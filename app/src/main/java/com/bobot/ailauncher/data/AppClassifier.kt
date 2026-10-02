@@ -3,14 +3,7 @@ package com.bobot.ailauncher.data
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
-import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 /** AI 智能分类结果 */
 sealed interface ClassifyResult {
@@ -89,65 +82,55 @@ object AppClassifier {
         ClassifyResult.Ok(merged, merged.size)
     }
 
-    private fun classifyBatch(
+    /**
+     * 单批分类。走与意图框同一套已验证的底层请求链路（LlmRouter.postChatCompletions）：
+     * 同一 URL 拼法、同一请求体风格、同一 OkHttpClient、同一 header。
+     * 关键差异修复：不再发送 response_format=json_object（部分中转端点不支持，
+     * 会返回 HTTP 200 + 空 body，导致"模型返回无法解析"）；JSON 解析靠
+     * content → reasoning_content → 正则抽 JSON 三级兜底。
+     */
+    private suspend fun classifyBatch(
         baseUrl: String,
         apiKey: String,
         model: String,
         apps: List<Pair<String, String>>
     ): ClassifyResult {
         return try {
-            val url = "${LlmConfig.normalizeBaseUrl(baseUrl)}/chat/completions"
             val userContent = apps.joinToString("\n") { (pkg, label) -> "$label|$pkg" }
-            val body = JSONObject()
-                .put("model", model)
-                .put("messages", JSONArray().apply {
-                    put(JSONObject().put("role", "system").put("content", systemPrompt()))
-                    put(JSONObject().put("role", "user").put("content", userContent))
-                })
-                .put("temperature", 0.2)
-                .put("max_tokens", 4000)
-                .put("response_format", JSONObject().put("type", "json_object"))
-                .toString()
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Content-Type", "application/json")
-                .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-            val client = OkHttpClient.Builder()
-                .callTimeout(60, TimeUnit.SECONDS)
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .build()
-            client.newCall(request).execute().use { resp ->
-                // body 只读一次：ResponseBody 读第二次会是空串
-                val rawBody = try { resp.body?.string().orEmpty() } catch (_: Exception) { "" }
-                if (!resp.isSuccessful) {
-                    return ClassifyResult.Err(extractHttpError(resp.code, rawBody))
-                }
-                // 200 但包络里藏着 error（如被拦截/降级/余额不足）
-                val envelopeErr = try {
-                    JSONObject(rawBody).optJSONObject("error")?.optString("message").orEmpty()
-                } catch (_: Exception) { "" }
-                if (envelopeErr.isNotBlank()) {
-                    return ClassifyResult.Err("服务端错误：$envelopeErr".take(300))
-                }
-                val content = extractContent(rawBody)
-                    ?: return ClassifyResult.Err(
-                        "模型返回无法解析" + rawBody.take(200).let {
-                            if (it.isBlank()) "" else "，原始返回：$it"
-                        }
-                    )
-                val parsed = parseMapping(content)
-                    ?: return ClassifyResult.Err("模型返回的 JSON 无法解析")
-                val validIds = GROUPS.map { it.first }.toSet()
-                val filtered = parsed.filter { (pkg, gid) ->
-                    pkg.isNotBlank() && gid in validIds
-                }
-                if (filtered.isEmpty()) return ClassifyResult.Err("模型没有返回有效分类")
-                ClassifyResult.Ok(filtered, filtered.size)
+            val r = LlmRouter.postChatCompletions(
+                baseUrl, apiKey, model,
+                systemPrompt(), userContent,
+                temperature = 0.2, maxTokens = 4000,
+                tag = "AppClassifier"
+            )
+            if (r.networkError != null) {
+                return ClassifyResult.Err("网络超时，请检查网络")
             }
-        } catch (e: IOException) {
-            ClassifyResult.Err("网络超时，请检查网络")
+            if (r.httpCode !in 200..299) {
+                return ClassifyResult.Err(extractHttpError(r.httpCode, r.rawBody))
+            }
+            val rawBody = r.rawBody
+            // 200 但包络里藏着 error（如被拦截/降级/余额不足）
+            val envelopeErr = try {
+                JSONObject(rawBody).optJSONObject("error")?.optString("message").orEmpty()
+            } catch (_: Exception) { "" }
+            if (envelopeErr.isNotBlank()) {
+                return ClassifyResult.Err("服务端错误：$envelopeErr".take(300))
+            }
+            val content = extractContent(rawBody)
+                ?: return ClassifyResult.Err(
+                    "模型返回无法解析" + rawBody.take(200).let {
+                        if (it.isBlank()) "" else "，原始返回：$it"
+                    }
+                )
+            val parsed = parseMapping(content)
+                ?: return ClassifyResult.Err("模型返回的 JSON 无法解析")
+            val validIds = GROUPS.map { it.first }.toSet()
+            val filtered = parsed.filter { (pkg, gid) ->
+                pkg.isNotBlank() && gid in validIds
+            }
+            if (filtered.isEmpty()) return ClassifyResult.Err("模型没有返回有效分类")
+            ClassifyResult.Ok(filtered, filtered.size)
         } catch (e: Exception) {
             ClassifyResult.Err("请求失败：${e.message.orEmpty().ifBlank { "未知错误" }}")
         }

@@ -70,6 +70,78 @@ object LlmConfig {
  */
 object LlmRouter {
 
+    /** 底层 /chat/completions 调用结果：HTTP 状态码 + 响应体原文（只读一次） */
+    data class RawChatResult(
+        val httpCode: Int,
+        val rawBody: String,
+        /** 非空表示网络层失败（超时/断网等），此时 httpCode 为 -1 */
+        val networkError: String?
+    )
+
+    /**
+     * 底层请求链路（意图框 chat 与 AI 智能分类共用，同一套已验证的写法）：
+     * 同一个 URL 拼法、同一个请求体构造风格、同一个 OkHttpClient 配置、同一个 header。
+     * 注意：不发 response_format 参数（部分中转端点不支持，会回 200 空 body）。
+     * 每次调用打 Log.d（TAG 可指定）：请求体字节数、HTTP code、响应体字节数 + 前 500 字符。
+     */
+    suspend fun postChatCompletions(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        systemPrompt: String,
+        userContent: String,
+        temperature: Double,
+        maxTokens: Int,
+        tag: String = "LlmRouter"
+    ): RawChatResult = withContext(Dispatchers.IO) {
+        try {
+            val url = "${LlmConfig.normalizeBaseUrl(baseUrl)}/chat/completions"
+            val bodyStr = JSONObject()
+                .put("model", model)
+                .put("messages", JSONArray().apply {
+                    put(JSONObject().put("role", "system").put("content", systemPrompt))
+                    put(JSONObject().put("role", "user").put("content", userContent))
+                })
+                .put("temperature", temperature)
+                .put("max_tokens", maxTokens)
+                .toString()
+            android.util.Log.d(
+                tag,
+                "POST $url model=$model temp=$temperature maxTokens=$maxTokens " +
+                    "bodyBytes=${bodyStr.toByteArray().size}"
+            )
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(bodyStr.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            client().newCall(request).execute().use { resp ->
+                // body 只读一次：ResponseBody 读第二次会是空串
+                val rawBody = try { resp.body?.string().orEmpty() } catch (_: Exception) { "" }
+                android.util.Log.d(
+                    tag,
+                    "HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
+                        "head=${rawBody.take(500)}"
+                )
+                RawChatResult(resp.code, rawBody, null)
+            }
+        } catch (e: IOException) {
+            android.util.Log.d(tag, "network error: ${e.message}")
+            RawChatResult(-1, "", e.message ?: "网络异常")
+        }
+    }
+
+    /** 把 HTTP 错误拼成 "状态码: 服务端 error.message" 的可读文案（body 已预读传入） */
+    private fun httpErrorText(code: Int, rawBody: String): String {
+        val serverMsg = try {
+            JSONObject(rawBody).optJSONObject("error")?.optString("message").orEmpty()
+        } catch (_: Exception) {
+            ""
+        }.ifBlank { rawBody.take(200).ifBlank { "请求被拒绝" } }
+        return "$code: $serverMsg".take(300)
+    }
+
     private val SYSTEM_PROMPT = """
         你是一个手机桌面助手的意图路由模块。用户说一句话，你判断它对应哪个能力。
         能力 id 列表：
@@ -161,40 +233,29 @@ object LlmRouter {
         input: String
     ): LlmChatResult = withContext(Dispatchers.IO) {
         try {
-            val url = "${LlmConfig.normalizeBaseUrl(baseUrl)}/chat/completions"
-            val body = JSONObject()
-                .put("model", model)
-                .put("messages", JSONArray().apply {
-                    put(JSONObject().put("role", "system").put("content", CHAT_SYSTEM_PROMPT))
-                    put(JSONObject().put("role", "user").put("content", input))
-                })
-                .put("temperature", 0.7)
-                .put("max_tokens", 800)
-                .toString()
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Content-Type", "application/json")
-                .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-            client().newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    return@withContext LlmChatResult.Err(extractHttpError(resp.code, resp))
-                }
-                val text = try {
-                    JSONObject(resp.body?.string().orEmpty())
-                        .getJSONArray("choices").getJSONObject(0)
-                        .getJSONObject("message").getString("content")
-                        .trim()
-                        .removePrefix("```").removeSuffix("```").trim()
-                } catch (_: Exception) {
-                    ""
-                }
-                if (text.isBlank()) LlmChatResult.Err("模型返回为空，请重试")
-                else LlmChatResult.Ok(text)
+            // 走与 AI 分类共用的底层链路：同一 URL、同一请求体风格、同一 client
+            val r = postChatCompletions(
+                baseUrl, apiKey, model,
+                CHAT_SYSTEM_PROMPT, input,
+                temperature = 0.7, maxTokens = 800
+            )
+            if (r.networkError != null) {
+                return@withContext LlmChatResult.Err("网络超时，请检查网络")
             }
-        } catch (e: IOException) {
-            LlmChatResult.Err("网络超时，请检查网络")
+            if (r.httpCode !in 200..299) {
+                return@withContext LlmChatResult.Err(httpErrorText(r.httpCode, r.rawBody))
+            }
+            val text = try {
+                JSONObject(r.rawBody)
+                    .getJSONArray("choices").getJSONObject(0)
+                    .getJSONObject("message").getString("content")
+                    .trim()
+                    .removePrefix("```").removeSuffix("```").trim()
+            } catch (_: Exception) {
+                ""
+            }
+            if (text.isBlank()) LlmChatResult.Err("模型返回为空，请重试")
+            else LlmChatResult.Ok(text)
         } catch (e: Exception) {
             LlmChatResult.Err("请求失败：${e.message.orEmpty().ifBlank { "未知错误" }}")
         }
