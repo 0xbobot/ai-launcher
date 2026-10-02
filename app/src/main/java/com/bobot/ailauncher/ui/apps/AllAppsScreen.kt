@@ -59,6 +59,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
@@ -66,6 +67,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -85,6 +87,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.exp
@@ -371,16 +374,25 @@ private fun ArcIndexBar(
                 ) {
                     Text(
                         text = ch.toString(),
-                        fontSize = 9.sp,
-                        color = if (g > 0.5f) AILauncherColors.Accent else AILauncherColors.Hint,
-                        fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 11.sp,
+                        // 全屏卡片是白 88% 玻璃：静息态用深炭灰字母保证对比度
+                        //（纯白在白玻璃上不可见），当前字母保持金色强调
+                        color = if (g > 0.5f) AILauncherColors.Accent
+                        else AILauncherColors.Title.copy(alpha = 0.85f),
+                        fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.SemiBold,
                         maxLines = 1,
+                        style = TextStyle(
+                            shadow = Shadow(
+                                color = Color.White.copy(alpha = 0.6f),
+                                offset = Offset(0f, 1f),
+                                blurRadius = 2f
+                            )
+                        ),
                         modifier = Modifier.graphicsLayer {
                             translationX = -bulgePx * g
                             val sc = 1f + g
                             scaleX = sc
                             scaleY = sc
-                            alpha = 0.45f + 0.55f * g
                         }
                     )
                 }

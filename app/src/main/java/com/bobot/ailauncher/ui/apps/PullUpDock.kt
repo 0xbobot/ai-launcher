@@ -58,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Velocity
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.listLaunchableApps
@@ -71,8 +72,9 @@ import kotlin.math.abs
 /**
  * 上拉 Dock（v0.11，替代 v0.9 的 DockBar + 三档抽屉）。
  *
- * - 默认首页无 Dock：底部只露出一根横线手柄（34dp）+ 页面圆点
- * - 按住横线上下拖动，四档，松手按速度/位置吸附最近档；点按横线跳到下一档
+ * - 默认首页无 Dock：底部只露出一根横线手柄（20dp 抓手区 + 内置 pill）+ 页面圆点
+ * - 按住抓手区上下拖动，四档，松手按速度/位置吸附最近档；点按 pill 跳到下一档；
+ *   拖动经过档位时 pill 轻微 pulse；列表 overscroll 松手也会吸附，杜绝档位间悬停
  * - 第一档：独立悬浮 Dock 卡片（iOS dock 式：左右 16dp、底部 16dp 边距，严格水平居中，
  *   完全脱离屏幕底部），4 个常用大图标（56dp）
  * - 第二档：同一张卡片变高，同一批常用重排成 10 个小图标（2×5，46dp）；
@@ -98,7 +100,8 @@ fun PullUpDock(
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val screenHpx = constraints.maxHeight.toFloat()
         if (screenHpx <= 0f) return@BoxWithConstraints
-        val handlePx = with(density) { 34.dp.toPx() }
+        // 抓手区高度 = iOS 式内置 pill（36×4dp）+ 上下留白；Handle 态只露出这一条
+        val handlePx = with(density) { 20.dp.toPx() }
         // 档位高度由内容实际测量得出（严格压缩，不写死过大）
         var dock4Hpx by remember { mutableFloatStateOf(0f) }
         var dock10Hpx by remember { mutableFloatStateOf(0f) }
@@ -182,35 +185,62 @@ fun PullUpDock(
         }
 
         val velocityTracker = remember { VelocityTracker() }
-        fun settle(velocity: Float) {
-            scope.launch {
-                val visiblePx = screenHpx - offsetY.value
-                val ordered = listOf(
-                    PullUpDetent.Handle to handlePx,
-                    PullUpDetent.Dock4 to d1px,
-                    PullUpDetent.Dock10 to d2px,
-                    PullUpDetent.Full to screenHpx
+        // 过档反馈：拖动经过档位时 grabber pill 轻微 pulse
+        val pillPulse = remember { Animatable(1f) }
+        val pulseTickState = remember { mutableIntStateOf(0) }
+        val lastPassed = remember { mutableStateOf(detent) }
+        val pulseTick = pulseTickState.intValue
+        LaunchedEffect(pulseTick) {
+            if (pulseTick > 0) {
+                pillPulse.snapTo(1.45f)
+                pillPulse.animateTo(
+                    1f,
+                    spring(stiffness = Spring.StiffnessMedium, dampingRatio = 0.45f)
                 )
-                val target = when {
-                    velocity < -600f ->
-                        ordered.filter { it.second > visiblePx + 1f }
-                            .minByOrNull { it.second }?.first ?: PullUpDetent.Full
-                    velocity > 600f ->
-                        ordered.filter { it.second < visiblePx - 1f }
-                            .maxByOrNull { it.second }?.first ?: PullUpDetent.Handle
-                    else ->
-                        ordered.minByOrNull { abs(it.second - visiblePx) }!!.first
-                }
-                if (target == detent) {
-                    // 回到同一档：直接吸附（LaunchedEffect 不会因 detent 未变而触发）
-                    offsetY.animateTo(
-                        targetFor(target),
-                        spring(stiffness = Spring.StiffnessMediumLow)
-                    )
-                } else {
-                    onDetentChange(target)
-                }
             }
+        }
+
+        fun nearestDetent(visiblePx: Float): PullUpDetent {
+            val ordered = listOf(
+                PullUpDetent.Handle to handlePx,
+                PullUpDetent.Dock4 to d1px,
+                PullUpDetent.Dock10 to d2px,
+                PullUpDetent.Full to screenHpx
+            )
+            return ordered.minByOrNull { abs(it.second - visiblePx) }!!.first
+        }
+
+        /** 严格三档：任何释放都必须落到某一档，绝不允许悬停在两档之间 */
+        suspend fun settleNow(velocity: Float) {
+            val visiblePx = screenHpx - offsetY.value
+            val ordered = listOf(
+                PullUpDetent.Handle to handlePx,
+                PullUpDetent.Dock4 to d1px,
+                PullUpDetent.Dock10 to d2px,
+                PullUpDetent.Full to screenHpx
+            )
+            val target = when {
+                velocity < -600f ->
+                    ordered.filter { it.second > visiblePx + 1f }
+                        .minByOrNull { it.second }?.first ?: PullUpDetent.Full
+                velocity > 600f ->
+                    ordered.filter { it.second < visiblePx - 1f }
+                        .maxByOrNull { it.second }?.first ?: PullUpDetent.Handle
+                else -> nearestDetent(visiblePx)
+            }
+            if (target == detent) {
+                // 回到同一档：直接吸附（LaunchedEffect 不会因 detent 未变而触发）
+                offsetY.animateTo(
+                    targetFor(target),
+                    spring(stiffness = Spring.StiffnessMediumLow)
+                )
+            } else {
+                onDetentChange(target)
+            }
+        }
+
+        fun settle(velocity: Float) {
+            scope.launch { settleNow(velocity) }
         }
 
         fun Modifier.pullDrag() = pointerInput(screenHpx) {
@@ -218,6 +248,7 @@ fun PullUpDock(
                 onDragStart = { _ ->
                     dragging = true
                     velocityTracker.resetTracking()
+                    lastPassed.value = nearestDetent(screenHpx - offsetY.value)
                 },
                 onDragEnd = {
                     dragging = false
@@ -237,6 +268,12 @@ fun PullUpDock(
                     velocityTracker.addPosition(change.uptimeMillis, change.position)
                     val t = (offsetY.value + dragAmount)
                         .coerceIn(0f, screenHpx - handlePx)
+                    // 过档反馈：拖动中经过某一档时 pill 轻微 pulse
+                    val np = nearestDetent(screenHpx - t)
+                    if (np != lastPassed.value) {
+                        lastPassed.value = np
+                        pulseTickState.intValue++
+                    }
                     scope.launch { offsetY.snapTo(t) }
                 }
             )
@@ -254,8 +291,10 @@ fun PullUpDock(
             })
         }
 
-        // 全屏时列表到顶继续下滑 → sheet 接管收起
-        val nested = remember(screenHpx) {
+        // 全屏时列表到顶继续下滑 → sheet 接管收起；
+        // 松手（fling 结束）时若 sheet 被带离了全屏，必须吸附到最近档位，
+        // 杜绝停在两档之间悬停——之前这里缺 settle，是"不受控制"感的来源
+        val nested = remember(screenHpx, detent) {
             object : NestedScrollConnection {
                 override fun onPreScroll(
                     available: Offset,
@@ -274,6 +313,16 @@ fun PullUpDock(
                         }
                     }
                     return Offset.Zero
+                }
+
+                override suspend fun onPostFling(
+                    consumed: Velocity,
+                    available: Velocity
+                ): Velocity {
+                    if (offsetY.value > 1f) {
+                        settleNow(available.y)
+                    }
+                    return super.onPostFling(consumed, available)
                 }
             }
         }
@@ -332,21 +381,27 @@ fun PullUpDock(
                     )
             ) {
                 if (!showFull) {
-                    // 抓手横线（可点按跳档、可拖）
+                    // iOS 式内置 grabber：卡片顶部居中一颗小 pill（36×4dp，半透明白）；
+                    // 点按跳到下一档，整块区域可上下拖动；过档时 pill 轻微 pulse
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(34.dp)
+                            .height(20.dp)
                             .pullDrag()
                             .tapCycle(),
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .width(44.dp)
-                                .height(5.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(AILauncherColors.Grabber)
+                                .width(36.dp)
+                                .height(4.dp)
+                                .graphicsLayer {
+                                    val s = pillPulse.value
+                                    scaleX = s
+                                    scaleY = s
+                                }
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color.White.copy(alpha = 0.7f))
                         )
                     }
                     // 一二档：同一批常用的两种排布，交叉淡入淡出 + 缩放（替换非叠加）；
