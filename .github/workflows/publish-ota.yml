@@ -50,13 +50,18 @@ jobs:
           mv ota/app-debug.apk ota/ai-launcher-latest.apk
           ls -la ota/
 
-      - name: Generate update.json
+      - name: Generate update.json from APK metadata
         id: meta
         env:
           CHANGELOG: ${{ inputs.changelog }}
         run: |
-          CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -1)
-          NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+          # 版本号从 APK 本体解析（aapt），避免与 build.gradle.kts 不一致导致"假更新"
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          BADGING=$("$ANDROID_HOME/build-tools/$BT/aapt" dump badging ota/ai-launcher-latest.apk)
+          CODE=$(echo "$BADGING" | grep -oP "versionCode='\K[0-9]+")
+          NAME=$(echo "$BADGING" | grep -oP "versionName='\K[^']+")
+          echo "APK versionCode=$CODE versionName=$NAME"
+          if [ -z "$CODE" ] || [ -z "$NAME" ]; then echo "failed to parse APK version" >&2; exit 1; fi
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           python3 - "$CODE" "$NAME" "$CHANGELOG" <<'EOF'
