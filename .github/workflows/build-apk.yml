@@ -26,8 +26,39 @@ jobs:
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
 
+      - name: Verify APK signature and manifest
+        run: |
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          echo "build-tools: $BT"
+          "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/$BT/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | head -8
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: ai-launcher-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+  smoke-test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-launcher-debug-apk
+          path: apk
+
+      - name: Install and launch on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          script: |
+            adb install apk/app-debug.apk
+            echo "--- launch MainActivity ---"
+            adb shell am start -n com.bobot.ailauncher/.MainActivity
+            sleep 8
+            echo "--- process check ---"
+            adb shell pidof com.bobot.ailauncher && echo "APP IS RUNNING"
