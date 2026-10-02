@@ -119,16 +119,24 @@ object AppClassifier {
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .build()
             client.newCall(request).execute().use { resp ->
+                // body 只读一次：ResponseBody 读第二次会是空串
+                val rawBody = try { resp.body?.string().orEmpty() } catch (_: Exception) { "" }
                 if (!resp.isSuccessful) {
-                    return ClassifyResult.Err(extractHttpError(resp.code, resp))
+                    return ClassifyResult.Err(extractHttpError(resp.code, rawBody))
                 }
-                val content = try {
-                    JSONObject(resp.body?.string().orEmpty())
-                        .getJSONArray("choices").getJSONObject(0)
-                        .getJSONObject("message").getString("content")
-                } catch (_: Exception) {
-                    return ClassifyResult.Err("模型返回无法解析")
+                // 200 但包络里藏着 error（如被拦截/降级/余额不足）
+                val envelopeErr = try {
+                    JSONObject(rawBody).optJSONObject("error")?.optString("message").orEmpty()
+                } catch (_: Exception) { "" }
+                if (envelopeErr.isNotBlank()) {
+                    return ClassifyResult.Err("服务端错误：$envelopeErr".take(300))
                 }
+                val content = extractContent(rawBody)
+                    ?: return ClassifyResult.Err(
+                        "模型返回无法解析" + rawBody.take(200).let {
+                            if (it.isBlank()) "" else "，原始返回：$it"
+                        }
+                    )
                 val parsed = parseMapping(content)
                     ?: return ClassifyResult.Err("模型返回的 JSON 无法解析")
                 val validIds = GROUPS.map { it.first }.toSet()
@@ -145,9 +153,35 @@ object AppClassifier {
         }
     }
 
+    /**
+     * 从原始响应里抠出模型正文，三级兜底：
+     * 1) message.content（标准）；2) message.reasoning_content（推理模型）；
+     * 3) 正则从全文抠第一个 JSON 对象。都拿不到返回 null。
+     */
+    private fun extractContent(rawBody: String): String? {
+        try {
+            val c = JSONObject(rawBody)
+                .getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("message").optString("content")
+            if (c.isNotBlank()) return c
+        } catch (_: Exception) { }
+        try {
+            val c = JSONObject(rawBody)
+                .getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("message").optString("reasoning_content")
+            if (c.isNotBlank()) return c
+        } catch (_: Exception) { }
+        return Regex("""\{[\s\S]*\}""").find(rawBody)?.value
+    }
+
     private fun parseMapping(raw: String): Map<String, String>? {
+        return tryParseMapping(raw)
+            ?: extractJsonObject(raw)?.let { tryParseMapping(it) }
+    }
+
+    private fun tryParseMapping(json: String): Map<String, String>? {
         return try {
-            val clean = raw.trim()
+            val clean = json.trim()
                 .removePrefix("```json").removePrefix("```")
                 .removeSuffix("```").trim()
             val obj = JSONObject(clean)
@@ -159,18 +193,16 @@ object AppClassifier {
         }
     }
 
-    /** 把 HTTP 错误拼成 "状态码: 服务端 error.message" 的可读文案 */
-    private fun extractHttpError(code: Int, resp: okhttp3.Response): String {
-        val bodyStr = try {
-            resp.body?.string().orEmpty()
-        } catch (_: Exception) {
-            ""
-        }
+    private fun extractJsonObject(text: String): String? =
+        Regex("""\{[\s\S]*\}""").find(text)?.value
+
+    /** 把 HTTP 错误拼成 "状态码: 服务端 error.message" 的可读文案（body 已预读传入） */
+    private fun extractHttpError(code: Int, rawBody: String): String {
         val serverMsg = try {
-            JSONObject(bodyStr).optJSONObject("error")?.optString("message").orEmpty()
+            JSONObject(rawBody).optJSONObject("error")?.optString("message").orEmpty()
         } catch (_: Exception) {
             ""
-        }.ifBlank { bodyStr.take(200).ifBlank { "请求被拒绝" } }
+        }.ifBlank { rawBody.take(200).ifBlank { "请求被拒绝" } }
         return "$code: $serverMsg".take(300)
     }
 }
