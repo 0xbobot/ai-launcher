@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.data
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -63,6 +64,12 @@ object PetRepository {
     private var autoFileJob: Job? = null
     private val recent = mutableMapOf<String, Long>()
     private val handledCalendarKeys = mutableSetOf<String>()
+    // v0.16：10 秒聚合窗口——忙碌中或 10 秒内连续多条 → 合并为一批处理
+    private val pendingBatch = mutableListOf<PetItem>()
+    private var batchJob: Job? = null
+    private var singleJob: Job? = null
+    private var lastArrivalTime = 0L
+    private const val BATCH_WINDOW_MS = 10_000L
 
     private const val PREFS = "ui_prefs"
     private const val KEY_AFFECTION = "pet_affection"
@@ -146,7 +153,94 @@ object PetRepository {
             recent[key] = now
             if (recent.size > 200) recent.clear()
         }
-        scope.launch { runSequence(item) }
+        // v0.16 聚合：忙碌中、或 10 秒内连续来多条 → 进聚合窗口，debounce 10 秒后一批处理
+        if (busy || now - lastArrivalTime < BATCH_WINDOW_MS) {
+            pendingBatch.add(item)
+            lastArrivalTime = now
+            batchJob?.cancel()
+            batchJob = scope.launch {
+                delay(BATCH_WINDOW_MS)
+                runBatch()
+            }
+        } else {
+            lastArrivalTime = now
+            singleJob?.cancel()
+            singleJob = scope.launch { runSequence(item) }
+        }
+    }
+
+    /** 一批：一次 fetch 动画 → 逐条展示分类决策 → 一张汇总卡片 → 8 秒后逐个归档 */
+    private suspend fun runBatch() {
+        if (pendingBatch.isEmpty()) return
+        val items = pendingBatch.toList()
+        pendingBatch.clear()
+        // 单条序列可能还在跑（fetch/思考延迟中）：取消它，避免它随后 present 覆盖批量卡片
+        singleJob?.cancel()
+        singleJob = null
+        if (busy) {
+            // 单条序列还在跑：先把正在呈现的收走，再跑批量
+            autoFileJob?.cancel()
+            _presented.value?.let { cur ->
+                _presented.value = null
+                _cardArmed.value = false
+                fileItems(if (cur.isBatchSummary) cur.batchItems else listOf(cur))
+            }
+        }
+        busy = true
+        try {
+            _dingText.value = "叮！收到 ${items.size} 条新消息"
+            _mouth.value = PetMouth.O
+            _mood.value = PetMood.FETCH
+            delay(900)
+            _dingText.value = null
+            _carryText.value = "${items.size} 条新消息"
+            _carryToRight.value = false
+            _mood.value = PetMood.SORTING
+            _showDots.value = true
+            _mouth.value = PetMouth.BUSY
+            delay(1000)
+            _showDots.value = false
+            // 逐条（同应用同类合并为"微信×2 → 工作"）简短展示分类决策
+            items.groupBy { it.appName to it.cat }.forEach { (key, group) ->
+                val (appName, cat) = key
+                _sortText.value = if (group.size > 1) "$appName×${group.size} → ${cat.cnName}"
+                else "${group.first().sortDesc} → 归到「${cat.cnName}」"
+                delay(700)
+            }
+            _sortText.value = null
+            _carryToRight.value = true
+            _mood.value = PetMood.FILE
+            delay(600)
+            _carryText.value = null
+            val summary = PetItem(
+                id = "batch${System.currentTimeMillis()}",
+                cat = items.map { it.cat }.minByOrNull { it.ordinal } ?: PetCat.WORK,
+                sortDesc = "",
+                appName = "宠物整理员",
+                title = "收到 ${items.size} 条新消息",
+                text = "",
+                time = System.currentTimeMillis(),
+                packageName = "",
+                isBatchSummary = true,
+                batchItems = items
+            )
+            present(summary)
+        } catch (e: CancellationException) {
+            throw e // 被批量流程取消：不碰 busy/视觉，交由 runBatch 接管
+        } catch (_: Exception) {
+            busy = false
+            resetVisual()
+        }
+    }
+
+    /** 把一组 item 逐个归档到各自分类标签（badge 累加） */
+    private fun fileItems(items: List<PetItem>) {
+        val map = _filed.value.toMutableMap()
+        items.forEach { sub ->
+            map[sub.cat] = (map[sub.cat] ?: emptyList()) + sub
+        }
+        _filed.value = map
+        items.forEach { dismissFromStream(it) }
     }
 
     private suspend fun runSequence(item: PetItem) {
@@ -181,6 +275,8 @@ object PetRepository {
             // 5. 呈现一次
             _carryText.value = null
             present(item)
+        } catch (e: CancellationException) {
+            throw e // 被批量流程取消：不碰 busy/视觉，交由 runBatch 接管
         } catch (_: Exception) {
             busy = false
             resetVisual()
@@ -210,19 +306,21 @@ object PetRepository {
 
     // ---------------- 标签栏手势 ----------------
 
-    /** 8 秒无操作 / 卡片右滑：收回成右侧标签 */
+    /** 8 秒无操作 / 卡片右滑：收回成右侧标签（汇总卡片逐个归档到各自标签） */
     fun fileToTab() {
         val item = _presented.value ?: run { busy = false; return }
         autoFileJob?.cancel()
         _presented.value = null
         _cardArmed.value = false
-        val map = _filed.value.toMutableMap()
-        map[item.cat] = (map[item.cat] ?: emptyList()) + item
-        _filed.value = map
+        val toFile = if (item.isBatchSummary) item.batchItems else listOf(item)
+        fileItems(toFile)
         _mouth.value = PetMouth.BUSY
         _mood.value = PetMood.FILE
         scope.launch {
-            _toast.emit("已收到右侧「${item.cat.cnName}」· 左滑标签展开")
+            _toast.emit(
+                if (item.isBatchSummary) "${toFile.size} 条已分别收到右侧 · 左滑标签展开"
+                else "已收到右侧「${item.cat.cnName}」· 左滑标签展开"
+            )
             delay(700)
             _mood.value = PetMood.IDLE
             _mouth.value = PetMouth.IDLE
@@ -278,13 +376,16 @@ object PetRepository {
         happyDone(null)
     }
 
-    /** 卡片上"完成"/操作按钮：完成这一件 */
+    /** 卡片上"完成"/操作按钮：完成这一件（汇总卡片则完成全部） */
     fun completeItem(how: String? = null) {
         autoFileJob?.cancel()
         val item = _presented.value
         _presented.value = null
         _cardArmed.value = false
-        item?.let { dismissFromStream(it) }
+        if (item != null) {
+            (if (item.isBatchSummary) item.batchItems else listOf(item))
+                .forEach { dismissFromStream(it) }
+        }
         happyDone(how)
     }
 
@@ -319,11 +420,14 @@ object PetRepository {
 
     // ---------------- 文案 ----------------
 
-    private fun dingTextFor(item: PetItem): String = when (item.cat) {
-        PetCat.IMP -> "叮！${item.appName}有重要消息"
-        PetCat.WORK -> "叮！收到一条工作消息"
-        PetCat.FUN -> "有条娱乐通知"
-        PetCat.PRIV -> "收到一条私密消息（已打码）"
+    private fun dingTextFor(item: PetItem): String = when {
+        item.isBatchSummary -> "叮！收到 ${item.batchItems.size} 条新消息"
+        else -> when (item.cat) {
+            PetCat.IMP -> "叮！${item.appName}有重要消息"
+            PetCat.WORK -> "叮！收到一条工作消息"
+            PetCat.FUN -> "有条娱乐通知"
+            PetCat.PRIV -> "收到一条私密消息（已打码）"
+        }
     }
 
     private fun carryTextFor(item: PetItem): String =

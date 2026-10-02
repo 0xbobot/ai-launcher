@@ -11,8 +11,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,11 +47,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -323,20 +329,34 @@ fun PetPresentedCard() {
                     )
                 }
                 Spacer(modifier = Modifier.height(5.dp))
-                Text(
-                    text = if (masked) "••••••" else cur.title,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C2C34)
-                )
-                if (cur.text.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(3.dp))
+                if (cur.isBatchSummary) {
+                    // v0.16：汇总卡片——多条分行列出（隐私类保持打码）
+                    cur.batchItems.forEach { sub ->
+                        Text(
+                            text = if (sub.cat == PetCat.PRIV) "${sub.cat.tabEmoji} ${sub.appName} · •••"
+                            else "${sub.cat.tabEmoji} ${sub.appName} · ${sub.title}",
+                            fontSize = 12.5.sp,
+                            color = Color(0xFF6B6B76),
+                            lineHeight = 19.sp,
+                            maxLines = 1
+                        )
+                    }
+                } else {
                     Text(
-                        text = if (masked) "••••••（左滑查看完整内容）" else cur.text,
-                        fontSize = 12.5.sp,
-                        color = Color(0xFF6B6B76),
-                        lineHeight = 18.sp
+                        text = if (masked) "••••••" else cur.title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2C2C34)
                     )
+                    if (cur.text.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = if (masked) "••••••（左滑查看完整内容）" else cur.text,
+                            fontSize = 12.5.sp,
+                            color = Color(0xFF6B6B76),
+                            lineHeight = 18.sp
+                        )
+                    }
                 }
                 AnimatedVisibility(visible = armed) {
                     PetCardActions(item = cur)
@@ -357,8 +377,10 @@ fun PetPresentedCard() {
 private fun PetCardActions(item: PetItem) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val actions = remember(item.cat) {
-        when (item.cat) {
+    val actions = remember(item.cat, item.isBatchSummary) {
+        // v0.16：汇总卡片只有一个"全部完成"
+        if (item.isBatchSummary) listOf("全部完成" to false)
+        else when (item.cat) {
             PetCat.IMP -> listOf("打开应用" to true, "标为已读" to false, "完成" to false)
             PetCat.WORK -> listOf("打开应用" to true, "完成" to false)
             PetCat.FUN -> listOf("打开应用" to true, "完成" to false)
@@ -405,7 +427,7 @@ private fun onPetAction(
             openAppForPet(context, item.packageName, item.appName)
             PetRepository.completeItem("打开应用")
         }
-        "标为已读", "完成" -> PetRepository.completeItem(label)
+        "标为已读", "完成", "全部完成" -> PetRepository.completeItem(label)
     }
 }
 
@@ -438,6 +460,7 @@ private fun openAppForPet(context: Context, packageName: String, appName: String
 fun PetTabsOverlay(dockHidden: Boolean) {
     val filed by PetRepository.filed.collectAsState()
     val density = LocalDensity.current
+    val view = LocalView.current
 
     AnimatedVisibility(
         visible = dockHidden,
@@ -453,6 +476,10 @@ fun PetTabsOverlay(dockHidden: Boolean) {
                     val count = filed[cat]?.size ?: 0
                     var dragX by remember { mutableStateOf(0f) }
                     val empty = count == 0
+                    // v0.16：系统返回手势冲突——手指按下标签时把该标签 rect 设为
+                    // 系统手势排除区（小而一定被系统接受），抬起/取消后清除。
+                    // rect 取 view 本地坐标（exclusionRects 要求 view 坐标系）。
+                    var tabRect by remember { mutableStateOf<android.graphics.Rect?>(null) }
                     Box(
                         modifier = Modifier
                             .size(width = 52.dp, height = 56.dp)
@@ -467,6 +494,37 @@ fun PetTabsOverlay(dockHidden: Boolean) {
                                 cat.color,
                                 RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
                             )
+                            .onGloballyPositioned { coords ->
+                                val winPos = coords.localToWindow(Offset.Zero)
+                                val loc = IntArray(2)
+                                view.getLocationInWindow(loc)
+                                val l = (winPos.x - loc[0]).roundToInt()
+                                val t = (winPos.y - loc[1]).roundToInt()
+                                tabRect = android.graphics.Rect(
+                                    l, t,
+                                    l + coords.size.width, t + coords.size.height
+                                )
+                            }
+                            .pointerInput(cat, empty) {
+                                // 排除区管理：按下即设，抬起/取消即清（与拖拽检测并行）
+                                if (empty) return@pointerInput
+                                awaitEachGesture {
+                                    awaitFirstDown()
+                                    tabRect?.let {
+                                        view.systemGestureExclusionRects = listOf(it)
+                                    }
+                                    try {
+                                        waitForUpOrCancellation()
+                                    } finally {
+                                        view.systemGestureExclusionRects = emptyList()
+                                    }
+                                }
+                            }
+                            .pointerInput(cat, empty) {
+                                // 点按展开（备用入口，不与左滑冲突）
+                                if (empty) return@pointerInput
+                                detectTapGestures(onTap = { PetRepository.expandFromTab(cat) })
+                            }
                             .pointerInput(cat, empty) {
                                 if (empty) return@pointerInput
                                 var accumX = 0f

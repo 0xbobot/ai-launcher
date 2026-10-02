@@ -106,6 +106,7 @@ import kotlin.math.roundToInt
  * - 下面直接连全部应用 A-Z 列表（字母分组头 + 行）
  * - Rail 只做定位：首个"类"跳回顶部整个分类区，后面 A-Z 字母跳转对应字母；
  *   不再做视图切换（无切换钮、无左右滑切视图）
+ * - v0.16：长按应用图标/行 → 常用操作 bottom sheet（系统快捷方式/调整分类/应用信息）
  * - 数据层复用 CustomCategories（AI 智能分类结果、长按手动调整）
  * - 手势签名（v0.14 纠正）：左滑=多 / 右滑=少
  */
@@ -124,6 +125,8 @@ fun AppCenterContent(
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     var refreshTick by remember { mutableIntStateOf(0) }
     var organizeApp by remember { mutableStateOf<AppInfo?>(null) }
+    // v0.16：长按 → 常用操作 bottom sheet（安卓习惯）
+    var quickActionsApp by remember { mutableStateOf<AppInfo?>(null) }
     val handed = remember { UiPrefs.getHanded(context) }
 
     // 已隐藏应用版本号：变化时分组与 A-Z 自动重算过滤
@@ -191,6 +194,19 @@ fun AppCenterContent(
     fun hideApp(app: AppInfo) {
         HiddenApps.hide(context, app.packageName)
         Toast.makeText(context, "已隐藏「${app.label}」，可在设置页恢复", Toast.LENGTH_SHORT).show()
+    }
+
+    // v0.16：长按 bottom sheet 里的"应用信息"
+    fun openAppDetails(app: AppInfo) {
+        try {
+            val intent = Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:${app.packageName}")
+            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "无法打开应用信息", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // AI 智能分类（从能力页搬过来，逻辑复用 AppClassifier）
@@ -317,7 +333,8 @@ fun AppCenterContent(
                         onCollapse = { expandedGroups = expandedGroups - group.id },
                         onLaunch = ::launchResolvedApp,
                         onOrganize = { app ->
-                            organizeApp = AppInfo(app.packageName, app.label, app.icon)
+                            // v0.16：长按 → 常用操作 bottom sheet（调整分类入口搬到 sheet 里）
+                            quickActionsApp = AppInfo(app.packageName, app.label, app.icon)
                         }
                     )
                 }
@@ -345,7 +362,7 @@ fun AppCenterContent(
                         AppRow(
                             app = app,
                             onLaunch = { launchApp(app) },
-                            onLongClick = { organizeApp = app },
+                            onLongClick = { quickActionsApp = app },
                             onHide = ::hideApp,
                             onOrganize = { organizeApp = it }
                         )
@@ -387,6 +404,19 @@ fun AppCenterContent(
             organizeApp = null
             refreshTick++
         })
+    }
+
+    // v0.16：长按常用操作 bottom sheet（系统快捷方式 + 调整分类 + 应用信息）
+    quickActionsApp?.let { app ->
+        AppQuickActionsSheet(
+            app = app,
+            onDismiss = { quickActionsApp = null },
+            onOrganize = {
+                quickActionsApp = null
+                organizeApp = app
+            },
+            onAppInfo = { openAppDetails(app) }
+        )
     }
 
     // AI 智能分类进度框
@@ -615,7 +645,7 @@ private fun CenterRail(
  *   （36dp 真实图标 8dp 间距，最多 3 个 + "+n" 胶囊），展开态右侧"收起"文字
  * - 收起态行底 1dp 分割线（两端渐隐）
  * - 展开态：4 列图标网格（44dp 真实图标 + 应用名）
- * - 长按图标 → 整理分类（复用 OrganizeDialog）
+ * - 长按图标 → 常用操作 bottom sheet（v0.16，调整分类入口在 sheet 里）
  * - 手势签名（v0.14 纠正）：组头左滑=多（展开）、右滑=少（折叠），点按也可切换
  */
 @OptIn(ExperimentalFoundationApi::class)

@@ -15,7 +15,7 @@ enum class PetCat(
     PRIV("隐私", Color(0xFF868E96), "隐私", "🔒");
 }
 
-/** 宠物要整理的一件东西：通知或日程 */
+/** 宠物要整理的一件东西：通知或日程；isBatchSummary 时为多条汇总卡片 */
 data class PetItem(
     val id: String,
     val cat: PetCat,
@@ -25,7 +25,9 @@ data class PetItem(
     val text: String,
     val time: Long,
     val packageName: String,
-    val isCalendar: Boolean = false
+    val isCalendar: Boolean = false,
+    val isBatchSummary: Boolean = false,
+    val batchItems: List<PetItem> = emptyList()
 )
 
 /**

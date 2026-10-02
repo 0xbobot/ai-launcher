@@ -127,8 +127,6 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     val density = LocalDensity.current
     var input by remember { mutableStateOf("") }
     var thinking by remember { mutableStateOf(false) }
-    val notifications by NotificationRepository.notifications.collectAsState()
-    val listenerConnected by NotificationRepository.isConnected.collectAsState()
 
     // ---------- 上滑打开应用抽屉：中间内容在顶部且上滑累计超过 120dp ----------
     val middleScrollState = rememberScrollState()
@@ -300,32 +298,14 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         }
     }
 
-    // ---------- 日历 ----------
+    // ---------- 日历（只喂给宠物整理员，首页不再展示） ----------
     var calEvents by remember { mutableStateOf<List<CalEvent>?>(null) } // null = 未授权
-    val calendarPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        calEvents = if (granted) loadTodayEvents(context) else emptyList()
-    }
     LaunchedEffect(Unit) {
         if (hasCalendarPermission(context)) {
             calEvents = loadTodayEvents(context)
         }
     }
-    // 日历三层视觉：下一个日程（大卡片）/ 全天事件（一行小字）/ 其余后续（小行）
-    val now = System.currentTimeMillis()
-    val timedEvents = remember(calEvents) {
-        (calEvents ?: emptyList()).filter { !it.allDay }.sortedBy { it.begin }
-    }
-    val allDayEvents = remember(calEvents) {
-        (calEvents ?: emptyList()).filter { it.allDay }
-    }
-    val nextEvent = remember(timedEvents, now) {
-        timedEvents.firstOrNull { it.begin > now } ?: allDayEvents.firstOrNull()
-    }
-    val laterEvents = remember(timedEvents, now, nextEvent) {
-        timedEvents.filter { it.begin > now && it != nextEvent }.take(3)
-    }
+    // v0.16：首页不再展示日程/通知（统一纳入宠物管理），日历只用于喂给宠物整理员
 
     // v0.15 宠物整理员：30 分钟内开始的日程 → 重要（去重由 PetRepository 保证）
     LaunchedEffect(calEvents) {
@@ -476,110 +456,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         // v0.15 宠物整理员：亲密度 + 桌台 + 呈现卡片
         PetZone()
         PetPresentedCard()
-        Spacer(modifier = Modifier.height(6.dp))
-        // 正在进行时（中间可滚动区域）
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .verticalScroll(middleScrollState),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                text = "正在进行",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                style = TextStyle(color = Color.White, shadow = GlassTextShadow)
-            )
-            // 今日日程：未授权 → 授权入口；有下一个日程 → 大卡片
-            if (calEvents == null) {
-                TextButton(
-                    onClick = {
-                        calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "授权日历后显示今日日程",
-                        fontSize = 13.sp,
-                        style = TextStyle(
-                            color = Color.White.copy(alpha = 0.85f),
-                            shadow = GlassTextShadow
-                        )
-                    )
-                }
-            } else if (nextEvent != null) {
-                NextEventCard(event = nextEvent, now = now)
-            }
-            allDayEvents.forEach { e ->
-                Text(
-                    text = "全天 · ${e.title.ifBlank { "（无标题）" }}",
-                    fontSize = 12.sp,
-                    style = TextStyle(
-                        color = Color.White.copy(alpha = 0.85f),
-                        shadow = GlassTextShadow
-                    ),
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-            }
-            laterEvents.forEach { e ->
-                Text(
-                    text = "${formatTime(e.begin)}  ${e.title.ifBlank { "（无标题）" }}",
-                    fontSize = 12.sp,
-                    style = TextStyle(
-                        color = Color.White.copy(alpha = 0.85f),
-                        shadow = GlassTextShadow
-                    ),
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-            }
-            // 通知卡片流（可点击：打开对应 App）
-            if (!isNotificationAccessGranted(context)) {
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text(
-                            text = "开启通知读取后，「正在进行时」才能把会议、快递、消息主动浮上来。",
-                            fontSize = 14.sp,
-                            color = AILauncherColors.Body
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        TextButton(onClick = {
-                            context.startActivity(
-                                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }) {
-                            Text("去开启", color = AILauncherColors.Accent)
-                        }
-                    }
-                }
-            } else if (notifications.isEmpty()) {
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
-                ) {
-                    Text(
-                        text = if (!listenerConnected) "正在连接通知服务…" else "暂无进行中的事项",
-                        fontSize = 14.sp,
-                        color = AILauncherColors.Hint,
-                        modifier = Modifier.padding(14.dp)
-                    )
-                }
-            } else {
-                notifications.forEach { n ->
-                    NotificationCard(n = n, onOpen = {
-                        openApp(context, n.packageName, n.appName)
-                    })
-                }
-            }
-        }
+        // v0.16：删除"正在进行时"区（日程大卡 + 通知流），统一纳入宠物管理
     }
 
     // 聆听中 Dialog
@@ -658,21 +535,6 @@ private fun ClockHeader() {
 }
 
 /** 点击通知卡片：打开对应 App（计入常用统计） */
-private fun openApp(context: Context, packageName: String, appName: String) {
-    try {
-        AppUsageTracker.recordLaunch(context, packageName)
-        val intent = context.packageManager.getLaunchIntentForPackage(packageName)
-        if (intent != null) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
-        } else {
-            Toast.makeText(context, "无法打开「$appName」", Toast.LENGTH_SHORT).show()
-        }
-    } catch (_: Exception) {
-        Toast.makeText(context, "无法打开「$appName」", Toast.LENGTH_SHORT).show()
-    }
-}
-
 /** 演示版意图路由：关键词 → capabilityId（无 Key 时的降级路径） */
 private fun routeKeyword(raw: String): String? {
     val q = raw.lowercase(Locale.ROOT)
@@ -745,202 +607,14 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
 private fun todayText(): String =
     SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date())
 
-private val timeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-
-private fun formatTime(time: Long): String =
-    LocalDateTime.ofInstant(Instant.ofEpochMilli(time), ZoneId.systemDefault())
-        .format(timeFormatter)
-
 /** 倒计时文案：<60 分钟显示分钟，否则显示"X 小时 Y 分" */
-private fun countdownText(begin: Long, now: Long): String {
-    val mins = Duration.between(
-        Instant.ofEpochMilli(now), Instant.ofEpochMilli(begin)
-    ).toMinutes().coerceAtLeast(0)
-    return if (mins < 60) "还有 $mins 分钟"
-    else "还有 ${mins / 60} 小时 ${mins % 60} 分"
-}
-
 /** 下一个日程：大卡片突出（标题 / 时间 / 地点 / 倒计时）——玻璃拟态
  * 手势签名（v0.14 纠正）：左滑展开（详情 + 操作），右滑收起；高度弹簧动画 */
 @Composable
-private fun NextEventCard(event: CalEvent, now: Long) {
-    val context = LocalContext.current
-    var expanded by remember { mutableStateOf(false) }
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, AILauncherColors.GlassBorder),
-        modifier = Modifier
-            .fillMaxWidth()
-            .swipeExpandCollapse { expanded = it }
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(12.dp)
-                .animateContentSize(
-                    animationSpec = spring(
-                        stiffness = Spring.StiffnessMediumLow,
-                        dampingRatio = 0.9f
-                    )
-                )
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "接下来",
-                    fontSize = 12.sp,
-                    color = AILauncherColors.Accent,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = countdownText(event.begin, now),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.Accent
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = event.title.ifBlank { "（无标题）" },
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                color = AILauncherColors.Title
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Row {
-                Text(
-                    text = if (event.allDay) "全天"
-                    else "${formatTime(event.begin)} – ${formatTime(event.end)}",
-                    fontSize = 13.sp,
-                    color = AILauncherColors.Body
-                )
-                if (event.location.isNotBlank()) {
-                    Text(
-                        text = " · ${event.location}",
-                        fontSize = 13.sp,
-                        color = AILauncherColors.Body
-                    )
-                }
-            }
-            if (expanded) {
-                Spacer(modifier = Modifier.height(8.dp))
-                if (event.location.isNotBlank()) {
-                    Text(
-                        text = "地点：${event.location}",
-                        fontSize = 13.sp,
-                        color = AILauncherColors.Body
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                }
-                TextButton(onClick = {
-                    Toast.makeText(context, "在日历中打开（待接入）", Toast.LENGTH_SHORT).show()
-                }) {
-                    Text("在日历中打开", color = AILauncherColors.Accent)
-                }
-            }
-        }
-    }
-}
-
 /** 通知卡片（v0.14 纠正）：左滑展开（全文 + 操作按钮），右滑收起；高度弹簧动画 */
 @Composable
-private fun NotificationCard(n: SimpleNotification, onOpen: () -> Unit) {
-    val context = LocalContext.current
-    var expanded by remember { mutableStateOf(false) }
-    Card(
-        onClick = onOpen,
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, AILauncherColors.GlassBorder),
-        modifier = Modifier
-            .fillMaxWidth()
-            .swipeExpandCollapse { expanded = it }
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(12.dp)
-                .animateContentSize(
-                    animationSpec = spring(
-                        stiffness = Spring.StiffnessMediumLow,
-                        dampingRatio = 0.9f
-                    )
-                )
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = n.appName,
-                    fontSize = 12.sp,
-                    color = AILauncherColors.Hint,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = formatTime(n.time),
-                    fontSize = 12.sp,
-                    color = AILauncherColors.Hint
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            if (n.title.isNotBlank()) {
-                Text(
-                    text = n.title,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.Title
-                )
-            }
-            if (n.text.isNotBlank()) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = n.text,
-                    fontSize = 13.sp,
-                    color = AILauncherColors.Body,
-                    maxLines = if (expanded) Int.MAX_VALUE else 2
-                )
-            }
-            if (expanded) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onOpen) {
-                        Text("打开应用", color = AILauncherColors.Accent)
-                    }
-                    TextButton(onClick = {
-                        NotificationRepository.dismiss(n)
-                    }) {
-                        Text("忽略", color = AILauncherColors.Hint)
-                    }
-                }
-            }
-        }
-    }
-}
-
 /**
  * 手势签名（全 App 统一，v0.14 纠正）：左滑 = 更多（展开），右滑 = 更少（收起）。
  * 横向专用检测（touch slop 后才消费），与纵向滚动不冲突；点按不受影响。
  */
 @Composable
-private fun Modifier.swipeExpandCollapse(
-    onExpandedChange: (Boolean) -> Unit
-): Modifier {
-    val density = LocalDensity.current
-    val threshPx = remember(density) { with(density) { 48.dp.toPx() } }
-    val latestChange = rememberUpdatedState(onExpandedChange)
-    return this.pointerInput(Unit) {
-        var accumX = 0f
-        var fired = false
-        detectHorizontalDragGestures(
-            onDragStart = { accumX = 0f; fired = false },
-            onDragCancel = { fired = true },
-            onHorizontalDrag = { change, dragAmount ->
-                change.consume()
-                if (fired) return@detectHorizontalDragGestures
-                accumX += dragAmount
-                if (abs(accumX) > threshPx) {
-                    fired = true
-                    latestChange.value(accumX < 0)
-                }
-            }
-        )
-    }
-}

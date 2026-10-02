@@ -26,6 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -61,7 +62,11 @@ import kotlinx.coroutines.launch
  * 「测试连接」发一个极简请求验证连通性。
  */
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    dockVisible: Boolean = true,
+    onDockVisibleChange: (Boolean) -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var apiKey by remember { mutableStateOf(LlmConfig.getApiKey(context)) }
@@ -174,6 +179,40 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
         }
         item { Spacer(modifier = Modifier.height(8.dp)) }
+
+        // v0.16：Dock 显示开关（D1 右滑隐藏后，在这里重新打开）
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "显示 Dock",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.Title
+                        )
+                        Text(
+                            text = "关闭后首页不再显示应用 Dock",
+                            fontSize = 13.sp,
+                            color = AILauncherColors.Hint
+                        )
+                    }
+                    Switch(
+                        checked = dockVisible,
+                        onCheckedChange = onDockVisibleChange
+                    )
+                }
+            }
+        }
 
         // 惯用手：决定 A-Z 导航 rail 在哪一侧、按住时往哪边偏移
         item {

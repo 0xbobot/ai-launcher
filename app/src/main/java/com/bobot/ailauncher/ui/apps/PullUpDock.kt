@@ -65,9 +65,11 @@ import kotlin.math.abs
  * - D3：不透明整屏替换（App 底色），顶部常用横滑一行 + 全部应用 A-Z 列表 + 弧形 A-Z 导航
  *
  * 手势签名（全 App 统一，v0.14 纠正）：左滑 = 更多，右滑 = 更少
- * - D1 —左滑→ D2 —左滑→ D3；D3 —右滑→ D2 —右滑→ D1 —右滑→ 隐藏
- * - 上滑：隐藏→D1（首页上滑）；D1/D2→D3（直接全屏）
- * - 下滑：D3→D2→D1→隐藏（逐级收回）；点按卡片外部 → 隐藏
+ * - D1 —左滑→ D2 —左滑→ D3；D3 —右滑→ D2 —右滑→ D1
+ * - v0.16：隐藏的唯一入口是 D1 右滑（弹确认框，"不再提醒"可记）；D1 下滑不再隐藏；
+ *   点按卡片外部不再隐藏（D2→D1 收一档，D1 无动作）
+ * - 上滑：隐藏→记住的行数（首页上滑）；D1/D2→D3（直接全屏）
+ * - 下滑：D3→D2→D1（逐级收回）；点按卡片外部 → D2 收回 D1
  */
 enum class DockState { Hidden, D1, D2, D3 }
 
@@ -76,6 +78,7 @@ fun PullUpDock(
     state: DockState,
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
+    onHideDockRequest: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -83,6 +86,7 @@ fun PullUpDock(
     val density = LocalDensity.current
     val onStateChangeState = rememberUpdatedState(onStateChange)
     val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
+    val onHideDockRequestState = rememberUpdatedState(onHideDockRequest)
 
     val allApps = remember {
         listLaunchableApps(context).filter { it.packageName != context.packageName }
@@ -110,7 +114,7 @@ fun PullUpDock(
     val cardVisible = state == DockState.D1 || state == DockState.D2
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        // ---- D1/D2 点按外部关闭的 scrim（透明，只拦截点击） ----
+        // ---- D1/D2 点按外部：只收一档（D2→D1），不再隐藏（v0.16：隐藏唯一入口是 D1 右滑） ----
         AnimatedVisibility(
             visible = cardVisible,
             enter = fadeIn(tween(150)),
@@ -119,7 +123,9 @@ fun PullUpDock(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clickable { onStateChangeState.value(DockState.Hidden) }
+                    .clickable {
+                        if (state == DockState.D2) onStateChangeState.value(DockState.D1)
+                    }
             )
         }
 
@@ -183,17 +189,14 @@ fun PullUpDock(
                                             if (state == DockState.D1) go(DockState.D2)
                                             else if (state == DockState.D2) go(DockState.D3)
                                         } else {
-                                            // 右滑 = 更少：D2→D1→隐藏
+                                            // 右滑 = 更少：D2→D1；D1 右滑 → 隐藏确认（唯一隐藏入口）
                                             if (state == DockState.D2) go(DockState.D1)
-                                            else if (state == DockState.D1) go(DockState.Hidden)
+                                            else if (state == DockState.D1) onHideDockRequestState.value()
                                         }
                                     } else if (ay > vThreshPx && ay > ax) {
                                         fired = true
                                         if (accumY < 0) go(DockState.D3) // 上滑 → 全屏
-                                        else go( // 下滑 → 下一层
-                                            if (state == DockState.D1) DockState.Hidden
-                                            else DockState.D1
-                                        )
+                                        else if (state == DockState.D2) go(DockState.D1) // 下滑 → 收一档（D1 下滑不再隐藏）
                                     }
                                 }
                             )
