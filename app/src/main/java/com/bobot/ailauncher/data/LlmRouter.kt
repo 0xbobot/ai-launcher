@@ -30,7 +30,7 @@ sealed interface LlmCallResult {
 object LlmConfig {
     private const val PREFS = "llm"
     const val DEFAULT_BASE_URL = "https://api.deepseek.com"
-    const val DEFAULT_MODEL = "deepseek-chat"
+    const val DEFAULT_MODEL = "deepseek-flash"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

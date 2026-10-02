@@ -119,7 +119,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
-                        text = "如 deepseek-chat / deepseek-reasoner",
+                        text = "如 deepseek-flash / deepseek-v4-pro",
                         fontSize = 12.sp,
                         color = AILauncherColors.Hint
                     )

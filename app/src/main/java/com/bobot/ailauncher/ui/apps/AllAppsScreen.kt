@@ -1,9 +1,7 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -46,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -316,18 +315,19 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
                     }
                 }
             }
-            // 中央悬浮大字母指示器
-            AnimatedVisibility(
-                visible = activeLetter != null,
-                modifier = Modifier.align(Alignment.Center),
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
+            // 中央悬浮大字母指示器（alpha 动画实现渐显渐隐）
+            val indicatorAlpha by animateFloatAsState(
+                targetValue = if (activeLetter != null) 1f else 0f,
+                label = "letterIndicatorAlpha"
+            )
+            if (indicatorAlpha > 0.01f) {
                 Box(
                     modifier = Modifier
+                        .align(Alignment.Center)
                         .size(72.dp)
                         .clip(CircleShape)
-                        .background(AILauncherColors.Accent),
+                        .background(AILauncherColors.Accent)
+                        .alpha(indicatorAlpha),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
