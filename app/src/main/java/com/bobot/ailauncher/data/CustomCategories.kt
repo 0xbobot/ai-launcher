@@ -49,6 +49,17 @@ object CustomCategories {
         prefs(context).edit().putString("mapping", obj.toString()).apply()
     }
 
+    /** 批量写入 mapping（AI 智能分类用）：packageName -> groupId */
+    fun setMappings(context: Context, mapping: Map<String, String>) {
+        val obj = try {
+            JSONObject(prefs(context).getString("mapping", "{}").orEmpty())
+        } catch (_: Exception) {
+            JSONObject()
+        }
+        mapping.forEach { (pkg, gid) -> obj.put(pkg, gid) }
+        prefs(context).edit().putString("mapping", obj.toString()).apply()
+    }
+
     fun getCustomGroups(context: Context): List<CustomGroupDef> {
         val out = mutableListOf<CustomGroupDef>()
         try {

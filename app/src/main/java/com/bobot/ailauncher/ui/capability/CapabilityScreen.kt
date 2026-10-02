@@ -32,8 +32,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -44,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,21 +56,51 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.data.AppClassifier
 import com.bobot.ailauncher.data.CapabilityRegistry
+import com.bobot.ailauncher.data.ClassifyResult
+import com.bobot.ailauncher.data.CustomCategories
 import com.bobot.ailauncher.data.ResolvedCapability
 import com.bobot.ailauncher.data.ResolvedGroup
 import com.bobot.ailauncher.data.getFrequentApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import kotlinx.coroutines.launch
 
 @Composable
 fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var refreshTick by remember { mutableStateOf(0) }
     // 本机已安装的真实应用（按 capabilities.json 的包名匹配）；空分组已被丢弃
-    val resolvedGroups = remember { CapabilityRegistry.installedCapabilities(context) }
+    val resolvedGroups = remember(refreshTick) { CapabilityRegistry.installedCapabilities(context) }
     var query by remember { mutableStateOf("") }
     val frequent = remember { getFrequentApps(context) }
     var expandedGroups by remember { mutableStateOf(setOf("travel")) } // 出行默认展开
+    // AI 智能分类状态
+    var classifying by remember { mutableStateOf(false) }
+    var classifyProgress by remember { mutableStateOf(0 to 0) }
+
+    fun startAiClassify() {
+        if (classifying) return
+        classifying = true
+        classifyProgress = 0 to 0
+        scope.launch {
+            when (val r = AppClassifier.classifyAll(context) { done, total ->
+                classifyProgress = done to total
+            }) {
+                is ClassifyResult.Ok -> {
+                    CustomCategories.setMappings(context, r.mapping)
+                    refreshTick++
+                    Toast.makeText(context, "已智能分类 ${r.classifiedCount} 个应用", Toast.LENGTH_SHORT).show()
+                }
+                is ClassifyResult.Err -> {
+                    Toast.makeText(context, r.message, Toast.LENGTH_LONG).show()
+                }
+            }
+            classifying = false
+        }
+    }
 
     val searchResults = remember(query, resolvedGroups) {
         val q = query.trim()
@@ -108,7 +141,34 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
                         tint = AILauncherColors.Hint
                     )
                 }
+                TextButton(onClick = { startAiClassify() }) {
+                    Text(
+                        text = "AI 智能分类",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Hint
+                    )
+                }
             }
+        }
+        // AI 智能分类进度框
+        if (classifying) {
+            val (done, total) = classifyProgress
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("AI 智能分类", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = if (total > 0) "正在智能分类…$done/$total" else "正在智能分类…",
+                            fontSize = 14.sp,
+                            color = AILauncherColors.Body
+                        )
+                    }
+                },
+                confirmButton = {}
+            )
         }
         item {
             Card(
