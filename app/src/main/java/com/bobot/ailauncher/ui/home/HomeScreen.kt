@@ -368,7 +368,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     }
 
     // ---------- 桌面感布局：大时钟 → 意图框 → 正在进行时（中间可滚） ----------
-    // 底部无 Dock：页面圆点 + 上拉横线手柄悬浮在底部（MainScreen / PullUpDock）
+    // 底部无 Dock：页面圆点悬浮在底部；上滑手势打开悬浮卡（MainScreen / PullUpDock）
     Column(
         modifier = Modifier
             .fillMaxSize()

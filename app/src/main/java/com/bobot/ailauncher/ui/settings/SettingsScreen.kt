@@ -47,6 +47,7 @@ import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.OtaCheckResult
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
+import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
@@ -164,6 +165,57 @@ fun SettingsScreen(onBack: () -> Unit) {
                         colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.Accent)
                     ) {
                         Text(if (testing) "测试中…" else "测试连接")
+                    }
+                }
+            }
+        }
+        item { Spacer(modifier = Modifier.height(8.dp)) }
+
+        // 惯用手：决定 A-Z 导航 rail 在哪一侧、按住时往哪边偏移
+        item {
+            var handed by remember { mutableStateOf(UiPrefs.getHanded(context)) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "惯用手",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = AILauncherColors.Title
+                    )
+                    Text(
+                        text = "按住 A-Z 导航时，字母和气泡会往拇指反方向偏移，不被拇指盖住。",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Hint
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        listOf(
+                            UiPrefs.Handed.LEFT to "左手",
+                            UiPrefs.Handed.RIGHT to "右手"
+                        ).forEach { (h, label) ->
+                            val selected = handed == h
+                            Button(
+                                onClick = {
+                                    handed = h
+                                    UiPrefs.setHanded(context, h)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selected) AILauncherColors.Accent
+                                    else AILauncherColors.Divider,
+                                    contentColor = if (selected) Color.White
+                                    else AILauncherColors.Title
+                                ),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(label)
+                            }
+                        }
                     }
                 }
             }

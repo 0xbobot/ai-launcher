@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui
 
 import android.content.Context
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -11,7 +12,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -27,13 +27,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
-import com.bobot.ailauncher.ui.apps.PullUpDetent
+import com.bobot.ailauncher.ui.apps.DockState
 import com.bobot.ailauncher.ui.apps.PullUpDock
 import com.bobot.ailauncher.ui.capability.CapabilityScreen
 import com.bobot.ailauncher.ui.components.PageIndicator
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
+import kotlinx.coroutines.delay
 
 /**
  * v0.2 导航：真桌面的全屏手势导航，没有底部 tab。
@@ -60,9 +61,8 @@ private fun PagerHost(onOpenSettings: () -> Unit) {
     // 注意：page0=首页（默认），page1=能力页——这样"首页左滑进能力页、能力页右滑回首页"
     // 的手势才成立（原 spec 的 page 编号与手势描述矛盾，按手势行为实现）
     val pagerState = rememberPagerState(initialPage = 0) { 2 }
-    // 上拉 Dock：默认只露出手柄（Handle），上滑/点按横线进入 Dock4 等档位
-    var dockDetent by remember { mutableStateOf(PullUpDetent.Handle) }
-    var dockOpenness by remember { mutableFloatStateOf(0f) }
+    // 上拉 Dock（v0.12）：离散状态机，弹簧动画切换，无横线手柄
+    var dockState by remember { mutableStateOf(DockState.Hidden) }
     val context = LocalContext.current
     var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
 
@@ -72,6 +72,20 @@ private fun PagerHost(onOpenSettings: () -> Unit) {
             val info = OtaUpdater.checkForUpdate(context)
             OtaUpdater.markChecked(context)
             if (info != null) updateInfo = info
+        }
+    }
+
+    // 首次发现引导：D1 轻轻 peek 一下（升起停 1 秒再落下），每设备一次
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("pullup_coach", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("peek_shown_v12", false)) {
+            delay(1200)
+            if (dockState == DockState.Hidden) {
+                dockState = DockState.D1
+                delay(1000)
+                if (dockState == DockState.D1) dockState = DockState.Hidden
+            }
+            prefs.edit().putBoolean("peek_shown_v12", true).apply()
         }
     }
 
@@ -94,27 +108,30 @@ private fun PagerHost(onOpenSettings: () -> Unit) {
         ) { page ->
             when (page) {
                 0 -> HomeScreen(
-                    onOpenAppDrawer = { dockDetent = PullUpDetent.Dock4 }
+                    onOpenAppDrawer = { dockState = DockState.D1 }
                 )
                 else -> CapabilityScreen(
-                    onOpenAllApps = { dockDetent = PullUpDetent.Full },
+                    onOpenAllApps = { dockState = DockState.D3 },
                     onOpenSettings = onOpenSettings
                 )
             }
         }
-        // 上拉 Dock（常驻）：横线手柄 + 浮卡两档 + 全屏
+        // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3，手势切换
         PullUpDock(
-            detent = dockDetent,
-            onDetentChange = { dockDetent = it },
-            onOpennessChange = { dockOpenness = it }
+            state = dockState,
+            onStateChange = { dockState = it }
         )
         // 页面圆点（卡片升起时渐隐）
+        val dotsAlpha by animateFloatAsState(
+            targetValue = if (dockState == DockState.Hidden) 1f else 0f,
+            label = "dotsAlpha"
+        )
         PageIndicator(
             currentPage = pagerState.currentPage,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 60.dp)
-                .alpha((1f - dockOpenness * 4f).coerceIn(0f, 1f))
+                .alpha(dotsAlpha)
         )
         // OTA 更新对话框（自动检查 / 设置页手动检查共用 UpdateDialog）
         updateInfo?.let { info ->

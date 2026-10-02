@@ -78,6 +78,7 @@ import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.CustomCategories
+import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -86,6 +87,9 @@ import java.util.Locale
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -155,6 +159,8 @@ fun AllAppsContent(
         m
     }
     val letters = remember { ('A'..'Z').toList() + '#' }
+    // 惯用手：决定 A-Z 导航 rail 在哪一侧、按住时往哪边偏移（设置页可改）
+    val handed = remember { UiPrefs.getHanded(context) }
     var activeLetter by remember { mutableStateOf<Char?>(null) }
     var barActiveIndex by remember { mutableStateOf<Int?>(null) }
     var hideJob by remember { mutableStateOf<Job?>(null) }
@@ -252,7 +258,8 @@ fun AllAppsContent(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
             }
             // 右侧弧形 A-Z 导航：平时收拢窄条，按住后字母沿高斯弧线向屏内展开，
-            // 当前字母放大 + 左侧气泡，列表跟手滚动，松手回弹
+            // 当前字母放大 + 气泡（往拇指反方向偏移 64dp，不被拇指盖住），
+            // 列表跟手滚动，松手回弹；惯用手决定 rail 在左还是右
             if (showIndexBar && !searching && groups.isNotEmpty()) {
                 ArcIndexBar(
                     letters = letters,
@@ -267,8 +274,12 @@ fun AllAppsContent(
                             jumpTo(letters[i])
                         }
                     },
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                    heightFraction = indexBarHeightFraction
+                    modifier = Modifier.align(
+                        if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
+                        else Alignment.CenterStart
+                    ),
+                    heightFraction = indexBarHeightFraction,
+                    handed = handed
                 )
             }
         }
@@ -308,10 +319,13 @@ private fun AppRow(app: AppInfo, onLaunch: () -> Unit, onLongClick: () -> Unit) 
 }
 
 /**
- * 弧形 A-Z 快速导航（v0.10）：
+ * 弧形 A-Z 快速导航（v0.12）：
  * - 平时是 20dp 收拢窄条，不占地方
  * - 按住后 26 个字母沿高斯弧线向屏幕内侧展开（越靠近手指越大），
- *   当前字母左侧弹出气泡；拖动时列表跟手 scrollToItem，松手回弹收拢
+ *   当前字母在拇指反方向弹出气泡；拖动时列表跟手 scrollToItem，松手回弹
+ * - 拇指遮挡：按住瞬间整组视觉往拇指反方向偏移约 64dp（弹簧），
+ *   右手→往左偏，左手→往右偏；触摸层不偏移，映射保持准确
+ * - 惯用手：右手 rail 在右、弧线向左展开；左手 rail 在左、弧线向右展开
  */
 @Composable
 private fun ArcIndexBar(
@@ -319,15 +333,30 @@ private fun ArcIndexBar(
     activeIndex: Int?,
     onIndex: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    heightFraction: Float = 1f
+    heightFraction: Float = 1f,
+    handed: UiPrefs.Handed = UiPrefs.Handed.RIGHT
 ) {
     val density = LocalDensity.current
+    // 右手：-1（往左偏/向左展开）；左手：+1（往右偏/向右展开）
+    val dirSign = if (handed == UiPrefs.Handed.RIGHT) -1f else 1f
+    val barAlign = if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
+    else Alignment.CenterStart
     BoxWithConstraints(modifier = modifier.fillMaxHeight(heightFraction).width(48.dp)) {
         val hPx = constraints.maxHeight.toFloat()
         if (hPx <= 0f || letters.isEmpty()) return@BoxWithConstraints
         val rowHpx = hPx / letters.size
         val bulgePx = with(density) { 40.dp.toPx() }
-        // 整块可触摸（含点按与纵向拖动）
+        val shiftPx = with(density) { 64.dp.toPx() }
+        // 按住时整组视觉往拇指反方向偏移（弹簧），字母/气泡不再被拇指盖住
+        val shiftX by animateFloatAsState(
+            targetValue = if (activeIndex != null) dirSign * shiftPx else 0f,
+            animationSpec = spring(
+                stiffness = Spring.StiffnessMediumLow,
+                dampingRatio = 0.85f
+            ),
+            label = "railShift"
+        )
+        // 触摸层：整块可触摸（含点按与纵向拖动），不偏移
         Box(
             modifier = Modifier
                 .matchParentSize()
@@ -351,76 +380,86 @@ private fun ArcIndexBar(
                     )
                 }
         )
-        Column(
+        // 视觉层：字母列 + 气泡，随按住偏移
+        Box(
             modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .width(24.dp)
-                .fillMaxHeight(),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .matchParentSize()
+                .graphicsLayer { translationX = shiftX }
         ) {
-            letters.forEachIndexed { i, ch ->
-                val d = if (activeIndex != null) (i - activeIndex).toFloat() else 999f
-                val gTarget = if (activeIndex != null) exp(-(d * d) / 15.68f) else 0f
-                val g by animateFloatAsState(
-                    targetValue = gTarget,
-                    animationSpec = tween(120),
-                    label = "arcG"
-                )
-                // 每行固定 1/27 高度：无论系统字号/屏幕尺寸，26 个字母 + # 必定完整显示，
-                // 不再依赖文字自然高度（之前大字号下会被裁剪）；触摸映射本就按等分计算
+            Column(
+                modifier = Modifier
+                    .align(barAlign)
+                    .width(24.dp)
+                    .fillMaxHeight(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                letters.forEachIndexed { i, ch ->
+                    val d = if (activeIndex != null) (i - activeIndex).toFloat() else 999f
+                    val gTarget = if (activeIndex != null) exp(-(d * d) / 15.68f) else 0f
+                    val g by animateFloatAsState(
+                        targetValue = gTarget,
+                        animationSpec = tween(120),
+                        label = "arcG"
+                    )
+                    // 每行固定 1/27 高度：无论系统字号/屏幕尺寸，26 个字母 + # 必定完整显示，
+                    // 不再依赖文字自然高度（之前大字号下会被裁剪）；触摸映射本就按等分计算
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = ch.toString(),
+                            fontSize = 11.sp,
+                            // 全屏卡片是白 88% 玻璃：静息态用深炭灰字母保证对比度
+                            //（纯白在白玻璃上不可见），当前字母保持金色强调
+                            color = if (g > 0.5f) AILauncherColors.Accent
+                            else AILauncherColors.Title.copy(alpha = 0.85f),
+                            fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.SemiBold,
+                            maxLines = 1,
+                            style = TextStyle(
+                                shadow = Shadow(
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    offset = Offset(0f, 1f),
+                                    blurRadius = 2f
+                                )
+                            ),
+                            modifier = Modifier.graphicsLayer {
+                                translationX = dirSign * bulgePx * g
+                                val sc = 1f + g
+                                scaleX = sc
+                                scaleY = sc
+                            }
+                        )
+                    }
+                }
+            }
+            // 当前字母气泡：右手在字母左侧，左手在字母右侧（拇指反方向）
+            activeIndex?.let { idx ->
+                val rPx = with(density) { 22.dp.toPx() }
                 Box(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .align(
+                            if (handed == UiPrefs.Handed.RIGHT) Alignment.TopStart
+                            else Alignment.TopEnd
+                        )
+                        .offset {
+                            IntOffset(
+                                0,
+                                (idx * rowHpx + rowHpx / 2f - rPx).roundToInt()
+                            )
+                        }
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(AILauncherColors.Accent),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = ch.toString(),
-                        fontSize = 11.sp,
-                        // 全屏卡片是白 88% 玻璃：静息态用深炭灰字母保证对比度
-                        //（纯白在白玻璃上不可见），当前字母保持金色强调
-                        color = if (g > 0.5f) AILauncherColors.Accent
-                        else AILauncherColors.Title.copy(alpha = 0.85f),
-                        fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.SemiBold,
-                        maxLines = 1,
-                        style = TextStyle(
-                            shadow = Shadow(
-                                color = Color.White.copy(alpha = 0.6f),
-                                offset = Offset(0f, 1f),
-                                blurRadius = 2f
-                            )
-                        ),
-                        modifier = Modifier.graphicsLayer {
-                            translationX = -bulgePx * g
-                            val sc = 1f + g
-                            scaleX = sc
-                            scaleY = sc
-                        }
+                        text = letters[idx].toString(),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
                 }
-            }
-        }
-        // 当前字母气泡（字母行左侧）
-        activeIndex?.let { idx ->
-            val rPx = with(density) { 22.dp.toPx() }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .offset {
-                        IntOffset(
-                            0,
-                            (idx * rowHpx + rowHpx / 2f - rPx).roundToInt()
-                        )
-                    }
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(AILauncherColors.Accent),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = letters[idx].toString(),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
             }
         }
     }
