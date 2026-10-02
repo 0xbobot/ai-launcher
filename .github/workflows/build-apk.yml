@@ -42,6 +42,7 @@ jobs:
   smoke-test:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Download APK artifact
         uses: actions/download-artifact@v4

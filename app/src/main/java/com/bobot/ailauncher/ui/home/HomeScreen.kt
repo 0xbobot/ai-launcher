@@ -484,6 +484,7 @@ private fun openApp(context: Context, packageName: String, appName: String) {
 private fun routeKeyword(raw: String): String? {
     val q = raw.lowercase(Locale.ROOT)
     return when {
+        q.contains("导航") -> "daohang"
         q.contains("打车") || q.contains("叫车") -> "dache"
         q.contains("地铁") -> "ditie"
         q.contains("火车") -> "huoche"

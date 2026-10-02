@@ -74,6 +74,7 @@ object LlmRouter {
         你是一个手机桌面助手的意图路由模块。用户说一句话，你判断它对应哪个能力。
         能力 id 列表：
         ditie(地铁), dache(打车), hangban(航班), zuche(租车), huoche(火车), jiudian(酒店),
+        daohang(导航),
         zhifubao(支付宝), wechatpay(微信支付), bank(银行),
         feishu(飞书), calendar(日历), mail(邮箱),
         meituan(美团), eleme(饿了么), dianping(大众点评),

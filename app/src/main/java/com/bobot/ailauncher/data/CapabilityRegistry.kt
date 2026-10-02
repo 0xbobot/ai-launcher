@@ -3,6 +3,7 @@ package com.bobot.ailauncher.data
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Drawable
+import java.net.URLEncoder
 import org.json.JSONObject
 
 /**
@@ -169,7 +170,9 @@ object CapabilityRegistry {
         cap.deeplinkTemplate?.let { template ->
             try {
                 var uri = template
-                params.forEach { (k, v) -> uri = uri.replace("{$k}", v) }
+                params.forEach { (k, v) ->
+                    uri = uri.replace("{$k}", URLEncoder.encode(v, "UTF-8"))
+                }
                 uri = uri.replace(Regex("\\{[^}]*\\}"), "") // 清掉未传入的参数占位符
                 val intent = Intent.parseUri(uri, Intent.URI_INTENT_SCHEME)
                 intent.setPackage(resolved.packageName)
