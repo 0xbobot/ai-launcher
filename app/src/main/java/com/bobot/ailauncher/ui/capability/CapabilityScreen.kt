@@ -2,9 +2,10 @@ package com.bobot.ailauncher.ui.capability
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.drawable.Drawable
 import android.widget.Toast
-import androidx.compose.foundation.Image
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,8 +26,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Search
@@ -50,13 +49,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.ResolvedCapability
 import com.bobot.ailauncher.data.ResolvedGroup
@@ -249,6 +246,12 @@ private fun launchResolvedApp(context: Context, app: ResolvedCapability) {
     }
 }
 
+/**
+ * 意图分组卡片（v0.4 新样式）：
+ * - 折叠态：该行直接横排该分类的真实 App 图标（可点击），放得下全放，
+ *   放不下（>6 个）时末尾放"展开 ›"按钮
+ * - 展开态：expandVertically/shrinkVertically 动画，把所有 App 铺成 4 列图标网格
+ */
 @Composable
 private fun ResolvedGroupCard(
     group: ResolvedGroup,
@@ -282,39 +285,92 @@ private fun ResolvedGroupCard(
                     color = AILauncherColors.Title,
                     modifier = Modifier.weight(1f)
                 )
-                if (!expanded) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        group.apps.take(3).forEach { app ->
-                            PackageIconPreview(icon = app.icon)
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-                Icon(
-                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = if (expanded) "收起" else "展开",
-                    tint = AILauncherColors.Hint
+                Text(
+                    text = if (expanded) "收起" else "展开 ›",
+                    fontSize = 13.sp,
+                    color = AILauncherColors.Hint
                 )
             }
-            if (expanded) {
-                Spacer(modifier = Modifier.height(12.dp))
-                group.apps.chunked(4).forEach { row ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        row.forEach { app ->
-                            ResolvedAppCell(
-                                app = app,
-                                onLaunch = { onLaunch(app) },
-                                modifier = Modifier.weight(1f)
-                            )
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    group.apps.chunked(4).forEach { row ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            row.forEach { app ->
+                                ResolvedAppCell(
+                                    app = app,
+                                    onLaunch = { onLaunch(app) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            repeat(4 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
                         }
-                        repeat(4 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
                     }
                 }
+            }
+            AnimatedVisibility(
+                visible = !expanded,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    CollapsedIconStrip(
+                        apps = group.apps,
+                        onLaunch = onLaunch,
+                        onExpand = onToggle
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 折叠态：横排真实 App 图标直接点；超过 6 个时末尾放"展开 ›" */
+@Composable
+private fun CollapsedIconStrip(
+    apps: List<ResolvedCapability>,
+    onLaunch: (ResolvedCapability) -> Unit,
+    onExpand: () -> Unit
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val shown = if (apps.size > 6) apps.take(5) else apps
+        shown.forEach { app ->
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.clickable { onLaunch(app) }
+            ) {
+                AppIconImage(
+                    drawable = app.icon,
+                    contentDescription = app.label.toString(),
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = app.label.toString(),
+                    fontSize = 11.sp,
+                    color = AILauncherColors.Body,
+                    maxLines = 1
+                )
+            }
+        }
+        if (apps.size > 6) {
+            TextButton(onClick = onExpand) {
+                Text("展开 ›", fontSize = 13.sp, color = AILauncherColors.Hint)
             }
         }
     }
@@ -390,15 +446,3 @@ private fun SearchResultRow(
     }
 }
 
-/** 折叠行里的 3 个小 App 图标预览（真实图标） */
-@Composable
-private fun PackageIconPreview(icon: Drawable) {
-    val bitmap = remember(icon) { icon.toBitmap().asImageBitmap() }
-    Image(
-        bitmap = bitmap,
-        contentDescription = null,
-        modifier = Modifier
-            .size(20.dp)
-            .clip(RoundedCornerShape(6.dp))
-    )
-}

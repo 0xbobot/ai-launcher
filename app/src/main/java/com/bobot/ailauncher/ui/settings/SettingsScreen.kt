@@ -118,6 +118,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Text(
+                        text = "如 deepseek-chat / deepseek-reasoner",
+                        fontSize = 12.sp,
+                        color = AILauncherColors.Hint
+                    )
                     Button(
                         onClick = {
                             if (testing) return@Button
@@ -128,7 +133,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                             }
                             testing = true
                             scope.launch {
-                                val ok = LlmRouter.testConnection(
+                                // testConnection 返回 null=成功，否则为可直接展示的错误文案
+                                //（如 "400: The model 'deepseek-flash' does not exist"）
+                                val err = LlmRouter.testConnection(
                                     baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
                                     apiKey,
                                     model.ifBlank { LlmConfig.DEFAULT_MODEL }
@@ -136,8 +143,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                                 testing = false
                                 Toast.makeText(
                                     context,
-                                    if (ok) "连接成功" else "连接失败，请检查 Key / 地址 / 模型",
-                                    Toast.LENGTH_SHORT
+                                    err ?: "连接成功",
+                                    Toast.LENGTH_LONG
                                 ).show()
                             }
                         },

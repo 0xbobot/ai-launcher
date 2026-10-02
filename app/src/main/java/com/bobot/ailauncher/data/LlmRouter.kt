@@ -10,6 +10,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /** 大模型意图路由结果 */
@@ -18,6 +19,12 @@ data class LlmRouteResult(
     val params: Map<String, String>,
     val reply: String
 )
+
+/** LLM 调用结果：成功带路由结果，失败带可直接展示给用户的错误文案 */
+sealed interface LlmCallResult {
+    data class Ok(val route: LlmRouteResult) : LlmCallResult
+    data class Err(val message: String) : LlmCallResult
+}
 
 /** 大模型配置：存 SharedPreferences "llm" */
 object LlmConfig {
@@ -44,17 +51,22 @@ object LlmConfig {
     fun save(context: Context, apiKey: String, baseUrl: String, model: String) {
         prefs(context).edit()
             .putString("api_key", apiKey.trim())
-            .putString("base_url", baseUrl.trim().trimEnd('/'))
+            .putString("base_url", normalizeBaseUrl(baseUrl).ifBlank { DEFAULT_BASE_URL })
             .putString("model", model.trim())
             .apply()
     }
+
+    /** baseUrl 规范化：去首尾空格、去末尾斜杠，再拼 /chat/completions */
+    fun normalizeBaseUrl(raw: String): String = raw.trim().trimEnd('/')
 }
 
 /**
  * LLM 意图路由：OpenAI 兼容的 /chat/completions 接口。
  * 要求模型只返回 JSON：{"capability_id":"...","params":{"from":"","to":""},"reply":"..."}，
  * capability_id 不在白名单内会被强制改写为 "none"。
- * 网络请求固定在 Dispatchers.IO，15 秒超时，所有异常吞掉返回 null（调用方降级）。
+ * 网络请求固定在 Dispatchers.IO，15 秒超时。
+ * 失败不再吞成 null，而是返回 Err(message)：HTTP 错误带状态码+服务端 error.message，
+ * 超时/网络异常提示检查网络——调用方直接 toast 给用户看。
  */
 object LlmRouter {
 
@@ -83,8 +95,9 @@ object LlmRouter {
         model: String,
         input: String,
         validIds: Set<String>
-    ): LlmRouteResult? = withContext(Dispatchers.IO) {
+    ): LlmCallResult = withContext(Dispatchers.IO) {
         try {
+            val url = "${LlmConfig.normalizeBaseUrl(baseUrl)}/chat/completions"
             val body = JSONObject()
                 .put("model", model)
                 .put("messages", JSONArray().apply {
@@ -95,29 +108,51 @@ object LlmRouter {
                 .put("max_tokens", 300)
                 .toString()
             val request = Request.Builder()
-                .url("$baseUrl/chat/completions")
+                .url(url)
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
             client().newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext null
-                parseResult(resp.body?.string().orEmpty(), validIds)
+                if (!resp.isSuccessful) {
+                    return@withContext LlmCallResult.Err(extractHttpError(resp.code, resp))
+                }
+                val parsed = parseResult(resp.body?.string().orEmpty(), validIds)
+                if (parsed != null) LlmCallResult.Ok(parsed)
+                else LlmCallResult.Err("模型返回无法解析，请换个说法再试")
             }
-        } catch (_: Exception) {
-            null
+        } catch (e: IOException) {
+            LlmCallResult.Err("网络超时，请检查网络")
+        } catch (e: Exception) {
+            LlmCallResult.Err("请求失败：${e.message.orEmpty().ifBlank { "未知错误" }}")
         }
     }
 
-    /** 设置页「测试连接」：发一个极简请求，能解析即算通 */
-    suspend fun testConnection(baseUrl: String, apiKey: String, model: String): Boolean =
+    /**
+     * 设置页「测试连接」：返回 null 表示成功，否则返回可直接展示的错误文案。
+     */
+    suspend fun testConnection(baseUrl: String, apiKey: String, model: String): String? =
         withContext(Dispatchers.IO) {
-            try {
-                route(baseUrl, apiKey, model, "你好", setOf("none")) != null
-            } catch (_: Exception) {
-                false
+            when (val r = route(baseUrl, apiKey, model, "你好", setOf("none"))) {
+                is LlmCallResult.Ok -> null
+                is LlmCallResult.Err -> r.message
             }
         }
+
+    /** 把 HTTP 错误拼成 "状态码: 服务端 error.message" 的可读文案 */
+    private fun extractHttpError(code: Int, resp: okhttp3.Response): String {
+        val bodyStr = try {
+            resp.body?.string().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        val serverMsg = try {
+            JSONObject(bodyStr).optJSONObject("error")?.optString("message").orEmpty()
+        } catch (_: Exception) {
+            ""
+        }.ifBlank { bodyStr.take(200).ifBlank { "请求被拒绝" } }
+        return "$code: $serverMsg".take(300)
+    }
 
     private fun parseResult(raw: String, validIds: Set<String>): LlmRouteResult? {
         return try {

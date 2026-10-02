@@ -69,6 +69,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.CapabilityRegistry
+import com.bobot.ailauncher.data.LlmCallResult
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.NotificationRepository
@@ -80,12 +81,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
 /** 今日日历事件 */
-private data class CalEvent(val title: String, val begin: Long, val location: String)
+private data class CalEvent(
+    val title: String,
+    val begin: Long,
+    val end: Long,
+    val location: String,
+    val allDay: Boolean
+)
 
 @Composable
 fun HomeScreen(onOpenAppDrawer: () -> Unit) {
@@ -184,6 +196,20 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             calEvents = loadTodayEvents(context)
         }
     }
+    // 日历三层视觉：下一个日程（大卡片）/ 全天事件（一行小字）/ 其余后续（小行）
+    val now = System.currentTimeMillis()
+    val timedEvents = remember(calEvents) {
+        (calEvents ?: emptyList()).filter { !it.allDay }.sortedBy { it.begin }
+    }
+    val allDayEvents = remember(calEvents) {
+        (calEvents ?: emptyList()).filter { it.allDay }
+    }
+    val nextEvent = remember(timedEvents, now) {
+        timedEvents.firstOrNull { it.begin > now } ?: allDayEvents.firstOrNull()
+    }
+    val laterEvents = remember(timedEvents, now, nextEvent) {
+        timedEvents.filter { it.begin > now && it != nextEvent }.take(3)
+    }
 
     // ---------- 意图提交：有 Key 走 LLM，无 Key 走关键词 ----------
     fun keywordFallback(text: String) {
@@ -208,20 +234,29 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 val apiKey = LlmConfig.getApiKey(context)
                 val baseUrl = LlmConfig.getBaseUrl(context)
                 val model = LlmConfig.getModel(context)
-                val result = withContext(Dispatchers.IO) {
+                val callResult = withContext(Dispatchers.IO) {
                     LlmRouter.route(baseUrl, apiKey, model, text, CapabilityRegistry.validIds())
                 }
-                if (result != null && result.capabilityId != "none") {
-                    val ok = CapabilityRegistry.resolveAndLaunch(
-                        context, result.capabilityId, result.params
-                    )
-                    if (result.reply.isNotBlank()) {
-                        Toast.makeText(context, result.reply, Toast.LENGTH_SHORT).show()
-                    } else if (!ok) {
-                        Toast.makeText(context, "能力暂不可用", Toast.LENGTH_SHORT).show()
+                when (callResult) {
+                    is LlmCallResult.Ok -> {
+                        val result = callResult.route
+                        if (result.capabilityId != "none") {
+                            val ok = CapabilityRegistry.resolveAndLaunch(
+                                context, result.capabilityId, result.params
+                            )
+                            if (result.reply.isNotBlank()) {
+                                Toast.makeText(context, result.reply, Toast.LENGTH_SHORT).show()
+                            } else if (!ok) {
+                                Toast.makeText(context, "能力暂不可用", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            keywordFallback(text)
+                        }
                     }
-                } else {
-                    keywordFallback(text)
+                    is LlmCallResult.Err -> {
+                        // 错误直接透出给用户（如模型名不存在），不再静默降级
+                        Toast.makeText(context, callResult.message, Toast.LENGTH_LONG).show()
+                    }
                 }
             } catch (_: Exception) {
                 keywordFallback(text)
@@ -338,7 +373,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 color = AILauncherColors.Title
             )
         }
-        // 今日日程（日历）
+        // 今日日程（三层视觉：下一个大卡片 / 全天小字 / 后续小行）
         when {
             calEvents == null -> item {
                 TextButton(
@@ -354,39 +389,31 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                     )
                 }
             }
-            calEvents!!.isNotEmpty() -> items(calEvents!!, key = { it.begin }) { e ->
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = AILauncherColors.AccentSoft),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = e.title.ifBlank { "（无标题）" },
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = AILauncherColors.Title
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Row {
-                            Text(
-                                text = formatTime(e.begin),
-                                fontSize = 13.sp,
-                                color = AILauncherColors.Body
-                            )
-                            if (e.location.isNotBlank()) {
-                                Text(
-                                    text = " · ${e.location}",
-                                    fontSize = 13.sp,
-                                    color = AILauncherColors.Body
-                                )
-                            }
-                        }
-                    }
-                }
+            nextEvent != null -> item {
+                NextEventCard(event = nextEvent, now = now)
             }
         }
-        // 通知卡片流
+        if (calEvents != null && allDayEvents.isNotEmpty()) {
+            items(allDayEvents, key = { it.title + it.begin }) { e ->
+                Text(
+                    text = "全天 · ${e.title.ifBlank { "（无标题）" }}",
+                    fontSize = 12.sp,
+                    color = AILauncherColors.Hint,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+        }
+        if (laterEvents.isNotEmpty()) {
+            items(laterEvents, key = { it.begin }) { e ->
+                Text(
+                    text = "${formatTime(e.begin)}  ${e.title.ifBlank { "（无标题）" }}",
+                    fontSize = 12.sp,
+                    color = AILauncherColors.Hint,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+        }
+        // 通知卡片流（可点击：打开对应 App）
         if (!isNotificationAccessGranted(context)) {
             item {
                 Card(
@@ -429,10 +456,27 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             }
         } else {
             items(notifications, key = { it.packageName + it.time }) { n ->
-                NotificationCard(n)
+                NotificationCard(n = n, onOpen = {
+                    openApp(context, n.packageName, n.appName)
+                })
             }
         }
         item { Spacer(modifier = Modifier.height(16.dp)) }
+    }
+}
+
+/** 点击通知卡片：打开对应 App */
+private fun openApp(context: Context, packageName: String, appName: String) {
+    try {
+        val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+        if (intent != null) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        } else {
+            Toast.makeText(context, "无法打开「$appName」", Toast.LENGTH_SHORT).show()
+        }
+    } catch (_: Exception) {
+        Toast.makeText(context, "无法打开「$appName」", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -454,7 +498,7 @@ private fun hasCalendarPermission(context: Context): Boolean =
         context, Manifest.permission.READ_CALENDAR
     ) == PackageManager.PERMISSION_GRANTED
 
-/** 读取今天 0 点 ~ 24 点的日历事件，取前 3 个 */
+/** 读取今天 0 点 ~ 24 点的日历事件（含全天标记），按开始时间排序 */
 private fun loadTodayEvents(context: Context): List<CalEvent> {
     return try {
         val cal = Calendar.getInstance().apply {
@@ -474,7 +518,9 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
             arrayOf(
                 CalendarContract.Instances.TITLE,
                 CalendarContract.Instances.BEGIN,
-                CalendarContract.Instances.EVENT_LOCATION
+                CalendarContract.Instances.END,
+                CalendarContract.Instances.EVENT_LOCATION,
+                CalendarContract.Instances.ALL_DAY
             ),
             null, null,
             CalendarContract.Instances.BEGIN + " ASC"
@@ -483,12 +529,16 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
         cursor?.use {
             val ti = it.getColumnIndex(CalendarContract.Instances.TITLE)
             val bi = it.getColumnIndex(CalendarContract.Instances.BEGIN)
+            val ei = it.getColumnIndex(CalendarContract.Instances.END)
             val li = it.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
-            while (it.moveToNext() && list.size < 3) {
+            val ai = it.getColumnIndex(CalendarContract.Instances.ALL_DAY)
+            while (it.moveToNext() && list.size < 20) {
                 list += CalEvent(
                     title = if (ti >= 0) it.getString(ti).orEmpty() else "",
                     begin = if (bi >= 0) it.getLong(bi) else 0L,
-                    location = if (li >= 0) it.getString(li).orEmpty() else ""
+                    end = if (ei >= 0) it.getLong(ei) else 0L,
+                    location = if (li >= 0) it.getString(li).orEmpty() else "",
+                    allDay = if (ai >= 0) it.getInt(ai) == 1 else false
                 )
             }
         }
@@ -510,12 +560,75 @@ private fun greeting(): String {
 private fun todayText(): String =
     SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date())
 
+private val timeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
 private fun formatTime(time: Long): String =
-    SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(time))
+    LocalDateTime.ofInstant(Instant.ofEpochMilli(time), ZoneId.systemDefault())
+        .format(timeFormatter)
+
+/** 倒计时文案：<60 分钟显示分钟，否则显示"X 小时 Y 分" */
+private fun countdownText(begin: Long, now: Long): String {
+    val mins = Duration.between(
+        Instant.ofEpochMilli(now), Instant.ofEpochMilli(begin)
+    ).toMinutes().coerceAtLeast(0)
+    return if (mins < 60) "还有 $mins 分钟"
+    else "还有 ${mins / 60} 小时 ${mins % 60} 分"
+}
+
+/** 下一个日程：大卡片突出（标题 / 时间 / 地点 / 倒计时） */
+@Composable
+private fun NextEventCard(event: CalEvent, now: Long) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = AILauncherColors.AccentSoft),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "接下来",
+                    fontSize = 12.sp,
+                    color = AILauncherColors.Accent,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = countdownText(event.begin, now),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AILauncherColors.Accent
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = event.title.ifBlank { "（无标题）" },
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color = AILauncherColors.Title
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Row {
+                Text(
+                    text = if (event.allDay) "全天"
+                    else "${formatTime(event.begin)} – ${formatTime(event.end)}",
+                    fontSize = 13.sp,
+                    color = AILauncherColors.Body
+                )
+                if (event.location.isNotBlank()) {
+                    Text(
+                        text = " · ${event.location}",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Body
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
-private fun NotificationCard(n: SimpleNotification) {
+private fun NotificationCard(n: SimpleNotification, onOpen: () -> Unit) {
     Card(
+        onClick = onOpen,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
