@@ -13,7 +13,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -57,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
@@ -96,8 +99,9 @@ import kotlin.math.roundToInt
 /**
  * 应用中心（v0.14.1，Bob 新设计）：D3 全屏单列表。
  * - 顶部：Header（"应用"标题 + AI 智能分类按钮 + 设置齿轮）
- * - 分类区：7 组（AI/社交/出行/支付/办公/生活/购物），组头名称+数量、可折叠，
- *   组内图标网格（真实图标），长按图标整理分类（复用 OrganizeDialog）
+ * - 分类区：直接复用能力页 v0.9 扁平样式（透明背景、行底 1dp 两端渐隐分割线、
+ *   图标分开 8dp 间距）：7 组（AI/社交/出行/支付/办公/生活/购物），组头可折叠，
+ *   收起态右侧图标 strip，展开态 4 列网格，长按图标整理分类（复用 OrganizeDialog）
  * - 下面直接连全部应用 A-Z 列表（字母分组头 + 行）
  * - Rail 只做定位：首个"类"跳回顶部整个分类区，后面 A-Z 字母跳转对应字母；
  *   不再做视图切换（无切换钮、无左右滑切视图）
@@ -581,9 +585,13 @@ private fun CenterRail(
 }
 
 /**
- * 分组块（手势签名，v0.14 纠正：左滑=多/右滑=少）：
- * - 组头：点按切换展开/收起；左滑→展开；右滑→折叠
- * - 展开：4 列图标网格（真实图标+应用名），点按启动，长按整理分类
+ * 分组卡片：直接复用能力页 v0.9 扁平样式（透明背景、无白卡）。
+ * - 组头 54dp：6dp 分类色点 + 名称(13sp) + 数量(11sp)；收起态右侧图标 strip
+ *   （36dp 真实图标 8dp 间距，最多 3 个 + "+n" 胶囊），展开态右侧"收起"文字
+ * - 收起态行底 1dp 分割线（两端渐隐）
+ * - 展开态：4 列图标网格（44dp 真实图标 + 应用名）
+ * - 长按图标 → 整理分类（复用 OrganizeDialog）
+ * - 手势签名（v0.14 纠正）：组头左滑=多（展开）、右滑=少（折叠），点按也可切换
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -604,7 +612,7 @@ private fun GroupBlock(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .height(54.dp)
                 .pointerInput(group.id) {
                     var accumX = 0f
                     var fired = false
@@ -624,33 +632,61 @@ private fun GroupBlock(
                     )
                 }
                 .clickable { onToggle() }
-                .padding(vertical = 10.dp, horizontal = 4.dp),
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(8.dp)
+                    .size(6.dp)
                     .clip(CircleShape)
                     .background(catColor)
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(7.dp))
             Text(
                 text = group.label,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = AILauncherColors.Title
+                fontSize = 13.sp,
+                color = AILauncherColors.Hint,
+                maxLines = 1
             )
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = group.apps.size.toString(),
-                fontSize = 12.sp,
-                color = AILauncherColors.Hint
+                fontSize = 11.sp,
+                color = AILauncherColors.Hint,
+                maxLines = 1
             )
             Spacer(modifier = Modifier.weight(1f))
-            Text(
-                text = if (collapsed) "展开" else "收起",
-                fontSize = 12.sp,
-                color = AILauncherColors.Hint
+            if (collapsed) {
+                CollapsedAppStrip(
+                    apps = group.apps,
+                    catColor = catColor,
+                    onLaunch = onLaunch,
+                    onOrganize = onOrganize,
+                    onExpand = onToggle
+                )
+            } else {
+                Text(
+                    text = "收起",
+                    fontSize = 13.sp,
+                    color = catColor,
+                    modifier = Modifier.clickable { onToggle() }
+                )
+            }
+        }
+        // 收起态行底细分割线（两端渐隐，参考原型 .shelf1-line）
+        if (collapsed) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            0f to Color.Transparent,
+                            0.12f to AILauncherColors.Divider,
+                            0.88f to AILauncherColors.Divider,
+                            1f to Color.Transparent
+                        )
+                    )
             )
         }
         AnimatedVisibility(
@@ -668,7 +704,7 @@ private fun GroupBlock(
                 )
             ) + fadeOut()
         ) {
-            Column(modifier = Modifier.padding(bottom = 12.dp)) {
+            Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                 group.apps.chunked(4).forEach { row ->
                     Row(
                         modifier = Modifier
@@ -677,44 +713,122 @@ private fun GroupBlock(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         row.forEach { app ->
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .combinedClickable(
-                                        onClick = { onLaunch(app) },
-                                        onLongClick = { onOrganize(app) }
-                                    )
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                AppIconImage(
-                                    drawable = app.icon,
-                                    contentDescription = app.label.toString(),
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(13.dp))
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = app.label.toString(),
-                                    fontSize = 11.sp,
-                                    color = AILauncherColors.Body,
-                                    maxLines = 1
-                                )
-                            }
+                            ResolvedAppCell(
+                                app = app,
+                                onLaunch = { onLaunch(app) },
+                                onOrganize = { onOrganize(app) },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                         repeat(4 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
                     }
                 }
             }
         }
-        // 分割线
-        Box(
+    }
+}
+
+/**
+ * 收起态右侧：36dp 真实图标分开排布（8dp 间距，直接点启动，长按整理分类），
+ * 超出 3 个时末尾放 "+n" 分类色描边胶囊（点击展开）
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CollapsedAppStrip(
+    apps: List<ResolvedCapability>,
+    catColor: Color,
+    onLaunch: (ResolvedCapability) -> Unit,
+    onOrganize: (ResolvedCapability) -> Unit,
+    onExpand: () -> Unit
+) {
+    val shown = if (apps.size > 3) apps.take(3) else apps
+    val rest = apps.size - shown.size
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        shown.forEach { app ->
+            AppIconImage(
+                drawable = app.icon,
+                contentDescription = app.label.toString(),
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .border(
+                        1.dp,
+                        Color.Black.copy(alpha = 0.06f),
+                        RoundedCornerShape(11.dp)
+                    )
+                    .combinedClickable(
+                        onClick = { onLaunch(app) },
+                        onLongClick = { onOrganize(app) }
+                    )
+            )
+        }
+        if (rest > 0) {
+            MoreCapsule(count = rest, catColor = catColor, onClick = onExpand)
+        }
+    }
+}
+
+/** "+n" 分类色描边胶囊：点击切换展开 / 收起 */
+@Composable
+private fun MoreCapsule(
+    count: Int,
+    catColor: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .height(36.dp)
+            .defaultMinSize(minWidth = 46.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, catColor.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .background(catColor.copy(alpha = 0.13f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "+$count",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = catColor
+        )
+    }
+}
+
+/** 展开态：真实应用图标 + 应用名（点按启动，长按整理分类） */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ResolvedAppCell(
+    app: ResolvedCapability,
+    onLaunch: () -> Unit,
+    onOrganize: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .combinedClickable(
+                onClick = onLaunch,
+                onLongClick = onOrganize
+            )
+            .padding(vertical = 4.dp)
+    ) {
+        AppIconImage(
+            drawable = app.icon,
+            contentDescription = app.label.toString(),
             modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(AILauncherColors.Divider.copy(alpha = 0.6f))
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = app.label.toString(),
+            fontSize = 12.sp,
+            color = AILauncherColors.Body,
+            maxLines = 1
         )
     }
 }
