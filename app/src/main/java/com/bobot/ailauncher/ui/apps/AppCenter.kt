@@ -212,6 +212,8 @@ fun AppCenterContent(
     // AI 智能分类（从能力页搬过来，逻辑复用 AppClassifier）
     var classifying by remember { mutableStateOf(false) }
     var classifyProgress by remember { mutableStateOf(0 to 0) }
+    // v0.16.1：A-Z 行左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
+    var expandedActionsPkg by remember { mutableStateOf<String?>(null) }
     fun startAiClassify() {
         if (classifying) return
         classifying = true
@@ -364,7 +366,14 @@ fun AppCenterContent(
                             onLaunch = { launchApp(app) },
                             onLongClick = { quickActionsApp = app },
                             onHide = ::hideApp,
-                            onOrganize = { organizeApp = it }
+                            onOrganize = { organizeApp = it },
+                            actionsVisible = expandedActionsPkg == app.packageName,
+                            onActionsVisibleChange = { expanded ->
+                                expandedActionsPkg =
+                                    if (expanded) app.packageName
+                                    else if (expandedActionsPkg == app.packageName) null
+                                    else expandedActionsPkg
+                            }
                         )
                     }
                 }

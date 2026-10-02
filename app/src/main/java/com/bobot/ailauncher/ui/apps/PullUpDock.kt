@@ -26,11 +26,13 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -152,6 +154,10 @@ fun PullUpDock(
             ) {
                 val hThreshPx = with(density) { 48.dp.toPx() }
                 val vThreshPx = with(density) { 72.dp.toPx() }
+                // v0.16.1：底部系统手势区高度（导航条/手势区），落在该区域内的拖拽起点不抢——
+                // 让系统处理底部左右滑（切最近应用）、底部上滑（回桌面/最近任务）
+                val sysGestureBottomPx = WindowInsets.systemGestures.getBottom(density)
+                val dockBottomPadPx = with(density) { 16.dp.toPx() }
                 val cardShape = RoundedCornerShape(24.dp)
                 Column(
                     modifier = Modifier
@@ -164,17 +170,24 @@ fun PullUpDock(
                             BorderStroke(1.dp, Color.White.copy(alpha = 0.45f)),
                             cardShape
                         )
-                        .pointerInput(state) {
+                        .pointerInput(state, sysGestureBottomPx, dockBottomPadPx) {
                             var accumX = 0f
                             var accumY = 0f
                             var fired = false
+                            var inSysGestureZone = false
                             detectDragGestures(
-                                onDragStart = {
+                                onDragStart = { start ->
                                     accumX = 0f
                                     accumY = 0f
                                     fired = false
+                                    // 起点在底部系统手势区内（卡片底部 dockBottomPadPx 之上、
+                                    // 屏幕底部 sysGestureBottomPx 之内）→ 本次不消费、不触发，交还系统
+                                    val dangerPx = sysGestureBottomPx - dockBottomPadPx
+                                    inSysGestureZone =
+                                        dangerPx > 0 && start.y > size.height - dangerPx
                                 },
                                 onDrag = { change, dragAmount ->
+                                    if (inSysGestureZone) return@detectDragGestures
                                     change.consume()
                                     accumX += dragAmount.x
                                     accumY += dragAmount.y

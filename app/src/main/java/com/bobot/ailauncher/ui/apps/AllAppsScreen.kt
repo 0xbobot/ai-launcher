@@ -231,6 +231,8 @@ fun AllAppsContent(
             if (nestedScrollConnection != null) {
                 listModifier = listModifier.nestedScroll(nestedScrollConnection)
             }
+            // v0.16.1：左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
+            var expandedActionsPkg by remember { mutableStateOf<String?>(null) }
             LazyColumn(
                 state = listState,
                 modifier = listModifier,
@@ -248,7 +250,14 @@ fun AllAppsContent(
                             },
                             onLongClick = { organizeApp = app },
                             onHide = ::hideApp,
-                            onOrganize = { organizeApp = it }
+                            onOrganize = { organizeApp = it },
+                            actionsVisible = expandedActionsPkg == app.packageName,
+                            onActionsVisibleChange = { expanded ->
+                                expandedActionsPkg =
+                                    if (expanded) app.packageName
+                                    else if (expandedActionsPkg == app.packageName) null
+                                    else expandedActionsPkg
+                            }
                         )
                     }
                 } else {
@@ -271,7 +280,14 @@ fun AllAppsContent(
                                 onLaunch = { launchApp(app.packageName) },
                                 onLongClick = { organizeApp = app },
                                 onHide = ::hideApp,
-                                onOrganize = { organizeApp = it }
+                                onOrganize = { organizeApp = it },
+                                actionsVisible = expandedActionsPkg == app.packageName,
+                                onActionsVisibleChange = { expanded ->
+                                    expandedActionsPkg =
+                                        if (expanded) app.packageName
+                                        else if (expandedActionsPkg == app.packageName) null
+                                        else expandedActionsPkg
+                                }
                             )
                         }
                     }
@@ -327,11 +343,12 @@ internal fun AppRow(
     onLaunch: () -> Unit,
     onLongClick: () -> Unit,
     onHide: (AppInfo) -> Unit,
-    onOrganize: (AppInfo) -> Unit
+    onOrganize: (AppInfo) -> Unit,
+    actionsVisible: Boolean,
+    onActionsVisibleChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    var actionsVisible by remember { mutableStateOf(false) }
     var showHideConfirm by remember { mutableStateOf(false) }
     val swipePx = with(density) { 56.dp.toPx() }
 
@@ -375,10 +392,10 @@ internal fun AppRow(
                                 if (accumX < -swipePx) {
                                     // 左滑=多：一段展开操作，二段进系统应用管理
                                     if (actionsVisible) openAppDetails()
-                                    else actionsVisible = true
+                                    else onActionsVisibleChange(true)
                                 } else if (accumX > swipePx) {
                                     // 右滑=少：展开态收起；收起态弹确认框再隐藏
-                                    if (actionsVisible) actionsVisible = false
+                                    if (actionsVisible) onActionsVisibleChange(false)
                                     else showHideConfirm = true
                                 }
                             }

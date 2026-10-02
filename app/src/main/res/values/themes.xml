@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- v0.11 玻璃拟态：半透明 Activity，系统壁纸透出；无 ActionBar -->
+    <!-- v0.16.1：去掉 windowIsTranslucent——启动器是 HOME 窗口，不该是半透明 Activity；
+         半透明 Activity 会干扰系统手势/最近任务等系统级交互。只保留 windowShowWallpaper，
+         系统壁纸仍绘制在窗口之后，透过透明底面呈现，玻璃拟态视觉不变 -->
     <style name="Theme.AILauncher" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowShowWallpaper">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
