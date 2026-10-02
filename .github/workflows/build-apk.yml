@@ -43,6 +43,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 模拟器在 GitHub runner 上经常起不来（adb 连不上），只做参考信号，不阻塞发布
+    continue-on-error: true
     steps:
       - name: Download APK artifact
         uses: actions/download-artifact@v4

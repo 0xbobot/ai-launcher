@@ -89,7 +89,7 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
     val searching = query.trim().isNotBlank()
     val filtered = remember(query, apps) {
         val q = query.trim()
-        if (q.isBlank()) apps else apps.filter { it.label.contains(q) }
+        if (q.isBlank()) apps else apps.filter { it.label.contains(q, ignoreCase = true) }
     }
 
     // 首字母分组：A-Z 在前，"#"（非字母开头）最后

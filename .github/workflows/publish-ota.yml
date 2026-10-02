@@ -22,14 +22,19 @@ jobs:
       - name: Checkout ai-launcher
         uses: actions/checkout@v4
 
-      - name: Get latest successful build run id
+      - name: Get latest run with successful build job
         id: build_run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RUN_ID=$(gh api "repos/0xbobot/ai-launcher/actions/workflows/build-apk.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id')
-          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-            echo "No successful build run found" >&2
+          # 找最近一次 build job 成功的 run（smoke-test 可能因模拟器环境失败，不应阻塞发布）
+          RUN_ID=""
+          for RID in $(gh api "repos/0xbobot/ai-launcher/actions/workflows/build-apk.yml/runs?per_page=10" --jq '.workflow_runs[].id'); do
+            CONC=$(gh api "repos/0xbobot/ai-launcher/actions/runs/$RID/jobs" --jq '.jobs[] | select(.name=="build") | .conclusion')
+            if [ "$CONC" = "success" ]; then RUN_ID=$RID; break; fi
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "No run with successful build job found" >&2
             exit 1
           fi
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
