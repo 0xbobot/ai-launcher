@@ -4,6 +4,7 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.bobot.ailauncher.data.NotificationRepository
+import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.SimpleNotification
 
 /**
@@ -24,6 +25,14 @@ class LauncherNotificationService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        // v0.15 宠物整理员：单条新通知 → 宠物接 → 分类 → 呈现（去重/忙碌保护在 PetRepository 内）
+        sbn?.let {
+            if (it.isClearable && !it.isOngoing) {
+                it.toSimpleNotification()?.let { n ->
+                    PetRepository.handleIncomingNotification(n)
+                }
+            }
+        }
         pushActiveNotifications()
     }
 

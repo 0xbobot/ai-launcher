@@ -90,7 +90,10 @@ import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.NotificationRepository
+import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.SimpleNotification
+import com.bobot.ailauncher.ui.pet.PetPresentedCard
+import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.GlassTextShadow
@@ -324,6 +327,14 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         timedEvents.filter { it.begin > now && it != nextEvent }.take(3)
     }
 
+    // v0.15 宠物整理员：30 分钟内开始的日程 → 重要（去重由 PetRepository 保证）
+    LaunchedEffect(calEvents) {
+        val t = System.currentTimeMillis()
+        (calEvents ?: emptyList())
+            .firstOrNull { !it.allDay && it.begin in (t + 1)..(t + 30 * 60 * 1000) }
+            ?.let { PetRepository.handleIncomingCalendar(it.title, it.begin, it.location) }
+    }
+
     // ---------- 意图提交：无 Key 走关键词演示版，有 Key 直连大模型问答 ----------
     var chatQuestion by remember { mutableStateOf<String?>(null) }
     var chatAnswer by remember { mutableStateOf<String?>(null) }
@@ -462,6 +473,10 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             }
         }
         Spacer(modifier = Modifier.height(14.dp))
+        // v0.15 宠物整理员：亲密度 + 桌台 + 呈现卡片
+        PetZone()
+        PetPresentedCard()
+        Spacer(modifier = Modifier.height(6.dp))
         // 正在进行时（中间可滚动区域）
         Column(
             modifier = Modifier

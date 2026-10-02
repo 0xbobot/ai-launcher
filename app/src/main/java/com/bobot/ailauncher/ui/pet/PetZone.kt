@@ -1,0 +1,518 @@
+package com.bobot.ailauncher.ui.pet
+
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.PetCat
+import com.bobot.ailauncher.data.PetItem
+import com.bobot.ailauncher.data.PetMood
+import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.GlassTextShadow
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
+
+/**
+ * 宠物区：亲密度 + 桌台（宠物本体/ding/思考点/sort-tag/carry）。
+ * 放在首页意图框下方、"正在进行时"上方。
+ */
+@Composable
+fun PetZone() {
+    val mood by PetRepository.mood.collectAsState()
+    val mouth by PetRepository.mouth.collectAsState()
+    val dingText by PetRepository.dingText.collectAsState()
+    val carryText by PetRepository.carryText.collectAsState()
+    val carryToRight by PetRepository.carryToRight.collectAsState()
+    val showDots by PetRepository.showDots.collectAsState()
+    val sortText by PetRepository.sortText.collectAsState()
+    val affection by PetRepository.affection.collectAsState()
+    var blinking by remember { mutableStateOf(false) }
+
+    // 定时眨眼
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(4100)
+            blinking = true
+            delay(150)
+            blinking = false
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // 亲密度
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "亲密度 ",
+                fontSize = 11.5.sp,
+                style = TextStyle(color = Color.White, shadow = GlassTextShadow)
+            )
+            Text(
+                text = "♥",
+                fontSize = 11.5.sp,
+                color = Color(0xFFFF8FB3),
+                style = TextStyle(shadow = GlassTextShadow)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            LinearProgressIndicator(
+                progress = affection / 100f,
+                modifier = Modifier
+                    .width(90.dp)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(99.dp)),
+                color = Color(0xFFFF5E7E),
+                trackColor = Color.White.copy(alpha = 0.28f)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "$affection",
+                fontSize = 11.5.sp,
+                style = TextStyle(color = Color.White, shadow = GlassTextShadow)
+            )
+        }
+        // 桌台
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(148.dp)
+        ) {
+            // ding
+            AnimatedVisibility(
+                visible = dingText != null,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter)
+            ) {
+                Text(
+                    text = dingText.orEmpty(),
+                    fontSize = 12.5.sp,
+                    color = Color.White,
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .background(
+                            Color(0xFF141428).copy(alpha = 0.72f),
+                            RoundedCornerShape(99.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                )
+            }
+            // sort-tag：分类决策展示
+            AnimatedVisibility(
+                visible = sortText != null,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter)
+            ) {
+                Text(
+                    text = sortText.orEmpty(),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .padding(top = 40.dp)
+                        .background(
+                            Color(0xFF141428).copy(alpha = 0.78f),
+                            RoundedCornerShape(99.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                )
+            }
+            // 思考省略号
+            if (showDots) {
+                ThinkDots(modifier = Modifier.align(Alignment.TopCenter).padding(top = 44.dp))
+            }
+            // 宠物本体
+            PetView(
+                mood = mood,
+                mouth = mouth,
+                blinking = blinking,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(100.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = { PetRepository.petTapped() })
+                    }
+            )
+            // carry 小纸条
+            AnimatedVisibility(
+                visible = carryText != null,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                val carryX by animateFloatAsState(
+                    targetValue = if (carryToRight) 100f else 0f,
+                    animationSpec = spring(
+                        stiffness = Spring.StiffnessMediumLow,
+                        dampingRatio = 0.8f
+                    ),
+                    label = "carryX"
+                )
+                val density = LocalDensity.current
+                Text(
+                    text = carryText.orEmpty(),
+                    fontSize = 11.sp,
+                    color = Color(0xFF333333),
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                with(density) { carryX.dp.toPx() }.roundToInt(),
+                                with(density) { 34.dp.toPx() }.roundToInt()
+                            )
+                        }
+                        .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 9.dp, vertical = 7.dp)
+                )
+            }
+        }
+    }
+}
+
+/** 思考中的三个跳动点 */
+@Composable
+private fun ThinkDots(modifier: Modifier = Modifier) {
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        repeat(3) { i ->
+            var up by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                delay(i * 150L)
+                while (true) {
+                    up = !up
+                    delay(450)
+                }
+            }
+            val dy by animateFloatAsState(
+                targetValue = if (up) -9f else 0f,
+                animationSpec = spring(
+                    stiffness = Spring.StiffnessMedium,
+                    dampingRatio = 0.6f
+                ),
+                label = "dot$i"
+            )
+            val density = LocalDensity.current
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(0, with(density) { dy.dp.toPx() }.roundToInt()) }
+                    .size(9.dp)
+                    .background(Color.White, RoundedCornerShape(99.dp))
+            )
+        }
+    }
+}
+
+/**
+ * 宠物呈现卡片：展示一次。
+ * 手势：左滑 = 更多（出现操作按钮），右滑 = 更少（收回成标签）。
+ * 隐私类：未展开前标题正文打码。
+ */
+@Composable
+fun PetPresentedCard() {
+    val item by PetRepository.presented.collectAsState()
+    val armed by PetRepository.cardArmed.collectAsState()
+    val density = LocalDensity.current
+    val threshPx = remember(density) { with(density) { 56.dp.toPx() } }
+
+    AnimatedVisibility(
+        visible = item != null,
+        enter = slideInVertically { with(density) { 26.dp.toPx() }.roundToInt() } + fadeIn(),
+        exit = fadeOut() + slideOutVertically { with(density) { 20.dp.toPx() }.roundToInt() }
+    ) {
+        val cur = item ?: return@AnimatedVisibility
+        val masked = cur.cat == PetCat.PRIV && !armed
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.92f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp)
+                .pointerInput(cur.id, armed) {
+                    var accumX = 0f
+                    var fired = false
+                    detectHorizontalDragGestures(
+                        onDragStart = { accumX = 0f; fired = false },
+                        onDragCancel = { fired = true },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            if (fired) return@detectHorizontalDragGestures
+                            accumX += dragAmount
+                            if (kotlin.math.abs(accumX) > threshPx) {
+                                fired = true
+                                if (accumX < 0) PetRepository.armCard()      // 左滑=多
+                                else PetRepository.fileToTab()              // 右滑=少
+                            }
+                        }
+                    )
+                }
+        ) {
+            Column(modifier = Modifier.padding(12.dp, 12.dp, 12.dp, 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${cur.cat.tabEmoji} ${cur.appName}",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = cur.cat.color,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = cur.cat.cnName,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier
+                            .background(cur.cat.color, RoundedCornerShape(99.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(5.dp))
+                Text(
+                    text = if (masked) "••••••" else cur.title,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF2C2C34)
+                )
+                if (cur.text.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = if (masked) "••••••（左滑查看完整内容）" else cur.text,
+                        fontSize = 12.5.sp,
+                        color = Color(0xFF6B6B76),
+                        lineHeight = 18.sp
+                    )
+                }
+                AnimatedVisibility(visible = armed) {
+                    PetCardActions(item = cur)
+                }
+                Text(
+                    text = if (armed) "选一个操作，或右滑收回" else "左滑 → 更多操作 · 右滑 → 收到右侧",
+                    fontSize = 10.5.sp,
+                    color = Color(0xFFA0A0AD),
+                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+/** 卡片操作按钮：按分类给 2-3 个 */
+@Composable
+private fun PetCardActions(item: PetItem) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val actions = remember(item.cat) {
+        when (item.cat) {
+            PetCat.IMP -> listOf("打开应用" to true, "标为已读" to false, "完成" to false)
+            PetCat.WORK -> listOf("打开应用" to true, "完成" to false)
+            PetCat.FUN -> listOf("打开应用" to true, "完成" to false)
+            PetCat.PRIV -> listOf("复制验证码" to true, "打开应用" to false, "完成" to false)
+        }
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(top = 10.dp)
+    ) {
+        actions.forEach { (label, primary) ->
+            if (primary) {
+                Button(
+                    onClick = { onPetAction(context, clipboard, item, label) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C5CE7)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                TextButton(
+                    onClick = { onPetAction(context, clipboard, item, label) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(label, fontSize = 12.5.sp, color = Color(0xFF5A4BD6))
+                }
+            }
+        }
+    }
+}
+
+private fun onPetAction(
+    context: Context,
+    clipboard: androidx.compose.ui.platform.ClipboardManager,
+    item: PetItem,
+    label: String
+) {
+    when (label) {
+        "复制验证码" -> {
+            clipboard.setText(AnnotatedString(item.text))
+            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+        }
+        "打开应用" -> {
+            openAppForPet(context, item.packageName, item.appName)
+            PetRepository.completeItem("打开应用")
+        }
+        "标为已读", "完成" -> PetRepository.completeItem(label)
+    }
+}
+
+/** 打开应用（计入常用统计）；日程类没有包名则只 toast */
+private fun openAppForPet(context: Context, packageName: String, appName: String) {
+    if (packageName.isBlank()) {
+        Toast.makeText(context, "「$appName」", Toast.LENGTH_SHORT).show()
+        return
+    }
+    try {
+        AppUsageTracker.recordLaunch(context, packageName)
+        val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+        if (intent != null) {
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        } else {
+            Toast.makeText(context, "无法打开「$appName」", Toast.LENGTH_SHORT).show()
+        }
+    } catch (_: Exception) {
+        Toast.makeText(context, "无法打开「$appName」", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * 右侧标签栏：四个文件夹从右边缘露出一点。
+ * 手势：标签左滑 = 拉进屏幕展开卡片；标签右滑 = 推出屏幕完成清空。
+ * D3 打开时隐藏（避免和 A-Z rail 冲突），由调用方传 dockHidden 控制。
+ */
+@Composable
+fun PetTabsOverlay(dockHidden: Boolean) {
+    val filed by PetRepository.filed.collectAsState()
+    val density = LocalDensity.current
+
+    AnimatedVisibility(
+        visible = dockHidden,
+        enter = fadeIn(),
+        exit = fadeOut()
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.align(Alignment.CenterEnd),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                PetCat.values().forEach { cat ->
+                    val count = filed[cat]?.size ?: 0
+                    var dragX by remember { mutableStateOf(0f) }
+                    val empty = count == 0
+                    Box(
+                        modifier = Modifier
+                            .size(width = 52.dp, height = 56.dp)
+                            .offset {
+                                IntOffset(
+                                    with(density) { (36.dp.toPx() + dragX).roundToInt() },
+                                    0
+                                )
+                            }
+                            .alpha(if (empty) 0.35f else 1f)
+                            .background(
+                                cat.color,
+                                RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
+                            )
+                            .pointerInput(cat, empty) {
+                                if (empty) return@pointerInput
+                                var accumX = 0f
+                                detectHorizontalDragGestures(
+                                    onDragStart = { accumX = 0f; dragX = 0f },
+                                    onDragCancel = { dragX = 0f },
+                                    onHorizontalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        accumX += dragAmount
+                                        dragX = (dragX + dragAmount).coerceIn(-120f, 80f)
+                                    },
+                                    onDragEnd = {
+                                        val dxDp = dragX / density.density
+                                        dragX = 0f
+                                        if (dxDp < -48) PetRepository.expandFromTab(cat)  // 左滑=多
+                                        else if (dxDp > 48) PetRepository.completeTab(cat) // 右滑=少
+                                    }
+                                )
+                            },
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(start = 6.dp)
+                        ) {
+                            Text(text = cat.tabEmoji, fontSize = 15.sp)
+                            Text(
+                                text = cat.tabLabel,
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                        }
+                        if (!empty) {
+                            Text(
+                                text = "$count",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = (-16).dp, y = (-7).dp)
+                                    .background(Color(0xFFFF4D4F), RoundedCornerShape(99.dp))
+                                    .padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

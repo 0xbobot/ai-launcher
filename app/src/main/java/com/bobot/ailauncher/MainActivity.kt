@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.OtaUpdater
+import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.MainScreen
 import com.bobot.ailauncher.ui.onboarding.OnboardingNav
 import com.bobot.ailauncher.ui.theme.AILauncherTheme
@@ -31,6 +32,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CapabilityRegistry.load(this)
+        // v0.15 宠物整理员：初始化（亲密度持久化等）
+        PetRepository.init(this)
         // OTA：版本变化后清理旧安装包，避免"直接安装"命中旧包
         OtaUpdater.onAppUpgraded(this)
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)

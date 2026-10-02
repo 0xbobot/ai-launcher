@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui
 
 import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,10 +20,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
+import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.apps.DockState
 import com.bobot.ailauncher.ui.apps.PullUpDock
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.home.HomeScreen
+import com.bobot.ailauncher.ui.pet.PetTabsOverlay
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import kotlinx.coroutines.delay
 
@@ -75,6 +78,13 @@ private fun HomeHost(onOpenSettings: () -> Unit) {
         }
     }
 
+    // v0.15 宠物整理员：toast 事件 → 系统 Toast
+    LaunchedEffect(Unit) {
+        PetRepository.toast.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // v0.11：壁纸轻微渐隐罩，保证悬浮在壁纸上的文字可读（上深下浅）
         Box(
@@ -98,6 +108,8 @@ private fun HomeHost(onOpenSettings: () -> Unit) {
             onStateChange = { dockState = it },
             onOpenSettings = onOpenSettings
         )
+        // v0.15 宠物整理员：右侧文件夹标签栏（Dock 打开时隐藏，避免和 A-Z rail 冲突）
+        PetTabsOverlay(dockHidden = dockState == DockState.Hidden)
         // OTA 更新对话框（自动检查 / 设置页手动检查共用 UpdateDialog）
         updateInfo?.let { info ->
             UpdateDialog(info = info, onDismiss = { updateInfo = null })
