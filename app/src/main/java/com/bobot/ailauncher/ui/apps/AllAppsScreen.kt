@@ -395,6 +395,7 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AppRow(app: AppInfo, onLaunch: () -> Unit, onLongClick: () -> Unit) {
     Row(
@@ -453,6 +454,7 @@ private fun pinyinInitial(c: Char): Char {
 }
 
 /** 长按应用 → 整理分类：加入分组 / 新建分类 / 恢复自动 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun OrganizeDialog(app: AppInfo, onDismiss: () -> Unit) {
     val context = LocalContext.current
