@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.capability
 
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
