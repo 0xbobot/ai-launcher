@@ -607,14 +607,3 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
 private fun todayText(): String =
     SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date())
 
-/** 倒计时文案：<60 分钟显示分钟，否则显示"X 小时 Y 分" */
-/** 下一个日程：大卡片突出（标题 / 时间 / 地点 / 倒计时）——玻璃拟态
- * 手势签名（v0.14 纠正）：左滑展开（详情 + 操作），右滑收起；高度弹簧动画 */
-@Composable
-/** 通知卡片（v0.14 纠正）：左滑展开（全文 + 操作按钮），右滑收起；高度弹簧动画 */
-@Composable
-/**
- * 手势签名（全 App 统一，v0.14 纠正）：左滑 = 更多（展开），右滑 = 更少（收起）。
- * 横向专用检测（touch slop 后才消费），与纵向滚动不冲突；点按不受影响。
- */
-@Composable

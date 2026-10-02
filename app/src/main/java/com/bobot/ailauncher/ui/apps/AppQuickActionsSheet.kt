@@ -87,7 +87,7 @@ fun AppQuickActionsSheet(
             shortcuts.forEach { s ->
                 val icon = remember(s.id) { shortcutIcon(context, app.packageName, s.id) }
                 SheetRow(
-                    label = s.label?.toString().orEmpty().ifBlank { "快捷方式" },
+                    label = s.shortLabel?.toString().orEmpty().ifBlank { "快捷方式" },
                     icon = icon,
                     onClick = {
                         launchShortcut(context, app.packageName, s.id)
@@ -162,7 +162,7 @@ private fun shortcutIcon(context: Context, packageName: String, shortcutId: Stri
                     LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
             )
         }
-        val info = lm.getShortcuts(query, Process.myUserHandle()).firstOrNull()
+        val info = lm.getShortcuts(query, Process.myUserHandle())?.firstOrNull()
         if (info != null) lm.getShortcutIconDrawable(info, 0) else null
     } catch (_: Exception) {
         null
