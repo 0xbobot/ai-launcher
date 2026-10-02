@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -45,7 +46,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,6 +56,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -64,9 +66,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.CustomCategories
 import com.bobot.ailauncher.data.listLaunchableApps
@@ -79,18 +83,24 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 全部应用列表（含 A-Z 快速索引）。
- * - 按首字母分组（A-Z；中文按拼音首字母，非 A-Z 开头归 "#"），stickyHeader 分组头
+ * 全部应用列表内容（含 A-Z 快速索引），可嵌入可拖动 BottomSheet。
+ * - 按首字母分组（A-Z；中文按拼音首字母，非 A-Z 开头归 "#"），分组头
  * - 右侧 A-Z 纵条：点按/拖动按 y 坐标定位字母，scrollToItem 跳转；
- *   拖动时中央悬浮大字母指示器，松手 600ms 后渐隐
+ *   拖动时中央悬浮大字母指示器，松手 600ms 后渐隐（[showIndexBar]=false 时隐藏）
  * - 搜索态隐藏索引条；搜索大小写不敏感，imeAction=Search
  * - 长按应用可整理分类（加入分组 / 新建分类 / 恢复自动）
- *
- * @param onClose 抽屉模式：非空时顶部显示把手（下滑关闭）+ 关闭按钮；为空时显示普通大标题。
+ * - 启动应用时记录频次（Dock 常用排序用）
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun AllAppsScreen(onClose: (() -> Unit)? = null) {
+fun AllAppsContent(
+    modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
+    nestedScrollConnection: NestedScrollConnection? = null,
+    onSearchFocus: () -> Unit = {},
+    showIndexBar: Boolean = true,
+    topPadding: Dp = 12.dp
+) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -120,7 +130,7 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
         }
         map.toList().sortedWith(compareBy({ if (it.first == '#') 1 else 0 }, { it.first }))
     }
-    // 字母 → LazyColumn 首项 index（计入 stickyHeader）
+    // 字母 → LazyColumn 首项 index（计入分组头）
     val letterIndex = remember(groups) {
         val m = mutableMapOf<Char, Int>()
         var idx = 0
@@ -130,7 +140,6 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
         }
         m
     }
-    val listState = rememberLazyListState()
     val letters = remember { ('A'..'Z').toList() + '#' }
     var activeLetter by remember { mutableStateOf<Char?>(null) }
     var hideJob by remember { mutableStateOf<Job?>(null) }
@@ -153,6 +162,7 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
     }
 
     fun launchApp(packageName: String) {
+        AppUsageTracker.recordLaunch(context, packageName)
         val intent: Intent? = context.packageManager
             .getLaunchIntentForPackage(packageName)
         intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -160,63 +170,12 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
     }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .background(AILauncherColors.Background)
             .padding(horizontal = 20.dp)
     ) {
-        if (onClose != null) {
-            var dragAccum by remember { mutableFloatStateOf(0f) }
-            val closeThresholdPx = with(density) { 90.dp.toPx() }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .pointerInput(Unit) {
-                        detectVerticalDragGestures(
-                            onDragEnd = { dragAccum = 0f },
-                            onDragCancel = { dragAccum = 0f },
-                            onVerticalDrag = { change, dragAmount ->
-                                if (dragAmount > 0f) {
-                                    dragAccum += dragAmount
-                                    change.consume()
-                                }
-                                if (dragAccum > closeThresholdPx) {
-                                    dragAccum = 0f
-                                    onClose()
-                                }
-                            }
-                        )
-                    }
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Spacer(modifier = Modifier.weight(1f))
-                Box(
-                    modifier = Modifier
-                        .width(40.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(AILauncherColors.Divider)
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        Icons.Filled.Close,
-                        contentDescription = "关闭",
-                        tint = AILauncherColors.Hint
-                    )
-                }
-            }
-        } else {
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-        Text(
-            text = "全部应用",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = AILauncherColors.Title
-        )
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(topPadding))
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -234,7 +193,10 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
                     placeholder = { Text("搜索应用", color = AILauncherColors.Hint) },
                     modifier = Modifier
                         .weight(1f)
-                        .onFocusChanged { if (!it.isFocused) keyboardController?.hide() },
+                        .onFocusChanged {
+                            if (it.isFocused) onSearchFocus()
+                            else keyboardController?.hide()
+                        },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
@@ -268,9 +230,13 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
                 .fillMaxWidth()
                 .weight(1f)
         ) {
+            var listModifier = Modifier.fillMaxSize()
+            if (nestedScrollConnection != null) {
+                listModifier = listModifier.nestedScroll(nestedScrollConnection)
+            }
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = listModifier,
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 if (searching) {
@@ -311,8 +277,8 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
                 }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
             }
-            // 右侧 A-Z 快速索引条（搜索态隐藏）
-            if (!searching && groups.isNotEmpty()) {
+            // 右侧 A-Z 快速索引条（搜索态 / 半屏以下隐藏）
+            if (showIndexBar && !searching && groups.isNotEmpty()) {
                 BoxWithConstraints(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)

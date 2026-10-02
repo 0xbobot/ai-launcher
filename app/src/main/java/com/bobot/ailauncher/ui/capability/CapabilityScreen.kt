@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,12 +50,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppClassifier
+import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.ClassifyResult
 import com.bobot.ailauncher.data.CustomCategories
@@ -219,6 +220,7 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
                                             .size(48.dp)
                                             .clip(RoundedCornerShape(12.dp))
                                             .clickable {
+                                                AppUsageTracker.recordLaunch(context, app.packageName)
                                                 val intent = context.packageManager
                                                     .getLaunchIntentForPackage(app.packageName)
                                                 intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -292,15 +294,17 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
 
 private fun launchResolvedApp(context: Context, app: ResolvedCapability) {
     val ok = CapabilityRegistry.launchResolved(context, app)
-    if (!ok) {
+    if (ok) AppUsageTracker.recordLaunch(context, app.packageName)
+    else {
         Toast.makeText(context, "「${app.label}」暂不可用", Toast.LENGTH_SHORT).show()
     }
 }
 
 /**
- * 意图分组卡片（v0.7 v4 样式）：
- * - 收起态：54dp 单行。左侧色点 + 弱化分类名（13sp 灰）+ 数量；右侧 36dp 真实图标
- *   重叠排布（可直接点启动），超出 3 个时末尾放该分类色的 "+n" 描边胶囊。
+ * 意图分组行（v0.9 扁平列表样式，按原型 v4 修正）：
+ * - 收起态：54dp 单行，透明背景无 Card 包裹，行底一条两端渐隐的细分割线。
+ *   左侧色点 + 弱化分类名（13sp 灰）+ 数量；右侧 36dp 真实图标分开排布
+ *   （可直接点启动），超出 3 个时末尾放该分类色的 "+n" 描边胶囊。
  *   去掉独立箭头：胶囊点击 / 整行点击都切换展开收起。
  * - 展开态：网格布局不变（4 列图标 + 应用名）。
  */
@@ -312,20 +316,15 @@ private fun ResolvedGroupCard(
     onLaunch: (ResolvedCapability) -> Unit
 ) {
     val catColor = groupColor(group.id)
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp)
-                    .clickable { onToggle() }
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .clickable { onToggle() }
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
                 Box(
                     modifier = Modifier
                         .size(6.dp)
@@ -363,6 +362,22 @@ private fun ResolvedGroupCard(
                     )
                 }
             }
+            // 收起态行底细分割线（两端渐隐，参考原型 .shelf1-line）
+            if (!expanded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(
+                            Brush.horizontalGradient(
+                                0f to Color.Transparent,
+                                0.12f to AILauncherColors.Divider,
+                                0.88f to AILauncherColors.Divider,
+                                1f to Color.Transparent
+                            )
+                        )
+                )
+            }
             AnimatedVisibility(
                 visible = expanded,
                 enter = expandVertically(),
@@ -389,7 +404,6 @@ private fun ResolvedGroupCard(
                 }
             }
         }
-    }
 }
 
 /** 分组色（v4：色点 / +n 胶囊描边用；自定义分组走默认灰） */
@@ -405,7 +419,7 @@ fun groupColor(id: String): Color = when (id) {
 }
 
 /**
- * v4 收起态右侧：36dp 真实图标重叠排布（直接点启动），
+ * v4 收起态右侧：36dp 真实图标分开排布（直接点启动），
  * 超出 3 个时末尾放 "+n" 分类色描边胶囊（点击展开）。
  */
 @Composable
@@ -417,31 +431,26 @@ private fun CollapsedAppStrip(
 ) {
     val shown = if (apps.size > 3) apps.take(3) else apps
     val hidden = apps.size - shown.size
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .width((36 + (shown.size - 1).coerceAtLeast(0) * 28).dp)
-                .height(36.dp)
-        ) {
-            shown.forEachIndexed { i, app ->
-                AppIconImage(
-                    drawable = app.icon,
-                    contentDescription = app.label.toString(),
-                    modifier = Modifier
-                        .size(36.dp)
-                        .offset(x = (i * 28).dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .border(
-                            1.dp,
-                            Color.Black.copy(alpha = 0.06f),
-                            RoundedCornerShape(11.dp)
-                        )
-                        .clickable { onLaunch(app) }
-                )
-            }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        shown.forEach { app ->
+            AppIconImage(
+                drawable = app.icon,
+                contentDescription = app.label.toString(),
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .border(
+                        1.dp,
+                        Color.Black.copy(alpha = 0.06f),
+                        RoundedCornerShape(11.dp)
+                    )
+                    .clickable { onLaunch(app) }
+            )
         }
         if (hidden > 0) {
-            Spacer(modifier = Modifier.width(6.dp))
             MoreCapsule(count = hidden, catColor = catColor, onClick = onExpand)
         }
     }

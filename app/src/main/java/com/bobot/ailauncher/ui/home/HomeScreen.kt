@@ -17,9 +17,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.mutableIntStateOf
+import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.listLaunchableApps
+import com.bobot.ailauncher.ui.components.AppIconImage
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,14 +35,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
@@ -119,8 +122,8 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     val notifications by NotificationRepository.notifications.collectAsState()
     val listenerConnected by NotificationRepository.isConnected.collectAsState()
 
-    // ---------- 上滑打开应用抽屉：列表在顶部且上滑累计超过 120dp ----------
-    val listState = rememberLazyListState()
+    // ---------- 上滑打开应用抽屉：中间内容在顶部且上滑累计超过 120dp ----------
+    val middleScrollState = rememberScrollState()
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
     val swipeThresholdPx = with(density) { 120.dp.toPx() }
     val drawerScrollConnection = remember {
@@ -128,21 +131,27 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             var accum = 0f
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (source != NestedScrollSource.UserInput) return Offset.Zero
-                val atTop = listState.firstVisibleItemIndex == 0 &&
-                    listState.firstVisibleItemScrollOffset == 0
+                val atTop = middleScrollState.value == 0
                 if (available.y < 0f && atTop) {
                     accum += -available.y
                     if (accum >= swipeThresholdPx) {
                         accum = 0f
                         openDrawerState()
-                        return available // 吞掉本次手势，不让列表滚动
+                        return available // 吞掉本次手势，不让内容滚动
                     }
-                    return available // 累计中也吞掉，避免列表跟着动
+                    return available // 累计中也吞掉，避免内容跟着动
                 }
                 if (available.y > 0f) accum = 0f // 换向清零
                 return Offset.Zero
             }
         }
+    }
+
+    // ---------- Dock：最常用 4 个应用（回到前台时刷新排序） ----------
+    val allApps = remember { listLaunchableApps(context) }
+    var dockTick by remember { mutableIntStateOf(0) }
+    val dockApps = remember(allApps, dockTick) {
+        AppUsageTracker.topApps(context, allApps, 4)
     }
 
     // ---------- 通知监听：从设置页返回时若已授权但服务未连接，强制重绑 ----------
@@ -155,6 +164,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 ) {
                     rebindListener(context)
                 }
+                dockTick++ // 回到前台刷新 Dock 常用排序
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -366,129 +376,105 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         }
     }
 
-    LazyColumn(
-        state = listState,
+    // ---------- 桌面感布局：大时钟 → 意图框 → 正在进行时（中间可滚）→ Dock ----------
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .nestedScroll(drawerScrollConnection),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .nestedScroll(drawerScrollConnection)
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 68.dp) // 给 MainScreen 底部悬浮指示器留位
     ) {
-        // 问候 + 应用抽屉兜底入口（紧凑排版）
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = greeting(),
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AILauncherColors.Title
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = todayText(),
-                        fontSize = 12.sp,
-                        color = AILauncherColors.Hint
-                    )
-                }
-                TextButton(onClick = onOpenAppDrawer) {
-                    Icon(
-                        Icons.Filled.Apps,
-                        contentDescription = null,
-                        tint = AILauncherColors.Hint,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("应用", color = AILauncherColors.Hint, fontSize = 14.sp)
-                }
-            }
-        }
-        // 意图输入框（压缩高度）
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        ClockHeader()
+        Spacer(modifier = Modifier.height(10.dp))
+        // 意图输入框
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Filled.AutoAwesome,
-                        contentDescription = null,
-                        tint = AILauncherColors.Accent
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    TextField(
-                        value = input,
-                        onValueChange = { input = it },
-                        placeholder = { Text("想做什么，直接告诉我…", color = AILauncherColors.Hint) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .onFocusChanged { if (!it.isFocused) keyboardController?.hide() },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { submit() }),
-                        trailingIcon = {
-                            if (input.isNotEmpty()) {
-                                IconButton(onClick = { input = "" }) {
-                                    Icon(
-                                        Icons.Filled.Close,
-                                        contentDescription = "清空",
-                                        tint = AILauncherColors.Hint
-                                    )
-                                }
+                Icon(
+                    Icons.Filled.AutoAwesome,
+                    contentDescription = null,
+                    tint = AILauncherColors.Accent
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                TextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    placeholder = { Text("想做什么，直接告诉我…", color = AILauncherColors.Hint) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { if (!it.isFocused) keyboardController?.hide() },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submit() }),
+                    trailingIcon = {
+                        if (input.isNotEmpty()) {
+                            IconButton(onClick = { input = "" }) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "清空",
+                                    tint = AILauncherColors.Hint
+                                )
                             }
-                        },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
-                        )
-                    )
-                    if (micVisible) {
-                        IconButton(onClick = { startVoiceInput() }) {
-                            Icon(
-                                Icons.Filled.Mic,
-                                contentDescription = if (listening) "停止语音输入" else "语音输入",
-                                tint = if (listening) AILauncherColors.Accent
-                                else AILauncherColors.Hint
-                            )
                         }
+                    },
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    )
+                )
+                if (micVisible) {
+                    IconButton(onClick = { startVoiceInput() }) {
+                        Icon(
+                            Icons.Filled.Mic,
+                            contentDescription = if (listening) "停止语音输入" else "语音输入",
+                            tint = if (listening) AILauncherColors.Accent
+                            else AILauncherColors.Hint
+                        )
                     }
                 }
             }
-            if (thinking) {
-                Row(
-                    modifier = Modifier.padding(start = 8.dp, top = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Filled.AutoAwesome,
-                        contentDescription = null,
-                        tint = AILauncherColors.Accent,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("思考中…", fontSize = 13.sp, color = AILauncherColors.Hint)
-                }
+        }
+        if (thinking) {
+            Row(
+                modifier = Modifier.padding(start = 8.dp, top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.AutoAwesome,
+                    contentDescription = null,
+                    tint = AILauncherColors.Accent,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("思考中…", fontSize = 13.sp, color = AILauncherColors.Hint)
             }
         }
-        // 正在进行
-        item {
+        Spacer(modifier = Modifier.height(14.dp))
+        // 正在进行时（中间可滚动区域）
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(middleScrollState),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Text(
                 text = "正在进行",
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = AILauncherColors.Title
             )
-        }
-        // 今日日程（三层视觉：下一个大卡片 / 全天小字 / 后续小行）
-        when {
-            calEvents == null -> item {
+            // 今日日程：未授权 → 授权入口；有下一个日程 → 大卡片
+            if (calEvents == null) {
                 TextButton(
                     onClick = {
                         calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
@@ -501,13 +487,10 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                         color = AILauncherColors.Hint
                     )
                 }
-            }
-            nextEvent != null -> item {
+            } else if (nextEvent != null) {
                 NextEventCard(event = nextEvent, now = now)
             }
-        }
-        if (calEvents != null && allDayEvents.isNotEmpty()) {
-            items(allDayEvents, key = { it.title + it.begin }) { e ->
+            allDayEvents.forEach { e ->
                 Text(
                     text = "全天 · ${e.title.ifBlank { "（无标题）" }}",
                     fontSize = 12.sp,
@@ -515,9 +498,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
-        }
-        if (laterEvents.isNotEmpty()) {
-            items(laterEvents, key = { it.begin }) { e ->
+            laterEvents.forEach { e ->
                 Text(
                     text = "${formatTime(e.begin)}  ${e.title.ifBlank { "（无标题）" }}",
                     fontSize = 12.sp,
@@ -525,10 +506,8 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
-        }
-        // 通知卡片流（可点击：打开对应 App）
-        if (!isNotificationAccessGranted(context)) {
-            item {
+            // 通知卡片流（可点击：打开对应 App）
+            if (!isNotificationAccessGranted(context)) {
                 Card(
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -551,9 +530,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                         }
                     }
                 }
-            }
-        } else if (notifications.isEmpty()) {
-            item {
+            } else if (notifications.isEmpty()) {
                 Card(
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -566,15 +543,28 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                         modifier = Modifier.padding(14.dp)
                     )
                 }
-            }
-        } else {
-            items(notifications, key = { it.packageName + it.time }) { n ->
-                NotificationCard(n = n, onOpen = {
-                    openApp(context, n.packageName, n.appName)
-                })
+            } else {
+                notifications.forEach { n ->
+                    NotificationCard(n = n, onOpen = {
+                        openApp(context, n.packageName, n.appName)
+                    })
+                }
             }
         }
-        item { Spacer(modifier = Modifier.height(16.dp)) }
+        Spacer(modifier = Modifier.height(12.dp))
+        // Dock：最常用的 4 个应用
+        DockBar(
+            apps = dockApps,
+            onLaunch = { app ->
+                AppUsageTracker.recordLaunch(context, app.packageName)
+                dockTick++ // 立刻刷新排序
+                val intent = context.packageManager
+                    .getLaunchIntentForPackage(app.packageName)
+                intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (intent != null) context.startActivity(intent)
+                else Toast.makeText(context, "无法打开「${app.label}」", Toast.LENGTH_SHORT).show()
+            }
+        )
     }
 
     // 聆听中 Dialog
@@ -620,9 +610,75 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     }
 }
 
-/** 点击通知卡片：打开对应 App */
+/** 桌面 widget 感的大时钟 + 日期（每 20 秒刷新一次） */
+@Composable
+private fun ClockHeader() {
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(20_000)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val time = remember(nowMs) {
+        SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(nowMs))
+    }
+    Column(modifier = Modifier.padding(top = 28.dp, bottom = 2.dp)) {
+        Text(
+            text = time,
+            fontSize = 54.sp,
+            fontWeight = FontWeight.Bold,
+            color = AILauncherColors.Title
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = todayText(),
+            fontSize = 14.sp,
+            color = AILauncherColors.Hint
+        )
+    }
+}
+
+/** 底部 Dock：最常用的 4 个应用（图标直达） */
+@Composable
+private fun DockBar(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp, horizontal = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            apps.forEach { app ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onLaunch(app) }
+                        .padding(4.dp)
+                ) {
+                    AppIconImage(
+                        drawable = app.icon,
+                        contentDescription = app.label.toString(),
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 点击通知卡片：打开对应 App（计入常用统计） */
 private fun openApp(context: Context, packageName: String, appName: String) {
     try {
+        AppUsageTracker.recordLaunch(context, packageName)
         val intent = context.packageManager.getLaunchIntentForPackage(packageName)
         if (intent != null) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -701,15 +757,6 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
         list
     } catch (_: Exception) {
         emptyList()
-    }
-}
-
-private fun greeting(): String {
-    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    return when (hour) {
-        in 5..11 -> "早上好"
-        in 12..17 -> "下午好"
-        else -> "晚上好"
     }
 }
 
