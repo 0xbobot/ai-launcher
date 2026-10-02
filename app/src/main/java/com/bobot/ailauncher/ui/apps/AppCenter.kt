@@ -158,7 +158,7 @@ fun AppCenterContent(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // ---- Header：标题 + AI 智能分类 + 设置；顶部下滑 → D2 ----
+        // ---- Header：标题 + AI 智能分类 + 设置；标题区右滑/顶部下滑 → D2 ----
         val headThreshPx = with(density) { 80.dp.toPx() }
         Column(
             modifier = Modifier.pointerInput(Unit) {
@@ -181,7 +181,27 @@ fun AppCenterContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 12.dp, top = 20.dp),
+                    .padding(start = 20.dp, end = 12.dp, top = 20.dp)
+                    .pointerInput(Unit) {
+                        // 标题区右滑 → D2（手势签名：右滑=更少）。
+                        // 只放在标题区：A-Z 行与分组组头自有横滑手势，"最具体目标优先"。
+                        var accumX = 0f
+                        var fired = false
+                        val hPx = with(density) { 48.dp.toPx() }
+                        detectHorizontalDragGestures(
+                            onDragStart = { accumX = 0f; fired = false },
+                            onDragCancel = { fired = true },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                if (fired) return@detectHorizontalDragGestures
+                                accumX += dragAmount
+                                if (accumX > hPx) {
+                                    fired = true
+                                    onPullDownState.value()
+                                }
+                            }
+                        )
+                    },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(

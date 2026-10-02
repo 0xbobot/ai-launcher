@@ -20,7 +20,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -262,10 +261,10 @@ fun PullUpDock(
 /**
  * D3 全屏：不透明底色整屏替换，内容为「应用中心」（分组 + A-Z 双视图）。
  * 手势签名（全 App 统一，v0.14 纠正：左滑 = 多，右滑 = 少）：
- * - 全屏内右滑 → D2（收回一档）
- * - 顶部区域下滑 / 列表到顶继续下滑 → D2
- * - 顶部"常用"横滑行是横向滚动区：行内手势由 LazyRow 先消费，dock 级
- *   右滑只在非滚动区触发，避免冲突
+ * - D3 → D2：header 标题区右滑 / 顶部区域下滑 / 列表到顶继续下滑
+ *   （右滑检测只放在 header 标题区：A-Z 行与分组组头自有横滑手势，
+ *   全屏级检测会双重触发，按"最具体目标优先"收拢到标题区）
+ * - 顶部"常用"横滑行是横向滚动区：行内手势由 LazyRow 先消费
  */
 @Composable
 private fun FullAppsOverlay(
@@ -274,32 +273,12 @@ private fun FullAppsOverlay(
     onStateChange: (DockState) -> Unit,
     onOpenSettings: () -> Unit
 ) {
-    val density = LocalDensity.current
     val onStateChangeState = rememberUpdatedState(onStateChange)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(AILauncherColors.Background) // 不透明整屏替换，不再透出下层
-            .pointerInput(Unit) {
-                // 全屏内右滑 → D2（手势签名：右滑=更少）
-                var accumX = 0f
-                var fired = false
-                val hPx = with(density) { 48.dp.toPx() }
-                detectHorizontalDragGestures(
-                    onDragStart = { accumX = 0f; fired = false },
-                    onDragCancel = { fired = true },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        if (fired) return@detectHorizontalDragGestures
-                        accumX += dragAmount
-                        if (accumX > hPx) {
-                            fired = true
-                            onStateChangeState.value(DockState.D2)
-                        }
-                    }
-                )
-            }
     ) {
         AppCenterContent(
             top10 = top10,
