@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +50,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -92,8 +94,11 @@ fun PullUpDock(
         val screenHpx = constraints.maxHeight.toFloat()
         if (screenHpx <= 0f) return@BoxWithConstraints
         val handlePx = with(density) { 34.dp.toPx() }
-        val d1px = with(density) { 190.dp.toPx() }
-        val d2px = with(density) { 300.dp.toPx() }
+        // 档位高度由内容实际测量得出（严格压缩，不写死过大）
+        var dock4Hpx by remember { mutableFloatStateOf(0f) }
+        var dock10Hpx by remember { mutableFloatStateOf(0f) }
+        val d1px = handlePx + dock4Hpx
+        val d2px = handlePx + dock10Hpx
         fun targetFor(d: PullUpDetent): Float = when (d) {
             PullUpDetent.Handle -> screenHpx - handlePx
             PullUpDetent.Dock4 -> screenHpx - d1px
@@ -130,8 +135,11 @@ fun PullUpDock(
         }
 
         // 外部档位变化 → 弹簧动画过去
-        LaunchedEffect(detent, screenHpx) {
+        LaunchedEffect(detent) {
             if (detent != PullUpDetent.Handle) usageTick++
+        }
+        // 档位目标（含内容测量完成后的修正）→ 弹簧动画过去
+        LaunchedEffect(detent, screenHpx, d1px, d2px) {
             offsetY.animateTo(
                 targetFor(detent),
                 spring(stiffness = Spring.StiffnessMediumLow)
@@ -267,20 +275,17 @@ fun PullUpDock(
 
         // ---- 由 offsetY 派生的连续动画量（拖动跟手，松手弹簧） ----
         val visiblePx = screenHpx - offsetY.value
-        val visibleDp = with(density) { visiblePx.toDp() }
-        // 一二档交叉替换进度
-        val q = ((visibleDp.value - 190f) / (300f - 190f)).coerceIn(0f, 1f)
-        // d2→d3 形变进度：边距/圆角/底色连续插值
-        val screenHDp = with(density) { screenHpx.toDp() }
-        val p = ((visibleDp.value - 300f) / (screenHDp.value - 300f).coerceAtLeast(1f))
+        // 一二档交叉替换进度（档位高度由内容测量得出）
+        val q = if (d2px > d1px + 1f) {
+            ((visiblePx - d1px) / (d2px - d1px)).coerceIn(0f, 1f)
+        } else 0f
+        // d2→d3 形变进度：边距/圆角/底色连续插值；全屏时圆角全部→0 真正 bleed
+        val p = ((visiblePx - d2px) / (screenHpx - d2px).coerceAtLeast(1f))
             .coerceIn(0f, 1f)
         val sideM = 16.dp * (1f - p)
-        val bottomR = 24.dp * (1f - p)
+        val cornerR = 24.dp * (1f - p)
         val cardBg = lerp(Color.White, AILauncherColors.Background, p)
-        val cardShape = RoundedCornerShape(
-            topStart = 24.dp, topEnd = 24.dp,
-            bottomStart = bottomR, bottomEnd = bottomR
-        )
+        val cardShape = RoundedCornerShape(cornerR)
         val showFull = p > 0.5f
 
         // 背景 scrim（接近全屏时出现，点击回到 Dock4）
@@ -325,16 +330,17 @@ fun PullUpDock(
                                 .background(AILauncherColors.Divider)
                         )
                     }
-                    // 一二档：同一批常用的两种排布，交叉淡入淡出 + 缩放（替换非叠加）
+                    // 一二档：同一批常用的两种排布，交叉淡入淡出 + 缩放（替换非叠加）；
+                    // 容器高度由较高的排布自然撑起，档位高度 d1/d2 由各自内容测量得出
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(266.dp)
                             .pullDrag()
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .fillMaxWidth()
+                                .onSizeChanged { dock4Hpx = it.height.toFloat() }
                                 .graphicsLayer {
                                     alpha = 1f - q
                                     val s = 1f - 0.12f * q
@@ -346,7 +352,8 @@ fun PullUpDock(
                         }
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .fillMaxWidth()
+                                .onSizeChanged { dock10Hpx = it.height.toFloat() }
                                 .graphicsLayer {
                                     alpha = q
                                     val s = 0.88f + 0.12f * q
@@ -381,27 +388,14 @@ fun PullUpDock(
                         )
                     ) {
                         items(top10, key = { it.packageName }) { app ->
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
+                            AppIconImage(
+                                drawable = app.icon,
+                                contentDescription = app.label.toString(),
                                 modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(13.dp))
                                     .clickable { launchApp(app) }
-                                    .padding(vertical = 2.dp)
-                            ) {
-                                AppIconImage(
-                                    drawable = app.icon,
-                                    contentDescription = app.label.toString(),
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(RoundedCornerShape(13.dp))
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = app.label.toString(),
-                                    fontSize = 10.sp,
-                                    color = AILauncherColors.Body,
-                                    maxLines = 1
-                                )
-                            }
+                            )
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -420,7 +414,8 @@ fun PullUpDock(
                         nestedScrollConnection = nested,
                         showSearch = false,
                         showIndexBar = true,
-                        topPadding = 0.dp
+                        topPadding = 0.dp,
+                        indexBarHeightFraction = 0.6f
                     )
                 }
             }
@@ -428,78 +423,56 @@ fun PullUpDock(
     }
 }
 
-/** 第一档：4 个常用大图标（56dp） */
+/** 第一档：4 个常用大图标（56dp），只留图标 */
 @Composable
 private fun DockRow4(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Text(text = "常用", fontSize = 12.sp, color = AILauncherColors.Hint)
-        Spacer(modifier = Modifier.height(10.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            apps.forEach { app ->
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clickable { onLaunch(app) }
-                        .padding(2.dp)
-                ) {
-                    AppIconImage(
-                        drawable = app.icon,
-                        contentDescription = app.label.toString(),
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = app.label.toString(),
-                        fontSize = 11.sp,
-                        color = AILauncherColors.Body,
-                        maxLines = 1
-                    )
-                }
-            }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        apps.forEach { app ->
+            AppIconImage(
+                drawable = app.icon,
+                contentDescription = app.label.toString(),
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onLaunch(app) }
+            )
         }
     }
 }
 
-/** 第二档：同一批常用重排成 10 个小图标（2×5，46dp） */
+/** 第二档：同一批常用重排成 10 个小图标（2×5，46dp），只留图标 */
 @Composable
 private fun DockGrid10(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Text(text = "常用", fontSize = 12.sp, color = AILauncherColors.Hint)
-        Spacer(modifier = Modifier.height(10.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            apps.chunked(5).forEach { row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    row.forEach { app ->
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        apps.chunked(5).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                row.forEach { app ->
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AppIconImage(
+                            drawable = app.icon,
+                            contentDescription = app.label.toString(),
                             modifier = Modifier
-                                .weight(1f)
+                                .size(46.dp)
+                                .clip(RoundedCornerShape(13.dp))
                                 .clickable { onLaunch(app) }
-                                .padding(2.dp)
-                        ) {
-                            AppIconImage(
-                                drawable = app.icon,
-                                contentDescription = app.label.toString(),
-                                modifier = Modifier
-                                    .size(46.dp)
-                                    .clip(RoundedCornerShape(13.dp))
-                            )
-                            Spacer(modifier = Modifier.height(5.dp))
-                            Text(
-                                text = app.label.toString(),
-                                fontSize = 10.sp,
-                                color = AILauncherColors.Body,
-                                maxLines = 1
-                            )
-                        }
+                        )
                     }
                 }
             }

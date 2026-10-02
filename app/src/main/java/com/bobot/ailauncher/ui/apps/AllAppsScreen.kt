@@ -107,7 +107,8 @@ fun AllAppsContent(
     onSearchFocus: () -> Unit = {},
     showIndexBar: Boolean = true,
     showSearch: Boolean = true,
-    topPadding: Dp = 12.dp
+    topPadding: Dp = 12.dp,
+    indexBarHeightFraction: Float = 1f
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -261,7 +262,8 @@ fun AllAppsContent(
                             jumpTo(letters[i])
                         }
                     },
-                    modifier = Modifier.align(Alignment.CenterEnd)
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    heightFraction = indexBarHeightFraction
                 )
             }
         }
@@ -311,10 +313,11 @@ private fun ArcIndexBar(
     letters: List<Char>,
     activeIndex: Int?,
     onIndex: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    heightFraction: Float = 1f
 ) {
     val density = LocalDensity.current
-    BoxWithConstraints(modifier = modifier.fillMaxHeight().width(48.dp)) {
+    BoxWithConstraints(modifier = modifier.fillMaxHeight(heightFraction).width(48.dp)) {
         val hPx = constraints.maxHeight.toFloat()
         if (hPx <= 0f || letters.isEmpty()) return@BoxWithConstraints
         val rowHpx = hPx / letters.size
