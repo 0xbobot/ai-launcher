@@ -249,8 +249,6 @@ fun PullUpDock(
             label = "fullOverlay"
         ) {
             FullAppsOverlay(
-                top10 = top10,
-                onLaunch = ::launchApp,
                 onStateChange = onStateChangeState.value,
                 onOpenSettings = onOpenSettings
             )
@@ -259,7 +257,7 @@ fun PullUpDock(
 }
 
 /**
- * D3 全屏：不透明底色整屏替换，内容为「应用中心」（分组 + A-Z 双视图）。
+ * D3 全屏：不透明底色整屏替换，内容为「应用中心」（单列表：分类区在上 + A-Z 在下）。
  * 手势签名（全 App 统一，v0.14 纠正：左滑 = 多，右滑 = 少）：
  * - D3 → D2：header 标题区右滑 / 顶部区域下滑 / 列表到顶继续下滑
  *   （右滑检测只放在 header 标题区：A-Z 行与分组组头自有横滑手势，
@@ -268,8 +266,6 @@ fun PullUpDock(
  */
 @Composable
 private fun FullAppsOverlay(
-    top10: List<AppInfo>,
-    onLaunch: (AppInfo) -> Unit,
     onStateChange: (DockState) -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -281,8 +277,6 @@ private fun FullAppsOverlay(
             .background(AILauncherColors.Background) // 不透明整屏替换，不再透出下层
     ) {
         AppCenterContent(
-            top10 = top10,
-            onLaunch = onLaunch,
             onOpenSettings = onOpenSettings,
             onPullDownToD2 = { onStateChangeState.value(DockState.D2) },
             modifier = Modifier

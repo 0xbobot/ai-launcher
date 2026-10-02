@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.ui.apps
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -76,28 +75,27 @@ import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.ResolvedCapability
 import com.bobot.ailauncher.data.ResolvedGroup
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
-
-/** 应用中心视图模式 */
-private enum class CenterView { GROUP, AZ }
+import java.text.Collator
+import java.util.Locale
 
 /**
- * 应用中心（v0.14）：D3 全屏内容，能力页分类 + 全部应用的融合体。
- * - Header："应用"标题 + AI 智能分类按钮 + 设置齿轮
- * - 顶部常用横滑一行（10 图标）
- * - 双视图（默认分组）：rail 顶部的"组/A"切换钮切换
- *   - 分组视图：7 组（AI/社交/出行/支付/办公/生活/购物），组头名称+数量、可折叠，
- *     长按图标整理分类（复用 OrganizeDialog）
- *   - A-Z 视图：全部应用列表 + 弧形波浪导航
+ * 应用中心（v0.14.1，Bob 新设计）：D3 全屏单列表。
+ * - 顶部：Header（"应用"标题 + AI 智能分类按钮 + 设置齿轮）
+ * - 分类区：7 组（AI/社交/出行/支付/办公/生活/购物），组头名称+数量、可折叠，
+ *   组内图标网格（真实图标），长按图标整理分类（复用 OrganizeDialog）
+ * - 下面直接连全部应用 A-Z 列表（字母分组头 + 行）
+ * - Rail 只做定位：首个"类"跳回顶部整个分类区，后面 A-Z 字母跳转对应字母；
+ *   不再做视图切换（无切换钮、无左右滑切视图）
  * - 数据层复用 CustomCategories（AI 智能分类结果、长按手动调整）
+ * - 手势签名（v0.14 纠正）：左滑=多 / 右滑=少
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppCenterContent(
-    top10: List<AppInfo>,
-    onLaunch: (AppInfo) -> Unit,
     onOpenSettings: () -> Unit,
     onPullDownToD2: () -> Unit,
     modifier: Modifier = Modifier
@@ -106,26 +104,75 @@ fun AppCenterContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val onPullDownState = rememberUpdatedState(onPullDownToD2)
-    var viewMode by remember { mutableStateOf(CenterView.GROUP) }
     var refreshTick by remember { mutableIntStateOf(0) }
     var organizeApp by remember { mutableStateOf<AppInfo?>(null) }
     val handed = remember { UiPrefs.getHanded(context) }
 
-    // 分组数据（CustomCategories 数据层：AI 智能分类 + 长按手动调整）
+    // 已隐藏应用版本号：变化时分组与 A-Z 自动重算过滤
     val hiddenVersion = HiddenApps.version.intValue
+    val hidden = remember(refreshTick, hiddenVersion) { HiddenApps.getHidden(context) }
+
+    // 分类区数据（CustomCategories 数据层：AI 智能分类 + 长按手动调整）
     val groups = remember(refreshTick, hiddenVersion) {
-        val hidden = HiddenApps.getHidden(context)
         CapabilityRegistry.installedCapabilities(context)
             .map { g -> g.copy(apps = g.apps.filter { it.packageName !in hidden }) }
             .filter { it.apps.isNotEmpty() }
     }
-    // 折叠态：默认全部展开
     var collapsedGroups by remember { mutableStateOf(setOf<String>()) }
 
-    val azListState = rememberLazyListState()
-    val groupListState = rememberLazyListState()
-    val azNested = rememberPullDownConnection(azListState, onPullDownState.value)
-    val groupNested = rememberPullDownConnection(groupListState, onPullDownState.value)
+    // A-Z 数据：全部可启动应用（去自己、去隐藏），中文按拼音首字母排序分组
+    val azApps = remember(refreshTick, hiddenVersion) {
+        val collator = Collator.getInstance(Locale.CHINA)
+        listLaunchableApps(context)
+            .filter { it.packageName != context.packageName && it.packageName !in hidden }
+            .sortedWith { a, b -> collator.compare(a.label.toString(), b.label.toString()) }
+    }
+    val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps) {
+        val map = linkedMapOf<Char, MutableList<AppInfo>>()
+        azApps.forEach { app ->
+            map.getOrPut(groupKey(app.label)) { mutableListOf() }.add(app)
+        }
+        map.toList().sortedWith(compareBy({ if (it.first == '#') 1 else 0 }, { it.first }))
+    }
+    val letters = remember(azGroups) { azGroups.map { it.first } }
+
+    val listState = rememberLazyListState()
+    val nested = rememberPullDownConnection(listState, onPullDownState.value)
+
+    // 字母 → LazyColumn item index（前面是分组块 + 1 个"全部应用"分隔）
+    val letterAnchors = remember(groups, azGroups) {
+        val m = mutableMapOf<Char, Int>()
+        var idx = groups.size + 1
+        azGroups.forEach { (letter, apps) ->
+            m[letter] = idx
+            idx += 1 + apps.size
+        }
+        m
+    }
+
+    fun launchApp(app: AppInfo) {
+        AppUsageTracker.recordLaunch(context, app.packageName)
+        try {
+            val intent = context.packageManager
+                .getLaunchIntentForPackage(app.packageName)
+                ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+            if (intent != null) context.startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "「${app.label}」暂不可用", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun launchResolvedApp(app: ResolvedCapability) {
+        val ok = CapabilityRegistry.launchResolved(context, app)
+        if (ok) AppUsageTracker.recordLaunch(context, app.packageName)
+        else Toast.makeText(context, "「${app.label}」暂不可用", Toast.LENGTH_SHORT).show()
+    }
+
+    // 右滑隐藏（手势签名：右滑=少），HiddenApps.version +1 后列表自动重算
+    fun hideApp(app: AppInfo) {
+        HiddenApps.hide(context, app.packageName)
+        Toast.makeText(context, "已隐藏「${app.label}」，可在设置页恢复", Toast.LENGTH_SHORT).show()
+    }
 
     // AI 智能分类（从能力页搬过来，逻辑复用 AppClassifier）
     var classifying by remember { mutableStateOf(false) }
@@ -149,12 +196,6 @@ fun AppCenterContent(
             }
             classifying = false
         }
-    }
-
-    fun launchResolvedApp(app: ResolvedCapability) {
-        val ok = CapabilityRegistry.launchResolved(context, app)
-        if (ok) AppUsageTracker.recordLaunch(context, app.packageName)
-        else Toast.makeText(context, "「${app.label}」暂不可用", Toast.LENGTH_SHORT).show()
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -183,8 +224,7 @@ fun AppCenterContent(
                     .fillMaxWidth()
                     .padding(start = 20.dp, end = 12.dp, top = 20.dp)
                     .pointerInput(Unit) {
-                        // 标题区右滑 → D2（手势签名：右滑=更少）。
-                        // 只放在标题区：A-Z 行与分组组头自有横滑手势，"最具体目标优先"。
+                        // 标题区右滑 → D2（手势签名：右滑=更少）
                         var accumX = 0f
                         var fired = false
                         val hPx = with(density) { 48.dp.toPx() }
@@ -222,101 +262,95 @@ fun AppCenterContent(
                     )
                 }
             }
-            Text(
-                text = "常用",
-                fontSize = 12.sp,
-                color = AILauncherColors.Hint,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(horizontal = 20.dp)
-            ) {
-                items(top10, key = { it.packageName }) { app ->
-                    AppIconImage(
-                        drawable = app.icon,
-                        contentDescription = app.label.toString(),
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(13.dp))
-                            .clickable { onLaunch(app) }
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
         }
 
-        // ---- 双视图 + rail（组/A 切换钮在 rail 顶部） ----
+        // ---- 单列表：分类区在上，A-Z 列表直接在下 ----
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
         ) {
-            when (viewMode) {
-                CenterView.GROUP -> {
-                    GroupListView(
-                        groups = groups,
-                        collapsedGroups = collapsedGroups,
-                        onToggleGroup = { gid ->
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(nested)
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // 分类区
+                items(groups, key = { "g:${it.id}" }) { group ->
+                    val collapsed = group.id in collapsedGroups
+                    GroupBlock(
+                        group = group,
+                        collapsed = collapsed,
+                        onToggle = {
                             collapsedGroups =
-                                if (gid in collapsedGroups) collapsedGroups - gid
-                                else collapsedGroups + gid
+                                if (group.id in collapsedGroups) collapsedGroups - group.id
+                                else collapsedGroups + group.id
                         },
-                        onExpandGroup = { gid -> collapsedGroups = collapsedGroups - gid },
-                        onCollapseGroup = { gid -> collapsedGroups = collapsedGroups + gid },
+                        onExpand = { collapsedGroups = collapsedGroups - group.id },
+                        onCollapse = { collapsedGroups = collapsedGroups + group.id },
                         onLaunch = ::launchResolvedApp,
                         onOrganize = { app ->
                             organizeApp = AppInfo(app.packageName, app.label, app.icon)
-                        },
-                        listState = groupListState,
-                        nestedScrollConnection = groupNested,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                CenterView.AZ -> {
-                    AllAppsContent(
-                        modifier = Modifier.fillMaxSize(),
-                        listState = azListState,
-                        nestedScrollConnection = azNested,
-                        showSearch = false,
-                        showIndexBar = true,
-                        topPadding = 0.dp,
-                        indexBarHeightFraction = 0.6f,
-                        railHeader = {
-                            RailModeToggle(
-                                toAz = false,
-                                onClick = { viewMode = CenterView.GROUP }
-                            )
                         }
                     )
                 }
+                // A-Z 分隔
+                item(key = "az-divider") {
+                    Text(
+                        text = "全部应用",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AILauncherColors.Title,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp, start = 4.dp)
+                    )
+                }
+                // A-Z 列表
+                azGroups.forEach { (letter, apps) ->
+                    item(key = "h:$letter") {
+                        Text(
+                            text = letter.toString(),
+                            fontSize = 13.sp,
+                            color = AILauncherColors.Hint,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp, start = 4.dp)
+                        )
+                    }
+                    items(apps, key = { "a:${it.packageName}" }) { app ->
+                        AppRow(
+                            app = app,
+                            onLaunch = { launchApp(app) },
+                            onLongClick = { organizeApp = app },
+                            onHide = ::hideApp,
+                            onOrganize = { organizeApp = it }
+                        )
+                    }
+                }
+                item { Spacer(modifier = Modifier.height(24.dp)) }
             }
-            // 分组视图的 rail：切换钮 + 分组快捷字
-            if (viewMode == CenterView.GROUP && groups.isNotEmpty()) {
-                Column(
+            // Rail：只做定位——"类"跳回顶部整个分类区，字母跳对应字母；惯用手镜像
+            if (groups.isNotEmpty() || letters.isNotEmpty()) {
+                CenterRail(
+                    letters = letters,
+                    handed = handed,
+                    onJumpTop = { scope.launch { listState.scrollToItem(0) } },
+                    onJumpLetter = { letter ->
+                        scope.launch {
+                            listState.scrollToItem(letterAnchors[letter] ?: 0)
+                        }
+                    },
                     modifier = Modifier.align(
                         if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
                         else Alignment.CenterStart
-                    ),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    RailModeToggle(toAz = true, onClick = { viewMode = CenterView.AZ })
-                    Spacer(modifier = Modifier.height(8.dp))
-                    GroupShortcutRail(
-                        groups = groups,
-                        handed = handed,
-                        onJump = { idx ->
-                            scope.launch { groupListState.scrollToItem(idx) }
-                        }
                     )
-                }
+                )
             }
         }
     }
 
-    // 长按整理分类 Dialog（分组视图用）
+    // 长按整理分类 Dialog
     organizeApp?.let { app ->
         OrganizeDialog(app = app, onDismiss = {
             organizeApp = null
@@ -346,7 +380,7 @@ fun AppCenterContent(
     }
 }
 
-/** 列表到顶继续下滑 → D2 的嵌套滚动连接（分组/A-Z 各用一个） */
+/** 列表到顶继续下滑 → D2 的嵌套滚动连接 */
 @Composable
 private fun rememberPullDownConnection(
     listState: LazyListState,
@@ -381,56 +415,23 @@ private fun rememberPullDownConnection(
 }
 
 /**
- * Rail 顶部切换钮：分组视图下显示 "A"（点按切到 A-Z），
- * A-Z 视图下显示 "组"（点按切回分组）
+ * 应用中心定位 rail（v0.14.1：只做定位，不做视图切换）：
+ * 首个"类"跳回顶部整个分类区，后面 A-Z 字母跳转对应字母；
+ * 点按/纵向拖动；惯用手决定在左还是右
  */
 @Composable
-private fun RailModeToggle(toAz: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.9f))
-            .border(1.dp, AILauncherColors.Divider, CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = if (toAz) "A" else "组",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = AILauncherColors.Accent
-        )
-    }
-}
-
-/** 分组快捷字：内置 7 组用固定字，自定义分组用名称首字 */
-private fun groupShortcutChar(group: ResolvedGroup): Char = when (group.id) {
-    "ai" -> '智'
-    "social" -> '社'
-    "travel" -> '出'
-    "pay" -> '支'
-    "work" -> '办'
-    "life" -> '生'
-    "shop" -> '购'
-    else -> group.label.firstOrNull() ?: '组'
-}
-
-/**
- * 分组快捷 rail（分组视图用）：☆ + 分组快捷字等分排布，
- * 点按/纵向拖动跳转到对应分组；惯用手决定在左还是右
- */
-@Composable
-private fun GroupShortcutRail(
-    groups: List<ResolvedGroup>,
+private fun CenterRail(
+    letters: List<Char>,
     handed: UiPrefs.Handed,
-    onJump: (Int) -> Unit,
+    onJumpTop: () -> Unit,
+    onJumpLetter: (Char) -> Unit,
+    modifier: Modifier = Modifier,
     heightFraction: Float = 0.6f
 ) {
-    val items = remember(groups) { listOf('☆') + groups.map(::groupShortcutChar) }
+    val items = remember(letters) { listOf('类') + letters }
     var activeIndex by remember { mutableStateOf<Int?>(null) }
     BoxWithConstraints(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxHeight(heightFraction)
             .width(40.dp)
     ) {
@@ -445,7 +446,7 @@ private fun GroupShortcutRail(
                         val i = ((offset.y / hPx) * items.size)
                             .toInt().coerceIn(items.indices)
                         activeIndex = i
-                        onJump(if (i == 0) 0 else i - 1)
+                        if (i == 0) onJumpTop() else onJumpLetter(items[i])
                     })
                 }
                 .pointerInput(items, hPx) {
@@ -457,7 +458,7 @@ private fun GroupShortcutRail(
                             val i = ((change.position.y / hPx) * items.size)
                                 .toInt().coerceIn(items.indices)
                             activeIndex = i
-                            onJump(if (i == 0) 0 else i - 1)
+                            if (i == 0) onJumpTop() else onJumpLetter(items[i])
                         }
                     )
                 }
@@ -478,53 +479,14 @@ private fun GroupShortcutRail(
                         text = ch.toString(),
                         fontSize = 12.sp,
                         fontWeight = if (activeIndex == i) FontWeight.Bold else FontWeight.SemiBold,
-                        color = if (activeIndex == i) AILauncherColors.Accent
+                        color = if (i == 0) AILauncherColors.Accent
+                        else if (activeIndex == i) AILauncherColors.Accent
                         else AILauncherColors.Title.copy(alpha = 0.85f),
                         textAlign = TextAlign.Center
                     )
                 }
             }
         }
-    }
-}
-
-/** 分组列表视图 */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun GroupListView(
-    groups: List<ResolvedGroup>,
-    collapsedGroups: Set<String>,
-    onToggleGroup: (String) -> Unit,
-    onExpandGroup: (String) -> Unit,
-    onCollapseGroup: (String) -> Unit,
-    onLaunch: (ResolvedCapability) -> Unit,
-    onOrganize: (ResolvedCapability) -> Unit,
-    listState: LazyListState,
-    nestedScrollConnection: NestedScrollConnection?,
-    modifier: Modifier = Modifier
-) {
-    var listModifier = modifier
-    if (nestedScrollConnection != null) {
-        listModifier = listModifier.nestedScroll(nestedScrollConnection)
-    }
-    LazyColumn(
-        state = listState,
-        modifier = listModifier.padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        items(groups, key = { it.id }) { group ->
-            val collapsed = group.id in collapsedGroups
-            GroupBlock(
-                group = group,
-                collapsed = collapsed,
-                onToggle = { onToggleGroup(group.id) },
-                onExpand = { onExpandGroup(group.id) },
-                onCollapse = { onCollapseGroup(group.id) },
-                onLaunch = onLaunch,
-                onOrganize = onOrganize
-            )
-        }
-        item { Spacer(modifier = Modifier.height(24.dp)) }
     }
 }
 
@@ -559,15 +521,15 @@ private fun GroupBlock(
                     detectHorizontalDragGestures(
                         onDragStart = { accumX = 0f; fired = false },
                         onDragCancel = { fired = true },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            if (!fired) accumX += dragAmount
+                        },
                         onDragEnd = {
                             if (!fired) {
                                 if (accumX < -swipePx) onExpand()
                                 else if (accumX > swipePx) onCollapse()
                             }
-                        },
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            if (!fired) accumX += dragAmount
                         }
                     )
                 }
@@ -678,4 +640,3 @@ fun groupColor(id: String): Color = when (id) {
     "shop" -> Color(0xFFE86A8A)
     else -> Color(0xFF8A8A93)
 }
-

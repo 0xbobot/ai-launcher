@@ -329,7 +329,7 @@ fun AllAppsContent(
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AppRow(
+internal fun AppRow(
     app: AppInfo,
     onLaunch: () -> Unit,
     onLongClick: () -> Unit,
@@ -600,7 +600,7 @@ private fun ArcIndexBar(
 }
 
 /** 分组 key：a-z/A-Z→大写；中文→拼音首字母大写（GB2312 区位边界法，无需第三方库）；数字及其他→'#' */
-private fun groupKey(label: CharSequence): Char {
+internal fun groupKey(label: CharSequence): Char {
     val c = label.firstOrNull() ?: return '#'
     if (c in 'a'..'z') return c.uppercaseChar()
     if (c in 'A'..'Z') return c
