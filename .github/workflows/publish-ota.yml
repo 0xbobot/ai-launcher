@@ -47,7 +47,6 @@ jobs:
           mkdir -p ota
           gh run download "${{ steps.build_run.outputs.run_id }}" \
             -n ai-launcher-debug-apk -D ota/
-          mv ota/app-debug.apk ota/ai-launcher-latest.apk
           ls -la ota/
 
       - name: Generate update.json from APK metadata
@@ -57,22 +56,29 @@ jobs:
         run: |
           # 版本号从 APK 本体解析（aapt），避免与 build.gradle.kts 不一致导致"假更新"
           BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
-          BADGING=$("$ANDROID_HOME/build-tools/$BT/aapt" dump badging ota/ai-launcher-latest.apk)
+          BADGING=$("$ANDROID_HOME/build-tools/$BT/aapt" dump badging ota/app-debug.apk)
           CODE=$(echo "$BADGING" | grep -oP "versionCode='\K[0-9]+")
           NAME=$(echo "$BADGING" | grep -oP "versionName='\K[^']+")
           echo "APK versionCode=$CODE versionName=$NAME"
           if [ -z "$CODE" ] || [ -z "$NAME" ]; then echo "failed to parse APK version" >&2; exit 1; fi
+          # 文件名带版本号：每个版本 URL 唯一，彻底避开各层缓存拿到旧包
+          APK_FILE="ai-launcher-v${NAME}.apk"
+          mv ota/app-debug.apk "ota/$APK_FILE"
+          cp "ota/$APK_FILE" ota/ai-launcher-latest.apk
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          python3 - "$CODE" "$NAME" "$CHANGELOG" <<'EOF'
+          echo "apk_file=$APK_FILE" >> "$GITHUB_OUTPUT"
+          ls -la ota/
+          python3 - "$CODE" "$NAME" "$CHANGELOG" "$APK_FILE" <<'EOF'
           import json, sys
           code = int(sys.argv[1])
           name = sys.argv[2]
           changelog = sys.argv[3].strip() or "常规更新"
+          apk_file = sys.argv[4]
           data = {
               "versionCode": code,
               "versionName": name,
-              "apkUrl": "https://bobot.is-a.dev/ai-launcher/ai-launcher-latest.apk",
+              "apkUrl": f"https://bobot.is-a.dev/ai-launcher/{apk_file}",
               "changelog": changelog,
               "forceUpdate": False,
           }
@@ -94,12 +100,14 @@ jobs:
             pages
           mkdir -p pages/ai-launcher
           # 只动 ai-launcher/ 目录，不碰仓库里其他文件
+          # （保留最近 3 个版本包 + latest，太旧的手动清理）
+          cp "ota/${{ steps.meta.outputs.apk_file }}" pages/ai-launcher/
           cp ota/ai-launcher-latest.apk pages/ai-launcher/
           cp ota/update.json pages/ai-launcher/
           cd pages
           git config user.name "Bobot"
           git config user.email "0xbobot@users.noreply.github.com"
-          git add ai-launcher/ai-launcher-latest.apk ai-launcher/update.json
+          git add ai-launcher/
           git commit -m "ota: AI桌面 v${{ steps.meta.outputs.name }} (${{ steps.meta.outputs.code }})" \
             || echo "nothing to commit"
           git push origin HEAD
