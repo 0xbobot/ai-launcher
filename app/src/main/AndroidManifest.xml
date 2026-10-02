@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- OTA 检查更新 / 下载安装包 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- OTA 安装 APK：Android 8+ 安装未知应用 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 通知渠道（API 33+，桌面自身发通知时用） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 日历：首页「今日日程」卡片 -->
@@ -50,6 +54,17 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- OTA 安装：FileProvider 把下载好的 APK 授权给系统安装器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 </manifest>

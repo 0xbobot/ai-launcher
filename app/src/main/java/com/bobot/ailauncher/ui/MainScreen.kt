@@ -15,6 +15,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,12 +23,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.bobot.ailauncher.data.OtaInfo
+import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.apps.AllAppsScreen
 import com.bobot.ailauncher.ui.capability.CapabilityScreen
+import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -58,6 +63,17 @@ private fun PagerHost(onOpenSettings: () -> Unit) {
     // 的手势才成立（原 spec 的 page 编号与手势描述矛盾，按手势行为实现）
     val pagerState = rememberPagerState(initialPage = 0) { 2 }
     var showAppDrawer by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
+
+    // OTA：每天最多自动检查一次，有新版弹更新对话框
+    LaunchedEffect(Unit) {
+        if (OtaUpdater.shouldAutoCheck(context)) {
+            val info = OtaUpdater.checkForUpdate(context)
+            OtaUpdater.markChecked(context)
+            if (info != null) updateInfo = info
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         HorizontalPager(
@@ -103,6 +119,10 @@ private fun PagerHost(onOpenSettings: () -> Unit) {
                     )
                 }
             }
+        }
+        // OTA 更新对话框（自动检查 / 设置页手动检查共用 UpdateDialog）
+        updateInfo?.let { info ->
+            UpdateDialog(info = info, onDismiss = { updateInfo = null })
         }
     }
 }

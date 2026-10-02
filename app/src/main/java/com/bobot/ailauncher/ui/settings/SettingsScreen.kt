@@ -18,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -36,8 +37,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
+import com.bobot.ailauncher.data.OtaCheckResult
+import com.bobot.ailauncher.data.OtaInfo
+import com.bobot.ailauncher.data.OtaUpdater
+import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
 
@@ -157,5 +163,67 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
         }
         item { Spacer(modifier = Modifier.height(24.dp)) }
+
+        // OTA：手动检查更新
+        item {
+            var checking by remember { mutableStateOf(false) }
+            var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                onClick = {
+                    if (checking) return@Card
+                    checking = true
+                    scope.launch {
+                        when (val r = OtaUpdater.checkForUpdateResult(context)) {
+                            is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
+                            OtaCheckResult.UpToDate ->
+                                Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
+                            OtaCheckResult.Failed ->
+                                Toast.makeText(context, "检查失败，请稍后再试", Toast.LENGTH_SHORT).show()
+                        }
+                        checking = false
+                    }
+                }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "检查更新",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.Title
+                        )
+                        Text(
+                            text = "当前版本 v${BuildConfig.VERSION_NAME}",
+                            fontSize = 13.sp,
+                            color = AILauncherColors.Hint
+                        )
+                    }
+                    if (checking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = AILauncherColors.Accent
+                        )
+                    } else {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = AILauncherColors.Hint
+                        )
+                    }
+                }
+            }
+            updateInfo?.let { info ->
+                UpdateDialog(info = info, onDismiss = { updateInfo = null })
+            }
+        }
     }
 }

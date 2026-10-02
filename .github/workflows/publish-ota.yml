@@ -1,0 +1,95 @@
+name: Publish OTA
+
+# 手动发布 OTA 更新：把最新一次构建成功的 APK + update.json 推到
+# Bob 的 GitHub Pages 站（bobot.is-a.dev/ai-launcher/），App 端自动检查更新。
+#
+# 需要在仓库 Settings > Secrets 中配置：
+#   PAGES_DEPLOY_TOKEN — 对 clawbobot/clawbobot.github.io 有 Contents 读写权限的
+#   fine-grained PAT（只勾选该仓库，权限 Contents: Read and write）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      changelog:
+        description: "更新日志（显示在 App 更新对话框里）"
+        required: false
+        default: "常规更新"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ai-launcher
+        uses: actions/checkout@v4
+
+      - name: Get latest successful build run id
+        id: build_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_ID=$(gh api "repos/0xbobot/ai-launcher/actions/workflows/build-apk.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id')
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "No successful build run found" >&2
+            exit 1
+          fi
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Using build run: $RUN_ID"
+
+      - name: Download APK artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ota
+          gh run download "${{ steps.build_run.outputs.run_id }}" \
+            -n ai-launcher-debug-apk -D ota/
+          mv ota/app-debug.apk ota/ai-launcher-latest.apk
+          ls -la ota/
+
+      - name: Generate update.json
+        id: meta
+        env:
+          CHANGELOG: ${{ inputs.changelog }}
+        run: |
+          CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -1)
+          NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          python3 - "$CODE" "$NAME" "$CHANGELOG" <<'EOF'
+          import json, sys
+          code = int(sys.argv[1])
+          name = sys.argv[2]
+          changelog = sys.argv[3].strip() or "常规更新"
+          data = {
+              "versionCode": code,
+              "versionName": name,
+              "apkUrl": "https://bobot.is-a.dev/ai-launcher/ai-launcher-latest.apk",
+              "changelog": changelog,
+              "forceUpdate": False,
+          }
+          with open("ota/update.json", "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+          print(open("ota/update.json", encoding="utf-8").read())
+          EOF
+
+      - name: Publish to GitHub Pages repo
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$PAGES_DEPLOY_TOKEN" ]; then
+            echo "PAGES_DEPLOY_TOKEN secret is not set" >&2
+            exit 1
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${PAGES_DEPLOY_TOKEN}@github.com/clawbobot/clawbobot.github.io.git" \
+            pages
+          mkdir -p pages/ai-launcher
+          # 只动 ai-launcher/ 目录，不碰仓库里其他文件
+          cp ota/ai-launcher-latest.apk pages/ai-launcher/
+          cp ota/update.json pages/ai-launcher/
+          cd pages
+          git config user.name "Bobot"
+          git config user.email "0xbobot@users.noreply.github.com"
+          git add ai-launcher/ai-launcher-latest.apk ai-launcher/update.json
+          git commit -m "ota: AI桌面 v${{ steps.meta.outputs.name }} (${{ steps.meta.outputs.code }})" \
+            || echo "nothing to commit"
+          git push origin HEAD
