@@ -134,7 +134,8 @@ fun AppCenterContent(
             .map { g -> g.copy(apps = g.apps.filter { it.packageName !in hidden }) }
             .filter { it.apps.isNotEmpty() }
     }
-    var collapsedGroups by remember { mutableStateOf(setOf<String>()) }
+    // 默认全部收起（只显示组头行）：7 组一屏内展示，点击/左滑再展开
+    var expandedGroups by remember { mutableStateOf(setOf<String>()) }
 
     // A-Z 数据：全部可启动应用（去自己、去隐藏），中文按拼音首字母排序分组
     val azApps = remember(refreshTick, hiddenVersion) {
@@ -155,10 +156,10 @@ fun AppCenterContent(
     val listState = rememberLazyListState()
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
-    // 字母 → LazyColumn item index（前面是分组块 + 1 个"全部应用"分隔）
+    // 字母 → LazyColumn item index（item0=宠物空白区，1..G=分组块，G+1="全部应用"分隔）
     val letterAnchors = remember(groups, azGroups) {
         val m = mutableMapOf<Char, Int>()
-        var idx = groups.size + 1
+        var idx = groups.size + 2
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
             idx += 1 + apps.size
@@ -296,18 +297,22 @@ fun AppCenterContent(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 // 分类区
+                // 顶部预留空白区（约 140dp，未来给宠物使用，先空着）
+                item(key = "pet-slot") {
+                    Spacer(modifier = Modifier.height(140.dp))
+                }
                 items(groups, key = { "g:${it.id}" }) { group ->
-                    val collapsed = group.id in collapsedGroups
+                    val collapsed = group.id !in expandedGroups
                     GroupBlock(
                         group = group,
                         collapsed = collapsed,
                         onToggle = {
-                            collapsedGroups =
-                                if (group.id in collapsedGroups) collapsedGroups - group.id
-                                else collapsedGroups + group.id
+                            expandedGroups =
+                                if (group.id in expandedGroups) expandedGroups - group.id
+                                else expandedGroups + group.id
                         },
-                        onExpand = { collapsedGroups = collapsedGroups - group.id },
-                        onCollapse = { collapsedGroups = collapsedGroups + group.id },
+                        onExpand = { expandedGroups = expandedGroups + group.id },
+                        onCollapse = { expandedGroups = expandedGroups - group.id },
                         onLaunch = ::launchResolvedApp,
                         onOrganize = { app ->
                             organizeApp = AppInfo(app.packageName, app.label, app.icon)
@@ -354,7 +359,10 @@ fun AppCenterContent(
                     onJumpTop = { scope.launch { listState.scrollToItem(0) } },
                     onJumpLetter = { letter ->
                         scope.launch {
-                            listState.scrollToItem(letterAnchors[letter] ?: 0)
+                            val anchor = letterAnchors[letter] ?: 0
+                            val viewportH = listState.layoutInfo.viewportSize.height
+                            // 字母区滚到屏幕垂直居中（方便单手操作和下一步点选），而非顶到列表顶部
+                            listState.scrollToItem(anchor, scrollOffset = -(viewportH / 2))
                         }
                     },
                     modifier = Modifier.align(
@@ -432,9 +440,10 @@ private fun rememberPullDownConnection(
 
 /**
  * 应用中心定位 rail（v0.14.1：只做定位，不做视图切换）：
- * 首个"类"跳回顶部整个分类区，后面 A-Z 字母跳转对应字母；
- * 点按/纵向拖动；字母波浪避让拇指（v0.13 高斯波浪移植：字母列不动，
- * 只有波浪往拇指反方向偏移 64dp + 气泡跟随）；惯用手决定在左还是右
+ * 首个 ☰ 跳回顶部整个分类区，后面 A-Z 字母跳转对应字母（应用区滚到屏幕垂直居中）；
+ * 点按/纵向拖动；字母波浪避让拇指（字母列不动，波浪往拇指反方向偏移 64dp）；
+ * 选中字母的大圆气泡放在 rail 外侧（远离屏幕中心），rail 内缩给气泡留位置；
+ * 惯用手决定 rail 在左还是右
  */
 @Composable
 private fun CenterRail(
@@ -447,10 +456,10 @@ private fun CenterRail(
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val items = remember(letters) { listOf('类') + letters }
+    val items = remember(letters) { listOf('\u2630') + letters }
     var activeIndex by remember { mutableStateOf<Int?>(null) }
     var hideJob by remember { mutableStateOf<Job?>(null) }
-    // 右手：-1（往左偏/向左展开）；左手：+1（往右偏/向右展开）
+    // 右手：-1（波浪往左偏，避开右侧拇指）；左手：+1（往右偏）
     val dirSign = if (handed == UiPrefs.Handed.RIGHT) -1f else 1f
     val bulgePx = with(density) { 40.dp.toPx() }
     val shiftPx = with(density) { 64.dp.toPx() }
@@ -462,6 +471,8 @@ private fun CenterRail(
         ),
         label = "railWaveShift"
     )
+    // 外侧 = 远离屏幕中心的一侧：右手 rail 在右，外侧=右；左手镜像
+    val rightHanded = handed == UiPrefs.Handed.RIGHT
 
     fun poke(i: Int) {
         activeIndex = i
@@ -473,41 +484,48 @@ private fun CenterRail(
         }
     }
 
+    // 外层 76dp：内侧 48dp 是 rail 本体（含触摸），外侧 28dp 给气泡留位置（rail 内缩）
     BoxWithConstraints(
         modifier = modifier
             .fillMaxHeight(heightFraction)
-            .width(48.dp)
+            .width(76.dp)
     ) {
         val hPx = constraints.maxHeight.toFloat()
         if (hPx <= 0f) return@BoxWithConstraints
         val rowHpx = hPx / items.size
-        // 触摸层：整块可触摸（点按 + 纵向拖动），不偏移
+        // rail 本体：内侧 48dp
         Box(
             modifier = Modifier
-                .matchParentSize()
-                .pointerInput(items, hPx) {
-                    detectTapGestures(onTap = { offset ->
-                        val i = ((offset.y / hPx) * items.size)
-                            .toInt().coerceIn(items.indices)
-                        poke(i)
-                    })
-                }
-                .pointerInput(items, hPx) {
-                    detectVerticalDragGestures(
-                        onDragEnd = { activeIndex = null },
-                        onDragCancel = { activeIndex = null },
-                        onVerticalDrag = { change, _ ->
-                            change.consume()
-                            val i = ((change.position.y / hPx) * items.size)
+                .align(if (rightHanded) Alignment.CenterStart else Alignment.CenterEnd)
+                .width(48.dp)
+                .fillMaxHeight()
+        ) {
+            // 触摸层：整块可触摸（点按 + 纵向拖动），不偏移
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .pointerInput(items, hPx) {
+                        detectTapGestures(onTap = { offset ->
+                            val i = ((offset.y / hPx) * items.size)
                                 .toInt().coerceIn(items.indices)
-                            activeIndex = i
-                            if (i == 0) onJumpTop() else onJumpLetter(items[i])
-                        }
-                    )
-                }
-        )
-        // 视觉层：字母列不动；波浪（当前字母放大 + 气泡）单独往拇指反方向偏移
-        Box(modifier = Modifier.matchParentSize()) {
+                            poke(i)
+                        })
+                    }
+                    .pointerInput(items, hPx) {
+                        detectVerticalDragGestures(
+                            onDragEnd = { activeIndex = null },
+                            onDragCancel = { activeIndex = null },
+                            onVerticalDrag = { change, _ ->
+                                change.consume()
+                                val i = ((change.position.y / hPx) * items.size)
+                                    .toInt().coerceIn(items.indices)
+                                activeIndex = i
+                                if (i == 0) onJumpTop() else onJumpLetter(items[i])
+                            }
+                        )
+                    }
+            )
+            // 视觉层：字母列不动；波浪（当前字母放大）单独往拇指反方向偏移
             Column(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -553,33 +571,30 @@ private fun CenterRail(
                     }
                 }
             }
-            // 当前字符气泡：拇指反方向，随波浪一起偏移，不被拇指盖住
-            activeIndex?.let { idx ->
-                val rPx = with(density) { 22.dp.toPx() }
-                Box(
-                    modifier = Modifier
-                        .align(
-                            if (handed == UiPrefs.Handed.RIGHT) Alignment.TopStart
-                            else Alignment.TopEnd
+        }
+        // 选中大圆气泡：rail 外侧（远离屏幕中心），不跟波浪偏移，不被拇指盖住
+        activeIndex?.let { idx ->
+            val rPx = with(density) { 22.dp.toPx() }
+            Box(
+                modifier = Modifier
+                    .align(if (rightHanded) Alignment.CenterEnd else Alignment.CenterStart)
+                    .offset {
+                        IntOffset(
+                            0,
+                            (idx * rowHpx + rowHpx / 2f - rPx).roundToInt()
                         )
-                        .offset {
-                            IntOffset(
-                                waveShiftX.roundToInt(),
-                                (idx * rowHpx + rowHpx / 2f - rPx).roundToInt()
-                            )
-                        }
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(AILauncherColors.Accent),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = items[idx].toString(),
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
+                    }
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(AILauncherColors.Accent),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = items[idx].toString(),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             }
         }
     }
