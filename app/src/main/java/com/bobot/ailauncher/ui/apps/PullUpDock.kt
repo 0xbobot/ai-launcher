@@ -21,7 +21,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,11 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -49,15 +44,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.listLaunchableApps
@@ -66,7 +57,7 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlin.math.abs
 
 /**
- * 上拉 Dock（v0.13：手势签名「右滑=多，左滑=少」，横线手柄彻底去掉）。
+ * 上拉 Dock（v0.14：手势签名纠正为「左滑=多，右滑=少」，横线手柄彻底去掉）。
  *
  * 状态机（全部离散档位，弹簧动画切换，不再连续拖动）：
  * - Hidden：什么都不显示
@@ -74,8 +65,8 @@ import kotlin.math.abs
  * - D2：同一张卡片，10 个小图标（2×5，46dp）；d1↔d2 内容 crossfade + scale
  * - D3：不透明整屏替换（App 底色），顶部常用横滑一行 + 全部应用 A-Z 列表 + 弧形 A-Z 导航
  *
- * 手势签名（全 App 统一）：右滑 = 更多，左滑 = 更少
- * - D1 —右滑→ D2 —右滑→ D3；D3 —左滑→ D2 —左滑→ D1 —左滑→ 隐藏
+ * 手势签名（全 App 统一，v0.14 纠正）：左滑 = 更多，右滑 = 更少
+ * - D1 —左滑→ D2 —左滑→ D3；D3 —右滑→ D2 —右滑→ D1 —右滑→ 隐藏
  * - 上滑：隐藏→D1（首页上滑）；D1/D2→D3（直接全屏）
  * - 下滑：D3→D2→D1→隐藏（逐级收回）；点按卡片外部 → 隐藏
  */
@@ -85,6 +76,7 @@ enum class DockState { Hidden, D1, D2, D3 }
 fun PullUpDock(
     state: DockState,
     onStateChange: (DockState) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -185,12 +177,12 @@ fun PullUpDock(
                                     val go = onStateChangeState.value
                                     if (ax > hThreshPx && ax >= ay) {
                                         fired = true
-                                        if (accumX > 0) {
-                                            // 右滑 = 更多：D1→D2→D3
+                                        if (accumX < 0) {
+                                            // 左滑 = 更多：D1→D2→D3
                                             if (state == DockState.D1) go(DockState.D2)
                                             else if (state == DockState.D2) go(DockState.D3)
                                         } else {
-                                            // 左滑 = 更少：D2→D1→隐藏
+                                            // 右滑 = 更少：D2→D1→隐藏
                                             if (state == DockState.D2) go(DockState.D1)
                                             else if (state == DockState.D1) go(DockState.Hidden)
                                         }
@@ -260,61 +252,37 @@ fun PullUpDock(
             FullAppsOverlay(
                 top10 = top10,
                 onLaunch = ::launchApp,
-                onStateChange = onStateChangeState.value
+                onStateChange = onStateChangeState.value,
+                onOpenSettings = onOpenSettings
             )
         }
     }
 }
 
 /**
- * D3 全屏：不透明底色整屏替换。
- * - 顶部"常用"横滑一行（10 个图标，去名）+ 全部应用 A-Z 列表 + 右侧弧形 A-Z 导航
- * - 顶部区域下滑 / 列表到顶继续下滑 → D2；全屏内左滑 → D2（右滑已到顶，无动作）
- *   顶部"常用"横滑行是横向滚动区：行内手势由 LazyRow 先消费，这里的 dock 级
- *   左滑只在非滚动区触发，避免冲突
+ * D3 全屏：不透明底色整屏替换，内容为「应用中心」（分组 + A-Z 双视图）。
+ * 手势签名（全 App 统一，v0.14 纠正：左滑 = 多，右滑 = 少）：
+ * - 全屏内右滑 → D2（收回一档）
+ * - 顶部区域下滑 / 列表到顶继续下滑 → D2
+ * - 顶部"常用"横滑行是横向滚动区：行内手势由 LazyRow 先消费，dock 级
+ *   右滑只在非滚动区触发，避免冲突
  */
 @Composable
 private fun FullAppsOverlay(
     top10: List<AppInfo>,
     onLaunch: (AppInfo) -> Unit,
-    onStateChange: (DockState) -> Unit
+    onStateChange: (DockState) -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     val density = LocalDensity.current
-    val listState = rememberLazyListState()
     val onStateChangeState = rememberUpdatedState(onStateChange)
-
-    // 列表到顶继续下滑 → D2（离散手势，松手即触发）
-    val downThreshPx = with(density) { 90.dp.toPx() }
-    var nestedAccum by remember { mutableStateOf(0f) }
-    val nested = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(
-                available: Offset,
-                source: NestedScrollSource
-            ): Offset {
-                if (source != NestedScrollSource.UserInput) return Offset.Zero
-                val atTop = listState.firstVisibleItemIndex == 0 &&
-                    listState.firstVisibleItemScrollOffset == 0
-                if (available.y > 0f && atTop) {
-                    nestedAccum += available.y
-                    if (nestedAccum > downThreshPx) {
-                        nestedAccum = 0f
-                        onStateChangeState.value(DockState.D2)
-                    }
-                    return Offset(0f, available.y)
-                }
-                nestedAccum = 0f
-                return Offset.Zero
-            }
-        }
-    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(AILauncherColors.Background) // 不透明整屏替换，不再透出下层
             .pointerInput(Unit) {
-                // 全屏内左滑 → D2（手势签名：左滑=更少）
+                // 全屏内右滑 → D2（手势签名：右滑=更少）
                 var accumX = 0f
                 var fired = false
                 val hPx = with(density) { 48.dp.toPx() }
@@ -325,7 +293,7 @@ private fun FullAppsOverlay(
                         change.consume()
                         if (fired) return@detectHorizontalDragGestures
                         accumX += dragAmount
-                        if (accumX < -hPx) {
+                        if (accumX > hPx) {
                             fired = true
                             onStateChangeState.value(DockState.D2)
                         }
@@ -333,70 +301,14 @@ private fun FullAppsOverlay(
                 )
             }
     ) {
-        // 顶部区域：下滑 → D2
-        val headThreshPx = with(density) { 80.dp.toPx() }
-        Column(
-            modifier = Modifier.pointerInput(Unit) {
-                var accumY = 0f
-                var fired = false
-                detectVerticalDragGestures(
-                    onDragStart = { accumY = 0f; fired = false },
-                    onVerticalDrag = { change, dragAmount ->
-                        change.consume()
-                        if (fired) return@detectVerticalDragGestures
-                        accumY += dragAmount
-                        if (accumY > headThreshPx) {
-                            fired = true
-                            onStateChangeState.value(DockState.D2)
-                        }
-                    }
-                )
-            }
-        ) {
-            Text(
-                text = "常用",
-                fontSize = 12.sp,
-                color = AILauncherColors.Hint,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = 20.dp
-                )
-            ) {
-                items(top10, key = { it.packageName }) { app ->
-                    AppIconImage(
-                        drawable = app.icon,
-                        contentDescription = app.label.toString(),
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(13.dp))
-                            .clickable { onLaunch(app) }
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-        Text(
-            text = "全部应用",
-            fontSize = 12.sp,
-            color = AILauncherColors.Hint,
-            modifier = Modifier.padding(horizontal = 20.dp)
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        AllAppsContent(
+        AppCenterContent(
+            top10 = top10,
+            onLaunch = onLaunch,
+            onOpenSettings = onOpenSettings,
+            onPullDownToD2 = { onStateChangeState.value(DockState.D2) },
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
-            listState = listState,
-            nestedScrollConnection = nested,
-            showSearch = false,
-            showIndexBar = true,
-            topPadding = 0.dp,
-            indexBarHeightFraction = 0.6f
+                .weight(1f)
         )
     }
 }

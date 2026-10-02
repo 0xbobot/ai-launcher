@@ -1,6 +1,8 @@
 package com.bobot.ailauncher.ui.settings
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +45,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
+import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.OtaCheckResult
@@ -214,6 +218,90 @@ fun SettingsScreen(onBack: () -> Unit) {
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text(label)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 已隐藏应用：在应用中心右滑隐藏的应用，在这里恢复
+        item {
+            val hiddenVersion = HiddenApps.version.intValue
+            val hiddenPkgs = remember(hiddenVersion) { HiddenApps.getHidden(context) }
+            var expanded by remember { mutableStateOf(false) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expanded = !expanded },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "已隐藏应用（${hiddenPkgs.size}）",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = AILauncherColors.Title
+                            )
+                            Text(
+                                text = "在应用中心右滑隐藏的应用，可在这里恢复显示",
+                                fontSize = 13.sp,
+                                color = AILauncherColors.Hint
+                            )
+                        }
+                        Text(
+                            text = if (expanded) "收起" else "展开",
+                            fontSize = 13.sp,
+                            color = AILauncherColors.Hint
+                        )
+                    }
+                    AnimatedVisibility(visible = expanded) {
+                        Column(modifier = Modifier.padding(top = 8.dp)) {
+                            if (hiddenPkgs.isEmpty()) {
+                                Text(
+                                    text = "暂无已隐藏应用",
+                                    fontSize = 13.sp,
+                                    color = AILauncherColors.Hint,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            } else {
+                                val pm = context.packageManager
+                                hiddenPkgs.sorted().forEach { pkg ->
+                                    val label = try {
+                                        pm.getApplicationLabel(
+                                            pm.getApplicationInfo(pkg, 0)
+                                        ).toString()
+                                    } catch (_: Exception) {
+                                        pkg
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 14.sp,
+                                            color = AILauncherColors.Body,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        TextButton(onClick = {
+                                            HiddenApps.unhide(context, pkg)
+                                        }) {
+                                            Text(
+                                                text = "恢复",
+                                                fontSize = 13.sp,
+                                                color = AILauncherColors.Accent
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

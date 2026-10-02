@@ -3,10 +3,15 @@ package com.bobot.ailauncher.ui.apps
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -78,6 +83,7 @@ import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.CustomCategories
+import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
@@ -117,7 +123,9 @@ fun AllAppsContent(
     showIndexBar: Boolean = true,
     showSearch: Boolean = true,
     topPadding: Dp = 12.dp,
-    indexBarHeightFraction: Float = 1f
+    indexBarHeightFraction: Float = 1f,
+    /** rail 顶部的切换钮插槽（应用中心用它放"组/A"切换） */
+    railHeader: @Composable () -> Unit = {}
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -126,11 +134,16 @@ fun AllAppsContent(
     val focusManager = LocalFocusManager.current
     var query by remember { mutableStateOf("") }
     var organizeApp by remember { mutableStateOf<AppInfo?>(null) }
-    val apps = remember {
+    // 已隐藏应用：HiddenApps.version 变化时重算
+    val hiddenVersion = HiddenApps.version.intValue
+    val apps = remember(hiddenVersion) {
+        val hidden = HiddenApps.getHidden(context)
         val collator = Collator.getInstance(Locale.CHINA)
-        listLaunchableApps(context).sortedWith { a, b ->
-            collator.compare(a.label.toString(), b.label.toString())
-        }
+        listLaunchableApps(context)
+            .filter { it.packageName != context.packageName && it.packageName !in hidden }
+            .sortedWith { a, b ->
+                collator.compare(a.label.toString(), b.label.toString())
+            }
     }
     val searching = query.trim().isNotBlank()
     val filtered = remember(query, apps) {
@@ -190,6 +203,12 @@ fun AllAppsContent(
         if (intent != null) context.startActivity(intent)
     }
 
+    // 左滑隐藏：HiddenApps.version +1 后上面的 apps 自动重算过滤
+    fun hideApp(app: AppInfo) {
+        HiddenApps.hide(context, app.packageName)
+        Toast.makeText(context, "已隐藏「${app.label}」，可在设置页恢复", Toast.LENGTH_SHORT).show()
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -229,7 +248,9 @@ fun AllAppsContent(
                                 keyboardController?.hide()
                                 focusManager.clearFocus()
                             },
-                            onLongClick = { organizeApp = app }
+                            onLongClick = { organizeApp = app },
+                            onHide = ::hideApp,
+                            onOrganize = { organizeApp = it }
                         )
                     }
                 } else {
@@ -250,7 +271,9 @@ fun AllAppsContent(
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app.packageName) },
-                                onLongClick = { organizeApp = app }
+                                onLongClick = { organizeApp = app },
+                                onHide = ::hideApp,
+                                onOrganize = { organizeApp = it }
                             )
                         }
                     }
@@ -259,28 +282,34 @@ fun AllAppsContent(
             }
             // 右侧弧形 A-Z 导航：平时收拢窄条，按住后字母沿高斯弧线向屏内展开，
             // 字母列不动，只有波浪（当前字母放大 + 气泡）往拇指反方向偏移避让；
-            // 列表跟手滚动，松手回弹；惯用手决定 rail 在左还是右、波浪往哪偏
+            // 列表跟手滚动，松手回弹；惯用手决定 rail 在左还是右、波浪往哪偏。
+            // rail 顶部可放切换钮（应用中心用它在"组/A"双视图间切换）
             if (showIndexBar && !searching && groups.isNotEmpty()) {
-                ArcIndexBar(
-                    letters = letters,
-                    activeIndex = barActiveIndex,
-                    onIndex = { i ->
-                        if (i < 0) {
-                            barActiveIndex = null
-                            activeLetter = null
-                            hideJob?.cancel()
-                        } else {
-                            barActiveIndex = i
-                            jumpTo(letters[i])
-                        }
-                    },
+                Column(
                     modifier = Modifier.align(
                         if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
                         else Alignment.CenterStart
                     ),
-                    heightFraction = indexBarHeightFraction,
-                    handed = handed
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    railHeader()
+                    ArcIndexBar(
+                        letters = letters,
+                        activeIndex = barActiveIndex,
+                        onIndex = { i ->
+                            if (i < 0) {
+                                barActiveIndex = null
+                                activeLetter = null
+                                hideJob?.cancel()
+                            } else {
+                                barActiveIndex = i
+                                jumpTo(letters[i])
+                            }
+                        },
+                        heightFraction = indexBarHeightFraction,
+                        handed = handed
+                    )
+                }
             }
         }
     }
@@ -291,30 +320,137 @@ fun AllAppsContent(
     }
 }
 
+/**
+ * A-Z 列表行（v0.14 纠正：左滑=多 / 右滑=少）：
+ * - 点按启动，长按整理分类（不变）
+ * - 左滑 → 展开快捷操作（应用信息 / 卸载 / 移到分组）
+ * - 右滑 → 展开态收起；收起态直接隐藏此应用（toast 提示，设置页可恢复）
+ * - 横向滑动与列表纵向滚动不冲突（主轴判定：横向位移超 slop 才消费）
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AppRow(app: AppInfo, onLaunch: () -> Unit, onLongClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .combinedClickable(onClick = onLaunch, onLongClick = onLongClick)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AppIconImage(
-            drawable = app.icon,
-            contentDescription = app.label.toString(),
+private fun AppRow(
+    app: AppInfo,
+    onLaunch: () -> Unit,
+    onLongClick: () -> Unit,
+    onHide: (AppInfo) -> Unit,
+    onOrganize: (AppInfo) -> Unit
+) {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    var actionsVisible by remember { mutableStateOf(false) }
+    val swipePx = with(density) { 56.dp.toPx() }
+
+    fun openAppDetails() {
+        try {
+            val intent = Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:${app.packageName}")
+            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "无法打开应用信息", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun uninstallApp() {
+        try {
+            val intent = Intent(
+                Intent.ACTION_DELETE,
+                android.net.Uri.parse("package:${app.packageName}")
+            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "无法卸载", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
             modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(10.dp))
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text = app.label.toString(),
-            fontSize = 16.sp,
-            color = AILauncherColors.Title
-        )
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .pointerInput(app.packageName) {
+                    var accumX = 0f
+                    var fired = false
+                    detectHorizontalDragGestures(
+                        onDragStart = { accumX = 0f; fired = false },
+                        onDragCancel = { fired = true },
+                        onDragEnd = {
+                            if (!fired) {
+                                if (accumX < -swipePx) actionsVisible = true
+                                else if (accumX > swipePx) {
+                                    if (actionsVisible) actionsVisible = false
+                                    else onHide(app)
+                                }
+                            }
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            if (!fired) accumX += dragAmount
+                        }
+                    )
+                }
+                .combinedClickable(onClick = onLaunch, onLongClick = onLongClick)
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AppIconImage(
+                drawable = app.icon,
+                contentDescription = app.label.toString(),
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(10.dp))
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = app.label.toString(),
+                fontSize = 16.sp,
+                color = AILauncherColors.Title
+            )
+        }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = actionsVisible,
+            enter = expandVertically(
+                animationSpec = spring(
+                    stiffness = Spring.StiffnessMediumLow,
+                    dampingRatio = 0.9f
+                )
+            ) + fadeIn(),
+            exit = shrinkVertically(
+                animationSpec = spring(
+                    stiffness = Spring.StiffnessMedium,
+                    dampingRatio = 0.9f
+                )
+            ) + fadeOut()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 56.dp, end = 12.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                AppRowAction(text = "应用信息", onClick = ::openAppDetails)
+                AppRowAction(text = "卸载", onClick = ::uninstallApp)
+                AppRowAction(text = "移到分组", onClick = { onOrganize(app) })
+            }
+        }
+    }
+}
+
+/** A-Z 行快捷操作小按钮 */
+@Composable
+private fun AppRowAction(text: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier
+            .border(
+                1.dp,
+                AILauncherColors.Divider,
+                RoundedCornerShape(999.dp)
+            )
+    ) {
+        Text(text = text, fontSize = 12.sp, color = AILauncherColors.Accent)
     }
 }
 
@@ -494,10 +630,10 @@ private fun pinyinInitial(c: Char): Char {
     }
 }
 
-/** 长按应用 → 整理分类：加入分组 / 新建分类 / 恢复自动 */
+/** 长按应用 → 整理分类：加入分组 / 新建分类 / 恢复自动（应用中心分组视图复用） */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun OrganizeDialog(app: AppInfo, onDismiss: () -> Unit) {
+internal fun OrganizeDialog(app: AppInfo, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val builtinGroups = remember { CapabilityRegistry.groups() }
     val customGroups = remember { CustomCategories.getCustomGroups(context) }

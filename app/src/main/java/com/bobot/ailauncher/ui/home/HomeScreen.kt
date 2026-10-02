@@ -746,7 +746,7 @@ private fun countdownText(begin: Long, now: Long): String {
 }
 
 /** 下一个日程：大卡片突出（标题 / 时间 / 地点 / 倒计时）——玻璃拟态
- * 手势签名：右滑展开（详情 + 操作），左滑收起；高度弹簧动画 */
+ * 手势签名（v0.14 纠正）：左滑展开（详情 + 操作），右滑收起；高度弹簧动画 */
 @Composable
 private fun NextEventCard(event: CalEvent, now: Long) {
     val context = LocalContext.current
@@ -827,7 +827,7 @@ private fun NextEventCard(event: CalEvent, now: Long) {
     }
 }
 
-/** 通知卡片：右滑展开（全文 + 操作按钮），左滑收起；高度弹簧动画 */
+/** 通知卡片（v0.14 纠正）：左滑展开（全文 + 操作按钮），右滑收起；高度弹簧动画 */
 @Composable
 private fun NotificationCard(n: SimpleNotification, onOpen: () -> Unit) {
     val context = LocalContext.current
@@ -901,7 +901,7 @@ private fun NotificationCard(n: SimpleNotification, onOpen: () -> Unit) {
 }
 
 /**
- * 手势签名（全 App 统一）：右滑 = 更多（展开），左滑 = 更少（收起）。
+ * 手势签名（全 App 统一，v0.14 纠正）：左滑 = 更多（展开），右滑 = 更少（收起）。
  * 横向专用检测（touch slop 后才消费），与纵向滚动不冲突；点按不受影响。
  */
 @Composable
@@ -923,7 +923,7 @@ private fun Modifier.swipeExpandCollapse(
                 accumX += dragAmount
                 if (abs(accumX) > threshPx) {
                     fired = true
-                    latestChange.value(accumX > 0)
+                    latestChange.value(accumX < 0)
                 }
             }
         )
