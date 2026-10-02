@@ -183,7 +183,7 @@ fun AppDrawerSheet(
                         .fillMaxWidth()
                         .pointerInput(screenH) {
                             detectVerticalDragGestures(
-                                onDragStart = {
+                                onDragStart = { _ ->
                                     dragging = true
                                     velocityTracker.resetTracking()
                                 },
