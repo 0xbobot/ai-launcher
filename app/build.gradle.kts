@@ -12,8 +12,8 @@ android {
         applicationId = "com.bobot.ailauncher"
         minSdk = 29
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.5.1"
+        versionCode = 9
+        versionName = "0.6.0"
     }
 
     // 固定 debug 签名：所有 CI 构建共用 app/debug.keystore（个人实验项目，
@@ -79,6 +79,8 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.squareup.okhttp)
+    // 中文按拼音首字母分组（全部应用 A-Z）
+    implementation("com.github.promeg:tinypinyin:2.0.3")
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

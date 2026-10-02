@@ -6,13 +6,18 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Bundle
 import android.provider.CalendarContract
 import android.provider.Settings
+import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -32,7 +37,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -53,14 +60,18 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -69,7 +80,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.CapabilityRegistry
-import com.bobot.ailauncher.data.LlmCallResult
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.NotificationRepository
@@ -151,8 +161,11 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ---------- 语音输入：系统 RecognizerIntent（国产机无 Google 语音服务也能用自带识别） ----------
+    // ---------- 语音输入：优先 in-app SpeechRecognizer（国产机无系统识别 Activity 也能用） ----------
     var micVisible by remember { mutableStateOf(true) }
+    var listening by remember { mutableStateOf(false) }
+    var recognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    val keyboardController = LocalSoftwareKeyboardController.current
     val voiceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -163,7 +176,16 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             if (!text.isNullOrBlank()) input = text
         }
     }
-    fun startVoiceInput() {
+
+    fun stopVoice() {
+        listening = false
+        recognizer?.stopListening()
+        recognizer?.destroy()
+        recognizer = null
+    }
+
+    // 老路径降级：系统 RecognizerIntent（in-app 不可用时）
+    fun startVoiceLegacy() {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
@@ -181,6 +203,90 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             voiceLauncher.launch(intent)
         } catch (_: Exception) {
             Toast.makeText(context, "语音识别启动失败", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun startInAppVoice() {
+        stopVoice()
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            startVoiceLegacy()
+            return
+        }
+        try {
+            val sr = SpeechRecognizer.createSpeechRecognizer(context)
+            sr.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    listening = true
+                }
+
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+
+                override fun onError(error: Int) {
+                    val msg = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH,
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "没听清，请再说一次"
+                        SpeechRecognizer.ERROR_NETWORK,
+                        SpeechRecognizer.ERROR_SERVER -> "网络异常，请重试"
+                        else -> "语音识别失败"
+                    }
+                    stopVoice()
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }
+
+                override fun onResults(results: Bundle?) {
+                    val text = results
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull { it.isNotBlank() }
+                    stopVoice()
+                    if (!text.isNullOrBlank()) input = text
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+            recognizer = sr
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            }
+            sr.startListening(intent)
+        } catch (_: Exception) {
+            stopVoice()
+            startVoiceLegacy()
+        }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startInAppVoice()
+        else Toast.makeText(context, "需要麦克风权限才能语音输入", Toast.LENGTH_SHORT).show()
+    }
+
+    fun startVoiceInput() {
+        if (listening) {
+            stopVoice()
+            return
+        }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            startInAppVoice()
+        } else {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            recognizer?.destroy()
+            recognizer = null
         }
     }
 
@@ -211,7 +317,10 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         timedEvents.filter { it.begin > now && it != nextEvent }.take(3)
     }
 
-    // ---------- 意图提交：有 Key 走 LLM，无 Key 走关键词 ----------
+    // ---------- 意图提交：无 Key 走关键词演示版，有 Key 直连大模型问答 ----------
+    var chatQuestion by remember { mutableStateOf<String?>(null) }
+    var chatAnswer by remember { mutableStateOf<String?>(null) }
+
     fun keywordFallback(text: String) {
         val capId = routeKeyword(text)
         val ok = capId?.let { CapabilityRegistry.resolveAndLaunch(context, it) } ?: false
@@ -231,38 +340,28 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         thinking = true
         scope.launch {
             try {
-                val apiKey = LlmConfig.getApiKey(context)
-                val baseUrl = LlmConfig.getBaseUrl(context)
-                val model = LlmConfig.getModel(context)
-                val callResult = withContext(Dispatchers.IO) {
-                    LlmRouter.route(baseUrl, apiKey, model, text, CapabilityRegistry.validIds())
+                val res = withContext(Dispatchers.IO) {
+                    LlmRouter.chat(
+                        LlmConfig.getBaseUrl(context),
+                        LlmConfig.getApiKey(context),
+                        LlmConfig.getModel(context),
+                        text
+                    )
                 }
-                when (callResult) {
-                    is LlmCallResult.Ok -> {
-                        val result = callResult.route
-                        if (result.capabilityId != "none") {
-                            val ok = CapabilityRegistry.resolveAndLaunch(
-                                context, result.capabilityId, result.params
-                            )
-                            if (result.reply.isNotBlank()) {
-                                Toast.makeText(context, result.reply, Toast.LENGTH_SHORT).show()
-                            } else if (!ok) {
-                                Toast.makeText(context, "能力暂不可用", Toast.LENGTH_SHORT).show()
-                            }
-                        } else {
-                            keywordFallback(text)
-                        }
+                when (res) {
+                    is LlmRouter.LlmChatResult.Ok -> {
+                        chatQuestion = text
+                        chatAnswer = res.text
+                        input = ""
                     }
-                    is LlmCallResult.Err -> {
-                        // 错误直接透出给用户（如模型名不存在），不再静默降级
-                        Toast.makeText(context, callResult.message, Toast.LENGTH_LONG).show()
+                    is LlmRouter.LlmChatResult.Err -> {
+                        Toast.makeText(context, res.message, Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (_: Exception) {
-                keywordFallback(text)
+                Toast.makeText(context, "请求失败，请重试", Toast.LENGTH_SHORT).show()
             } finally {
                 thinking = false
-                input = ""
             }
         }
     }
@@ -325,10 +424,23 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                         value = input,
                         onValueChange = { input = it },
                         placeholder = { Text("想做什么，直接告诉我…", color = AILauncherColors.Hint) },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { if (!it.isFocused) keyboardController?.hide() },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = { submit() }),
+                        trailingIcon = {
+                            if (input.isNotEmpty()) {
+                                IconButton(onClick = { input = "" }) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "清空",
+                                        tint = AILauncherColors.Hint
+                                    )
+                                }
+                            }
+                        },
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = Color.Transparent,
                             unfocusedContainerColor = Color.Transparent,
@@ -341,8 +453,9 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                         IconButton(onClick = { startVoiceInput() }) {
                             Icon(
                                 Icons.Filled.Mic,
-                                contentDescription = "语音输入",
-                                tint = AILauncherColors.Hint
+                                contentDescription = if (listening) "停止语音输入" else "语音输入",
+                                tint = if (listening) AILauncherColors.Accent
+                                else AILauncherColors.Hint
                             )
                         }
                     }
@@ -462,6 +575,48 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             }
         }
         item { Spacer(modifier = Modifier.height(16.dp)) }
+    }
+
+    // 聆听中 Dialog
+    if (listening) {
+        AlertDialog(
+            onDismissRequest = { stopVoice() },
+            title = { Text("正在聆听…") },
+            text = { Text("说出你想做什么，说完会自动识别") },
+            confirmButton = {
+                TextButton(onClick = { stopVoice() }) { Text("取消") }
+            }
+        )
+    }
+
+    // 大模型回答 Dialog（可滚动 + 复制）
+    val clipboardManager = LocalClipboardManager.current
+    if (chatAnswer != null) {
+        AlertDialog(
+            onDismissRequest = { chatQuestion = null; chatAnswer = null },
+            title = { Text(chatQuestion.orEmpty(), fontSize = 16.sp) },
+            text = {
+                Text(
+                    text = chatAnswer.orEmpty(),
+                    fontSize = 14.sp,
+                    color = AILauncherColors.Body,
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    clipboardManager.setText(AnnotatedString(chatAnswer.orEmpty()))
+                    Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                }) {
+                    Text("复制")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { chatQuestion = null; chatAnswer = null }) {
+                    Text("知道了")
+                }
+            }
+        )
     }
 }
 

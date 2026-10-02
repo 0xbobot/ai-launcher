@@ -1,6 +1,120 @@
 {
   "groups": [
     {
+      "id": "ai",
+      "label": "AI",
+      "icon": "smart_toy",
+      "capabilities": [
+        {
+          "id": "doubao",
+          "label": "豆包",
+          "icon": "smart_toy",
+          "packageNames": [
+            "com.larus.nova",
+            "com.larkoffice.doubao"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        },
+        {
+          "id": "deepseek",
+          "label": "DeepSeek",
+          "icon": "psychology",
+          "packageNames": [
+            "com.deepseek.chat"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        },
+        {
+          "id": "kimi",
+          "label": "Kimi",
+          "icon": "chat",
+          "packageNames": [
+            "com.moonshot.kimi"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        },
+        {
+          "id": "yuanbao",
+          "label": "元宝",
+          "icon": "bubble_chart",
+          "packageNames": [
+            "com.tencent.hunyuan"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        }
+      ]
+    },
+    {
+      "id": "social",
+      "label": "社交",
+      "icon": "group",
+      "capabilities": [
+        {
+          "id": "wechat",
+          "label": "微信",
+          "icon": "chat",
+          "packageNames": [
+            "com.tencent.mm"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        },
+        {
+          "id": "qq",
+          "label": "QQ",
+          "icon": "forum",
+          "packageNames": [
+            "com.tencent.mobileqq"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        },
+        {
+          "id": "weibo",
+          "label": "微博",
+          "icon": "public",
+          "packageNames": [
+            "com.sina.weibo"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        },
+        {
+          "id": "xiaohongshu",
+          "label": "小红书",
+          "icon": "photo_library",
+          "packageNames": [
+            "com.xingin.xhs"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        },
+        {
+          "id": "douyin",
+          "label": "抖音",
+          "icon": "music_note",
+          "packageNames": [
+            "com.ss.android.ugc.aweme"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        }
+      ]
+    },
+    {
       "capabilities": [
         {
           "deeplink": "amap://route?sourceApplication=ai-launcher&dlat={lat}&dlon={lon}&dev=0&t=1",
@@ -102,17 +216,6 @@
           "note": "需真机验证",
           "packageNames": [
             "com.eg.android.AlipayGphone"
-          ]
-        },
-        {
-          "deeplink": null,
-          "fallbackToLauncher": true,
-          "icon": "payments",
-          "id": "wechatpay",
-          "label": "微信支付",
-          "note": "需真机验证",
-          "packageNames": [
-            "com.tencent.mm"
           ]
         }
       ],

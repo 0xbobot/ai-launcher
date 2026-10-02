@@ -33,8 +33,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -61,6 +63,8 @@ fun SettingsScreen(onBack: () -> Unit) {
     var baseUrl by remember { mutableStateOf(LlmConfig.getBaseUrl(context)) }
     var model by remember { mutableStateOf(LlmConfig.getModel(context)) }
     var testing by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val hideOnBlur = Modifier.onFocusChanged { if (!it.isFocused) keyboardController?.hide() }
 
     fun persist() = LlmConfig.save(context, apiKey, baseUrl, model)
 
@@ -108,7 +112,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         placeholder = { Text("sk-…", color = AILauncherColors.Hint) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().then(hideOnBlur)
                     )
                     OutlinedTextField(
                         value = baseUrl,
@@ -116,7 +120,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         label = { Text("Base URL") },
                         placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.Hint) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().then(hideOnBlur)
                     )
                     OutlinedTextField(
                         value = model,
@@ -124,7 +128,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         label = { Text("模型") },
                         placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.Hint) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().then(hideOnBlur)
                     )
                     Text(
                         text = "如 deepseek-flash / deepseek-v4-pro",

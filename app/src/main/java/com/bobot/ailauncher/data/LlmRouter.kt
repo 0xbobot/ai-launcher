@@ -75,7 +75,9 @@ object LlmRouter {
         能力 id 列表：
         ditie(地铁), dache(打车), hangban(航班), zuche(租车), huoche(火车), jiudian(酒店),
         daohang(导航),
-        zhifubao(支付宝), wechatpay(微信支付), bank(银行),
+        doubao(豆包), deepseek(DeepSeek), kimi(Kimi), yuanbao(元宝),
+        zhifubao(支付宝),
+        wechat(微信), qq(QQ), weibo(微博), xiaohongshu(小红书), douyin(抖音),
         feishu(飞书), calendar(日历), mail(邮箱),
         meituan(美团), eleme(饿了么), dianping(大众点评),
         jd(京东), taobao(淘宝), pdd(拼多多)。
@@ -139,6 +141,64 @@ object LlmRouter {
                 is LlmCallResult.Err -> r.message
             }
         }
+
+    // ---------- 意图框直连大模型（v0.6 起 bypass 意图路由，直接问答） ----------
+
+    private val CHAT_SYSTEM_PROMPT =
+        "你是「AI 桌面」的智能助手，直接、简洁地用中文回答用户的问题。"
+
+    /** 大模型直接问答结果 */
+    sealed interface LlmChatResult {
+        data class Ok(val text: String) : LlmChatResult
+        data class Err(val message: String) : LlmChatResult
+    }
+
+    /** 意图框直连大模型：bypass 意图路由，直接返回回答文本 */
+    suspend fun chat(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        input: String
+    ): LlmChatResult = withContext(Dispatchers.IO) {
+        try {
+            val url = "${LlmConfig.normalizeBaseUrl(baseUrl)}/chat/completions"
+            val body = JSONObject()
+                .put("model", model)
+                .put("messages", JSONArray().apply {
+                    put(JSONObject().put("role", "system").put("content", CHAT_SYSTEM_PROMPT))
+                    put(JSONObject().put("role", "user").put("content", input))
+                })
+                .put("temperature", 0.7)
+                .put("max_tokens", 800)
+                .toString()
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            client().newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    return@withContext LlmChatResult.Err(extractHttpError(resp.code, resp))
+                }
+                val text = try {
+                    JSONObject(resp.body?.string().orEmpty())
+                        .getJSONArray("choices").getJSONObject(0)
+                        .getJSONObject("message").getString("content")
+                        .trim()
+                        .removePrefix("```").removeSuffix("```").trim()
+                } catch (_: Exception) {
+                    ""
+                }
+                if (text.isBlank()) LlmChatResult.Err("模型返回为空，请重试")
+                else LlmChatResult.Ok(text)
+            }
+        } catch (e: IOException) {
+            LlmChatResult.Err("网络超时，请检查网络")
+        } catch (e: Exception) {
+            LlmChatResult.Err("请求失败：${e.message.orEmpty().ifBlank { "未知错误" }}")
+        }
+    }
 
     /** 把 HTTP 错误拼成 "状态码: 服务端 error.message" 的可读文案 */
     private fun extractHttpError(code: Int, resp: okhttp3.Response): String {

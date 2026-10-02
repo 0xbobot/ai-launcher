@@ -44,6 +44,14 @@ data class ResolvedCapability(
     val icon: Drawable
 )
 
+/** 内部可变分组（installedCapabilities 组装时用） */
+private data class MutableResolvedGroup(
+    val id: String,
+    val label: String,
+    val iconName: String,
+    val apps: MutableList<ResolvedCapability>
+)
+
 data class ResolvedGroup(
     val id: String,
     val label: String,
@@ -125,10 +133,12 @@ object CapabilityRegistry {
     /**
      * 能力页用：返回每个分组下"本机已安装"的真实应用。
      * 同一分组内同一包名只出现一次（取排在前面的 capability）；空分组丢弃。
+     * 用户自定义 mapping 会覆盖自动匹配：被指定的应用从自动分组移出，
+     * 追加到目标分组；自定义分组排在内置分组之后。
      */
     fun installedCapabilities(context: Context): List<ResolvedGroup> {
         load(context)
-        return groups.mapNotNull { g ->
+        val auto = groups.mapNotNull { g ->
             val seen = mutableSetOf<String>()
             val apps = g.capabilities.flatMap { cap ->
                 cap.packageNames.mapNotNull { pkg ->
@@ -137,9 +147,52 @@ object CapabilityRegistry {
                     resolveOne(context, cap, pkg)
                 }
             }
-            if (apps.isEmpty()) null else ResolvedGroup(g.id, g.label, g.iconName, apps)
+            if (apps.isEmpty()) null
+            else MutableResolvedGroup(g.id, g.label, g.iconName, apps.toMutableList())
+        }.toMutableList()
+
+        // 自定义分组占位（按定义顺序排在内置分组之后）
+        val customDefs = CustomCategories.getCustomGroups(context)
+        customDefs.forEach { def ->
+            if (auto.none { it.id == def.id }) {
+                auto += MutableResolvedGroup(def.id, def.label, "", mutableListOf())
+            }
         }
+
+        val allGroupIds = auto.map { it.id }.toSet()
+        CustomCategories.getMapping(context).forEach { (pkg, groupId) ->
+            if (groupId !in allGroupIds) return@forEach
+            if (!isInstalled(context, pkg)) return@forEach
+            auto.forEach { it.apps.removeAll { a -> a.packageName == pkg } }
+            val resolved = resolveCustom(context, pkg) ?: return@forEach
+            auto.first { it.id == groupId }.apps += resolved
+        }
+
+        return auto.filter { it.apps.isNotEmpty() }
+            .map { ResolvedGroup(it.id, it.label, it.iconName, it.apps) }
     }
+
+    /** 用户手动归类的应用：用真实 label/icon 构造解析结果 */
+    private fun resolveCustom(context: Context, packageName: String): ResolvedCapability? =
+        try {
+            val pm = context.packageManager
+            val ai = pm.getApplicationInfo(packageName, 0)
+            val label = pm.getApplicationLabel(ai).toString()
+            ResolvedCapability(
+                capability = Capability(
+                    id = "custom_$packageName",
+                    label = label,
+                    iconName = "",
+                    packageNames = listOf(packageName),
+                    deeplinkTemplate = null
+                ),
+                packageName = packageName,
+                label = label,
+                icon = pm.getApplicationIcon(ai)
+            )
+        } catch (_: Exception) {
+            null
+        }
 
     /** 意图路由用：取该能力第一个已安装的包 */
     fun resolveFirstInstalled(context: Context, capabilityId: String): ResolvedCapability? {
