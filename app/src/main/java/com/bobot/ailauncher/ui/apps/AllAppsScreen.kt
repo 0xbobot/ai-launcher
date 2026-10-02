@@ -72,7 +72,6 @@ import com.bobot.ailauncher.data.CustomCategories
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
-import com.github.promeg.pinyinhelper.Pinyin
 import java.text.Collator
 import java.util.Locale
 import kotlinx.coroutines.Job
@@ -422,14 +421,32 @@ private fun AppRow(app: AppInfo, onLaunch: () -> Unit, onLongClick: () -> Unit) 
     }
 }
 
-/** 分组 key：a-z/A-Z→大写；中文→拼音首字母大写；数字及其他→'#' */
+/** 分组 key：a-z/A-Z→大写；中文→拼音首字母大写（GB2312 区位边界法，无需第三方库）；数字及其他→'#' */
 private fun groupKey(label: CharSequence): Char {
     val c = label.firstOrNull() ?: return '#'
     if (c in 'a'..'z') return c.uppercaseChar()
     if (c in 'A'..'Z') return c
+    if (c in '0'..'9') return '#'
+    return pinyinInitial(c)
+}
+
+/** 汉字拼音首字母：GB2312 编码区位与拼音首字母边界对照（i/u/v 不做声母，23 个字母） */
+private fun pinyinInitial(c: Char): Char {
     return try {
-        val first = Pinyin.toPinyin(c, "").firstOrNull()?.uppercaseChar()
-        if (first != null && first in 'A'..'Z') first else '#'
+        val bytes = c.toString().toByteArray(charset("GB2312"))
+        if (bytes.size < 2) return '#'
+        val secPos = (bytes[0].toInt() and 0xFF) * 100 + (bytes[1].toInt() and 0xFF) - 16160
+        // 上式 = ((b0-160)*100 + (b1-160))，即区位码
+        val bounds = intArrayOf(
+            1601, 1637, 1833, 2078, 2274, 2302, 2433, 2594, 2787,
+            3106, 3212, 3472, 3635, 3722, 3730, 3858, 4027, 4086,
+            4390, 4558, 4684, 4925, 5249, 5590
+        )
+        val letters = "abcdefghjklmnopqrstwxyz"
+        for (i in bounds.indices.reversed()) {
+            if (secPos >= bounds[i]) return letters[i].uppercaseChar()
+        }
+        '#'
     } catch (_: Exception) {
         '#'
     }

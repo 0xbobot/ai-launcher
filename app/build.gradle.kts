@@ -79,8 +79,6 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.squareup.okhttp)
-    // 中文按拼音首字母分组（全部应用 A-Z）
-    implementation("com.github.promeg:tinypinyin:2.0.3")
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
