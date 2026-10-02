@@ -17,13 +17,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.runtime.mutableIntStateOf
-import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
-import com.bobot.ailauncher.data.listLaunchableApps
-import com.bobot.ailauncher.ui.components.AppIconImage
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
@@ -63,7 +58,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -148,13 +142,6 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         }
     }
 
-    // ---------- Dock：最常用 4 个应用（回到前台时刷新排序） ----------
-    val allApps = remember { listLaunchableApps(context) }
-    var dockTick by remember { mutableIntStateOf(0) }
-    val dockApps = remember(allApps, dockTick) {
-        AppUsageTracker.topApps(context, allApps, 4)
-    }
-
     // ---------- 通知监听：从设置页返回时若已授权但服务未连接，强制重绑 ----------
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -165,7 +152,6 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 ) {
                     rebindListener(context)
                 }
-                dockTick++ // 回到前台刷新 Dock 常用排序
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -377,13 +363,14 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         }
     }
 
-    // ---------- 桌面感布局：大时钟 → 意图框 → 正在进行时（中间可滚）→ Dock ----------
+    // ---------- 桌面感布局：大时钟 → 意图框 → 正在进行时（中间可滚） ----------
+    // 底部无 Dock：页面圆点 + 上拉横线手柄悬浮在底部（MainScreen / PullUpDock）
     Column(
         modifier = Modifier
             .fillMaxSize()
             .nestedScroll(drawerScrollConnection)
             .padding(horizontal = 16.dp)
-            .padding(bottom = 68.dp) // 给 MainScreen 底部悬浮指示器留位
+            .padding(bottom = 100.dp) // 给底部悬浮的圆点 + 横线手柄留位
     ) {
         ClockHeader()
         Spacer(modifier = Modifier.height(10.dp))
@@ -552,20 +539,6 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 }
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        // Dock：最常用的 4 个应用
-        DockBar(
-            apps = dockApps,
-            onLaunch = { app ->
-                AppUsageTracker.recordLaunch(context, app.packageName)
-                dockTick++ // 立刻刷新排序
-                val intent = context.packageManager
-                    .getLaunchIntentForPackage(app.packageName)
-                intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                if (intent != null) context.startActivity(intent)
-                else Toast.makeText(context, "无法打开「${app.label}」", Toast.LENGTH_SHORT).show()
-            }
-        )
     }
 
     // 聆听中 Dialog
@@ -637,42 +610,6 @@ private fun ClockHeader() {
             fontSize = 14.sp,
             color = AILauncherColors.Hint
         )
-    }
-}
-
-/** 底部 Dock：最常用的 4 个应用（图标直达） */
-@Composable
-private fun DockBar(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
-    Card(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp, horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            apps.forEach { app ->
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable { onLaunch(app) }
-                        .padding(4.dp)
-                ) {
-                    AppIconImage(
-                        drawable = app.icon,
-                        contentDescription = app.label.toString(),
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                    )
-                }
-            }
-        }
     }
 }
 

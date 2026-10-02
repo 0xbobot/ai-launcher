@@ -81,6 +81,11 @@ import java.util.Locale
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.exp
+import kotlin.math.roundToInt
 
 /**
  * 全部应用列表内容（含 A-Z 快速索引），可嵌入可拖动 BottomSheet。
@@ -90,6 +95,7 @@ import kotlinx.coroutines.launch
  * - 搜索态隐藏索引条；搜索大小写不敏感，imeAction=Search
  * - 长按应用可整理分类（加入分组 / 新建分类 / 恢复自动）
  * - 启动应用时记录频次（Dock 常用排序用）
+ * - [showSearch]=false 时隐藏搜索框（上拉 Dock 全屏态）
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -99,6 +105,7 @@ fun AllAppsContent(
     nestedScrollConnection: NestedScrollConnection? = null,
     onSearchFocus: () -> Unit = {},
     showIndexBar: Boolean = true,
+    showSearch: Boolean = true,
     topPadding: Dp = 12.dp
 ) {
     val context = LocalContext.current
@@ -142,6 +149,7 @@ fun AllAppsContent(
     }
     val letters = remember { ('A'..'Z').toList() + '#' }
     var activeLetter by remember { mutableStateOf<Char?>(null) }
+    var barActiveIndex by remember { mutableStateOf<Int?>(null) }
     var hideJob by remember { mutableStateOf<Job?>(null) }
 
     fun jumpTo(letter: Char) {
@@ -176,55 +184,14 @@ fun AllAppsContent(
             .padding(horizontal = 20.dp)
     ) {
         Spacer(modifier = Modifier.height(topPadding))
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Filled.Search, contentDescription = null, tint = AILauncherColors.Hint)
-                Spacer(modifier = Modifier.width(8.dp))
-                TextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("搜索应用", color = AILauncherColors.Hint) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .onFocusChanged {
-                            if (it.isFocused) onSearchFocus()
-                            else keyboardController?.hide()
-                        },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                    }),
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) {
-                                Icon(
-                                    Icons.Filled.Close,
-                                    contentDescription = "清空",
-                                    tint = AILauncherColors.Hint
-                                )
-                            }
-                        }
-                    },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    )
-                )
-            }
+        if (showSearch) {
+            AllAppsSearchBar(
+                query = query,
+                onQueryChange = { query = it },
+                onSearchFocus = onSearchFocus
+            )
+            Spacer(modifier = Modifier.height(8.dp))
         }
-        Spacer(modifier = Modifier.height(8.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -277,80 +244,24 @@ fun AllAppsContent(
                 }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
             }
-            // 右侧 A-Z 快速索引条（搜索态 / 半屏以下隐藏）
+            // 右侧弧形 A-Z 导航：平时收拢窄条，按住后字母沿高斯弧线向屏内展开，
+            // 当前字母放大 + 左侧气泡，列表跟手滚动，松手回弹
             if (showIndexBar && !searching && groups.isNotEmpty()) {
-                BoxWithConstraints(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .fillMaxHeight()
-                        .width(28.dp)
-                ) {
-                    // maxHeight 只在 BoxWithConstraints 内容作用域可见，
-                    // 必须在 pointerInput 外先算好像素高度再传入手势闭包
-                    val hPx = with(density) { maxHeight.toPx() }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .pointerInput(letters) {
-                                detectTapGestures(
-                                    onTap = { offset ->
-                                        val i = ((offset.y / hPx) * letters.size)
-                                            .toInt().coerceIn(0, letters.size - 1)
-                                        jumpTo(letters[i])
-                                    }
-                                )
-                            }
-                            .pointerInput(letters) {
-                                detectVerticalDragGestures(
-                                    onDragEnd = { /* hideJob 的 600ms 计时负责渐隐 */ },
-                                    onVerticalDrag = { change, _ ->
-                                        change.consume()
-                                        val i = ((change.position.y / hPx) * letters.size)
-                                            .toInt().coerceIn(0, letters.size - 1)
-                                        jumpTo(letters[i])
-                                    }
-                                )
-                            },
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        letters.forEach { letter ->
-                            Text(
-                                text = letter.toString(),
-                                fontSize = 10.sp,
-                                color = if (letter == activeLetter) AILauncherColors.Accent
-                                else AILauncherColors.Hint,
-                                fontWeight = if (letter == activeLetter) FontWeight.Bold
-                                else FontWeight.Normal,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                ArcIndexBar(
+                    letters = letters,
+                    activeIndex = barActiveIndex,
+                    onIndex = { i ->
+                        if (i < 0) {
+                            barActiveIndex = null
+                            activeLetter = null
+                            hideJob?.cancel()
+                        } else {
+                            barActiveIndex = i
+                            jumpTo(letters[i])
                         }
-                    }
-                }
-            }
-            // 中央悬浮大字母指示器（alpha 动画实现渐显渐隐）
-            val indicatorAlpha by animateFloatAsState(
-                targetValue = if (activeLetter != null) 1f else 0f,
-                label = "letterIndicatorAlpha"
-            )
-            if (indicatorAlpha > 0.01f) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(72.dp)
-                        .clip(CircleShape)
-                        .background(AILauncherColors.Accent)
-                        .alpha(indicatorAlpha),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = activeLetter?.toString().orEmpty(),
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
+                    },
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                )
             }
         }
     }
@@ -385,6 +296,108 @@ private fun AppRow(app: AppInfo, onLaunch: () -> Unit, onLongClick: () -> Unit) 
             fontSize = 16.sp,
             color = AILauncherColors.Title
         )
+    }
+}
+
+/**
+ * 弧形 A-Z 快速导航（v0.10）：
+ * - 平时是 20dp 收拢窄条，不占地方
+ * - 按住后 26 个字母沿高斯弧线向屏幕内侧展开（越靠近手指越大），
+ *   当前字母左侧弹出气泡；拖动时列表跟手 scrollToItem，松手回弹收拢
+ */
+@Composable
+private fun ArcIndexBar(
+    letters: List<Char>,
+    activeIndex: Int?,
+    onIndex: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier = modifier.fillMaxHeight().width(48.dp)) {
+        val hPx = constraints.maxHeight.toFloat()
+        if (hPx <= 0f || letters.isEmpty()) return@BoxWithConstraints
+        val rowHpx = hPx / letters.size
+        val bulgePx = with(density) { 40.dp.toPx() }
+        // 整块可触摸（含点按与纵向拖动）
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .pointerInput(letters, hPx) {
+                    detectTapGestures(onTap = { offset ->
+                        val i = ((offset.y / hPx) * letters.size)
+                            .toInt().coerceIn(letters.indices)
+                        onIndex(i)
+                    })
+                }
+                .pointerInput(letters, hPx) {
+                    detectVerticalDragGestures(
+                        onDragEnd = { onIndex(-1) },
+                        onDragCancel = { onIndex(-1) },
+                        onVerticalDrag = { change, _ ->
+                            change.consume()
+                            val i = ((change.position.y / hPx) * letters.size)
+                                .toInt().coerceIn(letters.indices)
+                            onIndex(i)
+                        }
+                    )
+                }
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(24.dp)
+                .fillMaxHeight(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            letters.forEachIndexed { i, ch ->
+                val d = if (activeIndex != null) (i - activeIndex).toFloat() else 999f
+                val gTarget = if (activeIndex != null) exp(-(d * d) / 15.68f) else 0f
+                val g by animateFloatAsState(
+                    targetValue = gTarget,
+                    animationSpec = tween(120),
+                    label = "arcG"
+                )
+                Text(
+                    text = ch.toString(),
+                    fontSize = 10.sp,
+                    color = if (g > 0.5f) AILauncherColors.Accent else AILauncherColors.Hint,
+                    fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier.graphicsLayer {
+                        translationX = -bulgePx * g
+                        val sc = 1f + g
+                        scaleX = sc
+                        scaleY = sc
+                        alpha = 0.45f + 0.55f * g
+                    }
+                )
+            }
+        }
+        // 当前字母气泡（字母行左侧）
+        activeIndex?.let { idx ->
+            val rPx = with(density) { 22.dp.toPx() }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset {
+                        IntOffset(
+                            0,
+                            (idx * rowHpx + rowHpx / 2f - rPx).roundToInt()
+                        )
+                    }
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(AILauncherColors.Accent),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = letters[idx].toString(),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        }
     }
 }
 
@@ -522,4 +535,63 @@ private fun OrganizeDialog(app: AppInfo, onDismiss: () -> Unit) {
             }
         }
     )
+}
+
+/** 搜索框（showSearch=false 时不渲染） */
+@Composable
+private fun AllAppsSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onSearchFocus: () -> Unit
+) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Filled.Search, contentDescription = null, tint = AILauncherColors.Hint)
+            Spacer(modifier = Modifier.width(8.dp))
+            TextField(
+                value = query,
+                onValueChange = onQueryChange,
+                placeholder = { Text("搜索应用", color = AILauncherColors.Hint) },
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged {
+                        if (it.isFocused) onSearchFocus()
+                        else keyboardController?.hide()
+                    },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                }),
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { onQueryChange("") }) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "清空",
+                                tint = AILauncherColors.Hint
+                            )
+                        }
+                    }
+                },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
+                )
+            )
+        }
+    }
 }
