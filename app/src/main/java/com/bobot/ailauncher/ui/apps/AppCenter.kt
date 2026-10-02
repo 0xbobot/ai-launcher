@@ -3,6 +3,10 @@ package com.bobot.ailauncher.ui.apps
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -53,6 +57,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -60,8 +66,10 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppClassifier
@@ -77,9 +85,13 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.Collator
 import java.util.Locale
+import kotlin.math.exp
+import kotlin.math.roundToInt
 
 /**
  * 应用中心（v0.14.1，Bob 新设计）：D3 全屏单列表。
@@ -416,7 +428,8 @@ private fun rememberPullDownConnection(
 /**
  * 应用中心定位 rail（v0.14.1：只做定位，不做视图切换）：
  * 首个"类"跳回顶部整个分类区，后面 A-Z 字母跳转对应字母；
- * 点按/纵向拖动；惯用手决定在左还是右
+ * 点按/纵向拖动；字母波浪避让拇指（v0.13 高斯波浪移植：字母列不动，
+ * 只有波浪往拇指反方向偏移 64dp + 气泡跟随）；惯用手决定在左还是右
  */
 @Composable
 private fun CenterRail(
@@ -427,16 +440,43 @@ private fun CenterRail(
     modifier: Modifier = Modifier,
     heightFraction: Float = 0.6f
 ) {
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
     val items = remember(letters) { listOf('类') + letters }
     var activeIndex by remember { mutableStateOf<Int?>(null) }
+    var hideJob by remember { mutableStateOf<Job?>(null) }
+    // 右手：-1（往左偏/向左展开）；左手：+1（往右偏/向右展开）
+    val dirSign = if (handed == UiPrefs.Handed.RIGHT) -1f else 1f
+    val bulgePx = with(density) { 40.dp.toPx() }
+    val shiftPx = with(density) { 64.dp.toPx() }
+    val waveShiftX by animateFloatAsState(
+        targetValue = if (activeIndex != null) dirSign * shiftPx else 0f,
+        animationSpec = spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = 0.85f
+        ),
+        label = "railWaveShift"
+    )
+
+    fun poke(i: Int) {
+        activeIndex = i
+        if (i == 0) onJumpTop() else onJumpLetter(items[i])
+        hideJob?.cancel()
+        hideJob = scope.launch {
+            delay(600)
+            activeIndex = null
+        }
+    }
+
     BoxWithConstraints(
         modifier = modifier
             .fillMaxHeight(heightFraction)
-            .width(40.dp)
+            .width(48.dp)
     ) {
         val hPx = constraints.maxHeight.toFloat()
         if (hPx <= 0f) return@BoxWithConstraints
-        // 触摸层
+        val rowHpx = hPx / items.size
+        // 触摸层：整块可触摸（点按 + 纵向拖动），不偏移
         Box(
             modifier = Modifier
                 .matchParentSize()
@@ -444,8 +484,7 @@ private fun CenterRail(
                     detectTapGestures(onTap = { offset ->
                         val i = ((offset.y / hPx) * items.size)
                             .toInt().coerceIn(items.indices)
-                        activeIndex = i
-                        if (i == 0) onJumpTop() else onJumpLetter(items[i])
+                        poke(i)
                     })
                 }
                 .pointerInput(items, hPx) {
@@ -462,26 +501,78 @@ private fun CenterRail(
                     )
                 }
         )
-        // 视觉层：等分排布
-        Column(
-            modifier = Modifier
-                .fillMaxHeight()
-                .width(40.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            items.forEachIndexed { i, ch ->
+        // 视觉层：字母列不动；波浪（当前字母放大 + 气泡）单独往拇指反方向偏移
+        Box(modifier = Modifier.matchParentSize()) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .width(40.dp)
+                    .fillMaxHeight(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                items.forEachIndexed { i, ch ->
+                    val d = if (activeIndex != null) (i - activeIndex!!).toFloat() else 999f
+                    val gTarget = if (activeIndex != null) exp(-(d * d) / 15.68f) else 0f
+                    val g by animateFloatAsState(
+                        targetValue = gTarget,
+                        animationSpec = tween(120),
+                        label = "railG"
+                    )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = ch.toString(),
+                            fontSize = 12.sp,
+                            color = if (i == 0 || g > 0.5f) AILauncherColors.Accent
+                            else AILauncherColors.Title.copy(alpha = 0.85f),
+                            fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.SemiBold,
+                            maxLines = 1,
+                            textAlign = TextAlign.Center,
+                            style = TextStyle(
+                                shadow = Shadow(
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    offset = Offset(0f, 1f),
+                                    blurRadius = 2f
+                                )
+                            ),
+                            modifier = Modifier.graphicsLayer {
+                                // 高斯波浪：越靠近手指越大；波浪整体再往拇指反方向避让
+                                translationX = dirSign * bulgePx * g + waveShiftX * g
+                                val sc = 1f + g
+                                scaleX = sc
+                                scaleY = sc
+                            }
+                        )
+                    }
+                }
+            }
+            // 当前字符气泡：拇指反方向，随波浪一起偏移，不被拇指盖住
+            activeIndex?.let { idx ->
+                val rPx = with(density) { 22.dp.toPx() }
                 Box(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .align(
+                            if (handed == UiPrefs.Handed.RIGHT) Alignment.TopStart
+                            else Alignment.TopEnd
+                        )
+                        .offset {
+                            IntOffset(
+                                waveShiftX.roundToInt(),
+                                (idx * rowHpx + rowHpx / 2f - rPx).roundToInt()
+                            )
+                        }
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(AILauncherColors.Accent),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = ch.toString(),
-                        fontSize = 12.sp,
-                        fontWeight = if (activeIndex == i) FontWeight.Bold else FontWeight.SemiBold,
-                        color = if (i == 0) AILauncherColors.Accent
-                        else if (activeIndex == i) AILauncherColors.Accent
-                        else AILauncherColors.Title.copy(alpha = 0.85f),
-                        textAlign = TextAlign.Center
+                        text = items[idx].toString(),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
                 }
             }
