@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 主 sparkle -->
+    <path
+        android:fillColor="#F4F2EE"
+        android:pathData="M54,22 C57,44 64,51 86,54 C64,57 57,64 54,86 C51,64 44,57 22,54 C44,51 51,44 54,22 Z" />
+    <!-- 点缀小 sparkle（金色） -->
+    <path
+        android:fillColor="#C9A227"
+        android:pathData="M78,30 C79,38 82,41 90,42 C82,43 79,46 78,54 C77,46 74,43 66,42 C74,41 77,38 78,30 Z" />
+</vector>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与 Compose 侧 AILauncherTheme 保持一致：暖灰底、无 ActionBar -->
+    <style name="Theme.AILauncher" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F4F2EE</item>
+        <item name="android:statusBarColor">#F4F2EE</item>
+        <item name="android:navigationBarColor">#F4F2EE</item>
+    </style>
+</resources>
