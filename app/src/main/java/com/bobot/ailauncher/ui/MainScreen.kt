@@ -1,78 +1,75 @@
 package com.bobot.ailauncher.ui
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.bobot.ailauncher.ui.apps.AllAppsScreen
 import com.bobot.ailauncher.ui.capability.CapabilityScreen
 import com.bobot.ailauncher.ui.home.HomeScreen
+import com.bobot.ailauncher.ui.settings.SettingsScreen
 
-sealed class Dest(val route: String, val label: String, val icon: ImageVector) {
-    data object Home : Dest("home", "首页", Icons.Filled.Home)
-    data object Capability : Dest("capability", "能力", Icons.Filled.AutoAwesome)
-    data object Apps : Dest("apps", "应用", Icons.Filled.Apps)
-}
-
+/**
+ * v0.2 导航：真桌面的全屏手势导航，没有底部 tab。
+ * - HorizontalPager（2 页，默认 page0 首页）：首页左滑 → 能力页，能力页右滑 → 首页
+ * - 全部应用是全屏抽屉 overlay（首页上滑 / 右上角按钮 / 能力页底部链接打开，下滑把手关闭）
+ * - NavHost 只剩 "pager" 和 "settings"（能力页齿轮进入）
+ */
 @Composable
 fun MainScreen() {
     val navController = rememberNavController()
-    val items = listOf(Dest.Home, Dest.Capability, Dest.Apps)
+    NavHost(navController = navController, startDestination = "pager") {
+        composable("pager") {
+            PagerHost(onOpenSettings = { navController.navigate("settings") })
+        }
+        composable("settings") {
+            SettingsScreen(onBack = { navController.popBackStack() })
+        }
+    }
+}
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar(containerColor = Color.White) {
-                val backStackEntry by navController.currentBackStackEntryAsState()
-                val currentRoute = backStackEntry?.destination?.route
-                items.forEach { dest ->
-                    NavigationBarItem(
-                        selected = currentRoute == dest.route,
-                        onClick = {
-                            navController.navigate(dest.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(dest.icon, contentDescription = dest.label) },
-                        label = { Text(dest.label) }
-                    )
-                }
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PagerHost(onOpenSettings: () -> Unit) {
+    // 注意：page0=首页（默认），page1=能力页——这样"首页左滑进能力页、能力页右滑回首页"
+    // 的手势才成立（原 spec 的 page 编号与手势描述矛盾，按手势行为实现）
+    val pagerState = rememberPagerState(initialPage = 0) { 2 }
+    var showAppDrawer by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            when (page) {
+                0 -> HomeScreen(
+                    onOpenAppDrawer = { showAppDrawer = true }
+                )
+                else -> CapabilityScreen(
+                    onOpenAllApps = { showAppDrawer = true },
+                    onOpenSettings = onOpenSettings
+                )
             }
         }
-    ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = Dest.Home.route,
-            modifier = Modifier.padding(padding)
+        AnimatedVisibility(
+            visible = showAppDrawer,
+            enter = slideInVertically(initialOffsetY = { it }),
+            exit = slideOutVertically(targetOffsetY = { it })
         ) {
-            composable(Dest.Home.route) { HomeScreen() }
-            composable(Dest.Capability.route) {
-                CapabilityScreen(onOpenAllApps = {
-                    navController.navigate(Dest.Apps.route) {
-                        launchSingleTop = true
-                    }
-                })
-            }
-            composable(Dest.Apps.route) { AllAppsScreen() }
+            AllAppsScreen(onClose = { showAppDrawer = false })
         }
     }
 }

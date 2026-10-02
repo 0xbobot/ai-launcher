@@ -1,8 +1,11 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,15 +19,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,7 +38,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,9 +50,14 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
 import java.text.Collator
 import java.util.Locale
 
+/**
+ * 全部应用列表。
+ * @param onClose 抽屉模式：非空时顶部显示把手（下滑关闭）+ 关闭按钮；为空时显示普通大标题。
+ */
 @Composable
-fun AllAppsScreen() {
+fun AllAppsScreen(onClose: (() -> Unit)? = null) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     var query by remember { mutableStateOf("") }
     val apps = remember {
         val collator = Collator.getInstance(Locale.CHINA)
@@ -60,9 +73,54 @@ fun AllAppsScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(AILauncherColors.Background)
             .padding(horizontal = 20.dp)
     ) {
-        Spacer(modifier = Modifier.height(16.dp))
+        if (onClose != null) {
+            var dragAccum by remember { mutableFloatStateOf(0f) }
+            val closeThresholdPx = with(density) { 90.dp.toPx() }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures(
+                            onDragEnd = { dragAccum = 0f },
+                            onDragCancel = { dragAccum = 0f },
+                            onVerticalDrag = { change, dragAmount ->
+                                if (dragAmount > 0f) {
+                                    dragAccum += dragAmount
+                                    change.consume()
+                                }
+                                if (dragAccum > closeThresholdPx) {
+                                    dragAccum = 0f
+                                    onClose()
+                                }
+                            }
+                        )
+                    }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Spacer(modifier = Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(AILauncherColors.Divider)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "关闭",
+                        tint = AILauncherColors.Hint
+                    )
+                }
+            }
+        } else {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
         Text(
             text = "全部应用",
             fontSize = 24.sp,
@@ -128,7 +186,7 @@ fun AllAppsScreen() {
                     )
                 }
             }
-            item { Spacer(modifier = Modifier.height(72.dp)) }
+            item { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
 }

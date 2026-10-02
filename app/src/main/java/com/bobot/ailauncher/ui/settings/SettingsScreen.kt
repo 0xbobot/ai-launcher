@@ -1,0 +1,154 @@
+package com.bobot.ailauncher.ui.settings
+
+import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.data.LlmConfig
+import com.bobot.ailauncher.data.LlmRouter
+import com.bobot.ailauncher.ui.theme.AILauncherColors
+import kotlinx.coroutines.launch
+
+/**
+ * 大模型设置：API Key / Base URL / 模型名，存 SharedPreferences "llm"。
+ * 「测试连接」发一个极简请求验证连通性。
+ */
+@Composable
+fun SettingsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var apiKey by remember { mutableStateOf(LlmConfig.getApiKey(context)) }
+    var baseUrl by remember { mutableStateOf(LlmConfig.getBaseUrl(context)) }
+    var model by remember { mutableStateOf(LlmConfig.getModel(context)) }
+    var testing by remember { mutableStateOf(false) }
+
+    fun persist() = LlmConfig.save(context, apiKey, baseUrl, model)
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "返回",
+                        tint = AILauncherColors.Title
+                    )
+                }
+                Text(
+                    text = "大模型设置",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AILauncherColors.Title
+                )
+            }
+        }
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "意图理解由大模型驱动（OpenAI 兼容接口）。不填 Key 时，意图框退化为关键词匹配演示版。",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Hint
+                    )
+                    OutlinedTextField(
+                        value = apiKey,
+                        onValueChange = { apiKey = it; persist() },
+                        label = { Text("API Key") },
+                        placeholder = { Text("sk-…", color = AILauncherColors.Hint) },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = baseUrl,
+                        onValueChange = { baseUrl = it; persist() },
+                        label = { Text("Base URL") },
+                        placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.Hint) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = { model = it; persist() },
+                        label = { Text("模型") },
+                        placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.Hint) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(
+                        onClick = {
+                            if (testing) return@Button
+                            persist()
+                            if (apiKey.isBlank()) {
+                                Toast.makeText(context, "请先填写 API Key", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            testing = true
+                            scope.launch {
+                                val ok = LlmRouter.testConnection(
+                                    baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
+                                    apiKey,
+                                    model.ifBlank { LlmConfig.DEFAULT_MODEL }
+                                )
+                                testing = false
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "连接成功" else "连接失败，请检查 Key / 地址 / 模型",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.Accent)
+                    ) {
+                        Text(if (testing) "测试中…" else "测试连接")
+                    }
+                }
+            }
+        }
+        item { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+}

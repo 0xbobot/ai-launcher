@@ -1,93 +1,273 @@
 package com.bobot.ailauncher.ui.home
 
+import android.Manifest
+import android.content.ContentUris
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.provider.CalendarContract
 import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.bobot.ailauncher.data.CapabilityRegistry
+import com.bobot.ailauncher.data.LlmConfig
+import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SimpleNotification
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+/** 今日日历事件 */
+private data class CalEvent(val title: String, val begin: Long, val location: String)
+
 @Composable
-fun HomeScreen() {
+fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     var input by remember { mutableStateOf("") }
+    var thinking by remember { mutableStateOf(false) }
     val notifications by NotificationRepository.notifications.collectAsState()
 
-    fun submit() {
-        val text = input.trim()
-        if (text.isBlank()) return
+    // ---------- 上滑打开应用抽屉：列表在顶部且上滑累计超过 120dp ----------
+    val listState = rememberLazyListState()
+    val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
+    val swipeThresholdPx = with(density) { 120.dp.toPx() }
+    val drawerScrollConnection = remember {
+        object : NestedScrollConnection {
+            var accum = 0f
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput) return Offset.Zero
+                val atTop = listState.firstVisibleItemIndex == 0 &&
+                    listState.firstVisibleItemScrollOffset == 0
+                if (available.y < 0f && atTop) {
+                    accum += -available.y
+                    if (accum >= swipeThresholdPx) {
+                        accum = 0f
+                        openDrawerState()
+                        return available // 吞掉本次手势，不让列表滚动
+                    }
+                    return available // 累计中也吞掉，避免列表跟着动
+                }
+                if (available.y > 0f) accum = 0f // 换向清零
+                return Offset.Zero
+            }
+        }
+    }
+
+    // ---------- 语音输入 ----------
+    var listening by remember { mutableStateOf(false) }
+    var recognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    fun startListening() {
+        try {
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                Toast.makeText(context, "当前设备不支持语音识别", Toast.LENGTH_SHORT).show()
+                return
+            }
+            recognizer?.destroy()
+            val r = SpeechRecognizer.createSpeechRecognizer(context)
+            recognizer = r
+            r.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) { listening = true }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() { listening = false }
+                override fun onError(error: Int) { listening = false }
+                override fun onResults(results: Bundle?) {
+                    listening = false
+                    val text = results
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                    if (!text.isNullOrBlank()) input = text
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.CHINA.toString())
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            }
+            r.startListening(intent)
+        } catch (_: Exception) {
+            listening = false
+            Toast.makeText(context, "语音识别启动失败", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startListening()
+        else Toast.makeText(context, "需要录音权限才能语音输入", Toast.LENGTH_SHORT).show()
+    }
+    DisposableEffect(Unit) {
+        onDispose { recognizer?.destroy() }
+    }
+
+    // ---------- 日历 ----------
+    var calEvents by remember { mutableStateOf<List<CalEvent>?>(null) } // null = 未授权
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        calEvents = if (granted) loadTodayEvents(context) else emptyList()
+    }
+    LaunchedEffect(Unit) {
+        if (hasCalendarPermission(context)) {
+            calEvents = loadTodayEvents(context)
+        }
+    }
+
+    // ---------- 意图提交：有 Key 走 LLM，无 Key 走关键词 ----------
+    fun keywordFallback(text: String) {
         val capId = routeKeyword(text)
         val ok = capId?.let { CapabilityRegistry.resolveAndLaunch(context, it) } ?: false
         if (!ok) {
-            Toast.makeText(context, "演示版：已收到意图\"$text\"", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "已收到意图\"$text\"", Toast.LENGTH_SHORT).show()
         }
-        input = ""
+    }
+
+    fun submit() {
+        val text = input.trim()
+        if (text.isBlank() || thinking) return
+        if (!LlmConfig.hasKey(context)) {
+            keywordFallback(text)
+            input = ""
+            return
+        }
+        thinking = true
+        scope.launch {
+            try {
+                val apiKey = LlmConfig.getApiKey(context)
+                val baseUrl = LlmConfig.getBaseUrl(context)
+                val model = LlmConfig.getModel(context)
+                val result = withContext(Dispatchers.IO) {
+                    LlmRouter.route(baseUrl, apiKey, model, text, CapabilityRegistry.validIds())
+                }
+                if (result != null && result.capabilityId != "none") {
+                    val ok = CapabilityRegistry.resolveAndLaunch(
+                        context, result.capabilityId, result.params
+                    )
+                    if (result.reply.isNotBlank()) {
+                        Toast.makeText(context, result.reply, Toast.LENGTH_SHORT).show()
+                    } else if (!ok) {
+                        Toast.makeText(context, "能力暂不可用", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    keywordFallback(text)
+                }
+            } catch (_: Exception) {
+                keywordFallback(text)
+            } finally {
+                thinking = false
+                input = ""
+            }
+        }
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .nestedScroll(drawerScrollConnection),
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 问候
+        // 问候 + 应用抽屉兜底入口
         item {
-            Column {
-                Text(
-                    text = greeting(),
-                    fontSize = 30.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AILauncherColors.Title
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = todayText(),
-                    fontSize = 14.sp,
-                    color = AILauncherColors.Hint
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = greeting(),
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AILauncherColors.Title
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = todayText(),
+                        fontSize = 14.sp,
+                        color = AILauncherColors.Hint
+                    )
+                }
+                TextButton(onClick = onOpenAppDrawer) {
+                    Icon(
+                        Icons.Filled.Apps,
+                        contentDescription = null,
+                        tint = AILauncherColors.Hint,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("应用", color = AILauncherColors.Hint, fontSize = 14.sp)
+                }
             }
         }
         // 意图输入框
@@ -123,11 +303,36 @@ fun HomeScreen() {
                             unfocusedIndicatorColor = Color.Transparent
                         )
                     )
+                    IconButton(onClick = {
+                        if (listening) {
+                            try { recognizer?.stopListening() } catch (_: Exception) { }
+                        } else if (hasAudioPermission(context)) {
+                            startListening()
+                        } else {
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }) {
+                        Icon(
+                            Icons.Filled.Mic,
+                            contentDescription = if (listening) "正在聆听，点按停止" else "语音输入",
+                            tint = if (listening) AILauncherColors.Accent else AILauncherColors.Hint
+                        )
+                    }
+                }
+            }
+            if (thinking) {
+                Row(
+                    modifier = Modifier.padding(start = 8.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
-                        Icons.Filled.Mic,
-                        contentDescription = "语音输入（演示版暂为装饰）",
-                        tint = AILauncherColors.Hint
+                        Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        tint = AILauncherColors.Accent,
+                        modifier = Modifier.size(14.dp)
                     )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("思考中…", fontSize = 13.sp, color = AILauncherColors.Hint)
                 }
             }
         }
@@ -140,6 +345,55 @@ fun HomeScreen() {
                 color = AILauncherColors.Title
             )
         }
+        // 今日日程（日历）
+        when {
+            calEvents == null -> item {
+                TextButton(
+                    onClick = {
+                        calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "授权日历后显示今日日程",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Hint
+                    )
+                }
+            }
+            calEvents!!.isNotEmpty() -> items(calEvents!!, key = { it.begin }) { e ->
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = AILauncherColors.AccentSoft),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = e.title.ifBlank { "（无标题）" },
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AILauncherColors.Title
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row {
+                            Text(
+                                text = formatTime(e.begin),
+                                fontSize = 13.sp,
+                                color = AILauncherColors.Body
+                            )
+                            if (e.location.isNotBlank()) {
+                                Text(
+                                    text = " · ${e.location}",
+                                    fontSize = 13.sp,
+                                    color = AILauncherColors.Body
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 通知卡片流
         if (!isNotificationAccessGranted(context)) {
             item {
                 Card(
@@ -185,11 +439,11 @@ fun HomeScreen() {
                 NotificationCard(n)
             }
         }
-        item { Spacer(modifier = Modifier.height(72.dp)) }
+        item { Spacer(modifier = Modifier.height(24.dp)) }
     }
 }
 
-/** 演示版意图路由：关键词 → capabilityId */
+/** 演示版意图路由：关键词 → capabilityId（无 Key 时的降级路径） */
 private fun routeKeyword(raw: String): String? {
     val q = raw.lowercase(Locale.ROOT)
     return when {
@@ -199,6 +453,60 @@ private fun routeKeyword(raw: String): String? {
         q.contains("航班") || q.contains("飞机") -> "hangban"
         q.contains("酒店") -> "jiudian"
         else -> null
+    }
+}
+
+private fun hasCalendarPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(
+        context, Manifest.permission.READ_CALENDAR
+    ) == PackageManager.PERMISSION_GRANTED
+
+private fun hasAudioPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(
+        context, Manifest.permission.RECORD_AUDIO
+    ) == PackageManager.PERMISSION_GRANTED
+
+/** 读取今天 0 点 ~ 24 点的日历事件，取前 3 个 */
+private fun loadTodayEvents(context: Context): List<CalEvent> {
+    return try {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val start = cal.timeInMillis
+        cal.add(Calendar.DAY_OF_YEAR, 1)
+        val end = cal.timeInMillis
+        val builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
+        ContentUris.appendId(builder, start)
+        ContentUris.appendId(builder, end)
+        val cursor = context.contentResolver.query(
+            builder.build(),
+            arrayOf(
+                CalendarContract.Instances.TITLE,
+                CalendarContract.Instances.BEGIN,
+                CalendarContract.Instances.EVENT_LOCATION
+            ),
+            null, null,
+            CalendarContract.Instances.BEGIN + " ASC"
+        )
+        val list = mutableListOf<CalEvent>()
+        cursor?.use {
+            val ti = it.getColumnIndex(CalendarContract.Instances.TITLE)
+            val bi = it.getColumnIndex(CalendarContract.Instances.BEGIN)
+            val li = it.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
+            while (it.moveToNext() && list.size < 3) {
+                list += CalEvent(
+                    title = if (ti >= 0) it.getString(ti).orEmpty() else "",
+                    begin = if (bi >= 0) it.getLong(bi) else 0L,
+                    location = if (li >= 0) it.getString(li).orEmpty() else ""
+                )
+            }
+        }
+        list
+    } catch (_: Exception) {
+        emptyList()
     }
 }
 

@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.Train
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -93,7 +95,7 @@ fun capabilityIcon(name: String): ImageVector = when (name) {
 }
 
 @Composable
-fun CapabilityScreen(onOpenAllApps: () -> Unit) {
+fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
     CapabilityRegistry.load(context)
     var query by remember { mutableStateOf("") }
@@ -114,18 +116,29 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Text(
-                text = "能力",
-                fontSize = 30.sp,
-                fontWeight = FontWeight.Bold,
-                color = AILauncherColors.Title
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "按你要做的事组织 · App 是能力的供应商",
-                fontSize = 13.sp,
-                color = AILauncherColors.Hint
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "能力",
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AILauncherColors.Title
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "按你要做的事组织 · App 是能力的供应商",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Hint
+                    )
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(
+                        Icons.Filled.Settings,
+                        contentDescription = "大模型设置",
+                        tint = AILauncherColors.Hint
+                    )
+                }
+            }
         }
         item {
             Card(
@@ -165,7 +178,7 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit) {
                     onLaunch = { launchCapability(context, cap) }
                 )
             }
-            item { Spacer(modifier = Modifier.height(72.dp)) }
+            item { Spacer(modifier = Modifier.height(24.dp)) }
         } else {
             // 常用：横向一排真实应用图标
             item {
@@ -239,7 +252,7 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit) {
                         fontSize = 14.sp
                     )
                 }
-                Spacer(modifier = Modifier.height(72.dp))
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }

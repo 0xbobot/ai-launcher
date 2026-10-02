@@ -4,6 +4,10 @@
 
     <!-- 通知渠道（API 33+，桌面自身发通知时用） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 日历：首页「今日日程」卡片 -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- 录音：意图框语音输入 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 用量统计：设置 > 特殊应用权限 中手动开启 -->
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"

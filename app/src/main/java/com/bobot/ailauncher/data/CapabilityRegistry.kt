@@ -72,6 +72,10 @@ object CapabilityRegistry {
     fun find(id: String): Capability? =
         groups.flatMap { it.capabilities }.find { it.id == id }
 
+    /** 全部 capability id，供 LLM 路由做白名单校验 */
+    fun validIds(): Set<String> =
+        groups.flatMap { it.capabilities }.map { it.id }.toSet()
+
     fun resolveAndLaunch(
         context: Context,
         capabilityId: String,
