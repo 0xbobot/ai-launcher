@@ -26,6 +26,11 @@ object NotificationRepository {
         _notifications.value = list
     }
 
+    /** 本地忽略一条通知（从首页移除；该应用有新通知时仍会重新出现） */
+    fun dismiss(n: SimpleNotification) {
+        _notifications.value = _notifications.value.filter { it != n }
+    }
+
     fun setConnected(connected: Boolean) {
         _isConnected.value = connected
     }

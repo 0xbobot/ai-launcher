@@ -15,6 +15,10 @@ import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
@@ -35,6 +39,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.abs
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
@@ -739,16 +745,31 @@ private fun countdownText(begin: Long, now: Long): String {
     else "还有 ${mins / 60} 小时 ${mins % 60} 分"
 }
 
-/** 下一个日程：大卡片突出（标题 / 时间 / 地点 / 倒计时）——玻璃拟态 */
+/** 下一个日程：大卡片突出（标题 / 时间 / 地点 / 倒计时）——玻璃拟态
+ * 手势签名：右滑展开（详情 + 操作），左滑收起；高度弹簧动画 */
 @Composable
 private fun NextEventCard(event: CalEvent, now: Long) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
     Card(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
+        border = BorderStroke(1.dp, AILauncherColors.GlassBorder),
+        modifier = Modifier
+            .fillMaxWidth()
+            .swipeExpandCollapse { expanded = it }
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(12.dp)
+                .animateContentSize(
+                    animationSpec = spring(
+                        stiffness = Spring.StiffnessMediumLow,
+                        dampingRatio = 0.9f
+                    )
+                )
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "接下来",
@@ -786,20 +807,51 @@ private fun NextEventCard(event: CalEvent, now: Long) {
                     )
                 }
             }
+            if (expanded) {
+                Spacer(modifier = Modifier.height(8.dp))
+                if (event.location.isNotBlank()) {
+                    Text(
+                        text = "地点：${event.location}",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Body
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                }
+                TextButton(onClick = {
+                    Toast.makeText(context, "在日历中打开（待接入）", Toast.LENGTH_SHORT).show()
+                }) {
+                    Text("在日历中打开", color = AILauncherColors.Accent)
+                }
+            }
         }
     }
 }
 
+/** 通知卡片：右滑展开（全文 + 操作按钮），左滑收起；高度弹簧动画 */
 @Composable
 private fun NotificationCard(n: SimpleNotification, onOpen: () -> Unit) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
     Card(
         onClick = onOpen,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
+        border = BorderStroke(1.dp, AILauncherColors.GlassBorder),
+        modifier = Modifier
+            .fillMaxWidth()
+            .swipeExpandCollapse { expanded = it }
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(12.dp)
+                .animateContentSize(
+                    animationSpec = spring(
+                        stiffness = Spring.StiffnessMediumLow,
+                        dampingRatio = 0.9f
+                    )
+                )
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = n.appName,
@@ -828,9 +880,52 @@ private fun NotificationCard(n: SimpleNotification, onOpen: () -> Unit) {
                     text = n.text,
                     fontSize = 13.sp,
                     color = AILauncherColors.Body,
-                    maxLines = 2
+                    maxLines = if (expanded) Int.MAX_VALUE else 2
                 )
             }
+            if (expanded) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onOpen) {
+                        Text("打开应用", color = AILauncherColors.Accent)
+                    }
+                    TextButton(onClick = {
+                        NotificationRepository.dismiss(n)
+                    }) {
+                        Text("忽略", color = AILauncherColors.Hint)
+                    }
+                }
+            }
         }
+    }
+}
+
+/**
+ * 手势签名（全 App 统一）：右滑 = 更多（展开），左滑 = 更少（收起）。
+ * 横向专用检测（touch slop 后才消费），与纵向滚动不冲突；点按不受影响。
+ */
+@Composable
+private fun Modifier.swipeExpandCollapse(
+    onExpandedChange: (Boolean) -> Unit
+): Modifier {
+    val density = LocalDensity.current
+    val threshPx = remember(density) { with(density) { 48.dp.toPx() } }
+    val latestChange = rememberUpdatedState(onExpandedChange)
+    return this.pointerInput(Unit) {
+        var accumX = 0f
+        var fired = false
+        detectHorizontalDragGestures(
+            onDragStart = { accumX = 0f; fired = false },
+            onDragCancel = { fired = true },
+            onHorizontalDrag = { change, dragAmount ->
+                change.consume()
+                if (fired) return@detectHorizontalDragGestures
+                accumX += dragAmount
+                if (abs(accumX) > threshPx) {
+                    fired = true
+                    latestChange.value(accumX > 0)
+                }
+            }
+        )
     }
 }

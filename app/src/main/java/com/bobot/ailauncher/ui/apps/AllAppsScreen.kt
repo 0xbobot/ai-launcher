@@ -258,8 +258,8 @@ fun AllAppsContent(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
             }
             // 右侧弧形 A-Z 导航：平时收拢窄条，按住后字母沿高斯弧线向屏内展开，
-            // 当前字母放大 + 气泡（往拇指反方向偏移 64dp，不被拇指盖住），
-            // 列表跟手滚动，松手回弹；惯用手决定 rail 在左还是右
+            // 字母列不动，只有波浪（当前字母放大 + 气泡）往拇指反方向偏移避让；
+            // 列表跟手滚动，松手回弹；惯用手决定 rail 在左还是右、波浪往哪偏
             if (showIndexBar && !searching && groups.isNotEmpty()) {
                 ArcIndexBar(
                     letters = letters,
@@ -319,13 +319,12 @@ private fun AppRow(app: AppInfo, onLaunch: () -> Unit, onLongClick: () -> Unit) 
 }
 
 /**
- * 弧形 A-Z 快速导航（v0.12）：
+ * 弧形 A-Z 快速导航（v0.13）：
  * - 平时是 20dp 收拢窄条，不占地方
  * - 按住后 26 个字母沿高斯弧线向屏幕内侧展开（越靠近手指越大），
- *   当前字母在拇指反方向弹出气泡；拖动时列表跟手 scrollToItem，松手回弹
- * - 拇指遮挡：按住瞬间整组视觉往拇指反方向偏移约 64dp（弹簧），
- *   右手→往左偏，左手→往右偏；触摸层不偏移，映射保持准确
- * - 惯用手：右手 rail 在右、弧线向左展开；左手 rail 在左、弧线向右展开
+ *   字母列本身不动；只有波浪（放大的当前字母 + 气泡）往拇指反方向
+ *   偏移约 64dp（学 Niagara），不被拇指盖住；拖动时列表跟手 scrollToItem，松手回弹
+ * - 惯用手：右手 rail 在右、波浪往左偏；左手 rail 在左、波浪往右偏
  */
 @Composable
 private fun ArcIndexBar(
@@ -347,14 +346,15 @@ private fun ArcIndexBar(
         val rowHpx = hPx / letters.size
         val bulgePx = with(density) { 40.dp.toPx() }
         val shiftPx = with(density) { 64.dp.toPx() }
-        // 按住时整组视觉往拇指反方向偏移（弹簧），字母/气泡不再被拇指盖住
-        val shiftX by animateFloatAsState(
+        // 波浪避让（学 Niagara）：字母列本身不动，只有手指按住处的波浪
+        //（放大的当前字母 + 气泡）往拇指反方向偏移约 64dp，避开拇指遮挡
+        val waveShiftX by animateFloatAsState(
             targetValue = if (activeIndex != null) dirSign * shiftPx else 0f,
             animationSpec = spring(
                 stiffness = Spring.StiffnessMediumLow,
                 dampingRatio = 0.85f
             ),
-            label = "railShift"
+            label = "waveShift"
         )
         // 触摸层：整块可触摸（含点按与纵向拖动），不偏移
         Box(
@@ -380,12 +380,8 @@ private fun ArcIndexBar(
                     )
                 }
         )
-        // 视觉层：字母列 + 气泡，随按住偏移
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .graphicsLayer { translationX = shiftX }
-        ) {
+        // 视觉层：字母列不动；波浪（当前字母放大 + 气泡）单独往拇指反方向偏移
+        Box(modifier = Modifier.matchParentSize()) {
             Column(
                 modifier = Modifier
                     .align(barAlign)
@@ -424,7 +420,8 @@ private fun ArcIndexBar(
                                 )
                             ),
                             modifier = Modifier.graphicsLayer {
-                                translationX = dirSign * bulgePx * g
+                                // 高斯波浪：越靠近手指越大；波浪整体再往拇指反方向避让
+                                translationX = dirSign * bulgePx * g + waveShiftX * g
                                 val sc = 1f + g
                                 scaleX = sc
                                 scaleY = sc
@@ -433,7 +430,8 @@ private fun ArcIndexBar(
                     }
                 }
             }
-            // 当前字母气泡：右手在字母左侧，左手在字母右侧（拇指反方向）
+            // 当前字母气泡：右手在字母左侧，左手在字母右侧（拇指反方向），
+            // 随波浪一起偏移，不被拇指盖住
             activeIndex?.let { idx ->
                 val rPx = with(density) { 22.dp.toPx() }
                 Box(
@@ -444,7 +442,7 @@ private fun ArcIndexBar(
                         )
                         .offset {
                             IntOffset(
-                                0,
+                                waveShiftX.roundToInt(),
                                 (idx * rowHpx + rowHpx / 2f - rPx).roundToInt()
                             )
                         }

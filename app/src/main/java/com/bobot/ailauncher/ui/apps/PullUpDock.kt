@@ -20,6 +20,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -65,7 +66,7 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlin.math.abs
 
 /**
- * 上拉 Dock（v0.12：手势触发 + 弹簧动画，横线手柄彻底去掉）。
+ * 上拉 Dock（v0.13：手势签名「右滑=多，左滑=少」，横线手柄彻底去掉）。
  *
  * 状态机（全部离散档位，弹簧动画切换，不再连续拖动）：
  * - Hidden：什么都不显示
@@ -73,10 +74,10 @@ import kotlin.math.abs
  * - D2：同一张卡片，10 个小图标（2×5，46dp）；d1↔d2 内容 crossfade + scale
  * - D3：不透明整屏替换（App 底色），顶部常用横滑一行 + 全部应用 A-Z 列表 + 弧形 A-Z 导航
  *
- * 手势：
- * - 首页上滑 → D1；D1 内左滑 → D2；D2 内右滑 → D1
- * - D1/D2 内上滑 → D3；D3 下滑 → D2；D2 下滑 → D1；D1 下滑 → Hidden
- * - 点按卡片外部 → Hidden
+ * 手势签名（全 App 统一）：右滑 = 更多，左滑 = 更少
+ * - D1 —右滑→ D2 —右滑→ D3；D3 —左滑→ D2 —左滑→ D1 —左滑→ 隐藏
+ * - 上滑：隐藏→D1（首页上滑）；D1/D2→D3（直接全屏）
+ * - 下滑：D3→D2→D1→隐藏（逐级收回）；点按卡片外部 → 隐藏
  */
 enum class DockState { Hidden, D1, D2, D3 }
 
@@ -184,8 +185,15 @@ fun PullUpDock(
                                     val go = onStateChangeState.value
                                     if (ax > hThreshPx && ax >= ay) {
                                         fired = true
-                                        if (accumX < 0 && state == DockState.D1) go(DockState.D2)
-                                        else if (accumX > 0 && state == DockState.D2) go(DockState.D1)
+                                        if (accumX > 0) {
+                                            // 右滑 = 更多：D1→D2→D3
+                                            if (state == DockState.D1) go(DockState.D2)
+                                            else if (state == DockState.D2) go(DockState.D3)
+                                        } else {
+                                            // 左滑 = 更少：D2→D1→隐藏
+                                            if (state == DockState.D2) go(DockState.D1)
+                                            else if (state == DockState.D1) go(DockState.Hidden)
+                                        }
                                     } else if (ay > vThreshPx && ay > ax) {
                                         fired = true
                                         if (accumY < 0) go(DockState.D3) // 上滑 → 全屏
@@ -261,7 +269,9 @@ fun PullUpDock(
 /**
  * D3 全屏：不透明底色整屏替换。
  * - 顶部"常用"横滑一行（10 个图标，去名）+ 全部应用 A-Z 列表 + 右侧弧形 A-Z 导航
- * - 顶部区域下滑 / 列表到顶继续下滑 → D2
+ * - 顶部区域下滑 / 列表到顶继续下滑 → D2；全屏内左滑 → D2（右滑已到顶，无动作）
+ *   顶部"常用"横滑行是横向滚动区：行内手势由 LazyRow 先消费，这里的 dock 级
+ *   左滑只在非滚动区触发，避免冲突
  */
 @Composable
 private fun FullAppsOverlay(
@@ -303,6 +313,25 @@ private fun FullAppsOverlay(
         modifier = Modifier
             .fillMaxSize()
             .background(AILauncherColors.Background) // 不透明整屏替换，不再透出下层
+            .pointerInput(Unit) {
+                // 全屏内左滑 → D2（手势签名：左滑=更少）
+                var accumX = 0f
+                var fired = false
+                val hPx = with(density) { 48.dp.toPx() }
+                detectHorizontalDragGestures(
+                    onDragStart = { accumX = 0f; fired = false },
+                    onDragCancel = { fired = true },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        if (fired) return@detectHorizontalDragGestures
+                        accumX += dragAmount
+                        if (accumX < -hPx) {
+                            fired = true
+                            onStateChangeState.value(DockState.D2)
+                        }
+                    }
+                )
+            }
     ) {
         // 顶部区域：下滑 → D2
         val headThreshPx = with(density) { 80.dp.toPx() }
