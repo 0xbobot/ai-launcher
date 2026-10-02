@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.util.rebindListener
 
 /** 检测本应用是否已被设为默认桌面 */
 fun isDefaultLauncher(context: Context): Boolean {
@@ -235,6 +236,8 @@ private fun StepNotificationAccess(onNext: () -> Unit, onSkip: () -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
         TextButton(onClick = {
             if (isNotificationAccessGranted(context)) {
+                // 授权发生在 App 运行中，强制重绑让 onListenerConnected 立刻回调
+                rebindListener(context)
                 onNext()
             } else {
                 Toast.makeText(context, "还没检测到，请先在设置中开启", Toast.LENGTH_SHORT).show()

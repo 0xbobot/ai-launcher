@@ -2,6 +2,7 @@ package com.bobot.ailauncher.ui.capability
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Drawable
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -21,32 +22,21 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.DirectionsSubway
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Hotel
-import androidx.compose.material.icons.filled.LocalTaxi
-import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Payments
-import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingBag
-import androidx.compose.material.icons.filled.Store
-import androidx.compose.material.icons.filled.Train
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -67,47 +57,41 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
-import com.bobot.ailauncher.data.Capability
-import com.bobot.ailauncher.data.CapabilityGroup
 import com.bobot.ailauncher.data.CapabilityRegistry
+import com.bobot.ailauncher.data.ResolvedCapability
+import com.bobot.ailauncher.data.ResolvedGroup
 import com.bobot.ailauncher.data.getFrequentApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 
-/** capabilities.json 里的 iconName → Material Icon */
+/** capabilities.json 里的分组 iconName → Material Icon */
 fun capabilityIcon(name: String): ImageVector = when (name) {
     "directions_car" -> Icons.Filled.DirectionsCar
-    "directions_subway" -> Icons.Filled.DirectionsSubway
-    "local_taxi" -> Icons.Filled.LocalTaxi
-    "flight" -> Icons.Filled.Flight
-    "hotel" -> Icons.Filled.Hotel
-    "train" -> Icons.Filled.Train
     "payments" -> Icons.Filled.Payments
-    "account_balance" -> Icons.Filled.AccountBalance
     "work" -> Icons.Filled.Work
-    "date_range" -> Icons.Filled.DateRange
-    "mail" -> Icons.Filled.Mail
-    "store" -> Icons.Filled.Store
-    "restaurant" -> Icons.Filled.Restaurant
-    "shopping_bag" -> Icons.Filled.ShoppingBag
     "home" -> Icons.Filled.Home
+    "shopping_bag" -> Icons.Filled.ShoppingBag
     else -> Icons.Filled.AutoAwesome
 }
 
 @Composable
 fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
-    CapabilityRegistry.load(context)
+    // 本机已安装的真实应用（按 capabilities.json 的包名匹配）；空分组已被丢弃
+    val resolvedGroups = remember { CapabilityRegistry.installedCapabilities(context) }
     var query by remember { mutableStateOf("") }
-    val groups = remember { CapabilityRegistry.groups() }
     val frequent = remember { getFrequentApps(context) }
     var expandedGroups by remember { mutableStateOf(setOf("travel")) } // 出行默认展开
 
-    val searchResults = remember(query, groups) {
+    val searchResults = remember(query, resolvedGroups) {
         val q = query.trim()
         if (q.isBlank()) null
-        else groups.flatMap { g -> g.capabilities.map { g to it } }
-            .filter { (_, cap) -> cap.label.contains(q) }
+        else resolvedGroups.flatMap { g -> g.apps.map { g to it } }
+            .filter { (group, app) ->
+                app.label.contains(q, ignoreCase = true) ||
+                    app.capability.label.contains(q) ||
+                    group.label.contains(q)
+            }
     }
 
     LazyColumn(
@@ -126,7 +110,7 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "按你要做的事组织 · App 是能力的供应商",
+                        text = "按你要做的事组织 · 只显示你装了的应用",
                         fontSize = 13.sp,
                         color = AILauncherColors.Hint
                     )
@@ -171,11 +155,11 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
         }
 
         if (searchResults != null) {
-            items(searchResults, key = { (_, cap) -> cap.id }) { (group, cap) ->
-                CapabilityResultRow(
+            items(searchResults, key = { (_, app) -> app.packageName }) { (group, app) ->
+                SearchResultRow(
                     groupLabel = group.label,
-                    cap = cap,
-                    onLaunch = { launchCapability(context, cap) }
+                    app = app,
+                    onLaunch = { launchResolvedApp(context, app) }
                 )
             }
             item { Spacer(modifier = Modifier.height(24.dp)) }
@@ -227,10 +211,10 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
                     }
                 }
             }
-            // 意图分组
-            items(groups, key = { it.id }) { group ->
+            // 意图分组：只渲染本机已安装的真实应用
+            items(resolvedGroups, key = { it.id }) { group ->
                 val expanded = group.id in expandedGroups
-                GroupCard(
+                ResolvedGroupCard(
                     group = group,
                     expanded = expanded,
                     onToggle = {
@@ -238,7 +222,7 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
                             if (expanded) expandedGroups - group.id
                             else expandedGroups + group.id
                     },
-                    onLaunch = { cap -> launchCapability(context, cap) }
+                    onLaunch = { app -> launchResolvedApp(context, app) }
                 )
             }
             item {
@@ -258,19 +242,19 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
     }
 }
 
-private fun launchCapability(context: Context, cap: Capability) {
-    val ok = CapabilityRegistry.resolveAndLaunch(context, cap.id)
+private fun launchResolvedApp(context: Context, app: ResolvedCapability) {
+    val ok = CapabilityRegistry.launchResolved(context, app)
     if (!ok) {
-        Toast.makeText(context, "演示版：「${cap.label}」暂不可用", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "「${app.label}」暂不可用", Toast.LENGTH_SHORT).show()
     }
 }
 
 @Composable
-private fun GroupCard(
-    group: CapabilityGroup,
+private fun ResolvedGroupCard(
+    group: ResolvedGroup,
     expanded: Boolean,
     onToggle: () -> Unit,
-    onLaunch: (Capability) -> Unit
+    onLaunch: (ResolvedCapability) -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -300,8 +284,8 @@ private fun GroupCard(
                 )
                 if (!expanded) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        group.capabilities.take(3).forEach { cap ->
-                            PackageIconPreview(packageName = cap.packageName)
+                        group.apps.take(3).forEach { app ->
+                            PackageIconPreview(icon = app.icon)
                         }
                     }
                     Spacer(modifier = Modifier.width(4.dp))
@@ -314,21 +298,21 @@ private fun GroupCard(
             }
             if (expanded) {
                 Spacer(modifier = Modifier.height(12.dp))
-                group.capabilities.chunked(3).forEach { row ->
+                group.apps.chunked(4).forEach { row ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        row.forEach { cap ->
-                            CapabilityPill(
-                                cap = cap,
-                                onLaunch = { onLaunch(cap) },
+                        row.forEach { app ->
+                            ResolvedAppCell(
+                                app = app,
+                                onLaunch = { onLaunch(app) },
                                 modifier = Modifier.weight(1f)
                             )
                         }
-                        repeat(3 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                        repeat(4 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
                     }
                 }
             }
@@ -336,43 +320,40 @@ private fun GroupCard(
     }
 }
 
+/** 展开态：真实应用图标 + 应用名 */
 @Composable
-private fun CapabilityPill(
-    cap: Capability,
+private fun ResolvedAppCell(
+    app: ResolvedCapability,
     onLaunch: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = AILauncherColors.Background,
-        modifier = modifier.clickable { onLaunch() }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .clickable { onLaunch() }
+            .padding(vertical = 4.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                capabilityIcon(cap.iconName),
-                contentDescription = null,
-                tint = AILauncherColors.Accent,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = cap.label,
-                fontSize = 14.sp,
-                color = AILauncherColors.Title,
-                maxLines = 1
-            )
-        }
+        AppIconImage(
+            drawable = app.icon,
+            contentDescription = app.label.toString(),
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = app.label.toString(),
+            fontSize = 12.sp,
+            color = AILauncherColors.Body,
+            maxLines = 1
+        )
     }
 }
 
 @Composable
-private fun CapabilityResultRow(
+private fun SearchResultRow(
     groupLabel: String,
-    cap: Capability,
+    app: ResolvedCapability,
     onLaunch: () -> Unit
 ) {
     Card(
@@ -387,16 +368,17 @@ private fun CapabilityResultRow(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                capabilityIcon(cap.iconName),
-                contentDescription = null,
-                tint = AILauncherColors.Accent,
-                modifier = Modifier.size(24.dp)
+            AppIconImage(
+                drawable = app.icon,
+                contentDescription = app.label.toString(),
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = cap.label,
+                    text = app.label.toString(),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = AILauncherColors.Title
@@ -408,24 +390,15 @@ private fun CapabilityResultRow(
     }
 }
 
-/** 折叠行里的 3 个小 App 图标预览（真实图标，取不到则跳过） */
+/** 折叠行里的 3 个小 App 图标预览（真实图标） */
 @Composable
-private fun PackageIconPreview(packageName: String) {
-    val context = LocalContext.current
-    val bitmap = remember(packageName) {
-        try {
-            context.packageManager.getApplicationIcon(packageName).toBitmap().asImageBitmap()
-        } catch (_: Exception) {
-            null
-        }
-    }
-    if (bitmap != null) {
-        Image(
-            bitmap = bitmap,
-            contentDescription = null,
-            modifier = Modifier
-                .size(20.dp)
-                .clip(RoundedCornerShape(6.dp))
-        )
-    }
+private fun PackageIconPreview(icon: Drawable) {
+    val bitmap = remember(icon) { icon.toBitmap().asImageBitmap() }
+    Image(
+        bitmap = bitmap,
+        contentDescription = null,
+        modifier = Modifier
+            .size(20.dp)
+            .clip(RoundedCornerShape(6.dp))
+    )
 }

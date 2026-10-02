@@ -8,6 +8,10 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- 录音：意图框语音输入 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 取全量应用列表：个人侧载应用，无上架政策顾虑；launcher 必备（Android 11+ 包可见性过滤） -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <!-- 用量统计：设置 > 特殊应用权限 中手动开启 -->
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"

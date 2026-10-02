@@ -14,7 +14,13 @@ class LauncherNotificationService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        NotificationRepository.setConnected(true)
         pushActiveNotifications()
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        NotificationRepository.setConnected(false)
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {

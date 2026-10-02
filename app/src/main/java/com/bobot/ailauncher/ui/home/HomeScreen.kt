@@ -1,16 +1,14 @@
 package com.bobot.ailauncher.ui.home
 
 import android.Manifest
+import android.app.Activity
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Bundle
 import android.provider.CalendarContract
 import android.provider.Settings
-import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -62,11 +60,14 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
@@ -74,6 +75,7 @@ import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SimpleNotification
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.util.rebindListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -93,6 +95,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     var input by remember { mutableStateOf("") }
     var thinking by remember { mutableStateOf(false) }
     val notifications by NotificationRepository.notifications.collectAsState()
+    val listenerConnected by NotificationRepository.isConnected.collectAsState()
 
     // ---------- 上滑打开应用抽屉：列表在顶部且上滑累计超过 120dp ----------
     val listState = rememberLazyListState()
@@ -120,57 +123,53 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         }
     }
 
-    // ---------- 语音输入 ----------
-    var listening by remember { mutableStateOf(false) }
-    var recognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
-    fun startListening() {
-        try {
-            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-                Toast.makeText(context, "当前设备不支持语音识别", Toast.LENGTH_SHORT).show()
-                return
-            }
-            recognizer?.destroy()
-            val r = SpeechRecognizer.createSpeechRecognizer(context)
-            recognizer = r
-            r.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) { listening = true }
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() { listening = false }
-                override fun onError(error: Int) { listening = false }
-                override fun onResults(results: Bundle?) {
-                    listening = false
-                    val text = results
-                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                    if (!text.isNullOrBlank()) input = text
+    // ---------- 通知监听：从设置页返回时若已授权但服务未连接，强制重绑 ----------
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (isNotificationAccessGranted(context) &&
+                    !NotificationRepository.isConnected.value
+                ) {
+                    rebindListener(context)
                 }
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                )
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.CHINA.toString())
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             }
-            r.startListening(intent)
-        } catch (_: Exception) {
-            listening = false
-            Toast.makeText(context, "语音识别启动失败", Toast.LENGTH_SHORT).show()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // ---------- 语音输入：系统 RecognizerIntent（国产机无 Google 语音服务也能用自带识别） ----------
+    var micVisible by remember { mutableStateOf(true) }
+    val voiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val text = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            if (!text.isNullOrBlank()) input = text
         }
     }
-    val audioPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) startListening()
-        else Toast.makeText(context, "需要录音权限才能语音输入", Toast.LENGTH_SHORT).show()
-    }
-    DisposableEffect(Unit) {
-        onDispose { recognizer?.destroy() }
+    fun startVoiceInput() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toString())
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "说出你想干嘛")
+        }
+        if (intent.resolveActivity(context.packageManager) == null) {
+            micVisible = false
+            Toast.makeText(context, "当前设备不支持语音识别", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            voiceLauncher.launch(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "语音识别启动失败", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // ---------- 日历 ----------
@@ -238,23 +237,23 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .nestedScroll(drawerScrollConnection),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // 问候 + 应用抽屉兜底入口
+        // 问候 + 应用抽屉兜底入口（紧凑排版）
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = greeting(),
-                        fontSize = 30.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         color = AILauncherColors.Title
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = todayText(),
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         color = AILauncherColors.Hint
                     )
                 }
@@ -270,7 +269,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 }
             }
         }
-        // 意图输入框
+        // 意图输入框（压缩高度）
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -278,7 +277,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -303,26 +302,20 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                             unfocusedIndicatorColor = Color.Transparent
                         )
                     )
-                    IconButton(onClick = {
-                        if (listening) {
-                            try { recognizer?.stopListening() } catch (_: Exception) { }
-                        } else if (hasAudioPermission(context)) {
-                            startListening()
-                        } else {
-                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    if (micVisible) {
+                        IconButton(onClick = { startVoiceInput() }) {
+                            Icon(
+                                Icons.Filled.Mic,
+                                contentDescription = "语音输入",
+                                tint = AILauncherColors.Hint
+                            )
                         }
-                    }) {
-                        Icon(
-                            Icons.Filled.Mic,
-                            contentDescription = if (listening) "正在聆听，点按停止" else "语音输入",
-                            tint = if (listening) AILauncherColors.Accent else AILauncherColors.Hint
-                        )
                     }
                 }
             }
             if (thinking) {
                 Row(
-                    modifier = Modifier.padding(start = 8.dp, top = 8.dp),
+                    modifier = Modifier.padding(start = 8.dp, top = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -340,7 +333,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         item {
             Text(
                 text = "正在进行",
-                fontSize = 18.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = AILauncherColors.Title
             )
@@ -367,14 +360,14 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                     colors = CardDefaults.cardColors(containerColor = AILauncherColors.AccentSoft),
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Text(
                             text = e.title.ifBlank { "（无标题）" },
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = AILauncherColors.Title
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(2.dp))
                         Row {
                             Text(
                                 text = formatTime(e.begin),
@@ -401,13 +394,13 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         Text(
                             text = "开启通知读取后，「正在进行时」才能把会议、快递、消息主动浮上来。",
                             fontSize = 14.sp,
                             color = AILauncherColors.Body
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         TextButton(onClick = {
                             context.startActivity(
                                 Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
@@ -427,10 +420,10 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
                     Text(
-                        text = "暂无进行中的事项",
+                        text = if (!listenerConnected) "正在连接通知服务…" else "暂无进行中的事项",
                         fontSize = 14.sp,
                         color = AILauncherColors.Hint,
-                        modifier = Modifier.padding(20.dp)
+                        modifier = Modifier.padding(14.dp)
                     )
                 }
             }
@@ -439,7 +432,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 NotificationCard(n)
             }
         }
-        item { Spacer(modifier = Modifier.height(24.dp)) }
+        item { Spacer(modifier = Modifier.height(16.dp)) }
     }
 }
 
@@ -459,11 +452,6 @@ private fun routeKeyword(raw: String): String? {
 private fun hasCalendarPermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(
         context, Manifest.permission.READ_CALENDAR
-    ) == PackageManager.PERMISSION_GRANTED
-
-private fun hasAudioPermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(
-        context, Manifest.permission.RECORD_AUDIO
     ) == PackageManager.PERMISSION_GRANTED
 
 /** 读取今天 0 点 ~ 24 点的日历事件，取前 3 个 */
@@ -532,7 +520,7 @@ private fun NotificationCard(n: SimpleNotification) {
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = n.appName,
@@ -546,20 +534,20 @@ private fun NotificationCard(n: SimpleNotification) {
                     color = AILauncherColors.Hint
                 )
             }
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             if (n.title.isNotBlank()) {
                 Text(
                     text = n.title,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = AILauncherColors.Title
                 )
             }
             if (n.text.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = n.text,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     color = AILauncherColors.Body,
                     maxLines = 2
                 )
