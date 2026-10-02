@@ -123,9 +123,7 @@ fun AllAppsContent(
     showIndexBar: Boolean = true,
     showSearch: Boolean = true,
     topPadding: Dp = 12.dp,
-    indexBarHeightFraction: Float = 1f,
-    /** rail 顶部的切换钮插槽（应用中心用它放"组/A"切换） */
-    railHeader: @Composable () -> Unit = {}
+    indexBarHeightFraction: Float = 1f
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -283,33 +281,27 @@ fun AllAppsContent(
             // 右侧弧形 A-Z 导航：平时收拢窄条，按住后字母沿高斯弧线向屏内展开，
             // 字母列不动，只有波浪（当前字母放大 + 气泡）往拇指反方向偏移避让；
             // 列表跟手滚动，松手回弹；惯用手决定 rail 在左还是右、波浪往哪偏。
-            // rail 顶部可放切换钮（应用中心用它在"组/A"双视图间切换）
             if (showIndexBar && !searching && groups.isNotEmpty()) {
-                Column(
+                ArcIndexBar(
+                    letters = letters,
+                    activeIndex = barActiveIndex,
+                    onIndex = { i ->
+                        if (i < 0) {
+                            barActiveIndex = null
+                            activeLetter = null
+                            hideJob?.cancel()
+                        } else {
+                            barActiveIndex = i
+                            jumpTo(letters[i])
+                        }
+                    },
                     modifier = Modifier.align(
                         if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
                         else Alignment.CenterStart
                     ),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    railHeader()
-                    ArcIndexBar(
-                        letters = letters,
-                        activeIndex = barActiveIndex,
-                        onIndex = { i ->
-                            if (i < 0) {
-                                barActiveIndex = null
-                                activeLetter = null
-                                hideJob?.cancel()
-                            } else {
-                                barActiveIndex = i
-                                jumpTo(letters[i])
-                            }
-                        },
-                        heightFraction = indexBarHeightFraction,
-                        handed = handed
-                    )
-                }
+                    heightFraction = indexBarHeightFraction,
+                    handed = handed
+                )
             }
         }
     }
