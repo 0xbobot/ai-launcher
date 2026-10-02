@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,12 +16,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.MainScreen
 import com.bobot.ailauncher.ui.onboarding.OnboardingNav
-import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.AILauncherTheme
 
 class MainActivity : ComponentActivity() {
@@ -56,12 +57,22 @@ class MainActivity : ComponentActivity() {
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
 
+        // v0.11 玻璃拟态：API 31+ 开启窗口真实背景模糊（壁纸/下层内容），
+        // 低版本 graceful 降级为半透明底色（无 blur）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                window.setBackgroundBlurRadius(80)
+            } catch (_: Exception) {
+            }
+        }
+
         setContent {
             AILauncherTheme {
                 var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
+                // 全透明底：系统壁纸从半透明主题透出，不再全屏铺暖灰底
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = AILauncherColors.Background
+                    color = Color.Transparent
                 ) {
                     if (onboarded) {
                         MainScreen()

@@ -7,6 +7,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -66,17 +68,19 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
- * 上拉 Dock（v0.10，替代 v0.9 的 DockBar + 三档抽屉）。
+ * 上拉 Dock（v0.11，替代 v0.9 的 DockBar + 三档抽屉）。
  *
  * - 默认首页无 Dock：底部只露出一根横线手柄（34dp）+ 页面圆点
  * - 按住横线上下拖动，四档，松手按速度/位置吸附最近档；点按横线跳到下一档
- * - 第一档：悬浮圆角 Dock 卡片（16dp 边距、24dp 圆角），4 个常用大图标（56dp）
+ * - 第一档：独立悬浮 Dock 卡片（iOS dock 式：左右 16dp、底部 16dp 边距，严格水平居中，
+ *   完全脱离屏幕底部），4 个常用大图标（56dp）
  * - 第二档：同一张卡片变高，同一批常用重排成 10 个小图标（2×5，46dp）；
  *   一二档是替换关系：拖动过程中两套排布按进度 q 交叉淡入淡出 + 缩放
  * - 第三档：卡片贴边撑满变全屏（边距→0、底部圆角→0，横线隐藏）；
  *   顶部"常用"横滑一行（10 个）+ 下面全部应用 A-Z 列表 + 右侧弧形 A-Z 导航；搜索框不做
  * - 形变过渡：d2→d3 过程中边距/圆角/底色连续插值，松手弹簧吸附
  * - 全屏时按住顶部"常用"区域可下滑收起；全屏时列表到顶继续下滑 → sheet 接管收起
+ * - 玻璃拟态：半透明卡片 + 白色描边；API 31+ 叠加窗口真实背景模糊
  */
 enum class PullUpDetent { Handle, Dock4, Dock10, Full }
 
@@ -284,9 +288,18 @@ fun PullUpDock(
             .coerceIn(0f, 1f)
         val sideM = 16.dp * (1f - p)
         val cornerR = 24.dp * (1f - p)
-        val cardBg = lerp(Color.White, AILauncherColors.Background, p)
+        // 玻璃拟态：悬浮态更透（壁纸透出），全屏态更实（列表可读）
+        val cardBg = lerp(
+            Color.White.copy(alpha = 0.66f),
+            AILauncherColors.GlassCardStrong,
+            p
+        )
         val cardShape = RoundedCornerShape(cornerR)
         val showFull = p > 0.5f
+        // iOS dock 式独立悬浮：卡片底部与屏幕底边保持 16dp 间隙（p→1 时归零全屏），
+        // 卡片高度 = 当前可见高度，左右边距对称 → 严格水平居中
+        val bottomGapPx = with(density) { 16.dp.toPx() } * (1f - p)
+        val cardTopYPx = screenHpx - bottomGapPx - visiblePx
 
         // 背景 scrim（接近全屏时出现，点击回到 Dock4）
         if (p > 0.02f && !dragging) {
@@ -298,19 +311,24 @@ fun PullUpDock(
             )
         }
 
-        // 卡片本体
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { translationY = offsetY.value }
-        ) {
+        // 卡片本体：独立悬浮（不再整屏位移），高度 = 当前可见高度
+        Box(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(start = sideM, end = sideM, bottom = sideM)
+                    .fillMaxWidth()
+                    .graphicsLayer { translationY = cardTopYPx }
+                    .padding(start = sideM, end = sideM)
+                    .height(with(density) { visiblePx.toDp() })
                     .shadow((10 * (1f - p)).dp, cardShape)
                     .clip(cardShape)
                     .background(cardBg)
+                    .border(
+                        BorderStroke(
+                            1.dp,
+                            Color.White.copy(alpha = 0.45f * (1f - p))
+                        ),
+                        cardShape
+                    )
             ) {
                 if (!showFull) {
                     // 抓手横线（可点按跳档、可拖）
@@ -327,14 +345,16 @@ fun PullUpDock(
                                 .width(44.dp)
                                 .height(5.dp)
                                 .clip(RoundedCornerShape(3.dp))
-                                .background(AILauncherColors.Divider)
+                                .background(AILauncherColors.Grabber)
                         )
                     }
                     // 一二档：同一批常用的两种排布，交叉淡入淡出 + 缩放（替换非叠加）；
-                    // 容器高度由较高的排布自然撑起，档位高度 d1/d2 由各自内容测量得出
+                    // wrapContentHeight(unbounded=true) 让两套排布在卡片高度约束下仍量出自然高度，
+                    // 档位高度 d1/d2 才准确（否则第二档会被裁剪后的尺寸污染）
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .wrapContentHeight(unbounded = true)
                             .pullDrag()
                     ) {
                         Box(

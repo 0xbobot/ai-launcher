@@ -5,7 +5,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.unit.dp
 
 /**
@@ -23,7 +25,20 @@ object AILauncherColors {
     val AccentSoft = Color(0xFFF6ECD4)   // 浅金底
     val Success = Color(0xFF4C9A52)     // 成功绿
     val Divider = Color(0xFFE8E2D9)      // 分隔线
+
+    // ---- 玻璃拟态（v0.11）：半透明底色 + 系统壁纸透出；API 31+ 叠加 Window 真实背景模糊 ----
+    val GlassCard = Color(0x8CFFFFFF)        // 通用卡片：白 55%
+    val GlassCardStrong = Color(0xE0FFFFFF)  // 抽屉/全屏：白 88%（列表可读性）
+    val GlassBorder = Color(0x80FFFFFF)      // 玻璃描边：白 50%
+    val Grabber = Color(0xFF1F1D1A).copy(alpha = 0.28f) // 玻璃上的拖动手柄
 }
+
+/** 壁纸上悬浮文字的投影，保证在任意壁纸上可读（配合 TextStyle(color = White, shadow = …) 使用） */
+val GlassTextShadow = Shadow(
+    offset = Offset(0f, 3f),
+    blurRadius = 12f,
+    color = Color(0x66000000)
+)
 
 private val AILauncherColorScheme = lightColorScheme(
     background = AILauncherColors.Background,

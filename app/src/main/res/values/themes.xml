@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 与 Compose 侧 AILauncherTheme 保持一致：暖灰底、无 ActionBar -->
+    <!-- v0.11 玻璃拟态：半透明 Activity，系统壁纸透出；无 ActionBar -->
     <style name="Theme.AILauncher" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">#F4F2EE</item>
-        <item name="android:statusBarColor">#F4F2EE</item>
-        <item name="android:navigationBarColor">#F4F2EE</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

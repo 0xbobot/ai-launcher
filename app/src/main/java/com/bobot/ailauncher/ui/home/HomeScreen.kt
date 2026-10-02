@@ -16,6 +16,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import com.bobot.ailauncher.data.AppUsageTracker
@@ -70,6 +71,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -84,6 +86,7 @@ import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SimpleNotification
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.GlassTextShadow
 import com.bobot.ailauncher.util.rebindListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -374,11 +377,12 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     ) {
         ClockHeader()
         Spacer(modifier = Modifier.height(10.dp))
-        // 意图输入框
+        // 意图输入框（玻璃拟态）
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+            colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
@@ -443,7 +447,11 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                     modifier = Modifier.size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("思考中…", fontSize = 13.sp, color = AILauncherColors.Hint)
+                Text(
+                    "思考中…",
+                    fontSize = 13.sp,
+                    style = TextStyle(color = Color.White.copy(alpha = 0.85f), shadow = GlassTextShadow)
+                )
             }
         }
         Spacer(modifier = Modifier.height(14.dp))
@@ -459,7 +467,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 text = "正在进行",
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = AILauncherColors.Title
+                style = TextStyle(color = Color.White, shadow = GlassTextShadow)
             )
             // 今日日程：未授权 → 授权入口；有下一个日程 → 大卡片
             if (calEvents == null) {
@@ -472,7 +480,10 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                     Text(
                         "授权日历后显示今日日程",
                         fontSize = 13.sp,
-                        color = AILauncherColors.Hint
+                        style = TextStyle(
+                            color = Color.White.copy(alpha = 0.85f),
+                            shadow = GlassTextShadow
+                        )
                     )
                 }
             } else if (nextEvent != null) {
@@ -482,7 +493,10 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 Text(
                     text = "全天 · ${e.title.ifBlank { "（无标题）" }}",
                     fontSize = 12.sp,
-                    color = AILauncherColors.Hint,
+                    style = TextStyle(
+                        color = Color.White.copy(alpha = 0.85f),
+                        shadow = GlassTextShadow
+                    ),
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
@@ -490,7 +504,10 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
                 Text(
                     text = "${formatTime(e.begin)}  ${e.title.ifBlank { "（无标题）" }}",
                     fontSize = 12.sp,
-                    color = AILauncherColors.Hint,
+                    style = TextStyle(
+                        color = Color.White.copy(alpha = 0.85f),
+                        shadow = GlassTextShadow
+                    ),
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
@@ -498,8 +515,9 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             if (!isNotificationAccessGranted(context)) {
                 Card(
                     shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
@@ -521,8 +539,9 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             } else if (notifications.isEmpty()) {
                 Card(
                     shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
                 ) {
                     Text(
                         text = if (!listenerConnected) "正在连接通知服务…" else "暂无进行中的事项",
@@ -602,13 +621,16 @@ private fun ClockHeader() {
             text = time,
             fontSize = 54.sp,
             fontWeight = FontWeight.Bold,
-            color = AILauncherColors.Title
+            style = TextStyle(color = Color.White, shadow = GlassTextShadow)
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = todayText(),
             fontSize = 14.sp,
-            color = AILauncherColors.Hint
+            style = TextStyle(
+                color = Color.White.copy(alpha = 0.85f),
+                shadow = GlassTextShadow
+            )
         )
     }
 }
@@ -716,13 +738,14 @@ private fun countdownText(begin: Long, now: Long): String {
     else "还有 ${mins / 60} 小时 ${mins % 60} 分"
 }
 
-/** 下一个日程：大卡片突出（标题 / 时间 / 地点 / 倒计时） */
+/** 下一个日程：大卡片突出（标题 / 时间 / 地点 / 倒计时）——玻璃拟态 */
 @Composable
 private fun NextEventCard(event: CalEvent, now: Long) {
     Card(
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = AILauncherColors.AccentSoft),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -771,8 +794,9 @@ private fun NotificationCard(n: SimpleNotification, onOpen: () -> Unit) {
     Card(
         onClick = onOpen,
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

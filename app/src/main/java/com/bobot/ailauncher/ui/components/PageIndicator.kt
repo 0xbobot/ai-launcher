@@ -19,16 +19,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import com.bobot.ailauncher.ui.theme.AILauncherColors
 
 /**
- * 首页指示器 v4（v0.10）：
- * - 只剩两点一组（6dp、8dp 间距），管左右切页；当前页深色 1.3x 缩放
+ * 首页指示器 v4.1（v0.11）：
+ * - 只剩两点一组（6dp、8dp 间距），管左右切页；当前页白色 1.3x 缩放
  * - 切页时整行随手势方向轻推（nudge）+ 圆点平滑切换
- * - 菱形已移除：上滑改由底部横线手柄（PullUpDock）承担
+ * - 白色圆点：在壁纸上可读；菱形已移除
  */
 @Composable
 fun PageIndicator(
@@ -84,8 +84,8 @@ fun PageIndicator(
                     }
                     .clip(CircleShape)
                     .background(
-                        if (selected) AILauncherColors.Title
-                        else AILauncherColors.Hint.copy(alpha = dotAlpha)
+                        if (selected) Color.White
+                        else Color.White.copy(alpha = dotAlpha)
                     )
             )
         }

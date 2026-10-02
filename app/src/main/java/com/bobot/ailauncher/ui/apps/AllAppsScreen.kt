@@ -4,6 +4,7 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -182,7 +183,7 @@ fun AllAppsContent(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AILauncherColors.Background)
+            .background(Color.Transparent) // 玻璃拟态：底色由 Dock 卡片提供，不再铺不透明暖灰
             .padding(horizontal = 20.dp)
     ) {
         Spacer(modifier = Modifier.height(topPadding))
@@ -231,7 +232,7 @@ fun AllAppsContent(
                                 color = AILauncherColors.Hint,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(AILauncherColors.Background)
+                                    .background(Color.Transparent)
                                     .padding(vertical = 4.dp)
                             )
                         }
@@ -351,7 +352,6 @@ private fun ArcIndexBar(
                 .align(Alignment.CenterEnd)
                 .width(24.dp)
                 .fillMaxHeight(),
-            verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             letters.forEachIndexed { i, ch ->
@@ -362,19 +362,27 @@ private fun ArcIndexBar(
                     animationSpec = tween(120),
                     label = "arcG"
                 )
-                Text(
-                    text = ch.toString(),
-                    fontSize = 10.sp,
-                    color = if (g > 0.5f) AILauncherColors.Accent else AILauncherColors.Hint,
-                    fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.graphicsLayer {
-                        translationX = -bulgePx * g
-                        val sc = 1f + g
-                        scaleX = sc
-                        scaleY = sc
-                        alpha = 0.45f + 0.55f * g
-                    }
-                )
+                // 每行固定 1/27 高度：无论系统字号/屏幕尺寸，26 个字母 + # 必定完整显示，
+                // 不再依赖文字自然高度（之前大字号下会被裁剪）；触摸映射本就按等分计算
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = ch.toString(),
+                        fontSize = 9.sp,
+                        color = if (g > 0.5f) AILauncherColors.Accent else AILauncherColors.Hint,
+                        fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1,
+                        modifier = Modifier.graphicsLayer {
+                            translationX = -bulgePx * g
+                            val sc = 1f + g
+                            scaleX = sc
+                            scaleY = sc
+                            alpha = 0.45f + 0.55f * g
+                        }
+                    )
+                }
             }
         }
         // 当前字母气泡（字母行左侧）
@@ -552,8 +560,9 @@ private fun AllAppsSearchBar(
     val focusManager = LocalFocusManager.current
     Card(
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        colors = CardDefaults.cardColors(containerColor = AILauncherColors.GlassCard),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, AILauncherColors.GlassBorder)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
