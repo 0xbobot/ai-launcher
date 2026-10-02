@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.stickyHeader
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -246,7 +245,7 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
                     }
                 } else {
                     groups.forEach { (letter, list) ->
-                        stickyHeader(key = "header-$letter") {
+                        item(key = "header-$letter") {
                             Text(
                                 text = letter.toString(),
                                 fontSize = 14.sp,
@@ -272,31 +271,33 @@ fun AllAppsScreen(onClose: (() -> Unit)? = null) {
                         .align(Alignment.CenterEnd)
                         .fillMaxHeight()
                         .width(28.dp)
-                        .pointerInput(letters) {
-                            detectTapGestures(
-                                onTap = { offset ->
-                                    val hPx = with(density) { maxHeight.toPx() }
-                                    val i = ((offset.y / hPx) * letters.size)
-                                        .toInt().coerceIn(0, letters.size - 1)
-                                    jumpTo(letters[i])
-                                }
-                            )
-                        }
-                        .pointerInput(letters) {
-                            detectVerticalDragGestures(
-                                onDragEnd = { /* hideJob 的 600ms 计时负责渐隐 */ },
-                                onVerticalDrag = { change, _ ->
-                                    change.consume()
-                                    val hPx = with(density) { maxHeight.toPx() }
-                                    val i = ((change.position.y / hPx) * letters.size)
-                                        .toInt().coerceIn(0, letters.size - 1)
-                                    jumpTo(letters[i])
-                                }
-                            )
-                        }
                 ) {
+                    // maxHeight 只在 BoxWithConstraints 内容作用域可见，
+                    // 必须在 pointerInput 外先算好像素高度再传入手势闭包
+                    val hPx = with(density) { maxHeight.toPx() }
                     Column(
-                        modifier = Modifier.fillMaxHeight(),
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .pointerInput(letters) {
+                                detectTapGestures(
+                                    onTap = { offset ->
+                                        val i = ((offset.y / hPx) * letters.size)
+                                            .toInt().coerceIn(0, letters.size - 1)
+                                        jumpTo(letters[i])
+                                    }
+                                )
+                            }
+                            .pointerInput(letters) {
+                                detectVerticalDragGestures(
+                                    onDragEnd = { /* hideJob 的 600ms 计时负责渐隐 */ },
+                                    onVerticalDrag = { change, _ ->
+                                        change.consume()
+                                        val i = ((change.position.y / hPx) * letters.size)
+                                            .toInt().coerceIn(0, letters.size - 1)
+                                        jumpTo(letters[i])
+                                    }
+                                )
+                            },
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
