@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -136,9 +137,9 @@ fun PageIndicator(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Diamond(size = 7.dp, color = diamondColor.copy(alpha = 0.16f))
-                    Diamond(size = 9.dp, color = diamondColor.copy(alpha = 0.32f))
-                    Diamond(size = 12.dp, color = diamondColor)
+                    Diamond(diameter = 7.dp, color = diamondColor.copy(alpha = 0.16f))
+                    Diamond(diameter = 9.dp, color = diamondColor.copy(alpha = 0.32f))
+                    Diamond(diameter = 12.dp, color = diamondColor)
                 }
             }
             Spacer(modifier = Modifier.height(2.dp))
@@ -181,11 +182,11 @@ fun PageIndicator(
 /** 实心菱形 */
 @Composable
 private fun Diamond(
-    size: Dp,
+    diameter: Dp,
     color: Color,
     modifier: Modifier = Modifier
 ) {
-    Canvas(modifier = modifier.size(size)) {
+    Canvas(modifier = modifier.size(diameter)) {
         val w = size.width
         val h = size.height
         drawPath(
