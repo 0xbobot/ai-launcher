@@ -24,12 +24,14 @@ fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
         confirmButton = {
             TextButton(onClick = {
                 onDismiss()
-                val apk = OtaUpdater.downloadedApk(context)
-                if (apk != null && OtaUpdater.isDownloadComplete(
-                        context, OtaUpdater.pendingDownloadId(context)
-                    )
+                // 只有已下载的包正是这个新版本时才直接安装，否则重新下载
+                //（旧版本残留包不能复用，否则会"升级"成旧版）
+                if (OtaUpdater.isDownloadedVersion(context, info.versionCode) &&
+                    OtaUpdater.isDownloadComplete(context, OtaUpdater.pendingDownloadId(context))
                 ) {
-                    OtaUpdater.promptInstall(context, apk)
+                    OtaUpdater.downloadedApk(context)?.let {
+                        OtaUpdater.promptInstall(context, it)
+                    }
                     OtaUpdater.markInstallPrompted(context)
                 } else {
                     OtaUpdater.startDownload(context, info)

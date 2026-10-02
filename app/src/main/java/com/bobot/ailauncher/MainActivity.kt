@@ -30,6 +30,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CapabilityRegistry.load(this)
+        // OTA：版本变化后清理旧安装包，避免"直接安装"命中旧包
+        OtaUpdater.onAppUpgraded(this)
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
 
         // OTA：下载完成广播 → 下载的是我们的更新包则弹安装

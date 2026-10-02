@@ -46,6 +46,8 @@ object OtaUpdater {
     private const val KEY_LAST_CHECK = "last_check"
     private const val KEY_DOWNLOAD_ID = "download_id"
     private const val KEY_INSTALL_PROMPTED = "install_prompted"
+    private const val KEY_TARGET_VERSION = "target_version"
+    private const val KEY_LAST_RUN_VERSION = "last_run_version"
     private const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
     private const val APK_FILE_NAME = "ai-launcher-update.apk"
 
@@ -119,6 +121,7 @@ object OtaUpdater {
         val id = dm.enqueue(req)
         prefs(context).edit()
             .putLong(KEY_DOWNLOAD_ID, id)
+            .putInt(KEY_TARGET_VERSION, info.versionCode)
             .putBoolean(KEY_INSTALL_PROMPTED, false)
             .apply()
         return id
@@ -149,15 +152,38 @@ object OtaUpdater {
         return if (f.exists() && f.length() > 0) f else null
     }
 
-    /** 下载已完成、且还没弹过安装提示 → 应该弹安装 */
+    /** 已下载的包是否就是指定版本：防止"直接安装"命中旧包 */
+    fun isDownloadedVersion(context: Context, versionCode: Int): Boolean =
+        prefs(context).getInt(KEY_TARGET_VERSION, 0) == versionCode &&
+            downloadedApk(context) != null
+
+    /** 下载已完成、是比当前更新的版本、且还没弹过安装提示 → 应该弹安装 */
     fun shouldPromptInstall(context: Context): Boolean {
         if (prefs(context).getBoolean(KEY_INSTALL_PROMPTED, false)) return false
+        // 只为新版本弹安装：已装过的版本的残留包不再提示
+        if (prefs(context).getInt(KEY_TARGET_VERSION, 0) <= BuildConfig.VERSION_CODE) return false
         val id = pendingDownloadId(context)
         return isDownloadComplete(context, id) && downloadedApk(context) != null
     }
 
     fun markInstallPrompted(context: Context) {
         prefs(context).edit().putBoolean(KEY_INSTALL_PROMPTED, true).apply()
+    }
+
+    /**
+     * App 版本变化（升级/重装）后调用：清理旧安装包与旧下载状态，
+     * 避免下次更新时"直接安装"命中旧包。建议在 MainActivity.onCreate 调用。
+     */
+    fun onAppUpgraded(context: Context) {
+        val p = prefs(context)
+        if (p.getInt(KEY_LAST_RUN_VERSION, 0) != BuildConfig.VERSION_CODE) {
+            downloadedApk(context)?.delete()
+            p.edit()
+                .putInt(KEY_LAST_RUN_VERSION, BuildConfig.VERSION_CODE)
+                .putLong(KEY_DOWNLOAD_ID, -1L)
+                .putBoolean(KEY_INSTALL_PROMPTED, false)
+                .apply()
+        }
     }
 
     /** 弹安装：有"安装未知应用"权限走 FileProvider 安装，否则先引导去开权限 */
