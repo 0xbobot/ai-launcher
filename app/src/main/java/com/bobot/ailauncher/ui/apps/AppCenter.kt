@@ -114,12 +114,14 @@ import kotlin.math.roundToInt
 fun AppCenterContent(
     onOpenSettings: () -> Unit,
     onPullDownToD2: () -> Unit,
+    onHeaderSwipeRight: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val onPullDownState = rememberUpdatedState(onPullDownToD2)
+    val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     var refreshTick by remember { mutableIntStateOf(0) }
     var organizeApp by remember { mutableStateOf<AppInfo?>(null) }
     val handed = remember { UiPrefs.getHanded(context) }
@@ -241,7 +243,7 @@ fun AppCenterContent(
                     .fillMaxWidth()
                     .padding(start = 20.dp, end = 12.dp, top = 20.dp)
                     .pointerInput(Unit) {
-                        // 标题区右滑 → D2（手势签名：右滑=更少）
+                        // 标题区右滑 → 回到记住的 Dock 行数（手势签名：右滑=更少）
                         var accumX = 0f
                         var fired = false
                         val hPx = with(density) { 48.dp.toPx() }
@@ -254,7 +256,7 @@ fun AppCenterContent(
                                 accumX += dragAmount
                                 if (accumX > hPx) {
                                     fired = true
-                                    onPullDownState.value()
+                                    onHeaderSwipeRightState.value()
                                 }
                             }
                         )
@@ -352,7 +354,10 @@ fun AppCenterContent(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
             }
             // Rail：只做定位——"类"跳回顶部整个分类区，字母跳对应字母；惯用手镜像
+            // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp），
+            // 气泡仍在 rail 外侧紧贴边缘，允许轻微溢出绘制
             if (groups.isNotEmpty() || letters.isNotEmpty()) {
+                val railOutX = if (handed == UiPrefs.Handed.RIGHT) 18.dp else (-18).dp
                 CenterRail(
                     letters = letters,
                     handed = handed,
@@ -365,10 +370,12 @@ fun AppCenterContent(
                             listState.scrollToItem(anchor, scrollOffset = -(viewportH / 2))
                         }
                     },
-                    modifier = Modifier.align(
-                        if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
-                        else Alignment.CenterStart
-                    )
+                    modifier = Modifier
+                        .align(
+                            if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
+                            else Alignment.CenterStart
+                        )
+                        .offset(x = railOutX)
                 )
             }
         }
@@ -572,12 +579,14 @@ private fun CenterRail(
                 }
             }
         }
-        // 选中大圆气泡：rail 外侧（远离屏幕中心），不跟波浪偏移，不被拇指盖住
+        // 选中大圆气泡：rail 外侧（远离屏幕中心），不跟波浪偏移，不被拇指盖住；
+        // v0.15.1 修：用 Top 对齐 + 偏移量，保证气泡垂直居中对准当前字母（波浪峰顶），
+        // 之前用 Center 对齐再叠加偏移，气泡会被推到字母下方
         activeIndex?.let { idx ->
             val rPx = with(density) { 22.dp.toPx() }
             Box(
                 modifier = Modifier
-                    .align(if (rightHanded) Alignment.CenterEnd else Alignment.CenterStart)
+                    .align(if (rightHanded) Alignment.TopEnd else Alignment.TopStart)
                     .offset {
                         IntOffset(
                             0,
@@ -624,7 +633,12 @@ private fun GroupBlock(
     val swipePx = with(density) { 48.dp.toPx() }
     val catColor = groupColor(group.id)
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    // v0.15.1：右侧缩进 56dp，避让 rail（rail 已移到距边缘约 10dp）
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(end = 56.dp)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

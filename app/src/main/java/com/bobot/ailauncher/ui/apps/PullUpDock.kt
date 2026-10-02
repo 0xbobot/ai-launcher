@@ -75,12 +75,14 @@ enum class DockState { Hidden, D1, D2, D3 }
 fun PullUpDock(
     state: DockState,
     onStateChange: (DockState) -> Unit,
+    onD3SwipeRight: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val onStateChangeState = rememberUpdatedState(onStateChange)
+    val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
 
     val allApps = remember {
         listLaunchableApps(context).filter { it.packageName != context.packageName }
@@ -250,6 +252,7 @@ fun PullUpDock(
         ) {
             FullAppsOverlay(
                 onStateChange = onStateChangeState.value,
+                onD3SwipeRight = onD3SwipeRightState.value,
                 onOpenSettings = onOpenSettings
             )
         }
@@ -267,9 +270,11 @@ fun PullUpDock(
 @Composable
 private fun FullAppsOverlay(
     onStateChange: (DockState) -> Unit,
+    onD3SwipeRight: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val onStateChangeState = rememberUpdatedState(onStateChange)
+    val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
 
     Column(
         modifier = Modifier
@@ -279,6 +284,7 @@ private fun FullAppsOverlay(
         AppCenterContent(
             onOpenSettings = onOpenSettings,
             onPullDownToD2 = { onStateChangeState.value(DockState.D2) },
+            onHeaderSwipeRight = { onD3SwipeRightState.value() },
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)

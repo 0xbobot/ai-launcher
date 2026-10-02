@@ -313,10 +313,11 @@ fun AllAppsContent(
 }
 
 /**
- * A-Z 列表行（v0.14 纠正：左滑=多 / 右滑=少）：
+ * A-Z 列表行（v0.15.1 两段式，左滑=多 / 右滑=少）：
  * - 点按启动，长按整理分类（不变）
- * - 左滑 → 展开快捷操作（应用信息 / 卸载 / 移到分组）
- * - 右滑 → 展开态收起；收起态直接隐藏此应用（toast 提示，设置页可恢复）
+ * - 左滑第 1 段 → 行内展开快捷管理操作（应用信息 / 卸载 / 移到分组）
+ * - 操作展开后再左滑 → 跳系统应用管理界面
+ * - 操作展开时右滑 → 收起操作；操作未展开时右滑 → 弹出确认框，确认后隐藏
  * - 横向滑动与列表纵向滚动不冲突（主轴判定：横向位移超 slop 才消费）
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -331,6 +332,7 @@ internal fun AppRow(
     val context = LocalContext.current
     val density = LocalDensity.current
     var actionsVisible by remember { mutableStateOf(false) }
+    var showHideConfirm by remember { mutableStateOf(false) }
     val swipePx = with(density) { 56.dp.toPx() }
 
     fun openAppDetails() {
@@ -370,10 +372,14 @@ internal fun AppRow(
                         onDragCancel = { fired = true },
                         onDragEnd = {
                             if (!fired) {
-                                if (accumX < -swipePx) actionsVisible = true
-                                else if (accumX > swipePx) {
+                                if (accumX < -swipePx) {
+                                    // 左滑=多：一段展开操作，二段进系统应用管理
+                                    if (actionsVisible) openAppDetails()
+                                    else actionsVisible = true
+                                } else if (accumX > swipePx) {
+                                    // 右滑=少：展开态收起；收起态弹确认框再隐藏
                                     if (actionsVisible) actionsVisible = false
-                                    else onHide(app)
+                                    else showHideConfirm = true
                                 }
                             }
                         },
@@ -427,6 +433,30 @@ internal fun AppRow(
                 AppRowAction(text = "移到分组", onClick = { onOrganize(app) })
             }
         }
+    }
+
+    // 右滑隐藏确认框
+    if (showHideConfirm) {
+        AlertDialog(
+            onDismissRequest = { showHideConfirm = false },
+            title = { Text("隐藏应用", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+            text = {
+                Text(
+                    text = "是否隐藏「${app.label}」？可在设置页恢复。",
+                    fontSize = 14.sp,
+                    color = AILauncherColors.Body
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showHideConfirm = false
+                    onHide(app)
+                }) { Text("隐藏", color = AILauncherColors.Accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showHideConfirm = false }) { Text("取消") }
+            }
+        )
     }
 }
 

@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.ui
 
-import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -21,13 +20,13 @@ import androidx.navigation.compose.rememberNavController
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.apps.DockState
 import com.bobot.ailauncher.ui.apps.PullUpDock
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.pet.PetTabsOverlay
 import com.bobot.ailauncher.ui.settings.SettingsScreen
-import kotlinx.coroutines.delay
 
 /**
  * v0.14 导航：单页桌面（能力页已移除，左滑/右滑只剩卡片手势语义：右=多/左=少）。
@@ -50,9 +49,11 @@ fun MainScreen() {
 
 @Composable
 private fun HomeHost(onOpenSettings: () -> Unit) {
-    // 上拉 Dock（v0.12+）：离散状态机，弹簧动画切换，无横线手柄
-    var dockState by remember { mutableStateOf(DockState.Hidden) }
     val context = LocalContext.current
+    // v0.15.1：Dock 默认显示记住的行数（默认 D1 一行），不再默认隐藏
+    var dockState by remember {
+        mutableStateOf(if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1)
+    }
     var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
 
     // OTA：每天最多自动检查一次，有新版弹更新对话框
@@ -64,18 +65,21 @@ private fun HomeHost(onOpenSettings: () -> Unit) {
         }
     }
 
-    // 首次发现引导：D1 轻轻 peek 一下（升起停 1 秒再落下），每设备一次
-    LaunchedEffect(Unit) {
-        val prefs = context.getSharedPreferences("pullup_coach", Context.MODE_PRIVATE)
-        if (!prefs.getBoolean("peek_shown_v12", false)) {
-            delay(1200)
-            if (dockState == DockState.Hidden) {
-                dockState = DockState.D1
-                delay(1000)
-                if (dockState == DockState.D1) dockState = DockState.Hidden
-            }
-            prefs.edit().putBoolean("peek_shown_v12", true).apply()
-        }
+    // v0.15.1：Dock 状态机统一出口
+    // - 记住行数：D1 左滑→D2 时记 2，D2 右滑→D1 时记 1
+    // - 隐藏上滑唤出 / D3 右滑返回 → 直接回到记住的行数（D1/D2）
+    // - D1 右滑→隐藏、D1/D2 上滑→D3、D3 下滑逐级收回保持不变
+    // （v0.12 的首次 peek 引导已删除：默认显示，不需要了）
+    fun goDock(requested: DockState, fromD3SwipeRight: Boolean = false) {
+        val cur = dockState
+        val remembered =
+            if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1
+        var target = requested
+        if (fromD3SwipeRight && cur == DockState.D3) target = remembered
+        if (cur == DockState.Hidden && target == DockState.D1) target = remembered
+        if (cur == DockState.D1 && target == DockState.D2) UiPrefs.setDockRows(context, 2)
+        if (cur == DockState.D2 && target == DockState.D1) UiPrefs.setDockRows(context, 1)
+        dockState = target
     }
 
     // v0.15 宠物整理员：toast 事件 → 系统 Toast
@@ -100,12 +104,13 @@ private fun HomeHost(onOpenSettings: () -> Unit) {
         )
         // 单页桌面：只有首页
         HomeScreen(
-            onOpenAppDrawer = { dockState = DockState.D1 }
+            onOpenAppDrawer = { goDock(DockState.D1) }
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         PullUpDock(
             state = dockState,
-            onStateChange = { dockState = it },
+            onStateChange = { goDock(it) },
+            onD3SwipeRight = { goDock(DockState.D2, fromD3SwipeRight = true) },
             onOpenSettings = onOpenSettings
         )
         // v0.15 宠物整理员：右侧文件夹标签栏（Dock 打开时隐藏，避免和 A-Z rail 冲突）

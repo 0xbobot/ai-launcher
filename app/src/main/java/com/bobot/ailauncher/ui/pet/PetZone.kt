@@ -131,18 +131,19 @@ fun PetZone() {
                 .fillMaxWidth()
                 .height(148.dp)
         ) {
-            // ding
-            AnimatedVisibility(
-                visible = dingText != null,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.TopCenter)
-            ) {
+            // ding：alpha 淡入淡出（Box 内不用 AnimatedVisibility，避免 scope 重载解析问题）
+            val dingAlpha by animateFloatAsState(
+                targetValue = if (dingText != null) 1f else 0f,
+                label = "dingAlpha"
+            )
+            if (dingText != null || dingAlpha > 0.02f) {
                 Text(
                     text = dingText.orEmpty(),
                     fontSize = 12.5.sp,
                     color = Color.White,
                     modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .alpha(dingAlpha)
                         .padding(top = 4.dp)
                         .background(
                             Color(0xFF141428).copy(alpha = 0.72f),
@@ -152,18 +153,19 @@ fun PetZone() {
                 )
             }
             // sort-tag：分类决策展示
-            AnimatedVisibility(
-                visible = sortText != null,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.TopCenter)
-            ) {
+            val sortAlpha by animateFloatAsState(
+                targetValue = if (sortText != null) 1f else 0f,
+                label = "sortAlpha"
+            )
+            if (sortText != null || sortAlpha > 0.02f) {
                 Text(
                     text = sortText.orEmpty(),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .alpha(sortAlpha)
                         .padding(top = 40.dp)
                         .background(
                             Color(0xFF141428).copy(alpha = 0.78f),
@@ -189,12 +191,11 @@ fun PetZone() {
                     }
             )
             // carry 小纸条
-            AnimatedVisibility(
-                visible = carryText != null,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.Center)
-            ) {
+            val carryAlpha by animateFloatAsState(
+                targetValue = if (carryText != null) 1f else 0f,
+                label = "carryAlpha"
+            )
+            if (carryText != null || carryAlpha > 0.02f) {
                 val carryX by animateFloatAsState(
                     targetValue = if (carryToRight) 100f else 0f,
                     animationSpec = spring(
@@ -209,6 +210,8 @@ fun PetZone() {
                     fontSize = 11.sp,
                     color = Color(0xFF333333),
                     modifier = Modifier
+                        .align(Alignment.Center)
+                        .alpha(carryAlpha)
                         .offset {
                             IntOffset(
                                 with(density) { carryX.dp.toPx() }.roundToInt(),
