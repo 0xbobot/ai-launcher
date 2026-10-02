@@ -113,11 +113,12 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
             }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -149,26 +150,6 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
                     )
                 }
             }
-        }
-        // AI 智能分类进度框
-        if (classifying) {
-            val (done, total) = classifyProgress
-            AlertDialog(
-                onDismissRequest = {},
-                title = { Text("AI 智能分类", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
-                text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = if (total > 0) "正在智能分类…$done/$total" else "正在智能分类…",
-                            fontSize = 14.sp,
-                            color = AILauncherColors.Body
-                        )
-                    }
-                },
-                confirmButton = {}
-            )
         }
         item {
             Card(
@@ -283,7 +264,28 @@ fun CapabilityScreen(onOpenAllApps: () -> Unit, onOpenSettings: () -> Unit) {
                     )
                 }
                 Spacer(modifier = Modifier.height(24.dp))
+                }
             }
+        }
+        // AI 智能分类进度框
+        if (classifying) {
+            val (done, total) = classifyProgress
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("AI 智能分类", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = if (total > 0) "正在智能分类…$done/$total" else "正在智能分类…",
+                            fontSize = 14.sp,
+                            color = AILauncherColors.Body
+                        )
+                    }
+                },
+                confirmButton = {}
+            )
         }
     }
 }
