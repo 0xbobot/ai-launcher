@@ -39,8 +39,7 @@ import java.util.Calendar
 
 /**
  * v0.27.0：重建的极简主页——只留宠物。
- * Bob 要求：和 Dock/宠物无关的全部清除，实在不行就重建。
- * 布局：七仔居中 + 通知卡片。Dock 由 MainScreen 的 PullUpDock 单独管理。
+ * Bob 要求：和 Dock/宠物无关的全部清除。
  */
 @Composable
 fun HomeScreen(onOpenAppDrawer: () -> Unit) {
@@ -88,7 +87,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // 日历只喂给宠物整理员，首页不展示
+    // 日历喂给宠物整理员（首页不展示）
     var calEvents by remember { mutableStateOf<List<CalEvent>?>(null) }
     LaunchedEffect(Unit) {
         if (hasCalendarPermission(context)) {
@@ -102,7 +101,7 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             ?.let { PetRepository.handleIncomingCalendar(it.title, it.begin, it.location) }
     }
 
-    // 极简布局：只有宠物
+    // 极简：只有宠物
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -113,7 +112,6 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         PetPresentedCard()
     }
 }
-
 
 private data class CalEvent(
     val title: String,
@@ -127,56 +125,6 @@ private fun hasCalendarPermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(
         context, Manifest.permission.READ_CALENDAR
     ) == PackageManager.PERMISSION_GRANTED
-
-/** 读取今天 0 点 ~ 24 点的日历事件（含全天标记），按开始时间排序 */
-private fun loadTodayEvents(context: Context): List<CalEvent> {
-    return try {
-        val cal = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val start = cal.timeInMillis
-        cal.add(Calendar.DAY_OF_YEAR, 1)
-        val end = cal.timeInMillis
-        val builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
-        ContentUris.appendId(builder, start)
-        ContentUris.appendId(builder, end)
-        val cursor = context.contentResolver.query(
-            builder.build(),
-            arrayOf(
-                CalendarContract.Instances.TITLE,
-                CalendarContract.Instances.BEGIN,
-                CalendarContract.Instances.END,
-                CalendarContract.Instances.EVENT_LOCATION,
-                CalendarContract.Instances.ALL_DAY
-            ),
-            null, null,
-            CalendarContract.Instances.BEGIN + " ASC"
-        )
-        val list = mutableListOf<CalEvent>()
-        cursor?.use {
-            val ti = it.getColumnIndex(CalendarContract.Instances.TITLE)
-            val bi = it.getColumnIndex(CalendarContract.Instances.BEGIN)
-            val ei = it.getColumnIndex(CalendarContract.Instances.END)
-            val li = it.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
-            val ai = it.getColumnIndex(CalendarContract.Instances.ALL_DAY)
-            while (it.moveToNext() && list.size < 20) {
-                list += CalEvent(
-                    title = if (ti >= 0) it.getString(ti).orEmpty() else "",
-                    begin = if (bi >= 0) it.getLong(bi) else 0L,
-                    end = if (ei >= 0) it.getLong(ei) else 0L,
-                    location = if (li >= 0) it.getString(li).orEmpty() else "",
-                    allDay = if (ai >= 0) it.getInt(ai) == 1 else false
-                )
-            }
-        }
-        list
-    } catch (_: Exception) {
-        emptyList()
-    }
-}
 
 private fun loadTodayEvents(context: Context): List<CalEvent> {
     return try {
