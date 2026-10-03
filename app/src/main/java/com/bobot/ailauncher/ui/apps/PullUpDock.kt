@@ -310,7 +310,8 @@ private fun DockRow4(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        // v0.27.2：居中（之前 spacedBy 默认左对齐）
+        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically
     ) {
         apps.forEach { app ->

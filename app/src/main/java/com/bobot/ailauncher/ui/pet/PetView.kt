@@ -11,7 +11,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -26,6 +25,10 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.awaitEachGesture
+import androidx.compose.ui.input.pointer.awaitFirstDown
+import androidx.compose.ui.input.pointer.awaitTouchSlopOrCancellation
+import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -155,33 +158,53 @@ fun PetView(
     val maxDragPx = with(density) { 40.dp.toPx() }
 
     Box(
-        // v0.26.4：拖拽放外层（先于 clickable），解决拖拽不动
+        // v0.27.2：手动处理拖拽（awaitEachGesture），立即消费事件，
+        // 避免被父级 nestedScroll（上滑开抽屉）和 clickable 抢掉
         modifier = Modifier
             .pointerInput(Unit) {
-                detectDragGestures(
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        val newX = dragOffset.x + dragAmount.x
-                        val newY = dragOffset.y + dragAmount.y
-                        // 限制在 40dp 半径内
-                        val dist = sqrt(newX * newX + newY * newY)
-                        dragOffset = if (dist > maxDragPx) {
-                            androidx.compose.ui.geometry.Offset(
-                                newX / dist * maxDragPx,
-                                newY / dist * maxDragPx
-                            )
-                        } else {
-                            androidx.compose.ui.geometry.Offset(newX, newY)
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    var curOffset = dragOffset
+                    var dragging = false
+                    do {
+                        val event = awaitTouchSlopOrCancellation(down.id) { change, over ->
+                            change.consume()
                         }
-                    },
-                    onDragEnd = {
-                        // 松手回弹
-                        dragOffset = androidx.compose.ui.geometry.Offset.Zero
-                    },
-                    onDragCancel = {
+                        if (event == null) break // 取消（可能是点击）
+                        dragging = true
+                        // 进入拖拽：持续跟手
+                        var prev = event
+                        while (true) {
+                            val next = awaitPointerEvent()
+                            val change = next.changes.firstOrNull { it.id == down.id }
+                                ?: break
+                            if (!change.pressed) {
+                                change.consume()
+                                break
+                            }
+                            val delta = change.position - prev.position
+                            prev = change
+                            change.consume()
+                            val newX = curOffset.x + delta.x
+                            val newY = curOffset.y + delta.y
+                            val dist = sqrt(newX * newX + newY * newY)
+                            curOffset = if (dist > maxDragPx) {
+                                androidx.compose.ui.geometry.Offset(
+                                    newX / dist * maxDragPx,
+                                    newY / dist * maxDragPx
+                                )
+                            } else {
+                                androidx.compose.ui.geometry.Offset(newX, newY)
+                            }
+                            dragOffset = curOffset
+                        }
+                        break
+                    } while (false)
+                    // 松手回弹（无论是否拖拽过）
+                    if (dragging) {
                         dragOffset = androidx.compose.ui.geometry.Offset.Zero
                     }
-                )
+                }
             }
             .then(modifier)
             .graphicsLayer {
