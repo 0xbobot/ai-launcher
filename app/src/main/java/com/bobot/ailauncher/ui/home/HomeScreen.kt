@@ -58,6 +58,7 @@ import com.bobot.ailauncher.core.action.ActionRequest
 import com.bobot.ailauncher.core.action.ActionResult
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.data.WeatherRepository
 import com.bobot.ailauncher.ui.pet.PetPresentedCard
 import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
