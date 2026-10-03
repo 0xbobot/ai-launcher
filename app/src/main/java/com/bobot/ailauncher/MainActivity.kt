@@ -18,12 +18,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import com.bobot.ailauncher.core.brain.AiBrain
+import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.MainScreen
 import com.bobot.ailauncher.ui.onboarding.OnboardingNav
 import com.bobot.ailauncher.ui.theme.AILauncherTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -66,6 +70,14 @@ class MainActivity : ComponentActivity() {
             try {
                 window.setBackgroundBlurRadius(80)
             } catch (_: Exception) {
+            }
+        }
+
+        // v0.17.0（PRD 技术方案 Phase 1）：事件驱动 AI Brain。
+        // Launcher 只生产事件、消费决策结果；Brain 挂掉也不影响 Launcher。
+        lifecycleScope.launch {
+            EventBus.events.collect { event ->
+                AiBrain.onEvent(event, this@MainActivity)
             }
         }
 

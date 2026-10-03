@@ -3,12 +3,15 @@ package com.bobot.ailauncher.service
 import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import com.bobot.ailauncher.core.event.EventBus
+import com.bobot.ailauncher.core.event.LauncherEvent
 import com.bobot.ailauncher.data.NotificationRepository
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.SimpleNotification
 
 /**
- * 通知监听服务："正在进行时"信息流的数据来源。
+ * 通知监听服务：通知事件的生产者。
+ * v0.17.0（PRD 技术方案 Phase 1）：只发 EventBus 事件，不再直调 PetRepository——
+ * "收到通知"这个事实与"宠物该怎么做"的决策解耦，决策权在 AiBrain。
  * 用户需在「设置 > 通知 > 通知读取权限」中手动开启（冷启动 Step3 引导）。
  */
 class LauncherNotificationService : NotificationListenerService() {
@@ -25,11 +28,11 @@ class LauncherNotificationService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        // v0.15 宠物整理员：单条新通知 → 宠物接 → 分类 → 呈现（去重/忙碌保护在 PetRepository 内）
+        // v0.17.0：只发事件。宠物"接→分类→呈现"由 AiBrain 决策后走原链路，行为不变。
         sbn?.let {
             if (it.isClearable && !it.isOngoing) {
                 it.toSimpleNotification()?.let { n ->
-                    PetRepository.handleIncomingNotification(n)
+                    EventBus.emit(LauncherEvent.NotificationReceived(n))
                 }
             }
         }

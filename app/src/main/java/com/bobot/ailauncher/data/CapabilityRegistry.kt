@@ -26,8 +26,21 @@ data class Capability(
     val packageNames: List<String>,
     val deeplinkTemplate: String?,
     val fallbackToLauncher: Boolean = true,
-    val note: String? = null
+    val note: String? = null,
+    // v0.17.0（PRD §六十一/§二十三）：风险分级与执行方式，JSON 可选字段，缺省安全值
+    val riskLevel: RiskLevel = RiskLevel.LOW_RISK,
+    val executionMethod: ExecutionMethod = ExecutionMethod.LAUNCH,
+    val permission: String? = null
 )
+
+/** Action 风险分级（PRD §二十三）：A=读，B=导航，C=低风险，D=中风险，E=高风险（必须用户确认） */
+enum class RiskLevel { READ, NAVIGATE, LOW_RISK, MEDIUM_RISK, HIGH_RISK }
+
+/**
+ * 执行方式优先级（PRD §二十一）：APP_FUNCTION > DEEP_LINK > SHORTCUT > INTENT > LAUNCH；
+ * ACCESSIBILITY 永远只是兼容层，不做核心路径（PRD §六十评审结论 2）。
+ */
+enum class ExecutionMethod { LAUNCH, INTENT, DEEP_LINK, SHORTCUT, APP_FUNCTION, ACCESSIBILITY }
 
 data class CapabilityGroup(
     val id: String,
@@ -83,7 +96,15 @@ object CapabilityRegistry {
                     packageNames = pkgs,
                     deeplinkTemplate = c.optString("deeplink").ifBlank { null },
                     fallbackToLauncher = c.optBoolean("fallbackToLauncher", true),
-                    note = c.optString("note").ifBlank { null }
+                    note = c.optString("note").ifBlank { null },
+                    // 可选字段：缺省 LOW_RISK / LAUNCH（老 JSON 不用改）
+                    riskLevel = runCatching {
+                        RiskLevel.valueOf(c.optString("risk", "LOW_RISK"))
+                    }.getOrDefault(RiskLevel.LOW_RISK),
+                    executionMethod = runCatching {
+                        ExecutionMethod.valueOf(c.optString("execution", "LAUNCH"))
+                    }.getOrDefault(ExecutionMethod.LAUNCH),
+                    permission = c.optString("permission").ifBlank { null }
                 )
             }
             result += CapabilityGroup(
