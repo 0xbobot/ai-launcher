@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -17,12 +19,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.awaitEachGesture
-import androidx.compose.ui.input.pointer.awaitFirstDown
-import androidx.compose.ui.input.pointer.awaitPointerEvent
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -47,7 +48,31 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     val context = LocalContext.current
     val density = LocalDensity.current
 
-    // v0.27.5：上滑检测改用 pointerInput（见下方 Column），删除 nestedScroll 方案
+    // 上滑打开应用抽屉
+    val middleScrollState = rememberScrollState()
+    val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
+    // v0.27.3：上滑阈值降低（120dp→48dp），更容易触发 D3
+    val swipeThresholdPx = with(density) { 48.dp.toPx() }
+    val drawerScrollConnection = remember {
+        object : NestedScrollConnection {
+            var accum = 0f
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput) return Offset.Zero
+                val atTop = middleScrollState.value == 0
+                if (available.y < 0f && atTop) {
+                    accum += -available.y
+                    if (accum >= swipeThresholdPx) {
+                        accum = 0f
+                        openDrawerState()
+                        return available
+                    }
+                    return available
+                }
+                if (available.y > 0f) accum = 0f
+                return Offset.Zero
+            }
+        }
+    }
 
     // 通知监听重绑
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -79,47 +104,13 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             ?.let { PetRepository.handleIncomingCalendar(it.title, it.begin, it.location) }
     }
 
-    // v0.27.5：上滑开 D3——直接 pointerInput 检测（nestedScroll 不可靠）
-    // 非 Dock 区上滑，任何状态都进 D3
-    val swipeUpHandler = rememberUpdatedState(onOpenAppDrawer)
-    val swipeThresholdPx2 = with(density) { 48.dp.toPx() }
-
-    // 极简：只有宠物（居中）
+    // 极简：只有宠物
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                // 可靠的上滑检测：累计上滑超过阈值就开 D3
-                awaitEachGesture {
-                    val down = awaitFirstDown()
-                    var accumY = 0f
-                    var opened = false
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id }
-                            ?: break
-                        if (!change.pressed) break
-                        val dy = change.position.y - change.previousPosition.y
-                        // 只累计上滑（dy<0）
-                        if (dy < 0) {
-                            accumY += -dy
-                            change.consume()
-                            if (!opened && accumY >= swipeThresholdPx2) {
-                                opened = true
-                                swipeUpHandler.value()
-                            }
-                        } else {
-                            // 下滑则重置（避免误触）
-                            accumY = 0f
-                        }
-                        if (opened) {
-                            // 已触发，消费掉剩余事件避免冲突
-                            event.changes.forEach { it.consume() }
-                        }
-                    }
-                }
-            }
+            .nestedScroll(drawerScrollConnection)
             .padding(horizontal = 16.dp),
+        // v0.27.5：宠物居中（Bob：位置太高）
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
