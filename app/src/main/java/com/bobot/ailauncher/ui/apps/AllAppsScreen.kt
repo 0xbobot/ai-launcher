@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.CustomCategories
@@ -144,9 +145,10 @@ fun AllAppsContent(
             }
     }
     val searching = query.trim().isNotBlank()
-    val filtered = remember(query, apps) {
-        val q = query.trim()
-        if (q.isBlank()) apps else apps.filter { it.label.contains(q, ignoreCase = true) }
+    // v0.21（PRD §三十三）：拼音/首字母/自然语言/模糊搜索；索引按应用列表建一次
+    val searchIndex = remember(apps) { AppSearchIndex.build(apps) }
+    val filtered = remember(query, searchIndex) {
+        AppSearchIndex.search(query, searchIndex)
     }
 
     // 首字母分组：A-Z 在前，"#"（非字母开头）最后；中文按拼音首字母
@@ -798,7 +800,7 @@ private fun AllAppsSearchBar(
             TextField(
                 value = query,
                 onValueChange = onQueryChange,
-                placeholder = { Text("搜索应用", color = AILauncherColors.Hint) },
+                placeholder = { Text("搜索应用，支持拼音/首字母/如\"打车\"", color = AILauncherColors.Hint) },
                 modifier = Modifier
                     .weight(1f)
                     .onFocusChanged {
