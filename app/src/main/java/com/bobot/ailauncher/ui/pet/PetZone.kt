@@ -49,6 +49,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphicsLayer
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -109,6 +116,8 @@ fun PetZone(
             showDeliver = false
         }
     }
+    // v0.30.0：天气微动作
+    val weatherDesc by com.bobot.ailauncher.data.WeatherState.desc.collectAsState()
     var blinking by remember { mutableStateOf(false) }
     val context = LocalContext.current
     // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
@@ -225,6 +234,7 @@ fun PetZone(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(100.dp)
+                    .weatherMotion(weatherDesc)
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }
@@ -677,5 +687,54 @@ private fun GiftBox(modifier: Modifier = Modifier) {
             radius = w * 0.12f,
             center = androidx.compose.ui.geometry.Offset(w * 0.62f, h * 0.14f)
         )
+    }
+}
+
+/**
+ * v0.30.0：天气微动作——按天气给宠物加极小的身体语言。
+ * 晴±0.6°晃 / 雨微微低头 / 阴几乎不动 / 雪抬头看 / 夜下沉。
+ */
+@Composable
+private fun Modifier.weatherMotion(desc: String?): Modifier {
+    val density = LocalDensity.current
+    return when {
+        desc == null -> this
+        desc.contains("晴") -> {
+            val t = rememberInfiniteTransition(label = "bask")
+            val r by t.animateFloat(
+                initialValue = -0.6f, targetValue = 0.6f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(3000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "baskR"
+            )
+            this.graphicsLayer { rotationZ = r }
+        }
+        desc.contains("雨") -> {
+            val t = rememberInfiniteTransition(label = "droop")
+            val y by t.animateFloat(
+                initialValue = 0f, targetValue = with(density) { 2.dp.toPx() },
+                animationSpec = infiniteRepeatable(
+                    animation = tween(4000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "droopY"
+            )
+            this.graphicsLayer { translationY = y }
+        }
+        desc.contains("雪") -> {
+            val t = rememberInfiniteTransition(label = "lookUp")
+            val y by t.animateFloat(
+                initialValue = 0f, targetValue = with(density) { (-4).dp.toPx() },
+                animationSpec = infiniteRepeatable(
+                    animation = tween(4000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "lookY"
+            )
+            this.graphicsLayer { translationY = y }
+        }
+        else -> this
     }
 }
