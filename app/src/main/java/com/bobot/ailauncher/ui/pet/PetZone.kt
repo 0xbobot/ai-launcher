@@ -82,7 +82,11 @@ import kotlin.math.roundToInt
  * 放在首页顶栏下方。
  */
 @Composable
-fun PetZone() {
+fun PetZone(
+    // v0.29.0：升级提醒宠物化
+    hasUpgrade: Boolean = false,
+    onUpgradeTap: () -> Unit = {}
+) {
     val mood by PetRepository.mood.collectAsState()
     val mouth by PetRepository.mouth.collectAsState()
     val dingText by PetRepository.dingText.collectAsState()
@@ -92,6 +96,19 @@ fun PetZone() {
     val sortText by PetRepository.sortText.collectAsState()
     // v0.19：语义状态——SLEEPY 时眼睛保持闭合（夜晚睡觉）
     val petState by PetRepository.petState.collectAsState()
+    // v0.29.0：新通知送达 / 会议临近
+    val deliverTick by PetRepository.deliverTick.collectAsState()
+    val deliverApp by PetRepository.deliverApp.collectAsState()
+    val meetingSoon by PetRepository.meetingSoon.collectAsState()
+    var showDeliver by remember { mutableStateOf(false) }
+    // 送达徽标显示 3 秒
+    LaunchedEffect(deliverTick) {
+        if (deliverTick > 0) {
+            showDeliver = true
+            delay(3000)
+            showDeliver = false
+        }
+    }
     var blinking by remember { mutableStateOf(false) }
     val context = LocalContext.current
     // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
@@ -164,6 +181,40 @@ fun PetZone() {
             if (showDots) {
                 ThinkDots(modifier = Modifier.align(Alignment.TopCenter).padding(top = 44.dp))
             }
+            // v0.29.0：升级礼物盒——有新版时七仔头顶抱礼物盒
+            if (hasUpgrade) {
+                GiftBox(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 8.dp)
+                )
+            }
+            // v0.29.0：新通知送达——头顶冒出应用名小徽标（3 秒）
+            if (showDeliver && deliverApp != null) {
+                Text(
+                    text = deliverApp!!,
+                    fontSize = 11.sp,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 52.dp)
+                        .background(Color(0xFF5C8DEF), RoundedCornerShape(99.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+            // v0.29.0：会议临近——七仔头顶会议提醒
+            if (meetingSoon != null) {
+                Text(
+                    text = "15 分钟后：$meetingSoon",
+                    fontSize = 11.sp,
+                    color = AILauncherColors.Title,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 52.dp)
+                        .background(Color(0xFFFFE9A8), RoundedCornerShape(99.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
             // 宠物本体
             PetView(
                 mood = mood,
@@ -178,8 +229,9 @@ fun PetZone() {
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }
                     ) {
-                        // P0：纯视觉反馈（果冻回弹），Bob 拍板
-                        jellyTick++
+                        // v0.29.0：有升级时点按 → 弹更新对话框；否则果冻
+                        if (hasUpgrade) onUpgradeTap()
+                        else jellyTick++
                     }
             )
             // P0：落地阴影（奶油白在暖灰底上加对比）
@@ -572,5 +624,58 @@ fun PetTabsOverlay(dockHidden: Boolean) {
                 }
             }
         }
+    }
+}
+
+/**
+ * v0.29.0：升级礼物盒——Canvas 手绘，七仔头顶。
+ * 有新版时显示，点按七仔弹更新对话框。
+ */
+@Composable
+private fun GiftBox(modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(
+        modifier = modifier.size(44.dp, 40.dp)
+    ) {
+        val w = size.width
+        val h = size.height
+        val boxColor = androidx.compose.ui.graphics.Color(0xFFE8734A)
+        val ribbonColor = androidx.compose.ui.graphics.Color(0xFFFFD66B)
+        // 盒身
+        drawRoundRect(
+            color = boxColor,
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.15f, h * 0.35f),
+            size = androidx.compose.ui.geometry.Size(w * 0.7f, h * 0.65f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx())
+        )
+        // 盒盖
+        drawRoundRect(
+            color = boxColor,
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.1f, h * 0.22f),
+            size = androidx.compose.ui.geometry.Size(w * 0.8f, h * 0.2f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx())
+        )
+        // 纵丝带
+        drawRect(
+            color = ribbonColor,
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.45f, h * 0.22f),
+            size = androidx.compose.ui.geometry.Size(w * 0.1f, h * 0.78f)
+        )
+        // 横丝带（盖上）
+        drawRect(
+            color = ribbonColor,
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.1f, h * 0.28f),
+            size = androidx.compose.ui.geometry.Size(w * 0.8f, h * 0.08f)
+        )
+        // 蝴蝶结（两个圆）
+        drawCircle(
+            color = ribbonColor,
+            radius = w * 0.12f,
+            center = androidx.compose.ui.geometry.Offset(w * 0.38f, h * 0.14f)
+        )
+        drawCircle(
+            color = ribbonColor,
+            radius = w * 0.12f,
+            center = androidx.compose.ui.geometry.Offset(w * 0.62f, h * 0.14f)
+        )
     }
 }
