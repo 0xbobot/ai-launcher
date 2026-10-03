@@ -148,54 +148,13 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             .padding(horizontal = 16.dp)
             .padding(bottom = 100.dp) // 给底部悬浮的圆点 + 横线手柄留位
     ) {
-        // v0.19（原型 v2 / PRD §6.1）：极简顶栏 + 情境信息条 + 宠物居中
-        MinimalTopBar()
-        Spacer(modifier = Modifier.height(10.dp))
+        // v0.25.8：顶栏日期时间删掉（Bob：和状态栏冲突，没意义）
         // v0.19 情境信息条：一次一条最重要的事（PRD §七）
         AmbientInfoPill(calEvents)
         // v0.15 宠物整理员：桌台 + 呈现卡片
         PetZone()
         PetPresentedCard()
         // v0.16：删除"正在进行时"区（日程大卡 + 通知流），统一纳入宠物管理
-    }
-}
-
-/** v0.19（原型 v2 / PRD §6.1）：极简顶栏——左日期、右时间，一行小字 */
-@Composable
-private fun MinimalTopBar() {
-    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(20_000)
-            nowMs = System.currentTimeMillis()
-        }
-    }
-    val time = remember(nowMs) {
-        SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(nowMs))
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 18.dp, bottom = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = todayText(),
-            fontSize = 12.5.sp,
-            style = TextStyle(
-                color = Color.White.copy(alpha = 0.75f),
-                shadow = GlassTextShadow
-            )
-        )
-        Text(
-            text = time,
-            fontSize = 12.5.sp,
-            style = TextStyle(
-                color = Color.White.copy(alpha = 0.75f),
-                shadow = GlassTextShadow
-            )
-        )
     }
 }
 
@@ -330,6 +289,4 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
     }
 }
 
-private fun todayText(): String =
-    SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date())
 
