@@ -64,11 +64,7 @@
         <service
             android:name=".service.BatteryGuardService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="低电量守护：电量过低时温和提醒" />
-        </service>
+            android:foregroundServiceType="specialUse" />
 
         <!-- 低电量提醒弹窗：半透明主题，居中温和卡片 -->
         <activity
