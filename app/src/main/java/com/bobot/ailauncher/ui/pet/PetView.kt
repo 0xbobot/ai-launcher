@@ -11,6 +11,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -25,10 +26,6 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.awaitEachGesture
-import androidx.compose.ui.input.pointer.awaitFirstDown
-import androidx.compose.ui.input.pointer.awaitTouchSlopOrCancellation
-import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -158,49 +155,33 @@ fun PetView(
     val maxDragPx = with(density) { 40.dp.toPx() }
 
     Box(
-        // v0.27.2：手动处理拖拽（awaitEachGesture），立即消费事件，
-        // 避免被父级 nestedScroll（上滑开抽屉）和 clickable 抢掉
+        // v0.26.4：拖拽放外层（先于 clickable），解决拖拽不动
         modifier = Modifier
             .pointerInput(Unit) {
-                awaitEachGesture {
-                    val down = awaitFirstDown()
-                    var curOffset = dragOffset
-                    // 等待超过 touch slop（否则视为点击，不干扰 clickable）
-                    val slopEvent = awaitTouchSlopOrCancellation(down.id) { change, _ ->
+                detectDragGestures(
+                    onDrag = { change, dragAmount ->
                         change.consume()
-                    }
-                    if (slopEvent != null) {
-                        // 进入拖拽：持续跟手
-                        var prevPos = slopEvent.position
-                        var done = false
-                        while (!done) {
-                            val ev = awaitPointerEvent()
-                            val change = ev.changes.firstOrNull { it.id == down.id }
-                            if (change == null || !change.pressed) {
-                                change?.consume()
-                                done = true
-                            } else {
-                                val delta = change.position - prevPos
-                                prevPos = change.position
-                                change.consume()
-                                val newX = curOffset.x + delta.x
-                                val newY = curOffset.y + delta.y
-                                val dist = sqrt(newX * newX + newY * newY)
-                                curOffset = if (dist > maxDragPx) {
-                                    androidx.compose.ui.geometry.Offset(
-                                        newX / dist * maxDragPx,
-                                        newY / dist * maxDragPx
-                                    )
-                                } else {
-                                    androidx.compose.ui.geometry.Offset(newX, newY)
-                                }
-                                dragOffset = curOffset
-                            }
+                        val newX = dragOffset.x + dragAmount.x
+                        val newY = dragOffset.y + dragAmount.y
+                        // 限制在 40dp 半径内
+                        val dist = sqrt(newX * newX + newY * newY)
+                        dragOffset = if (dist > maxDragPx) {
+                            androidx.compose.ui.geometry.Offset(
+                                newX / dist * maxDragPx,
+                                newY / dist * maxDragPx
+                            )
+                        } else {
+                            androidx.compose.ui.geometry.Offset(newX, newY)
                         }
+                    },
+                    onDragEnd = {
                         // 松手回弹
                         dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                    },
+                    onDragCancel = {
+                        dragOffset = androidx.compose.ui.geometry.Offset.Zero
                     }
-                }
+                )
             }
             .then(modifier)
             .graphicsLayer {
