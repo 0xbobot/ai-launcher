@@ -21,7 +21,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -61,12 +60,10 @@ fun WeatherEnv(modifier: Modifier = Modifier) {
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        // 场景区：椭圆裁剪，天气只发生在这里
-        // 氛围渐变本身带透明衰减，边缘自然融入壁纸
+        // 场景区：不裁剪，靠渐变自然羽化（边缘透明）
+        // 氛围半径 < 场景区，粒子活动范围 < 氛围半径，三层嵌套保证柔边
         Box(
-            modifier = Modifier
-                .size(230.dp, 300.dp)
-                .clip(androidx.compose.foundation.shape.CircleShape)
+            modifier = Modifier.size(260.dp, 330.dp)
         ) {
             when {
                 isNight -> NightScene()
@@ -90,53 +87,55 @@ fun WeatherEnv(modifier: Modifier = Modifier) {
     }
 }
 
-/** 晴：左上暖光 */
+/** 晴：左上暖光（羽化） */
 @Composable
 private fun SunnyScene(temp: Int, city: String) {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // 暖光从左上
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFFFFBE5A).copy(alpha = 0.35f),
+                    Color(0xFFFFBE5A).copy(alpha = 0.38f),
+                    Color(0xFFFFBE5A).copy(alpha = 0.14f),
                     Color.Transparent
                 ),
-                center = Offset(size.width * 0.3f, size.height * 0.2f),
-                radius = size.width * 0.7f
+                center = Offset(size.width * 0.32f, size.height * 0.22f),
+                radius = size.minDimension * 0.62f
             ),
             size = size
         )
     }
 }
 
-/** 雨：暗冷 + 细长雨丝快落 */
+/** 雨：暗冷 + 细长雨丝快落（羽化） */
 @Composable
 private fun RainyScene() {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // 压暗冷调
         drawRect(
-            brush = Brush.verticalGradient(
+            brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFF2D3C50).copy(alpha = 0.5f),
-                    Color(0xFF1C2637).copy(alpha = 0.62f)
-                )
+                    Color(0xFF2D3C50).copy(alpha = 0.55f),
+                    Color(0xFF1C2637).copy(alpha = 0.3f),
+                    Color.Transparent
+                ),
+                center = center,
+                radius = size.minDimension * 0.6f
             ),
             size = size
         )
     }
-    // 22 条雨丝
+    // 22 条雨丝（活动范围收进羽化区内）
     repeat(22) { i ->
         val transition = rememberInfiniteTransition(label = "rain$i")
         val y by transition.animateFloat(
-            initialValue = -30f,
-            targetValue = 320f,
+            initialValue = -20f,
+            targetValue = 280f,
             animationSpec = infiniteRepeatable(
                 animation = tween((700 + i * 30), easing = LinearEasing),
                 repeatMode = RepeatMode.Restart
             ),
             label = "rainY$i"
         )
-        val x = (i * 37) % 220
+        val x = 40 + (i * 31) % 160
         Canvas(
             modifier = Modifier
                 .size(2.dp, (10 + (i % 5) * 2).dp)
@@ -153,29 +152,29 @@ private fun RainyScene() {
     }
 }
 
-/** 雪：亮暖白 + 圆绒雪点慢飘 */
+/** 雪：亮暖白 + 圆绒雪点慢飘（羽化） */
 @Composable
 private fun SnowyScene() {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // 明亮冷白（和雨的暗冷拉开）
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFFE6F2FF).copy(alpha = 0.35f),
-                    Color(0xFFC8DCF5).copy(alpha = 0.12f)
+                    Color(0xFFE6F2FF).copy(alpha = 0.38f),
+                    Color(0xFFC8DCF5).copy(alpha = 0.14f),
+                    Color.Transparent
                 ),
-                center = Offset(size.width / 2, size.height * 0.1f),
-                radius = size.width * 0.8f
+                center = Offset(size.width / 2, size.height * 0.15f),
+                radius = size.minDimension * 0.65f
             ),
             size = size
         )
     }
-    // 12 朵雪点
+    // 12 朵雪点（活动范围收进羽化区内）
     repeat(12) { i ->
         val transition = rememberInfiniteTransition(label = "snow$i")
         val y by transition.animateFloat(
             initialValue = -20f,
-            targetValue = 320f,
+            targetValue = 280f,
             animationSpec = infiniteRepeatable(
                 animation = tween((4000 + i * 250), easing = LinearEasing),
                 repeatMode = RepeatMode.Restart
@@ -193,7 +192,7 @@ private fun SnowyScene() {
             ),
             label = "swayX$i"
         )
-        val baseX = (i * 53) % 210
+        val baseX = 50 + (i * 41) % 140
         val flakeSize = 4 + (i % 3) * 2
         Canvas(
             modifier = Modifier
@@ -209,40 +208,80 @@ private fun SnowyScene() {
     }
 }
 
-/** 阴：均匀冷灰 */
+/** 阴：看得出来的阴天——柔和云块缓慢漂移 */
 @Composable
 private fun CloudyScene() {
+    // 底：均匀冷灰（羽化）
     Canvas(modifier = Modifier.fillMaxSize()) {
-        drawRect(
-            color = Color(0xFF788291).copy(alpha = 0.22f),
-            size = size
-        )
-    }
-}
-
-/** 夜：深蓝月光 */
-@Composable
-private fun NightScene() {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        // 月光从右上
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFF96B4FF).copy(alpha = 0.28f),
+                    Color(0xFF788291).copy(alpha = 0.32f),
+                    Color(0xFF788291).copy(alpha = 0.12f),
                     Color.Transparent
                 ),
-                center = Offset(size.width * 0.72f, size.height * 0.18f),
-                radius = size.width * 0.5f
+                center = center,
+                radius = size.minDimension * 0.55f
             ),
             size = size
         )
-        // 深蓝底
+    }
+    // 3 朵柔和云块，缓慢漂移（看得出是阴天，但不卡通）
+    repeat(3) { i ->
+        val t = rememberInfiniteTransition(label = "cloud$i")
+        val x by t.animateFloat(
+            initialValue = -16f,
+            targetValue = 16f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(9000 + i * 2000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "cloudX$i"
+        )
+        val baseX = 50 + i * 55
+        val baseY = 70 + (i % 2) * 45
+        Canvas(
+            modifier = Modifier
+                .size(90.dp, 44.dp)
+                .offset(x = (baseX + x).dp, y = baseY.dp)
+        ) {
+            // 柔和云：三个模糊圆拼合
+            val cloudColor = Color(0xFF9AA3B2).copy(alpha = 0.5f)
+            drawCircle(cloudColor, radius = size.width * 0.22f,
+                center = Offset(size.width * 0.3f, size.height * 0.6f))
+            drawCircle(cloudColor, radius = size.width * 0.28f,
+                center = Offset(size.width * 0.55f, size.height * 0.45f))
+            drawCircle(cloudColor, radius = size.width * 0.2f,
+                center = Offset(size.width * 0.78f, size.height * 0.62f))
+        }
+    }
+}
+
+/** 夜：深蓝月光（羽化） */
+@Composable
+private fun NightScene() {
+    Canvas(modifier = Modifier.fillMaxSize()) {
         drawRect(
-            brush = Brush.verticalGradient(
+            brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFF0F1428).copy(alpha = 0.6f),
-                    Color(0xFF0A0E1C).copy(alpha = 0.7f)
-                )
+                    Color(0xFF0F1428).copy(alpha = 0.62f),
+                    Color(0xFF0A0E1C).copy(alpha = 0.3f),
+                    Color.Transparent
+                ),
+                center = center,
+                radius = size.minDimension * 0.6f
+            ),
+            size = size
+        )
+        // 月光从右上（柔光）
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFF96B4FF).copy(alpha = 0.3f),
+                    Color.Transparent
+                ),
+                center = Offset(size.width * 0.72f, size.height * 0.18f),
+                radius = size.minDimension * 0.4f
             ),
             size = size
         )
