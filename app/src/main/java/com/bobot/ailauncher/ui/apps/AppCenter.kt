@@ -41,6 +41,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,7 +50,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -78,6 +86,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppClassifier
 import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.ClassifyResult
@@ -157,6 +166,19 @@ fun AppCenterContent(
         map.toList().sortedWith(compareBy({ if (it.first == '#') 1 else 0 }, { it.first }))
     }
     val letters = remember(azGroups) { azGroups.map { it.first } }
+
+    // v0.21：应用中心搜索（PRD §三十三）——拼音/首字母/自然语言/模糊
+    var query by remember { mutableStateOf("") }
+    val searching = query.trim().isNotBlank()
+    val searchIndex = remember(azApps) { AppSearchIndex.build(context, azApps) }
+    val searchResults = remember(query, searchIndex) {
+        if (query.trim().isBlank()) null
+        else AppSearchIndex.search(context, query, searchIndex)
+    }
+    // 开始搜索时滚到顶部
+    LaunchedEffect(searching) {
+        if (searching) listState.scrollToItem(0)
+    }
 
     val listState = rememberLazyListState()
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
@@ -300,6 +322,58 @@ fun AppCenterContent(
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
+            // v0.21 搜索框：拼音/首字母/自然语言/模糊（PRD §三十三）
+            val keyboardController =
+                androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+            TextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = {
+                    Text(
+                        "搜索应用，支持拼音/首字母/如\"打车\"",
+                        fontSize = 14.sp,
+                        color = AILauncherColors.Hint
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = AILauncherColors.Hint
+                    )
+                },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "清空",
+                                tint = AILauncherColors.Hint
+                            )
+                        }
+                    }
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = {
+                    keyboardController?.hide()
+                }),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = AILauncherColors.GlassCard,
+                    unfocusedContainerColor = AILauncherColors.GlassCard,
+                    disabledContainerColor = AILauncherColors.GlassCard,
+                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    focusedTextColor = AILauncherColors.Title,
+                    unfocusedTextColor = AILauncherColors.Title,
+                    cursorColor = AILauncherColors.Accent
+                ),
+                shape = RoundedCornerShape(99.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
         }
 
         // ---- 单列表：分类区在上，A-Z 列表直接在下 ----
@@ -316,6 +390,38 @@ fun AppCenterContent(
                     .padding(horizontal = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                val results = searchResults
+                if (results != null) {
+                    // 搜索态：只显示搜索结果（拼音/首字母/自然语言/模糊）
+                    if (results.isEmpty()) {
+                        item(key = "search-empty") {
+                            Text(
+                                text = "没有找到「${query.trim()}」相关的应用",
+                                fontSize = 14.sp,
+                                color = AILauncherColors.Hint,
+                                modifier = Modifier.padding(top = 32.dp, start = 4.dp)
+                            )
+                        }
+                    } else {
+                        items(results, key = { "s:${it.packageName}" }) { app ->
+                            AppRow(
+                                app = app,
+                                onLaunch = { launchApp(app) },
+                                onLongClick = { quickActionsApp = app },
+                                onHide = ::hideApp,
+                                onOrganize = { organizeApp = it },
+                                actionsVisible = expandedActionsPkg == app.packageName,
+                                onActionsVisibleChange = { expanded ->
+                                    expandedActionsPkg =
+                                        if (expanded) app.packageName
+                                        else if (expandedActionsPkg == app.packageName) null
+                                        else expandedActionsPkg
+                                }
+                            )
+                        }
+                    }
+                    item { Spacer(modifier = Modifier.height(24.dp)) }
+                } else {
                 // 分类区
                 // 顶部预留空白区（约 140dp，未来给宠物使用，先空着）
                 item(key = "pet-slot") {
@@ -378,11 +484,13 @@ fun AppCenterContent(
                     }
                 }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
+                } // else 非搜索态：分类区 + A-Z 列表
             }
             // Rail：只做定位——"类"跳回顶部整个分类区，字母跳对应字母；惯用手镜像
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp），
             // 气泡仍在 rail 外侧紧贴边缘，允许轻微溢出绘制
-            if (groups.isNotEmpty() || letters.isNotEmpty()) {
+            // v0.21：搜索态隐藏 rail（定位无意义）
+            if (!searching && (groups.isNotEmpty() || letters.isNotEmpty())) {
                 val railOutX = if (handed == UiPrefs.Handed.RIGHT) 18.dp else (-18).dp
                 CenterRail(
                     letters = letters,
