@@ -155,9 +155,9 @@ class BatteryGuardService : Service() {
             this, if (critical) 2 else 1, fullScreen,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val title = if (critical) "电量只剩 $pct% 了" else "电量还剩 $pct%"
-        val text = if (critical) "找个充电器，或者开省电模式多撑一会儿"
-        else "要不要充个电，或者开省电模式？"
+        val title = if (critical) "掉到 $pct% 了，还没充？" else "电量到 $pct% 了"
+        val text = if (critical) "再不插电真要关机了"
+        else "充个电休息一下？"
         val notification = NotificationCompat.Builder(this, CHANNEL_ALERT)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
