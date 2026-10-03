@@ -176,7 +176,7 @@ fun AppCenterContent(
 
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
-    // 字母 → LazyColumn item index（item0="全部应用"分隔，之后每字母：1 头 + N 行）
+    // 字母 → LazyColumn item index（每字母：1 头 + N 行）
     val letterAnchors = remember(azGroups) {
         val m = mutableMapOf<Char, Int>()
         var idx = 0
@@ -356,8 +356,9 @@ fun AppCenterContent(
                 modifier = Modifier
                     .fillMaxSize()
                     .nestedScroll(nested)
-                    .padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                    // v0.25.9：右侧多缩进（避让 rail），更紧凑
+                    .padding(start = 20.dp, end = 64.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 val results = searchResults
                 if (results != null) {

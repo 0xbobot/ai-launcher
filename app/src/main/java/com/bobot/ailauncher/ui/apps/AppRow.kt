@@ -124,20 +124,21 @@ internal fun AppRow(
                     )
                 }
                 .combinedClickable(onClick = onLaunch, onLongClick = onLongClick)
-                .padding(12.dp),
+                // v0.25.9：更紧凑——纵向 padding 8dp，图标 36dp
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AppIconImage(
                 drawable = app.icon,
                 contentDescription = app.label.toString(),
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(9.dp))
             )
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = app.label.toString(),
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 color = AILauncherColors.Title
             )
         }
