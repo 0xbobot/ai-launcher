@@ -239,6 +239,8 @@ private fun WeatherPill(w: WeatherRepository.WeatherInfo) {
     }
 }
 
+/** v0.19：情境信息条——一次只显示一条最重要的事（60 分钟内日程） */
+@Composable
 private fun AmbientInfoPill(calEvents: List<CalEvent>?) {
     val context = LocalContext.current
     val now = System.currentTimeMillis()
