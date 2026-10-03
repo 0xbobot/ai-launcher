@@ -296,4 +296,85 @@ object LlmRouter {
             null
         }
     }
+
+    // ---------- 结构化意图解析（Action Engine 用，PRD §二十二） ----------
+
+    /** plan() 结果：做事 / 纯聊天 / 解析失败 */
+    sealed interface PlanResult {
+        /** 纯聊天：直接展示文本 */
+        data class Chat(val text: String) : PlanResult
+        /** 可执行动作：capabilityId 已过白名单 */
+        data class Action(
+            val capabilityId: String,
+            val params: Map<String, String>,
+            /** D/E 级确认弹窗用的一句话，无则用默认文案 */
+            val confirmText: String?
+        ) : PlanResult
+        data class Err(val message: String) : PlanResult
+    }
+
+    private fun planSystemPrompt(hints: String) = """
+        你是手机桌面助手的意图解析器。用户说一句话，你判断他是想【做事】还是【聊天】。
+        【做事】只能从以下能力里选（id: 名称）：
+        $hints
+        做事时只返回 JSON：{"action":{"capability_id":"dache","params":{"to":""},"confirm_text":""}}
+        params 尽量提取目的地/关键词等；confirm_text 是执行前给用户确认看的一句话，没有可空字符串。
+        【聊天】（问知识、闲聊、能力列表里没有的事）只返回 JSON：{"chat":"直接回答的内容"}。
+        只返回 JSON，不要任何其他文字。
+    """.trimIndent()
+
+    /**
+     * 结构化意图解析：走与 chat/分类共用的 postChatCompletions 链路。
+     * @param hints "id: 名称" 列表，供模型选择能力
+     */
+    suspend fun plan(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        input: String,
+        validIds: Set<String>,
+        hints: String
+    ): PlanResult = withContext(Dispatchers.IO) {
+        try {
+            val r = postChatCompletions(
+                baseUrl, apiKey, model,
+                planSystemPrompt(hints), input,
+                temperature = 0.1, maxTokens = 400,
+                tag = "LlmPlan"
+            )
+            if (r.networkError != null) return@withContext PlanResult.Err("网络超时，请检查网络")
+            if (r.httpCode !in 200..299) return@withContext PlanResult.Err(httpErrorText(r.httpCode, r.rawBody))
+            val clean = try {
+                JSONObject(r.rawBody)
+                    .getJSONArray("choices").getJSONObject(0)
+                    .getJSONObject("message").getString("content")
+                    .trim().removePrefix("```json").removePrefix("```")
+                    .removeSuffix("```").trim()
+            } catch (_: Exception) {
+                return@withContext PlanResult.Err("模型返回为空，请重试")
+            }
+            try {
+                val obj = JSONObject(clean)
+                obj.optJSONObject("action")?.let { a ->
+                    val id = a.optString("capability_id", "")
+                    if (id !in validIds) return@withContext PlanResult.Err("模型返回无法解析，请换个说法再试")
+                    val params = mutableMapOf<String, String>()
+                    a.optJSONObject("params")?.keys()?.forEach { k ->
+                        params[k] = a.optJSONObject("params")!!.optString(k, "")
+                    }
+                    return@withContext PlanResult.Action(
+                        id, params, a.optString("confirm_text", "").ifBlank { null }
+                    )
+                }
+                obj.optString("chat", "").ifBlank { null }?.let {
+                    return@withContext PlanResult.Chat(it)
+                }
+                PlanResult.Err("模型返回无法解析，请换个说法再试")
+            } catch (_: Exception) {
+                PlanResult.Err("模型返回无法解析，请换个说法再试")
+            }
+        } catch (e: Exception) {
+            PlanResult.Err("请求失败：${e.message.orEmpty().ifBlank { "未知错误" }}")
+        }
+    }
 }

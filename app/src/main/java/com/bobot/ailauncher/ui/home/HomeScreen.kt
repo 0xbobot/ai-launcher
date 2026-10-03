@@ -89,6 +89,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
+import com.bobot.ailauncher.core.action.ActionEngine
+import com.bobot.ailauncher.core.action.ActionRequest
+import com.bobot.ailauncher.core.action.ActionResult
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.SimpleNotification
@@ -315,16 +318,39 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             ?.let { PetRepository.handleIncomingCalendar(it.title, it.begin, it.location) }
     }
 
-    // ---------- 意图提交：无 Key 走关键词演示版，有 Key 直连大模型问答 ----------
+    // ---------- 意图提交：无 Key 走关键词演示版，有 Key 走 LLM 结构化解析 → ActionEngine ----------
     var chatQuestion by remember { mutableStateOf<String?>(null) }
     var chatAnswer by remember { mutableStateOf<String?>(null) }
+    var pendingConfirm by remember { mutableStateOf<ActionResult.NeedsConfirmation?>(null) }
+
+    /** ActionResult 统一处理：成功 toast，D/E 级弹窗确认，失败如实说 */
+    fun handleActionResult(res: ActionResult) {
+        when (res) {
+            is ActionResult.Done ->
+                Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+            is ActionResult.NeedsConfirmation ->
+                pendingConfirm = res
+            is ActionResult.NeedsPermission ->
+                Toast.makeText(context, res.rationale + "，请在设置中开启", Toast.LENGTH_LONG).show()
+            is ActionResult.Failed ->
+                Toast.makeText(context, res.reason, Toast.LENGTH_LONG).show()
+        }
+    }
 
     fun keywordFallback(text: String) {
         val capId = routeKeyword(text)
-        val ok = capId?.let { CapabilityRegistry.resolveAndLaunch(context, it) } ?: false
-        if (!ok) {
+        val cap = capId?.let { CapabilityRegistry.find(it) }
+        if (cap == null) {
             Toast.makeText(context, "已收到意图\"$text\"", Toast.LENGTH_SHORT).show()
+            return
         }
+        // 无 Key 降级路径同样走 ActionEngine：过安全门、结果如实反馈
+        handleActionResult(
+            ActionEngine.submit(
+                context,
+                ActionRequest(intent = text, capabilityId = cap.id, riskLevel = cap.riskLevel)
+            )
+        )
     }
 
     fun submit() {
@@ -338,21 +364,44 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         thinking = true
         scope.launch {
             try {
+                // 有 Key：LLM 先做结构化意图解析（做事 vs 聊天），做事走 ActionEngine
+                val caps = CapabilityRegistry.groups().flatMap { it.capabilities }
                 val res = withContext(Dispatchers.IO) {
-                    LlmRouter.chat(
+                    LlmRouter.plan(
                         LlmConfig.getBaseUrl(context),
                         LlmConfig.getApiKey(context),
                         LlmConfig.getModel(context),
-                        text
+                        text,
+                        caps.map { it.id }.toSet(),
+                        caps.joinToString(", ") { "${it.id}(${it.label})" }
                     )
                 }
                 when (res) {
-                    is LlmRouter.LlmChatResult.Ok -> {
+                    is LlmRouter.PlanResult.Chat -> {
                         chatQuestion = text
                         chatAnswer = res.text
                         input = ""
                     }
-                    is LlmRouter.LlmChatResult.Err -> {
+                    is LlmRouter.PlanResult.Action -> {
+                        val cap = CapabilityRegistry.find(res.capabilityId)
+                        if (cap == null) {
+                            Toast.makeText(context, "模型返回无法解析，请换个说法再试", Toast.LENGTH_SHORT).show()
+                        } else {
+                            handleActionResult(
+                                ActionEngine.submit(
+                                    context,
+                                    ActionRequest(
+                                        intent = text,
+                                        capabilityId = cap.id,
+                                        params = res.params,
+                                        riskLevel = cap.riskLevel
+                                    )
+                                )
+                            )
+                            input = ""
+                        }
+                    }
+                    is LlmRouter.PlanResult.Err -> {
                         Toast.makeText(context, res.message, Toast.LENGTH_LONG).show()
                     }
                 }
@@ -467,6 +516,38 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             text = { Text("说出你想做什么，说完会自动识别") },
             confirmButton = {
                 TextButton(onClick = { stopVoice() }) { Text("取消") }
+            }
+        )
+    }
+
+    // D/E 级高风险动作确认弹窗（PRD §二十三：必须用户明确确认，不许模型代劳）
+    pendingConfirm?.let { pc ->
+        AlertDialog(
+            onDismissRequest = { pendingConfirm = null },
+            title = { Text("确认执行", fontSize = 16.sp) },
+            text = {
+                Text(
+                    text = pc.confirmText,
+                    fontSize = 14.sp,
+                    color = AILauncherColors.Body
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val req = pc.request
+                    pendingConfirm = null
+                    // 用户已确认：二次提交带 confirmed=true
+                    handleActionResult(
+                        ActionEngine.submit(context, req.copy(confirmed = true))
+                    )
+                }) {
+                    Text("执行")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingConfirm = null }) {
+                    Text("取消")
+                }
             }
         )
     }
