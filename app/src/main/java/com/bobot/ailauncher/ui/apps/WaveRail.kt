@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,7 +31,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -59,15 +57,12 @@ internal fun WaveRail(
     onActiveLetter: (Char) -> Unit,
     onRelease: () -> Unit,
     modifier: Modifier = Modifier,
-    handed: UiPrefs.Handed = UiPrefs.Handed.RIGHT,
-    /** 字母列顶部相对父容器的 Y（px），父组件用它对齐聚焦模式的字母头 */
-    onLettersTopMeasured: (Float) -> Unit = {}
+    handed: UiPrefs.Handed = UiPrefs.Handed.RIGHT
 ) {
     val density = LocalDensity.current
     // 右手：-1（往左/向内）；左手：+1（往右/向内）
     val dirSign = if (handed == UiPrefs.Handed.RIGHT) -1f else 1f
     var activeIndex by remember { mutableIntStateOf(-1) }
-    var lettersTopPx by remember { mutableFloatStateOf(0f) }
 
     // 字母列占容器高度的比例（紧凑）
     val railFraction = 0.62f
@@ -148,14 +143,7 @@ internal fun WaveRail(
             modifier = Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth()
-                .fillMaxHeight(railFraction)
-                .onGloballyPositioned { coords ->
-                    val top = coords.positionInParent().y
-                    if (top != lettersTopPx) {
-                        lettersTopPx = top
-                        onLettersTopMeasured(top)
-                    }
-                },
+                .fillMaxHeight(railFraction),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             letters.forEachIndexed { i, ch ->

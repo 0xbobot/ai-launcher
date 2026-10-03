@@ -68,7 +68,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -162,9 +161,7 @@ fun AppCenterContent(
     // v0.21：应用中心搜索（PRD §三十三）——拼音/首字母/自然语言/模糊
     var query by remember { mutableStateOf("") }
     val searching = query.trim().isNotBlank()
-    // v0.25：rail 聚焦模式——拖动字母导航时只显示当前字母，松手恢复全量
-    var scrubLetter by remember { mutableStateOf<Char?>(null) }
-    var railLettersTopPx by remember { mutableFloatStateOf(0f) }
+    // v0.25.5：Niagara 式——拖动直接滚完整列表，不做内容过滤，松手零位移
     val searchIndex = remember(azApps) { AppSearchIndex.build(context, azApps) }
     val searchResults = remember(query, searchIndex) {
         if (query.trim().isBlank()) null
@@ -393,8 +390,7 @@ fun AppCenterContent(
                 modifier = Modifier
                     .fillMaxSize()
                     .nestedScroll(nested)
-                    .padding(horizontal = 20.dp)
-                    .alpha(if (scrubLetter != null) 0f else 1f),
+                    .padding(horizontal = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 val results = searchResults
@@ -468,47 +464,6 @@ fun AppCenterContent(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
-            // v0.25.4：聚焦遮罩——拖动 rail 时覆盖在列表上，只显示当前字母；
-            // 底下的完整列表同步滚动，松手时直接显现，零位移
-            val scrub = scrubLetter
-            if (scrub != null) {
-                val scrubApps = azGroups.firstOrNull { it.first == scrub }?.second.orEmpty()
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(AILauncherColors.Background)
-                        .padding(horizontal = 20.dp)
-                ) {
-                    Spacer(
-                        modifier = Modifier.height(
-                            with(density) { railLettersTopPx.toDp() }
-                        )
-                    )
-                    // 字母头与正常列表同样式，保证松手显现时视觉一致
-                    Text(
-                        text = scrub.toString(),
-                        fontSize = 13.sp,
-                        color = AILauncherColors.Hint,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp, start = 4.dp)
-                    )
-                    scrubApps.forEach { app ->
-                        AppRow(
-                            app = app,
-                            onLaunch = { launchApp(app) },
-                            onLongClick = { quickActionsApp = app },
-                            onHide = ::hideApp,
-                            actionsVisible = expandedActionsPkg == app.packageName,
-                            onActionsVisibleChange = { expanded ->
-                                expandedActionsPkg =
-                                    if (expanded) app.packageName
-                                    else if (expandedActionsPkg == app.packageName) null
-                                    else expandedActionsPkg
-                            }
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                }
-            }
             // Rail：波浪字母导航（v0.24，学 Niagara/参考视频）——只做定位
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）
             // v0.21：搜索态隐藏 rail（定位无意义）
@@ -517,22 +472,16 @@ fun AppCenterContent(
                 WaveRail(
                     letters = letters,
                     handed = handed,
-                    onLettersTopMeasured = { railLettersTopPx = it },
                     onActiveLetter = { letter ->
-                        // 聚焦模式：显示遮罩；同时滚动底下的完整列表（不可见），
-                        // 松手时直接显现，零位移
-                        scrubLetter = letter
+                        // Niagara 做法：直接滚完整列表，不做内容过滤；
+                        // 松手时列表本来就在位置上，零位移
                         scope.launch {
                             val anchor = letterAnchors[letter] ?: 0
-                            listState.scrollToItem(
-                                anchor,
-                                scrollOffset = railLettersTopPx.roundToInt()
-                            )
+                            listState.scrollToItem(anchor)
                         }
                     },
                     onRelease = {
-                        // 底下的列表已在正确位置，直接显现即可
-                        scrubLetter = null
+                        // 列表已在拖动中滚到位，松手无需任何操作
                     },
                     modifier = Modifier
                         .align(
