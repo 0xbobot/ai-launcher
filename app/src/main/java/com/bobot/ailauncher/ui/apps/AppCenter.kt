@@ -155,6 +155,15 @@ fun AppCenterContent(
     // v0.25：rail 聚焦模式——拖动字母导航时只显示当前字母，松手恢复全量
     var scrubLetter by remember { mutableStateOf<Char?>(null) }
     var railLettersTopPx by remember { mutableFloatStateOf(0f) }
+    // 松手后的滚动目标：等列表恢复全量重组完成后再滚，避免打在旧内容上
+    var scrollTarget by remember { mutableStateOf<Char?>(null) }
+    LaunchedEffect(scrollTarget) {
+        val letter = scrollTarget ?: return@LaunchedEffect
+        val anchor = letterAnchors[letter] ?: 0
+        // 字母头落在和聚焦时同样的高度（rail 顶端），避免视觉跳变
+        listState.scrollToItem(anchor, scrollOffset = railLettersTopPx.roundToInt())
+        scrollTarget = null
+    }
     val searchIndex = remember(azApps) { AppSearchIndex.build(context, azApps) }
     val searchResults = remember(query, searchIndex) {
         if (query.trim().isBlank()) null
@@ -470,18 +479,9 @@ fun AppCenterContent(
                         scrubLetter = letter
                     },
                     onRelease = { letter ->
-                        // 松手：退出聚焦，恢复全量；字母头落在和聚焦时同样的高度
-                        //（rail 顶端），避免视觉跳变
+                        // 松手：退出聚焦，恢复全量；滚动由 LaunchedEffect 在重组后执行
                         scrubLetter = null
-                        if (letter != null) {
-                            scope.launch {
-                                val anchor = letterAnchors[letter] ?: 0
-                                listState.scrollToItem(
-                                    anchor,
-                                    scrollOffset = railLettersTopPx.roundToInt()
-                                )
-                            }
-                        }
+                        scrollTarget = letter
                     },
                     modifier = Modifier
                         .align(
