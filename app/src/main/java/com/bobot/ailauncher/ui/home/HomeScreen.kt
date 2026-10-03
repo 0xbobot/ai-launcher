@@ -49,7 +49,8 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     // 上滑打开应用抽屉
     val middleScrollState = rememberScrollState()
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
-    val swipeThresholdPx = with(density) { 120.dp.toPx() }
+    // v0.27.3：上滑阈值降低（120dp→48dp），更容易触发 D3
+    val swipeThresholdPx = with(density) { 48.dp.toPx() }
     val drawerScrollConnection = remember {
         object : NestedScrollConnection {
             var accum = 0f

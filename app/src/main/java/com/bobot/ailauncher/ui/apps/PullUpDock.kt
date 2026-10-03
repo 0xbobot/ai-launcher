@@ -189,7 +189,12 @@ fun PullUpDock(
                                     val ax = abs(accumX)
                                     val ay = abs(accumY)
                                     val go = onStateChangeState.value
-                                    if (ax > hThreshPx && ax >= ay) {
+                                    // v0.27.3：上滑优先（Bob：不管什么状态，上滑都开 D3）
+                                    // 斜向上滑不再被误判为右滑（D2→D1）
+                                    if (ay > vThreshPx && accumY < 0) {
+                                        fired = true
+                                        go(DockState.D3) // 上滑 → 全屏应用中心
+                                    } else if (ax > hThreshPx && ax >= ay) {
                                         fired = true
                                         if (accumX < 0) {
                                             // 左滑 = 更多：D1→D2→D3
@@ -202,8 +207,8 @@ fun PullUpDock(
                                         }
                                     } else if (ay > vThreshPx && ay > ax) {
                                         fired = true
-                                        if (accumY < 0) go(DockState.D3) // 上滑 → 全屏
-                                        else if (state == DockState.D2) go(DockState.D1) // 下滑 → 收一档（D1 下滑不再隐藏）
+                                        // 下滑 → 收一档（D1 下滑不再隐藏）
+                                        if (state == DockState.D2) go(DockState.D1)
                                     }
                                 }
                             )
