@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,11 @@ fun PetView(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
+    // v0.28.1：低电量省电模式——七仔变困、动画降频
+    val lowPower by com.bobot.ailauncher.data.BatteryState.isLowPower
+        .collectAsState()
+    // 低电量时强制闭眼（像没电犯困）
+    val effectiveSleepy = sleepy || lowPower
     // idle 轻微浮动
     val bob by rememberInfiniteTransition(label = "petBob").animateFloat(
         initialValue = 0f,
@@ -68,20 +74,26 @@ fun PetView(
         label = "bob"
     )
     // P0：呼吸——4s 一次的细微缩放，比浮动更"活"
-    val breathe by rememberInfiniteTransition(label = "petBreathe").animateFloat(
-        initialValue = 1f,
-        targetValue = 1.03f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "breathe"
-    )
+    // v0.28.1：低电量时停止呼吸（静态，省电）
+    val breathe: Float = if (lowPower) {
+        1f
+    } else {
+        rememberInfiniteTransition(label = "petBreathe").animateFloat(
+            initialValue = 1f,
+            targetValue = 1.03f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(2000, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "breathe"
+        ).value
+    }
     // P0：眨眼——每 4s 一次，140ms 图片快切（睁眼→闭眼→睁眼）
+    // v0.28.1：低电量时 12s 眨一次（本来就闭眼，少折腾）
     var blinkTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(lowPower) {
         while (true) {
-            delay(4000)
+            delay(if (lowPower) 12000 else 4000)
             blinkTick++
             delay(140)
             blinkTick++
@@ -129,12 +141,12 @@ fun PetView(
     )
 
     val baseResId = when {
-        sleepy || mood == PetMood.IDLE -> R.drawable.qizai_idle
+        effectiveSleepy || mood == PetMood.IDLE -> R.drawable.qizai_idle
         mood == PetMood.HAPPY || mood == PetMood.FILE -> R.drawable.qizai_happy
         else -> R.drawable.qizai_sorting // SORTING / FETCH
     }
-    // 眨眼时强制显示闭眼图（140ms）
-    val resId = if (isBlinking && !sleepy && mood != PetMood.IDLE) {
+    // 眨眼时强制显示闭眼图（140ms）；低电量时本来就闭眼，不眨了
+    val resId = if (isBlinking && !effectiveSleepy && mood != PetMood.IDLE) {
         R.drawable.qizai_idle
     } else {
         baseResId

@@ -68,6 +68,9 @@ class BatteryGuardService : Service() {
             val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
                     status == BatteryManager.BATTERY_STATUS_FULL
 
+            // v0.28.1：同步电池状态给七仔省电模式
+            com.bobot.ailauncher.data.BatteryState.update(pct, charging)
+
             // 充电中或回升到安全线以上：重置，下轮再提醒
             if (charging || pct >= RESET_PCT) {
                 warnFired = false
