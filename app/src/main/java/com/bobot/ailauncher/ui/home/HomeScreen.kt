@@ -55,6 +55,7 @@ import com.bobot.ailauncher.core.action.ActionRequest
 import com.bobot.ailauncher.core.action.ActionResult
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.data.WeatherRepository
 import com.bobot.ailauncher.ui.pet.PetPresentedCard
 import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
@@ -138,6 +139,18 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             ?.let { PetRepository.handleIncomingCalendar(it.title, it.begin, it.location) }
     }
 
+    // v0.26.2：天气（后台线程取，PRD §七）
+    var weather by remember { mutableStateOf<WeatherRepository.WeatherInfo?>(null) }
+    LaunchedEffect(Unit) {
+        Thread {
+            val w = WeatherRepository.fetchSync()
+            // 回主线程更新（用 Handler）
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                weather = w
+            }
+        }.start()
+    }
+
     // ---------- 桌面布局：顶栏 → 情境信息条 → 宠物区 ----------
     // 底部无 Dock：页面圆点悬浮在底部；上滑手势打开悬浮卡（MainScreen / PullUpDock）
     Column(
@@ -151,6 +164,30 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         // v0.25.8：顶栏日期时间删掉（Bob：和状态栏冲突，没意义）
         // v0.19 情境信息条：一次一条最重要的事（PRD §七）
         AmbientInfoPill(calEvents)
+        // v0.26.2：天气条
+        weather?.let { w ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White.copy(alpha = 0.55f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = w.city,
+                    fontSize = 13.sp,
+                    color = AILauncherColors.Title.copy(alpha = 0.7f)
+                )
+                Text(
+                    text = "${w.desc} ${w.temp}°",
+                    fontSize = 14.sp,
+                    color = AILauncherColors.Title
+                )
+            }
+        }
         // v0.15 宠物整理员：桌台 + 呈现卡片
         PetZone()
         PetPresentedCard()
