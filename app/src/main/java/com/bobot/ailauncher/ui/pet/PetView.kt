@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.ui.pet
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -10,8 +11,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -22,13 +25,17 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.data.PetMouth
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * 七仔（宠物 IP 形象，图片渲染）：
@@ -133,21 +140,64 @@ fun PetView(
         baseResId
     }
 
+    // v0.26.0：拖拽——<40dp 范围内跟手，松手 spring 回弹（纯玩）
+    var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    val dragX by animateFloatAsState(
+        targetValue = dragOffset.x,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
+        label = "dragX"
+    )
+    val dragY by animateFloatAsState(
+        targetValue = dragOffset.y,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
+        label = "dragY"
+    )
+    val maxDragPx = with(density) { 40.dp.toPx() }
+
     Box(
         modifier = modifier
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        val newX = dragOffset.x + dragAmount.x
+                        val newY = dragOffset.y + dragAmount.y
+                        // 限制在 40dp 半径内
+                        val dist = sqrt(newX * newX + newY * newY)
+                        dragOffset = if (dist > maxDragPx) {
+                            androidx.compose.ui.geometry.Offset(
+                                newX / dist * maxDragPx,
+                                newY / dist * maxDragPx
+                            )
+                        } else {
+                            androidx.compose.ui.geometry.Offset(newX, newY)
+                        }
+                    },
+                    onDragEnd = {
+                        // 松手回弹
+                        dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                    },
+                    onDragCancel = {
+                        dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                    }
+                )
+            }
             .graphicsLayer {
-                translationX = with(density) { offX.dp.toPx() }
-                translationY = with(density) { (offY + bob).dp.toPx() }
+                translationX = with(density) { offX.dp.toPx() } + dragX
+                translationY = with(density) { (offY + bob).dp.toPx() } + dragY
                 val s = scale * breathe * jelly
                 scaleX = s
                 scaleY = s
             }
     ) {
-        Image(
-            painter = painterResource(resId),
-            contentDescription = "七仔",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize()
-        )
+        // v0.26.0：图片切换 Crossfade（代替硬切）
+        Crossfade(targetState = resId, label = "petImage") { id ->
+            Image(
+                painter = painterResource(id),
+                contentDescription = "七仔",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }

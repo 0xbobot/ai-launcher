@@ -28,10 +28,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontWeight
+import kotlin.math.roundToInt
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -138,6 +141,42 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             ?.let { PetRepository.handleIncomingCalendar(it.title, it.begin, it.location) }
     }
 
+    // v0.26.0：天气（Open-Meteo，IP 定位免权限）
+    var weather by remember { mutableStateOf<WeatherRepository.WeatherInfo?>(null) }
+    LaunchedEffect(Unit) {
+        weather = WeatherRepository.fetch()
+    }
+
+    // v0.26.0：信息密度（左滑=多/右滑=少，PRD §三十四）
+    // 0=极简（只宠物），1=标准（+1 条信息），2=丰富（+天气+日程详情）
+    var densityLevel by remember { mutableIntStateOf(1) }
+    val densityConn = remember {
+        object : NestedScrollConnection {
+            var accumX = 0f
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput) return Offset.Zero
+                // 只处理水平滑动
+                if (kotlin.math.abs(available.x) > kotlin.math.abs(available.y) * 1.5f) {
+                    accumX += available.x
+                    val threshold = 120f // dp 转 px 简化
+                    if (accumX < -threshold && densityLevel < 2) {
+                        // 左滑=多
+                        densityLevel++
+                        accumX = 0f
+                        return available
+                    } else if (accumX > threshold && densityLevel > 0) {
+                        // 右滑=少
+                        densityLevel--
+                        accumX = 0f
+                        return available
+                    }
+                    return available
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
     // ---------- 桌面布局：顶栏 → 情境信息条 → 宠物区 ----------
     // 底部无 Dock：页面圆点悬浮在底部；上滑手势打开悬浮卡（MainScreen / PullUpDock）
     Column(
@@ -145,12 +184,23 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             .fillMaxSize()
             .statusBarsPadding()
             .nestedScroll(drawerScrollConnection)
+            .nestedScroll(densityConn)
             .padding(horizontal = 16.dp)
             .padding(bottom = 100.dp) // 给底部悬浮的圆点 + 横线手柄留位
     ) {
         // v0.25.8：顶栏日期时间删掉（Bob：和状态栏冲突，没意义）
-        // v0.19 情境信息条：一次一条最重要的事（PRD §七）
-        AmbientInfoPill(calEvents)
+        // v0.26.0：按密度显示信息
+        if (densityLevel >= 1) {
+            // v0.19 情境信息条：一次一条最重要的事（PRD §七）
+            AmbientInfoPill(calEvents)
+        }
+        if (densityLevel >= 2) {
+            // v0.26.0：天气条
+            weather?.let { w ->
+                WeatherPill(w)
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
         // v0.15 宠物整理员：桌台 + 呈现卡片
         PetZone()
         PetPresentedCard()
@@ -163,6 +213,32 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
  * 当前：60 分钟内的日程 → 点按直达日历（走 ActionEngine）。无事则隐藏。
  */
 @Composable
+/** v0.26.0：天气条（PRD §七） */
+@Composable
+private fun WeatherPill(w: WeatherRepository.WeatherInfo) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.White.copy(alpha = 0.55f))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = w.city,
+            fontSize = 13.sp,
+            color = AILauncherColors.Title.copy(alpha = 0.7f)
+        )
+        Text(
+            text = "${w.desc} ${w.tempC.roundToInt()}°",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = AILauncherColors.Title
+        )
+    }
+}
+
 private fun AmbientInfoPill(calEvents: List<CalEvent>?) {
     val context = LocalContext.current
     val now = System.currentTimeMillis()

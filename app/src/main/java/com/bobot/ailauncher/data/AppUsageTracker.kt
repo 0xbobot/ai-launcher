@@ -68,13 +68,18 @@ object AppUsageTracker {
             null
         }
         val slot = ContextEngine.currentSlot().name
+        val now = System.currentTimeMillis()
         data class Scored(val app: AppInfo, val score: Double, val last: Long)
         val scored = candidates.map { app ->
             val c = p?.getInt(KEY_COUNT_PREFIX + app.packageName, 0) ?: 0
             val sc = p?.getInt(KEY_SLOT_PREFIX + slot + "_" + app.packageName, 0) ?: 0
             val last = p?.getLong(KEY_LAST_PREFIX + app.packageName, 0L) ?: 0L
-            // 总频次 + 3×当前时段亲和度：早晚常用不同的 App，Dock 跟着变
-            Scored(app, c + 3.0 * sc, last)
+            // v0.26.0 PRD §三十二：总频次 + 3×时段亲和度 - 重复惩罚（30 分钟内用过 -2，避免单调）
+            var score = c + 3.0 * sc
+            if (now - last < 30 * 60 * 1000) {
+                score -= 2.0 // Repetition 惩罚
+            }
+            Scored(app, score, last)
         }
         val byUsage = scored.filter { it.score > 0 }
             .sortedWith(compareByDescending<Scored> { it.score }.thenByDescending { it.last })
