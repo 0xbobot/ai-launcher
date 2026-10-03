@@ -214,6 +214,44 @@ fun SettingsScreen(
             }
         }
 
+        // v0.20：Dock 智能排序开关（PRD §九：AI 可以推荐，不能强行改变）
+        item {
+            var smartSort by remember { mutableStateOf(UiPrefs.getDockSmartSort(context)) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Dock 智能排序",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.Title
+                        )
+                        Text(
+                            text = "按使用频次和当前时段排列常用应用；关闭后按名称排列",
+                            fontSize = 13.sp,
+                            color = AILauncherColors.Hint
+                        )
+                    }
+                    Switch(
+                        checked = smartSort,
+                        onCheckedChange = {
+                            smartSort = it
+                            UiPrefs.setDockSmartSort(context, it)
+                        }
+                    )
+                }
+            }
+        }
+
         // 惯用手：决定 A-Z 导航 rail 在哪一侧、按住时往哪边偏移
         item {
             var handed by remember { mutableStateOf(UiPrefs.getHanded(context)) }

@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -94,8 +95,10 @@ fun PullUpDock(
         listLaunchableApps(context).filter { it.packageName != context.packageName }
     }
     var usageTick by remember { mutableIntStateOf(0) }
-    val top10 = remember(allApps, usageTick) {
-        AppUsageTracker.topApps(context, allApps, 10)
+    // v0.20：智能排序开关（设置页可关）；key 里带上开关值，切换后返回即生效
+    val smartSort = UiPrefs.getDockSmartSort(context)
+    val top10 = remember(allApps, usageTick, smartSort) {
+        AppUsageTracker.topApps(context, allApps, 10, smartSort)
     }
     val top4 = remember(top10) { top10.take(4) }
 

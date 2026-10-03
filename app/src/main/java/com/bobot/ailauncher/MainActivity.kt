@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.bobot.ailauncher.core.brain.AiBrain
+import com.bobot.ailauncher.core.context.ContextEngine
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.OtaUpdater
@@ -80,6 +81,9 @@ class MainActivity : ComponentActivity() {
                 AiBrain.onEvent(event, this@MainActivity)
             }
         }
+
+        // v0.20（PRD §十八 Context Engine）：前台应用追踪 + 屏幕事件 → EventBus
+        ContextEngine.start(this)
 
         setContent {
             AILauncherTheme {
