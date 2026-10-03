@@ -165,43 +165,39 @@ fun PetView(
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     var curOffset = dragOffset
-                    var dragging = false
-                    do {
-                        val event = awaitTouchSlopOrCancellation(down.id) { change, over ->
-                            change.consume()
-                        }
-                        if (event == null) break // 取消（可能是点击）
-                        dragging = true
+                    // 等待超过 touch slop（否则视为点击，不干扰 clickable）
+                    val slopEvent = awaitTouchSlopOrCancellation(down.id) { change, _ ->
+                        change.consume()
+                    }
+                    if (slopEvent != null) {
                         // 进入拖拽：持续跟手
-                        var prev = event
-                        while (true) {
-                            val next = awaitPointerEvent()
-                            val change = next.changes.firstOrNull { it.id == down.id }
-                                ?: break
-                            if (!change.pressed) {
-                                change.consume()
-                                break
-                            }
-                            val delta = change.position - prev.position
-                            prev = change
-                            change.consume()
-                            val newX = curOffset.x + delta.x
-                            val newY = curOffset.y + delta.y
-                            val dist = sqrt(newX * newX + newY * newY)
-                            curOffset = if (dist > maxDragPx) {
-                                androidx.compose.ui.geometry.Offset(
-                                    newX / dist * maxDragPx,
-                                    newY / dist * maxDragPx
-                                )
+                        var prevPos = slopEvent.position
+                        var done = false
+                        while (!done) {
+                            val ev = awaitPointerEvent()
+                            val change = ev.changes.firstOrNull { it.id == down.id }
+                            if (change == null || !change.pressed) {
+                                change?.consume()
+                                done = true
                             } else {
-                                androidx.compose.ui.geometry.Offset(newX, newY)
+                                val delta = change.position - prevPos
+                                prevPos = change.position
+                                change.consume()
+                                val newX = curOffset.x + delta.x
+                                val newY = curOffset.y + delta.y
+                                val dist = sqrt(newX * newX + newY * newY)
+                                curOffset = if (dist > maxDragPx) {
+                                    androidx.compose.ui.geometry.Offset(
+                                        newX / dist * maxDragPx,
+                                        newY / dist * maxDragPx
+                                    )
+                                } else {
+                                    androidx.compose.ui.geometry.Offset(newX, newY)
+                                }
+                                dragOffset = curOffset
                             }
-                            dragOffset = curOffset
                         }
-                        break
-                    } while (false)
-                    // 松手回弹（无论是否拖拽过）
-                    if (dragging) {
+                        // 松手回弹
                         dragOffset = androidx.compose.ui.geometry.Offset.Zero
                     }
                 }
