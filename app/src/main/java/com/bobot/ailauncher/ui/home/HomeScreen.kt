@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -151,6 +153,10 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         }.start()
     }
 
+    // v0.26.3：信息密度（左滑=多/右滑=少，PRD §三十四）
+    // 0=极简（只宠物），1=标准（+日程+天气），默认 1
+    var densityLevel by remember { mutableStateOf(1) }
+
     // ---------- 桌面布局：顶栏 → 情境信息条 → 宠物区 ----------
     // 底部无 Dock：页面圆点悬浮在底部；上滑手势打开悬浮卡（MainScreen / PullUpDock）
     Column(
@@ -158,34 +164,56 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             .fillMaxSize()
             .statusBarsPadding()
             .nestedScroll(drawerScrollConnection)
+            // v0.26.3：水平滑动切换信息密度
+            .pointerInput(Unit) {
+                var accumX = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { accumX = 0f },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        accumX += dragAmount
+                    },
+                    onDragEnd = {
+                        val thresholdPx = 120f
+                        if (accumX < -thresholdPx && densityLevel < 1) {
+                            densityLevel++ // 左滑=多
+                        } else if (accumX > thresholdPx && densityLevel > 0) {
+                            densityLevel-- // 右滑=少
+                        }
+                        accumX = 0f
+                    }
+                )
+            }
             .padding(horizontal = 16.dp)
             .padding(bottom = 100.dp) // 给底部悬浮的圆点 + 横线手柄留位
     ) {
         // v0.25.8：顶栏日期时间删掉（Bob：和状态栏冲突，没意义）
-        // v0.19 情境信息条：一次一条最重要的事（PRD §七）
-        AmbientInfoPill(calEvents)
-        // v0.26.2：天气条
-        weather?.let { w ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White.copy(alpha = 0.55f))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = w.city,
-                    fontSize = 13.sp,
-                    color = AILauncherColors.Title.copy(alpha = 0.7f)
-                )
-                Text(
-                    text = "${w.desc} ${w.temp}°",
-                    fontSize = 14.sp,
-                    color = AILauncherColors.Title
-                )
+        if (densityLevel >= 1) {
+            // v0.19 情境信息条：一次一条最重要的事（PRD §七）
+            AmbientInfoPill(calEvents)
+            // v0.26.2：天气条
+            weather?.let { w ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.55f))
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = w.city,
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Title.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        text = "${w.desc} ${w.temp}°",
+                        fontSize = 14.sp,
+                        color = AILauncherColors.Title
+                    )
+                }
             }
         }
         // v0.15 宠物整理员：桌台 + 呈现卡片
