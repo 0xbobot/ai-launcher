@@ -168,9 +168,6 @@ fun AppCenterContent(
         else AppSearchIndex.search(context, query, searchIndex)
     }
     // v0.25.3：最近使用横条（搜索下方），取高频应用
-    val recentApps = remember(azApps, refreshTick) {
-        AppUsageTracker.topApps(context, azApps, count = 8, smartSort = true)
-    }
     // 开始搜索时滚到顶部
     val listState = rememberLazyListState()
     LaunchedEffect(searching) {
@@ -344,38 +341,7 @@ fun AppCenterContent(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
             )
-            // v0.25.3：最近使用横条（搜索下方）——只显示图标，一行排满
-            if (!searching && recentApps.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    recentApps.forEach { app ->
-                        val iconBitmap = remember(app.packageName) {
-                            try {
-                                app.icon.toBitmap().asImageBitmap()
-                            } catch (_: Exception) { null }
-                        }
-                        if (iconBitmap != null) {
-                            Image(
-                                bitmap = iconBitmap,
-                                contentDescription = app.label.toString(),
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(11.dp))
-                                    .combinedClickable(
-                                        onClick = { launchApp(app) },
-                                        onLongClick = { quickActionsApp = app }
-                                    )
-                            )
-                        }
-                    }
-                }
-            }
+            // v0.25.5：最近使用横条已删除（Bob：不好看不协调）
             Spacer(modifier = Modifier.height(8.dp))
         }
 

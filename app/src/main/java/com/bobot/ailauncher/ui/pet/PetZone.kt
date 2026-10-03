@@ -30,22 +30,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,11 +70,7 @@ import com.bobot.ailauncher.data.PetCat
 import com.bobot.ailauncher.data.PetItem
 import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.core.pet.PetState
-import com.bobot.ailauncher.data.OtaCheckResult
-import com.bobot.ailauncher.data.OtaInfo
-import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.PetRepository
-import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.GlassTextShadow
 import kotlinx.coroutines.launch
@@ -98,11 +94,8 @@ fun PetZone() {
     val petState by PetRepository.petState.collectAsState()
     var blinking by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    // v0.24.1：点七仔 = 检查更新（开发期高频操作，入口前移）
-    var checkingUpdate by remember { mutableStateOf(false) }
-    var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
-    val checkingUpdateNow by rememberUpdatedState(checkingUpdate)
+    // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
+    var jellyTick by remember { mutableIntStateOf(0) }
 
     // 定时眨眼
     LaunchedEffect(Unit) {
@@ -177,6 +170,7 @@ fun PetZone() {
                 mouth = mouth,
                 blinking = blinking,
                 sleepy = petState == PetState.SLEEPY,
+                jellyTick = jellyTick,
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(100.dp)
@@ -184,31 +178,21 @@ fun PetZone() {
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }
                     ) {
-                        if (!checkingUpdateNow) {
-                            checkingUpdate = true
-                            scope.launch {
-                                when (val r = OtaUpdater.checkForUpdateResult(context)) {
-                                    is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
-                                    OtaCheckResult.UpToDate ->
-                                        Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
-                                    OtaCheckResult.Failed ->
-                                        Toast.makeText(context, "检查失败，请稍后再试", Toast.LENGTH_SHORT).show()
-                                }
-                                checkingUpdate = false
-                            }
-                        }
+                        // P0：纯视觉反馈（果冻回弹），Bob 拍板
+                        jellyTick++
                     }
             )
-            // v0.24.1：检查更新 loading
-            if (checkingUpdate) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(30.dp),
-                    strokeWidth = 3.dp,
-                    color = Color.White.copy(alpha = 0.9f)
-                )
-            }
+            // P0：落地阴影（奶油白在暖灰底上加对比）
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(top = 92.dp)
+                    .size(width = 64.dp, height = 12.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.12f),
+                        CircleShape
+                    )
+            )
             // carry 小纸条
             val carryAlpha by animateFloatAsState(
                 targetValue = if (carryText != null) 1f else 0f,
@@ -242,9 +226,6 @@ fun PetZone() {
                 )
             }
         }
-    }
-    updateInfo?.let { info ->
-        UpdateDialog(info = info, onDismiss = { updateInfo = null })
     }
 }
 
