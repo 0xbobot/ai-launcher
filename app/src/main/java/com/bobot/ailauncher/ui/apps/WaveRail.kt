@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,7 +20,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -29,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -41,34 +46,60 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 
 /**
- * 波浪字母导航（v0.24，学 Niagara / Bob 发的参考视频）。
- * - 手指按下/拖动时，附近字母按高斯衰减放大（sigma≈2.8 个字母）并向屏幕内侧鼓起，
- *   整个波浪再往拇指反方向避让约 64dp，不被拇指盖住
- * - 大气泡显示当前字母，跟随手指高度
- * - 点按：回调 onActiveLetter；拖动：字母变化时回调 onActiveLetter（列表跟手滚动切换）；
- *   松手：回调 onRelease
+ * 波浪字母导航 v2（v0.25）。
+ * - 默认藏在屏幕外面（看不见）；手指触到右侧边缘唤出，松手后滑回去
+ * - 紧凑高度（约 62% 屏高，居中），字母不拉得太开
+ * - 唤出时：附近字母按高斯衰减放大并向内鼓起，大气泡在靠应用的一侧跟随手指
+ * - 拖动中通过 onActiveLetter 回调当前字母（父组件进入聚焦模式：只显示该字母）；
+ *   松手通过 onRelease 回调（父组件恢复全量并定位）
  * - 只做定位，不承载其他功能
  */
 @Composable
 internal fun WaveRail(
     letters: List<Char>,
     onActiveLetter: (Char) -> Unit,
-    onRelease: () -> Unit,
+    onRelease: (letter: Char?) -> Unit,
     modifier: Modifier = Modifier,
-    handed: UiPrefs.Handed = UiPrefs.Handed.RIGHT
+    handed: UiPrefs.Handed = UiPrefs.Handed.RIGHT,
+    /** 字母列顶部相对父容器的 Y（px），父组件用它对齐聚焦模式的字母头 */
+    onLettersTopMeasured: (Float) -> Unit = {}
 ) {
     val density = LocalDensity.current
-    // 右手：-1（往左偏/向内展开）；左手：+1（往右偏/向内展开）
+    // 右手：-1（往左/向内）；左手：+1（往右/向内）
     val dirSign = if (handed == UiPrefs.Handed.RIGHT) -1f else 1f
+    var revealed by remember { mutableStateOf(false) }
     var activeIndex by remember { mutableIntStateOf(-1) }
+    var lettersTopPx by remember { mutableFloatStateOf(0f) }
 
-    BoxWithConstraints(modifier = modifier.fillMaxHeight().width(48.dp)) {
+    // 字母列占容器高度的比例（紧凑）
+    val railFraction = 0.62f
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(44.dp)
+    ) {
         val hPx = constraints.maxHeight.toFloat()
         if (hPx <= 0f || letters.isEmpty()) return@BoxWithConstraints
-        val rowHpx = hPx / letters.size
-        val bulgePx = with(density) { 40.dp.toPx() }
-        val shiftPx = with(density) { 64.dp.toPx() }
-        // 波浪避让：手指按住时整个波浪往拇指反方向偏移，spring 跟手
+        val railHpx = hPx * railFraction
+        val railTopPx = (hPx - railHpx) / 2f
+        val rowHpx = railHpx / letters.size
+        val bulgePx = with(density) { 36.dp.toPx() }
+        val shiftPx = with(density) { 56.dp.toPx() }
+        val hiddenX = with(density) { 72.dp.toPx() }
+        // 气泡在靠应用的一侧：明显离开波浪区
+        val bubbleOutX = with(density) { 128.dp.toPx() }
+
+        // 显隐滑动
+        val revealX by animateFloatAsState(
+            targetValue = if (revealed) 0f else hiddenX,
+            animationSpec = spring(
+                stiffness = Spring.StiffnessMedium,
+                dampingRatio = 0.85f
+            ),
+            label = "railReveal"
+        )
+        // 波浪避让：唤出时整体往拇指反方向偏移
         val waveShiftX by animateFloatAsState(
             targetValue = if (activeIndex >= 0) dirSign * shiftPx else 0f,
             animationSpec = spring(
@@ -77,31 +108,47 @@ internal fun WaveRail(
             ),
             label = "waveShift"
         )
-        // 触摸层：整块可触摸（含点按与纵向拖动），不偏移
+
+        fun indexAt(y: Float): Int {
+            return (((y - railTopPx) / railHpx) * letters.size)
+                .toInt().coerceIn(letters.indices))
+        }
+
+        // 触摸层：整块可触摸（含点按与纵向拖动）；平时隐形但可命中
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .pointerInput(letters, hPx) {
                     detectTapGestures(onTap = { offset ->
-                        val i = ((offset.y / hPx) * letters.size)
-                            .toInt().coerceIn(letters.indices)
+                        // 点按：直接跳转，不需要唤出动画
+                        val i = indexAt(offset.y)
                         onActiveLetter(letters[i])
+                        onRelease(letters[i])
                     })
                 }
                 .pointerInput(letters, hPx) {
                     detectVerticalDragGestures(
                         onDragStart = { offset ->
-                            val i = ((offset.y / hPx) * letters.size)
-                                .toInt().coerceIn(letters.indices)
+                            val i = indexAt(offset.y)
+                            revealed = true
                             activeIndex = i
                             onActiveLetter(letters[i])
                         },
-                        onDragEnd = { activeIndex = -1; onRelease() },
-                        onDragCancel = { activeIndex = -1; onRelease() },
+                        onDragEnd = {
+                            val last = activeIndex.takeIf { it >= 0 }
+                                ?.let { letters[it] }
+                            activeIndex = -1
+                            revealed = false
+                            onRelease(last)
+                        },
+                        onDragCancel = {
+                            activeIndex = -1
+                            revealed = false
+                            onRelease(null)
+                        },
                         onVerticalDrag = { change, _ ->
                             change.consume()
-                            val i = ((change.position.y / hPx) * letters.size)
-                                .toInt().coerceIn(letters.indices)
+                            val i = indexAt(change.position.y)
                             if (i != activeIndex) {
                                 activeIndex = i
                                 onActiveLetter(letters[i])
@@ -110,12 +157,23 @@ internal fun WaveRail(
                     )
                 }
         )
-        // 视觉层：字母列
+
+        // 字母列：紧凑居中，随显隐滑入滑出
         Column(
             modifier = Modifier
-                .align(if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd else Alignment.CenterStart)
-                .width(24.dp)
-                .fillMaxHeight(),
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .fillMaxHeight(railFraction)
+                .onGloballyPositioned { coords ->
+                    val top = coords.positionInParent().y
+                    if (top != lettersTopPx) {
+                        lettersTopPx = top
+                        onLettersTopMeasured(top)
+                    }
+                }
+                .graphicsLayer {
+                    translationX = revealX
+                },
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             letters.forEachIndexed { i, ch ->
@@ -155,30 +213,28 @@ internal fun WaveRail(
                 }
             }
         }
-        // 当前字母气泡：拇指反方向，随波浪一起偏移，不被拇指盖住
+
+        // 当前字母气泡：靠应用的一侧（远离 rail），跟随手指高度，随显隐一起走
         if (activeIndex >= 0) {
             val idx = activeIndex.coerceIn(letters.indices)
-            val rPx = with(density) { 22.dp.toPx() }
+            val rPx = with(density) { 24.dp.toPx() }
             Box(
                 modifier = Modifier
-                    .align(
-                        if (handed == UiPrefs.Handed.RIGHT) Alignment.TopStart
-                        else Alignment.TopEnd
-                    )
+                    .align(Alignment.Center)
                     .offset {
                         IntOffset(
-                            waveShiftX.roundToInt(),
-                            (idx * rowHpx + rowHpx / 2f - rPx).roundToInt()
+                            (revealX + dirSign * bubbleOutX).roundToInt(),
+                            (railTopPx + idx * rowHpx + rowHpx / 2f - rPx - hPx / 2f).roundToInt()
                         )
                     }
-                    .size(44.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(AILauncherColors.Accent),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = letters[idx].toString(),
-                    fontSize = 20.sp,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )

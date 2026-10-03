@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,6 +79,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -149,6 +152,9 @@ fun AppCenterContent(
     // v0.21：应用中心搜索（PRD §三十三）——拼音/首字母/自然语言/模糊
     var query by remember { mutableStateOf("") }
     val searching = query.trim().isNotBlank()
+    // v0.25：rail 聚焦模式——拖动字母导航时只显示当前字母，松手恢复全量
+    var scrubLetter by remember { mutableStateOf<Char?>(null) }
+    var railLettersTopPx by remember { mutableFloatStateOf(0f) }
     val searchIndex = remember(azApps) { AppSearchIndex.build(context, azApps) }
     val searchResults = remember(query, searchIndex) {
         if (query.trim().isBlank()) null
@@ -207,7 +213,11 @@ fun AppCenterContent(
     // v0.16.1：A-Z 行左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
     var expandedActionsPkg by remember { mutableStateOf<String?>(null) }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+    ) {
         // ---- Header：标题 + 设置；标题区右滑/顶部下滑 → D2 ----
         val headThreshPx = with(density) { 80.dp.toPx() }
         Column(
@@ -277,9 +287,11 @@ fun AppCenterContent(
                 onValueChange = { query = it },
                 placeholder = {
                     Text(
-                        "搜索应用，支持拼音/首字母/如\"打车\"",
+                        "搜索应用，支持拼音/首字母",
                         fontSize = 14.sp,
-                        color = AILauncherColors.Hint
+                        color = AILauncherColors.Hint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 },
                 leadingIcon = {
@@ -338,7 +350,45 @@ fun AppCenterContent(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 val results = searchResults
-                if (results != null) {
+                val scrub = scrubLetter
+                if (scrub != null) {
+                    // v0.25 聚焦模式：只显示当前字母的应用，字母头固定在 rail 顶端高度；
+                    // 松手后恢复全量。屏幕锚点不动，不乱跳。
+                    val scrubApps = remember(scrub, azGroups) {
+                        azGroups.firstOrNull { it.first == scrub }?.second.orEmpty()
+                    }
+                    item(key = "scrub-pad") {
+                        Spacer(
+                            modifier = Modifier.height(
+                                with(density) { railLettersTopPx.toDp() }
+                            )
+                        )
+                    }
+                    item(key = "scrub-letter") {
+                        Text(
+                            text = scrub.toString(),
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AILauncherColors.Title,
+                            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                        )
+                    }
+                    items(scrubApps, key = { "sc:${it.packageName}" }) { app ->
+                        AppRow(
+                            app = app,
+                            onLaunch = { launchApp(app) },
+                            onLongClick = { quickActionsApp = app },
+                            onHide = ::hideApp,
+                            actionsVisible = expandedActionsPkg == app.packageName,
+                            onActionsVisibleChange = { expanded ->
+                                expandedActionsPkg =
+                                    if (expanded) app.packageName
+                                    else if (expandedActionsPkg == app.packageName) null
+                                    else expandedActionsPkg
+                            }
+                        )
+                    }
+                } else if (results != null) {
                     // 搜索态：只显示搜索结果（拼音/首字母/自然语言/模糊）
                     if (results.isEmpty()) {
                         item(key = "search-empty") {
@@ -413,26 +463,30 @@ fun AppCenterContent(
             // v0.21：搜索态隐藏 rail（定位无意义）
             // v0.24：点按跳字母（居中）；拖动时波浪跟手，列表跟手滚动切换字母
             if (!searching && letters.isNotEmpty()) {
-                val railOutX = if (handed == UiPrefs.Handed.RIGHT) 18.dp else (-18).dp
                 WaveRail(
                     letters = letters,
                     handed = handed,
+                    onLettersTopMeasured = { railLettersTopPx = it },
                     onActiveLetter = { letter ->
-                        scope.launch {
-                            val anchor = letterAnchors[letter] ?: 0
-                            val viewportH = listState.layoutInfo.viewportSize.height
-                            // 点按：字母区滚到屏幕垂直居中（方便单手操作和下一步点选）
-                            // 拖动：跟手即时切换，不用动画避免拖尾
-                            listState.scrollToItem(anchor, scrollOffset = -(viewportH / 2))
+                        // 聚焦模式：只显示当前字母（父组件切换列表内容，不滚动）
+                        scrubLetter = letter
+                    },
+                    onRelease = { letter ->
+                        // 松手：退出聚焦，恢复全量并定位到该字母（居中）
+                        scrubLetter = null
+                        if (letter != null) {
+                            scope.launch {
+                                val anchor = letterAnchors[letter] ?: 0
+                                val viewportH = listState.layoutInfo.viewportSize.height
+                                listState.scrollToItem(anchor, scrollOffset = -(viewportH / 2))
+                            }
                         }
                     },
-                    onRelease = { /* 松手后列表停在当前位置 */ },
                     modifier = Modifier
                         .align(
                             if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
                             else Alignment.CenterStart
                         )
-                        .offset(x = railOutX)
                 )
             }
         }

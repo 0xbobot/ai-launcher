@@ -36,6 +36,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // v0.25：全屏 edge-to-edge，桌面内容延伸到状态栏/导航栏后面
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         CapabilityRegistry.load(this)
         // v0.15 宠物整理员：初始化（亲密度持久化等）
         PetRepository.init(this)

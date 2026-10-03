@@ -33,7 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,6 +42,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,15 +68,20 @@ import com.bobot.ailauncher.data.PetCat
 import com.bobot.ailauncher.data.PetItem
 import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.core.pet.PetState
+import com.bobot.ailauncher.data.OtaCheckResult
+import com.bobot.ailauncher.data.OtaInfo
+import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.GlassTextShadow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 /**
- * 宠物区：亲密度 + 桌台（宠物本体/ding/思考点/sort-tag/carry）。
- * 放在首页意图框下方、"正在进行时"上方。
+ * 宠物区：桌台（宠物本体/ding/思考点/sort-tag/carry）。
+ * 放在首页顶栏下方。
  */
 @Composable
 fun PetZone() {
@@ -85,10 +92,15 @@ fun PetZone() {
     val carryToRight by PetRepository.carryToRight.collectAsState()
     val showDots by PetRepository.showDots.collectAsState()
     val sortText by PetRepository.sortText.collectAsState()
-    val affection by PetRepository.affection.collectAsState()
     // v0.19：语义状态——SLEEPY 时眼睛保持闭合（夜晚睡觉）
     val petState by PetRepository.petState.collectAsState()
     var blinking by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // v0.24.1：点七仔 = 检查更新（开发期高频操作，入口前移）
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
+    val checkingUpdateNow by rememberUpdatedState(checkingUpdate)
 
     // 定时眨眼
     LaunchedEffect(Unit) {
@@ -104,36 +116,6 @@ fun PetZone() {
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 亲密度
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "亲密度 ",
-                fontSize = 11.5.sp,
-                style = TextStyle(color = Color.White, shadow = GlassTextShadow)
-            )
-            Text(
-                text = "♥",
-                fontSize = 11.5.sp,
-                color = Color(0xFFFF8FB3),
-                style = TextStyle(shadow = GlassTextShadow)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            LinearProgressIndicator(
-                progress = affection / 100f,
-                modifier = Modifier
-                    .width(90.dp)
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(99.dp)),
-                color = Color(0xFFFF5E7E),
-                trackColor = Color.White.copy(alpha = 0.28f)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = "$affection",
-                fontSize = 11.5.sp,
-                style = TextStyle(color = Color.White, shadow = GlassTextShadow)
-            )
-        }
         // 桌台
         Box(
             modifier = Modifier
@@ -197,9 +179,32 @@ fun PetZone() {
                     .align(Alignment.Center)
                     .size(100.dp)
                     .pointerInput(Unit) {
-                        detectTapGestures(onTap = { PetRepository.petTapped() })
+                        detectTapGestures(onTap = {
+                            if (checkingUpdateNow) return@onTap
+                            checkingUpdate = true
+                            scope.launch {
+                                when (val r = OtaUpdater.checkForUpdateResult(context)) {
+                                    is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
+                                    OtaCheckResult.UpToDate ->
+                                        Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
+                                    OtaCheckResult.Failed ->
+                                        Toast.makeText(context, "检查失败，请稍后再试", Toast.LENGTH_SHORT).show()
+                                }
+                                checkingUpdate = false
+                            }
+                        })
                     }
             )
+            // v0.24.1：检查更新 loading
+            if (checkingUpdate) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(30.dp),
+                    strokeWidth = 3.dp,
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+            }
             // carry 小纸条
             val carryAlpha by animateFloatAsState(
                 targetValue = if (carryText != null) 1f else 0f,
@@ -233,6 +238,9 @@ fun PetZone() {
                 )
             }
         }
+    }
+    updateInfo?.let { info ->
+        UpdateDialog(info = info, onDismiss = { updateInfo = null })
     }
 }
 
