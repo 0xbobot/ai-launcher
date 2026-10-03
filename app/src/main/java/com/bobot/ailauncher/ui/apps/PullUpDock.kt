@@ -16,7 +16,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -44,7 +43,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -161,18 +159,11 @@ fun PullUpDock(
                 // 让系统处理底部左右滑（切最近应用）、底部上滑（回桌面/最近任务）
                 val sysGestureBottomPx = WindowInsets.systemGestures.getBottom(density)
                 val dockBottomPadPx = with(density) { 16.dp.toPx() }
-                val cardShape = RoundedCornerShape(24.dp)
+                // v0.27.1：去底（Bob 选一）——图标直接浮在壁纸上，无卡片无阴影
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
-                        .shadow(10.dp, cardShape)
-                        .clip(cardShape)
-                        .background(Color.White.copy(alpha = 0.66f))
-                        .border(
-                            BorderStroke(1.dp, Color.White.copy(alpha = 0.45f)),
-                            cardShape
-                        )
                         .pointerInput(state, sysGestureBottomPx, dockBottomPadPx) {
                             var accumX = 0f
                             var accumY = 0f
