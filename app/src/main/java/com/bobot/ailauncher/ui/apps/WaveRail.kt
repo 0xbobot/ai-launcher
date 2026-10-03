@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,7 +22,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -34,6 +33,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -47,11 +47,10 @@ import kotlin.math.roundToInt
 
 /**
  * 波浪字母导航 v2（v0.25）。
- * - 默认藏在屏幕外面（看不见）；手指触到右侧边缘唤出，松手后滑回去
+ * - 常显于屏幕右侧（修复 v0.24 藏入屏外看不见的问题）
  * - 紧凑高度（约 62% 屏高，居中），字母不拉得太开
- * - 唤出时：附近字母按高斯衰减放大并向内鼓起，大气泡在靠应用的一侧跟随手指
- * - 拖动中通过 onActiveLetter 回调当前字母（父组件进入聚焦模式：只显示该字母）；
- *   松手通过 onRelease 回调（父组件恢复全量并定位）
+ * - 拖动时：附近字母按高斯衰减放大并向内鼓起，大气泡在靠应用的一侧跟随手指；
+ *   列表进入聚焦模式（只显示当前字母），松手恢复全量
  * - 只做定位，不承载其他功能
  */
 @Composable
@@ -67,7 +66,6 @@ internal fun WaveRail(
     val density = LocalDensity.current
     // 右手：-1（往左/向内）；左手：+1（往右/向内）
     val dirSign = if (handed == UiPrefs.Handed.RIGHT) -1f else 1f
-    var revealed by remember { mutableStateOf(false) }
     var activeIndex by remember { mutableIntStateOf(-1) }
     var lettersTopPx by remember { mutableFloatStateOf(0f) }
 
@@ -86,20 +84,10 @@ internal fun WaveRail(
         val rowHpx = railHpx / letters.size
         val bulgePx = with(density) { 36.dp.toPx() }
         val shiftPx = with(density) { 56.dp.toPx() }
-        val hiddenX = with(density) { 72.dp.toPx() }
         // 气泡在靠应用的一侧：明显离开波浪区
         val bubbleOutX = with(density) { 128.dp.toPx() }
 
-        // 显隐滑动
-        val revealX by animateFloatAsState(
-            targetValue = if (revealed) 0f else hiddenX,
-            animationSpec = spring(
-                stiffness = Spring.StiffnessMedium,
-                dampingRatio = 0.85f
-            ),
-            label = "railReveal"
-        )
-        // 波浪避让：唤出时整体往拇指反方向偏移
+        // 波浪避让：拖动时整体往拇指反方向偏移
         val waveShiftX by animateFloatAsState(
             targetValue = if (activeIndex >= 0) dirSign * shiftPx else 0f,
             animationSpec = spring(
@@ -114,13 +102,13 @@ internal fun WaveRail(
                 .toInt().coerceIn(letters.indices)
         }
 
-        // 触摸层：整块可触摸（含点按与纵向拖动）；平时隐形但可命中
+        // 触摸层：点按与纵向拖动
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .pointerInput(letters, hPx) {
                     detectTapGestures(onTap = { offset ->
-                        // 点按：直接跳转，不需要唤出动画
+                        // 点按：直接跳转
                         val i = indexAt(offset.y)
                         onActiveLetter(letters[i])
                         onRelease(letters[i])
@@ -130,7 +118,6 @@ internal fun WaveRail(
                     detectVerticalDragGestures(
                         onDragStart = { offset ->
                             val i = indexAt(offset.y)
-                            revealed = true
                             activeIndex = i
                             onActiveLetter(letters[i])
                         },
@@ -138,12 +125,10 @@ internal fun WaveRail(
                             val last = activeIndex.takeIf { it >= 0 }
                                 ?.let { letters[it] }
                             activeIndex = -1
-                            revealed = false
                             onRelease(last)
                         },
                         onDragCancel = {
                             activeIndex = -1
-                            revealed = false
                             onRelease(null)
                         },
                         onVerticalDrag = { change, _ ->
@@ -158,7 +143,7 @@ internal fun WaveRail(
                 }
         )
 
-        // 字母列：紧凑居中，随显隐滑入滑出
+        // 字母列：紧凑居中，常显
         Column(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -170,9 +155,6 @@ internal fun WaveRail(
                         lettersTopPx = top
                         onLettersTopMeasured(top)
                     }
-                }
-                .graphicsLayer {
-                    translationX = revealX
                 },
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -214,7 +196,7 @@ internal fun WaveRail(
             }
         }
 
-        // 当前字母气泡：靠应用的一侧（远离 rail），跟随手指高度，随显隐一起走
+        // 当前字母气泡：靠应用的一侧（远离 rail），跟随手指高度
         if (activeIndex >= 0) {
             val idx = activeIndex.coerceIn(letters.indices)
             val rPx = with(density) { 24.dp.toPx() }
@@ -223,7 +205,7 @@ internal fun WaveRail(
                     .align(Alignment.Center)
                     .offset {
                         IntOffset(
-                            (revealX + dirSign * bubbleOutX).roundToInt(),
+                            (dirSign * bubbleOutX).roundToInt(),
                             (railTopPx + idx * rowHpx + rowHpx / 2f - rPx - hPx / 2f).roundToInt()
                         )
                     }
