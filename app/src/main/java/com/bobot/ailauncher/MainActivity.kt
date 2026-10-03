@@ -9,12 +9,17 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
@@ -67,14 +72,8 @@ class MainActivity : ComponentActivity() {
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
 
-        // v0.11 玻璃拟态：API 31+ 开启窗口真实背景模糊（壁纸/下层内容），
-        // 低版本 graceful 降级为半透明底色（无 blur）
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                window.setBackgroundBlurRadius(80)
-            } catch (_: Exception) {
-            }
-        }
+        // v0.26.5：去掉窗口背景模糊——现在壁纸由 Compose 内绘制，
+        // window blur 只模糊窗口后的内容，对内绘壁纸无效，反而可能导致切换闪烁
 
         // v0.17.0（PRD 技术方案 Phase 1）：事件驱动 AI Brain。
         // Launcher 只生产事件、消费决策结果；Brain 挂掉也不影响 Launcher。
@@ -90,11 +89,37 @@ class MainActivity : ComponentActivity() {
         setContent {
             AILauncherTheme {
                 var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
-                // 全透明底：系统壁纸从半透明主题透出，不再全屏铺暖灰底
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color.Transparent
-                ) {
+                // v0.26.5：自己绘制系统壁纸（解决多任务缩略图透明问题）
+                // 之前靠 windowShowWallpaper 透出壁纸，缩略图捕获不到，显示白色
+                val wallpaperDrawable = remember {
+                    try {
+                        android.app.WallpaperManager.getInstance(this).drawable
+                    } catch (_: Exception) { null }
+                }
+                val wallpaperBitmap = remember(wallpaperDrawable) {
+                    try {
+                        (wallpaperDrawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                            ?.asImageBitmap()
+                    } catch (_: Exception) { null }
+                }
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // 底层：系统壁纸
+                    if (wallpaperBitmap != null) {
+                        Image(
+                            bitmap = wallpaperBitmap,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        // 兜底：暖灰底
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFFF4F2EE))
+                        )
+                    }
+                    // 上层：原有内容（半透明 Surface 改为直接内容，玻璃效果靠各页面半透明遮罩）
                     if (onboarded) {
                         MainScreen()
                     } else {
@@ -117,6 +142,19 @@ class MainActivity : ComponentActivity() {
                 OtaUpdater.markInstallPrompted(this)
             }
         }
+    }
+
+    // v0.26.5：启动器按返回键不做任何事（避免重复刷新主页）
+    // 系统桌面按返回键本就不该有行为
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        // 空实现：不调用 super，避免 Activity 出栈/重建
+    }
+
+    // v0.26.5：singleTask 模式下按 Home 键回来走这里，确保不重建页面
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // 不做任何事：MainScreen 的 Compose 状态保持，避免"空页面"
     }
 
     override fun onDestroy() {
