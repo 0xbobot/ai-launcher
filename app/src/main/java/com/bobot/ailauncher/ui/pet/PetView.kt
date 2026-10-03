@@ -39,6 +39,8 @@ fun PetView(
     mood: PetMood,
     mouth: PetMouth,
     blinking: Boolean,
+    /** 夜晚/睡眠态：眼睛保持闭合 */
+    sleepy: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -84,7 +86,7 @@ fun PetView(
             }
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            drawPet(mouth, blinking)
+            drawPet(mouth, blinking || sleepy)
         }
     }
 }

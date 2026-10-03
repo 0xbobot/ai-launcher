@@ -65,6 +65,7 @@ import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.PetCat
 import com.bobot.ailauncher.data.PetItem
 import com.bobot.ailauncher.data.PetMood
+import com.bobot.ailauncher.core.pet.PetState
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.GlassTextShadow
@@ -85,6 +86,8 @@ fun PetZone() {
     val showDots by PetRepository.showDots.collectAsState()
     val sortText by PetRepository.sortText.collectAsState()
     val affection by PetRepository.affection.collectAsState()
+    // v0.19：语义状态——SLEEPY 时眼睛保持闭合（夜晚睡觉）
+    val petState by PetRepository.petState.collectAsState()
     var blinking by remember { mutableStateOf(false) }
 
     // 定时眨眼
@@ -189,6 +192,7 @@ fun PetZone() {
                 mood = mood,
                 mouth = mouth,
                 blinking = blinking,
+                sleepy = petState == PetState.SLEEPY,
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(100.dp)

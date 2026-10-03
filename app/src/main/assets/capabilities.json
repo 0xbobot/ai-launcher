@@ -246,6 +246,18 @@
           "packageNames": [
             "com.alibaba.android.rimet"
           ]
+        },
+        {
+          "id": "rili",
+          "label": "日历",
+          "icon": "calendar_month",
+          "packageNames": [
+            "com.google.android.calendar",
+            "com.android.calendar"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "系统日历"
         }
       ],
       "icon": "work",

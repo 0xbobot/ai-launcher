@@ -21,9 +21,13 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import com.bobot.ailauncher.data.AppUsageTracker
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.verticalScroll
@@ -422,7 +426,8 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             .padding(horizontal = 16.dp)
             .padding(bottom = 100.dp) // 给底部悬浮的圆点 + 横线手柄留位
     ) {
-        ClockHeader()
+        // v0.19（原型 v2 / PRD §6.1）：极简顶栏 + 情境信息条 + 宠物居中
+        MinimalTopBar()
         Spacer(modifier = Modifier.height(10.dp))
         // 意图输入框（玻璃拟态）
         Card(
@@ -502,6 +507,8 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
             }
         }
         Spacer(modifier = Modifier.height(14.dp))
+        // v0.19 情境信息条：一次一条最重要的事（PRD §七）
+        AmbientInfoPill(calEvents)
         // v0.15 宠物整理员：亲密度 + 桌台 + 呈现卡片
         PetZone()
         PetPresentedCard()
@@ -583,9 +590,9 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     }
 }
 
-/** 桌面 widget 感的大时钟 + 日期（每 20 秒刷新一次） */
+/** v0.19（原型 v2 / PRD §6.1）：极简顶栏——左日期、右时间，一行小字 */
 @Composable
-private fun ClockHeader() {
+private fun MinimalTopBar() {
     var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -596,22 +603,90 @@ private fun ClockHeader() {
     val time = remember(nowMs) {
         SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(nowMs))
     }
-    Column(modifier = Modifier.padding(top = 28.dp, bottom = 2.dp)) {
-        Text(
-            text = time,
-            fontSize = 54.sp,
-            fontWeight = FontWeight.Bold,
-            style = TextStyle(color = Color.White, shadow = GlassTextShadow)
-        )
-        Spacer(modifier = Modifier.height(2.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 18.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Text(
             text = todayText(),
-            fontSize = 14.sp,
+            fontSize = 12.5.sp,
             style = TextStyle(
-                color = Color.White.copy(alpha = 0.85f),
+                color = Color.White.copy(alpha = 0.75f),
                 shadow = GlassTextShadow
             )
         )
+        Text(
+            text = time,
+            fontSize = 12.5.sp,
+            style = TextStyle(
+                color = Color.White.copy(alpha = 0.75f),
+                shadow = GlassTextShadow
+            )
+        )
+    }
+}
+
+/**
+ * v0.19（原型 v2 / PRD §七）：情境信息条——一次只显示一条最重要的事。
+ * 当前：60 分钟内的日程 → 点按直达日历（走 ActionEngine）。无事则隐藏。
+ */
+@Composable
+private fun AmbientInfoPill(calEvents: List<CalEvent>?) {
+    val context = LocalContext.current
+    val now = System.currentTimeMillis()
+    val next = remember(calEvents, now / 60_000) {
+        calEvents
+            ?.filter { !it.allDay && it.begin > now && it.begin <= now + 60 * 60 * 1000 }
+            ?.minByOrNull { it.begin }
+    }
+    if (next == null) return
+    val mins = ((next.begin - now) / 60_000).toInt()
+    val time = remember(next.begin) {
+        SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(next.begin))
+    }
+    val label = if (mins <= 0) "正在进行" else "还有 $mins 分钟"
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(99.dp))
+            .background(AILauncherColors.GlassCard)
+            .clickable {
+                // 点按直达日历（PRD Apple 评审结论 5：Action 必须靠近结果）
+                val cap = CapabilityRegistry.find("rili")
+                if (cap == null) {
+                    Toast.makeText(context, "本机没有日历应用", Toast.LENGTH_SHORT).show()
+                    return@clickable
+                }
+                val res = ActionEngine.submit(
+                    context,
+                    ActionRequest(
+                        intent = "查看日程",
+                        capabilityId = cap.id,
+                        riskLevel = cap.riskLevel
+                    )
+                )
+                if (res is ActionResult.Failed) {
+                    Toast.makeText(context, res.reason, Toast.LENGTH_SHORT).show()
+                }
+            }
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = "📅", fontSize = 14.sp)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "$time「${next.title.ifBlank { "日程" }}」$label",
+            fontSize = 13.sp,
+            color = Color.White.copy(alpha = 0.92f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Text(text = "›", fontSize = 16.sp, color = Color.White.copy(alpha = 0.5f))
     }
 }
 

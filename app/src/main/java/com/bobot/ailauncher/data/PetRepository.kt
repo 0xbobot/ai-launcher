@@ -8,6 +8,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import com.bobot.ailauncher.core.pet.AttentionBudget
+import com.bobot.ailauncher.core.pet.PetContext
+import com.bobot.ailauncher.core.pet.PetState
+import com.bobot.ailauncher.core.pet.PetStateMachine
+import com.bobot.ailauncher.core.pet.toMood
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +51,10 @@ object PetRepository {
     val filed: StateFlow<Map<PetCat, List<PetItem>>> get() = _filed.asStateFlow()
     val affection: StateFlow<Int> get() = _affection.asStateFlow()
     val toast: SharedFlow<String> get() = _toast.asSharedFlow()
+    /** 语义状态（PRD §十二）：时间/互动/Context 共同决定，PetZone 可据此微调渲染 */
+    val petState: StateFlow<PetState> get() = _petState.asStateFlow()
+    /** 主动预算（PRD §十四）：AiBrain 在 Phase 4b 接入 */
+    val attentionBudget = AttentionBudget()
 
     private val _mood = MutableStateFlow(PetMood.IDLE)
     private val _mouth = MutableStateFlow(PetMouth.IDLE)
@@ -59,8 +68,15 @@ object PetRepository {
     private val _filed = MutableStateFlow<Map<PetCat, List<PetItem>>>(emptyMap())
     private val _affection = MutableStateFlow(15)
     private val _toast = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    private val _petState = MutableStateFlow(PetState.CURIOUS)
+    private var lastInteractMs = System.currentTimeMillis()
 
     private var busy = false
+        set(v) {
+            field = v
+            // 忙/闲切换 → 语义状态重估（WORKING ↔ 其他）
+            refreshState()
+        }
     private var autoFileJob: Job? = null
     private val recent = mutableMapOf<String, Long>()
     private val handledCalendarKeys = mutableSetOf<String>()
@@ -79,6 +95,41 @@ object PetRepository {
         ownPackage = context.packageName
         _affection.value = appCtx!!.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getInt(KEY_AFFECTION, 15)
+        // v0.19：状态机时钟——每 60 秒按时间/闲置重估一次语义状态
+        scope.launch {
+            while (true) {
+                delay(60_000)
+                refreshState()
+            }
+        }
+        refreshState()
+    }
+
+    /**
+     * v0.19 语义状态刷新（PRD §十二）。
+     * 只在整理员流程空闲（mood == IDLE）时把语义状态映射到渲染 mood，
+     * 流程中的 FETCH/SORTING/FILE 不受影响。
+     */
+    fun refreshState() {
+        val minutesIdle = (System.currentTimeMillis() - lastInteractMs) / 60_000
+        val hasImportant = (_filed.value[PetCat.IMP]?.size ?: 0) > 0 ||
+            _presented.value?.cat == PetCat.IMP
+        val state = PetStateMachine.derive(
+            PetContext(
+                busy = busy,
+                hasImportant = hasImportant,
+                minutesIdle = minutesIdle
+            )
+        )
+        _petState.value = state
+        if (_mood.value == PetMood.IDLE) {
+            _mood.value = state.toMood()
+        }
+    }
+
+    /** 任何用户互动都先记一笔（状态机输入） */
+    private fun markInteracted() {
+        lastInteractMs = System.currentTimeMillis()
     }
 
     fun addAffection(n: Int) {
@@ -90,7 +141,11 @@ object PetRepository {
 
     /** 点按宠物：happy 弹跳一下 */
     fun petTapped() {
-        if (_mood.value == PetMood.HAPPY) return
+        markInteracted()
+        if (_mood.value == PetMood.HAPPY) {
+            refreshState()
+            return
+        }
         val prev = _mood.value
         _mood.value = PetMood.HAPPY
         _mouth.value = PetMouth.HAPPY
