@@ -408,24 +408,25 @@ fun AppCenterContent(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
-            // Rail：只做定位——字母跳对应字母；惯用手镜像
-            // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp），
-            // 气泡仍在 rail 外侧紧贴边缘，允许轻微溢出绘制
+            // Rail：波浪字母导航（v0.24，学 Niagara/参考视频）——只做定位
+            // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）
             // v0.21：搜索态隐藏 rail（定位无意义）
+            // v0.24：点按跳字母（居中）；拖动时波浪跟手，列表跟手滚动切换字母
             if (!searching && letters.isNotEmpty()) {
                 val railOutX = if (handed == UiPrefs.Handed.RIGHT) 18.dp else (-18).dp
-                CenterRail(
+                WaveRail(
                     letters = letters,
                     handed = handed,
-                    onJumpTop = { scope.launch { listState.scrollToItem(0) } },
-                    onJumpLetter = { letter ->
+                    onActiveLetter = { letter ->
                         scope.launch {
                             val anchor = letterAnchors[letter] ?: 0
                             val viewportH = listState.layoutInfo.viewportSize.height
-                            // 字母区滚到屏幕垂直居中（方便单手操作和下一步点选），而非顶到列表顶部
+                            // 点按：字母区滚到屏幕垂直居中（方便单手操作和下一步点选）
+                            // 拖动：跟手即时切换，不用动画避免拖尾
                             listState.scrollToItem(anchor, scrollOffset = -(viewportH / 2))
                         }
                     },
+                    onRelease = { /* 松手后列表停在当前位置 */ },
                     modifier = Modifier
                         .align(
                             if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
@@ -477,170 +478,6 @@ private fun rememberPullDownConnection(
                 }
                 accum = 0f
                 return Offset.Zero
-            }
-        }
-    }
-}
-
-/**
- * 应用中心定位 rail（v0.14.1：只做定位，不做视图切换）：
- * 首个 ☰ 跳回顶部整个分类区，后面 A-Z 字母跳转对应字母（应用区滚到屏幕垂直居中）；
- * 点按/纵向拖动；字母波浪避让拇指（字母列不动，波浪往拇指反方向偏移 64dp）；
- * 选中字母的大圆气泡放在 rail 外侧（远离屏幕中心），rail 内缩给气泡留位置；
- * 惯用手决定 rail 在左还是右
- */
-@Composable
-private fun CenterRail(
-    letters: List<Char>,
-    handed: UiPrefs.Handed,
-    onJumpTop: () -> Unit,
-    onJumpLetter: (Char) -> Unit,
-    modifier: Modifier = Modifier,
-    heightFraction: Float = 0.6f
-) {
-    val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
-    val items = remember(letters) { listOf('\u2630') + letters }
-    var activeIndex by remember { mutableStateOf<Int?>(null) }
-    var hideJob by remember { mutableStateOf<Job?>(null) }
-    // 右手：-1（波浪往左偏，避开右侧拇指）；左手：+1（往右偏）
-    val dirSign = if (handed == UiPrefs.Handed.RIGHT) -1f else 1f
-    val bulgePx = with(density) { 40.dp.toPx() }
-    val shiftPx = with(density) { 64.dp.toPx() }
-    val waveShiftX by animateFloatAsState(
-        targetValue = if (activeIndex != null) dirSign * shiftPx else 0f,
-        animationSpec = spring(
-            stiffness = Spring.StiffnessMediumLow,
-            dampingRatio = 0.85f
-        ),
-        label = "railWaveShift"
-    )
-    // 外侧 = 远离屏幕中心的一侧：右手 rail 在右，外侧=右；左手镜像
-    val rightHanded = handed == UiPrefs.Handed.RIGHT
-
-    fun poke(i: Int) {
-        activeIndex = i
-        if (i == 0) onJumpTop() else onJumpLetter(items[i])
-        hideJob?.cancel()
-        hideJob = scope.launch {
-            delay(600)
-            activeIndex = null
-        }
-    }
-
-    // 外层 76dp：内侧 48dp 是 rail 本体（含触摸），外侧 28dp 给气泡留位置（rail 内缩）
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxHeight(heightFraction)
-            .width(76.dp)
-    ) {
-        val hPx = constraints.maxHeight.toFloat()
-        if (hPx <= 0f) return@BoxWithConstraints
-        val rowHpx = hPx / items.size
-        // rail 本体：内侧 48dp
-        Box(
-            modifier = Modifier
-                .align(if (rightHanded) Alignment.CenterStart else Alignment.CenterEnd)
-                .width(48.dp)
-                .fillMaxHeight()
-        ) {
-            // 触摸层：整块可触摸（点按 + 纵向拖动），不偏移
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .pointerInput(items, hPx) {
-                        detectTapGestures(onTap = { offset ->
-                            val i = ((offset.y / hPx) * items.size)
-                                .toInt().coerceIn(items.indices)
-                            poke(i)
-                        })
-                    }
-                    .pointerInput(items, hPx) {
-                        detectVerticalDragGestures(
-                            onDragEnd = { activeIndex = null },
-                            onDragCancel = { activeIndex = null },
-                            onVerticalDrag = { change, _ ->
-                                change.consume()
-                                val i = ((change.position.y / hPx) * items.size)
-                                    .toInt().coerceIn(items.indices)
-                                activeIndex = i
-                                if (i == 0) onJumpTop() else onJumpLetter(items[i])
-                            }
-                        )
-                    }
-            )
-            // 视觉层：字母列不动；波浪（当前字母放大）单独往拇指反方向偏移
-            Column(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .width(40.dp)
-                    .fillMaxHeight(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                items.forEachIndexed { i, ch ->
-                    val d = if (activeIndex != null) (i - activeIndex!!).toFloat() else 999f
-                    val gTarget = if (activeIndex != null) exp(-(d * d) / 15.68f) else 0f
-                    val g by animateFloatAsState(
-                        targetValue = gTarget,
-                        animationSpec = tween(120),
-                        label = "railG"
-                    )
-                    Box(
-                        modifier = Modifier.weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = ch.toString(),
-                            fontSize = 12.sp,
-                            color = if (i == 0 || g > 0.5f) AILauncherColors.Accent
-                            else AILauncherColors.Title.copy(alpha = 0.85f),
-                            fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.SemiBold,
-                            maxLines = 1,
-                            textAlign = TextAlign.Center,
-                            style = TextStyle(
-                                shadow = Shadow(
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    offset = Offset(0f, 1f),
-                                    blurRadius = 2f
-                                )
-                            ),
-                            modifier = Modifier.graphicsLayer {
-                                // 高斯波浪：越靠近手指越大；波浪整体再往拇指反方向避让
-                                translationX = dirSign * bulgePx * g + waveShiftX * g
-                                val sc = 1f + g
-                                scaleX = sc
-                                scaleY = sc
-                            }
-                        )
-                    }
-                }
-            }
-        }
-        // 选中大圆气泡：rail 外侧（远离屏幕中心），不跟波浪偏移，不被拇指盖住；
-        // v0.15.1 修：用 Top 对齐 + 偏移量，保证气泡垂直居中对准当前字母（波浪峰顶），
-        // 之前用 Center 对齐再叠加偏移，气泡会被推到字母下方
-        activeIndex?.let { idx ->
-            val rPx = with(density) { 22.dp.toPx() }
-            Box(
-                modifier = Modifier
-                    .align(if (rightHanded) Alignment.TopEnd else Alignment.TopStart)
-                    .offset {
-                        IntOffset(
-                            0,
-                            (idx * rowHpx + rowHpx / 2f - rPx).roundToInt()
-                        )
-                    }
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(AILauncherColors.Accent),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = items[idx].toString(),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
             }
         }
     }
