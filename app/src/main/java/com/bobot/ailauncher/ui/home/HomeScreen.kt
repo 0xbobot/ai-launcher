@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.CalendarContract
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -44,7 +45,12 @@ import java.util.Calendar
  * Bob 要求：和 Dock/宠物无关的全部清除。
  */
 @Composable
-fun HomeScreen(onOpenAppDrawer: () -> Unit) {
+fun HomeScreen(
+    onOpenAppDrawer: () -> Unit,
+    // v0.29.0：升级提醒宠物化
+    hasUpgrade: Boolean = false,
+    onUpgradeTap: () -> Unit = {}
+) {
     val context = LocalContext.current
     val density = LocalDensity.current
 
@@ -102,20 +108,29 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
         (calEvents ?: emptyList())
             .firstOrNull { !it.allDay && it.begin in (t + 1)..(t + 30 * 60 * 1000) }
             ?.let { PetRepository.handleIncomingCalendar(it.title, it.begin, it.location) }
+        // v0.29.0：15 分钟内有会 → 七仔戴手表
+        val soon = (calEvents ?: emptyList())
+            .firstOrNull { !it.allDay && it.begin in (t + 1)..(t + 15 * 60 * 1000) }
+        PetRepository.setMeetingSoon(soon?.title?.ifBlank { "会议" })
     }
 
-    // 极简：只有宠物
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .nestedScroll(drawerScrollConnection)
-            .padding(horizontal = 16.dp),
-        // v0.27.5：宠物居中（Bob：位置太高）
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        PetZone()
-        PetPresentedCard()
+    // v0.29.0：天气环境 overlay + 宠物（Box 叠放）
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 天气：七仔的天空（底层）
+        WeatherEnv()
+        // 极简：只有宠物
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(drawerScrollConnection)
+                .padding(horizontal = 16.dp),
+            // v0.27.5：宠物居中（Bob：位置太高）
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            PetZone(hasUpgrade = hasUpgrade, onUpgradeTap = onUpgradeTap)
+            PetPresentedCard()
+        }
     }
 }
 

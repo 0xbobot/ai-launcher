@@ -2,6 +2,7 @@ package com.bobot.ailauncher.ui.pet
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -35,16 +36,24 @@ import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.data.PetMouth
+import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
  * 小流星（宠物 IP 形象，图片渲染，全身版）：
  * 按 mood 显示对应图片——IDLE/sleepy → meteor_main（站立），
- * HAPPY → meteor_jump（跳跃），FILE → meteor_hold（半身抱卡片），
+ * HAPPY → meteor_jump（跳跃），FILE → meteor_hold（全身抱卡片），
  * SORTING/FETCH → meteor_wave（挥手）。
  * 位移动画由 mood 驱动：FETCH 上跳 / FILE 右移 / HAPPY 放大弹跳 / IDLE 轻微浮动。
  * P0：呼吸（4s 缩放）+ 眨眼（140ms 图片快切）+ 点按果冻（jellyTick 触发）。
+ * v0.29.1 动作设计（学 Muse：慢速单轴轻摆，循环头尾无缝）：
+ * - 姿势切换"顿一下"：切图时 90ms 挤到 0.88，再弹簧回弹，落点精确回 1.0
+ * - 随移动倾斜：rotationZ 跟随 offX（±8°），弹簧跟随，静止精确回 0
+ * - 各 mood 小循环（sin 曲线 + Restart，头尾都是 0，重复播放不突兀）：
+ *   IDLE 轻摆 ±2.5°，HAPPY 小跳 8dp，FILE 轻摆 ±3°，SORTING/FETCH 挥手摆 ±5°，周期 2.4s
+ * - 切图 Crossfade 加快到 150ms；低电量时循环动作全停（省电）
  * mouth/blinking 为 Canvas 手绘时代遗留参数，保留签名兼容，内部不再使用。
  */
 @Composable
@@ -154,6 +163,50 @@ fun PetView(
         baseResId
     }
 
+    // v0.29.1：姿势切换"顿一下"——切图时先挤到 0.88（90ms），再弹簧回弹（轻微 overshoot），
+    // 落点精确回到 1.0，遮掉切图的生硬感；比慢溶接更像活物在动
+    var poseSquash by remember { mutableStateOf(false) }
+    LaunchedEffect(resId) {
+        poseSquash = true
+        delay(90)
+        poseSquash = false
+    }
+    val posePop by animateFloatAsState(
+        targetValue = if (poseSquash) 0.88f else 1f,
+        animationSpec = spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessMedium),
+        label = "posePop"
+    )
+    // v0.29.1：随移动倾斜——往哪边飘就往哪边倾一点，弹簧跟随，静止时精确回 0
+    val tilt by animateFloatAsState(
+        targetValue = (offX * 0.12f).coerceIn(-8f, 8f),
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
+        label = "tilt"
+    )
+    // v0.29.1：Muse 式无缝小循环——sin 曲线走满 2π，Restart 模式头尾都是 0，
+    // 重复播放不突兀；周期慢（2.4s）、幅度小（不招摇）；低电量全停
+    val loopPhase by rememberInfiniteTransition(label = "petLoop").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "loopPhase"
+    )
+    val loopTheta = (loopPhase * 2 * Math.PI).toFloat()
+    val loopRot = when {
+        lowPower -> 0f
+        mood == PetMood.HAPPY -> 0f // 开心用小跳，不转
+        mood == PetMood.IDLE || effectiveSleepy -> sin(loopTheta) * 2.5f
+        mood == PetMood.FILE -> sin(loopTheta) * 3f
+        else -> sin(loopTheta) * 5f // SORTING / FETCH 挥手摆动
+    }
+    val loopYdp = when {
+        lowPower -> 0f
+        mood == PetMood.HAPPY -> -abs(sin(loopTheta)) * 8f // 开心小跳，只往上，落点回 0
+        else -> 0f
+    }
+
     // v0.26.0：拖拽——<40dp 范围内跟手，松手 spring 回弹（纯玩）
     var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val dragX by animateFloatAsState(
@@ -200,14 +253,19 @@ fun PetView(
             .then(modifier)
             .graphicsLayer {
                 translationX = with(density) { offX.dp.toPx() } + dragX
-                translationY = with(density) { (offY + bob).dp.toPx() } + dragY
-                val s = scale * breathe * jelly
+                translationY = with(density) { (offY + bob + loopYdp).dp.toPx() } + dragY
+                rotationZ = tilt + loopRot
+                val s = scale * breathe * jelly * posePop
                 scaleX = s
                 scaleY = s
             }
     ) {
-        // v0.26.0：图片切换 Crossfade（代替硬切）
-        Crossfade(targetState = resId, label = "petImage") { id ->
+        // v0.26.0：图片切换 Crossfade；v0.29.1：150ms 快溶（慢溶接像幻灯片）+ 姿势顿一下，不再拖沓
+        Crossfade(
+            targetState = resId,
+            animationSpec = tween(150),
+            label = "petImage"
+        ) { id ->
             Image(
                 painter = painterResource(id),
                 contentDescription = "七仔",

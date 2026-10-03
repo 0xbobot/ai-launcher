@@ -69,6 +69,14 @@ object PetRepository {
     private val _affection = MutableStateFlow(15)
     private val _toast = MutableSharedFlow<String>(extraBufferCapacity = 8)
     private val _petState = MutableStateFlow(PetState.CURIOUS)
+    // v0.29.0：新通知送达——七仔小跑送通知（app 名 + 计数，PetZone 显示浮动徽标）
+    private val _deliverTick = MutableStateFlow(0)
+    val deliverTick: StateFlow<Int> get() = _deliverTick.asStateFlow()
+    private val _deliverApp = MutableStateFlow<String?>(null)
+    val deliverApp: StateFlow<String?> get() = _deliverApp.asStateFlow()
+    // v0.29.0：会议临近——15 分钟内有会，七仔戴手表
+    private val _meetingSoon = MutableStateFlow<String?>(null)
+    val meetingSoon: StateFlow<String?> get() = _meetingSoon.asStateFlow()
     private var lastInteractMs = System.currentTimeMillis()
 
     private var busy = false
@@ -164,6 +172,9 @@ object PetRepository {
     fun handleIncomingNotification(n: SimpleNotification) {
         if (n.packageName == ownPackage) return
         val (cat, desc) = PetClassifier.classify(n.packageName, n.appName, n.title, n.text)
+        // v0.29.0：新通知送达动画
+        _deliverApp.value = n.appName
+        _deliverTick.value += 1
         handleIncoming(
             PetItem(
                 id = "n${n.time}_${n.packageName.hashCode()}",
@@ -176,6 +187,11 @@ object PetRepository {
                 packageName = n.packageName
             )
         )
+    }
+
+    /** v0.29.0：设置/清除会议临近状态（15 分钟内有会） */
+    fun setMeetingSoon(title: String?) {
+        _meetingSoon.value = title
     }
 
     /** 日历：30 分钟内开始的日程 → 重要 */
