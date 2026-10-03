@@ -39,9 +39,10 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * 七仔（宠物 IP 形象，图片渲染）：
- * 按 mood 显示对应图片——IDLE/sleepy → qizai_idle（闭眼待机），
- * HAPPY/FILE → qizai_happy，SORTING/FETCH → qizai_sorting。
+ * 小流星（宠物 IP 形象，图片渲染，全身版）：
+ * 按 mood 显示对应图片——IDLE/sleepy → meteor_main（站立），
+ * HAPPY → meteor_jump（跳跃），FILE → meteor_hold（半身抱卡片），
+ * SORTING/FETCH → meteor_wave（挥手）。
  * 位移动画由 mood 驱动：FETCH 上跳 / FILE 右移 / HAPPY 放大弹跳 / IDLE 轻微浮动。
  * P0：呼吸（4s 缩放）+ 眨眼（140ms 图片快切）+ 点按果冻（jellyTick 触发）。
  * mouth/blinking 为 Canvas 手绘时代遗留参数，保留签名兼容，内部不再使用。
@@ -141,13 +142,14 @@ fun PetView(
     )
 
     val baseResId = when {
-        effectiveSleepy || mood == PetMood.IDLE -> R.drawable.qizai_idle
-        mood == PetMood.HAPPY || mood == PetMood.FILE -> R.drawable.qizai_happy
-        else -> R.drawable.qizai_sorting // SORTING / FETCH
+        effectiveSleepy || mood == PetMood.IDLE -> R.drawable.meteor_main
+        mood == PetMood.HAPPY -> R.drawable.meteor_jump
+        mood == PetMood.FILE -> R.drawable.meteor_hold
+        else -> R.drawable.meteor_wave // SORTING / FETCH
     }
-    // 眨眼时强制显示闭眼图（140ms）；低电量时本来就闭眼，不眨了
+    // 眨眼时切主图闪一下（140ms）；低电量时本来就待机态，不眨了
     val resId = if (isBlinking && !effectiveSleepy && mood != PetMood.IDLE) {
-        R.drawable.qizai_idle
+        R.drawable.meteor_main
     } else {
         baseResId
     }
