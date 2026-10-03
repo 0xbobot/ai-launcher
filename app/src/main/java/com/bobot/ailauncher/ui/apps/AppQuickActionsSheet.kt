@@ -38,15 +38,14 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * v0.16：长按应用 → 常用操作 bottom sheet（安卓习惯）。
  * - 系统应用快捷方式（LauncherApps.getShortcuts()，能取到才显示；
  *   非默认桌面/取不到时优雅降级，只显示下面两项）
- * - 调整分类（原 OrganizeDialog 入口搬到这里）
  * - 应用信息
+ * v0.22：分类取消，"调整分类"入口移除。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppQuickActionsSheet(
     app: AppInfo,
     onDismiss: () -> Unit,
-    onOrganize: () -> Unit,
     onAppInfo: () -> Unit
 ) {
     val context = LocalContext.current
@@ -95,7 +94,6 @@ fun AppQuickActionsSheet(
                     }
                 )
             }
-            SheetRow(label = "调整分类", onClick = onOrganize)
             SheetRow(label = "应用信息", onClick = {
                 onAppInfo()
                 onDismiss()

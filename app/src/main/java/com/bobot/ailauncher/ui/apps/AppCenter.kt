@@ -44,12 +44,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.foundation.text.KeyboardActions
@@ -84,16 +81,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bobot.ailauncher.data.AppClassifier
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.AppUsageTracker
-import com.bobot.ailauncher.data.CapabilityRegistry
-import com.bobot.ailauncher.data.ClassifyResult
-import com.bobot.ailauncher.data.CustomCategories
 import com.bobot.ailauncher.data.HiddenApps
-import com.bobot.ailauncher.data.ResolvedCapability
-import com.bobot.ailauncher.data.ResolvedGroup
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
@@ -107,17 +98,13 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 
 /**
- * 应用中心（v0.14.1，Bob 新设计）：D3 全屏单列表。
- * - 顶部：Header（"应用"标题 + AI 智能分类按钮 + 设置齿轮）
- * - 分类区：直接复用能力页 v0.9 扁平样式（透明背景、行底 1dp 两端渐隐分割线、
- *   图标分开 8dp 间距）：7 组（AI/社交/出行/支付/办公/生活/购物），组头可折叠，
- *   收起态右侧图标 strip，展开态 4 列网格，长按图标整理分类（复用 OrganizeDialog）
+ * 应用中心（v0.22，PRD 重设计方向）：D3 全屏单列表，只干一件事——最快找到应用。
+ * - 顶部：Header（"应用"标题 + 设置齿轮）
+ * - 搜索框（吸顶）：拼音/首字母/自然语言/模糊四档匹配（AppSearchIndex）
  * - 下面直接连全部应用 A-Z 列表（字母分组头 + 行）
- * - Rail 只做定位：首个"类"跳回顶部整个分类区，后面 A-Z 字母跳转对应字母；
- *   不再做视图切换（无切换钮、无左右滑切视图）
- * - v0.16：长按应用图标/行 → 常用操作 bottom sheet（系统快捷方式/调整分类/应用信息）
- * - 数据层复用 CustomCategories（AI 智能分类结果、长按手动调整）
- * - 手势签名（v0.14 纠正）：左滑=多 / 右滑=少
+ * - Rail 只做定位：字母跳转对应字母
+ * - v0.22：分类区取消（Bob 决定，等需要时再重新设计）；AllAppsScreen 死代码删除
+ * - 手势签名：左滑=多 / 右滑=少
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -133,23 +120,15 @@ fun AppCenterContent(
     val onPullDownState = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     var refreshTick by remember { mutableIntStateOf(0) }
-    var organizeApp by remember { mutableStateOf<AppInfo?>(null) }
     // v0.16：长按 → 常用操作 bottom sheet（安卓习惯）
     var quickActionsApp by remember { mutableStateOf<AppInfo?>(null) }
     val handed = remember { UiPrefs.getHanded(context) }
 
-    // 已隐藏应用版本号：变化时分组与 A-Z 自动重算过滤
+    // 已隐藏应用版本号：变化时 A-Z 自动重算过滤
     val hiddenVersion = HiddenApps.version.intValue
     val hidden = remember(refreshTick, hiddenVersion) { HiddenApps.getHidden(context) }
 
-    // 分类区数据（CustomCategories 数据层：AI 智能分类 + 长按手动调整）
-    val groups = remember(refreshTick, hiddenVersion) {
-        CapabilityRegistry.installedCapabilities(context)
-            .map { g -> g.copy(apps = g.apps.filter { it.packageName !in hidden }) }
-            .filter { it.apps.isNotEmpty() }
-    }
-    // 默认全部收起（只显示组头行）：7 组一屏内展示，点击/左滑再展开
-    var expandedGroups by remember { mutableStateOf(setOf<String>()) }
+    // v0.22：分类区取消（等需要时再重新设计），只保留 A-Z
 
     // A-Z 数据：全部可启动应用（去自己、去隐藏），中文按拼音首字母排序分组
     val azApps = remember(refreshTick, hiddenVersion) {
@@ -183,10 +162,10 @@ fun AppCenterContent(
 
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
-    // 字母 → LazyColumn item index（item0=宠物空白区，1..G=分组块，G+1="全部应用"分隔）
-    val letterAnchors = remember(groups, azGroups) {
+    // 字母 → LazyColumn item index（item0="全部应用"分隔，之后每字母：1 头 + N 行）
+    val letterAnchors = remember(azGroups) {
         val m = mutableMapOf<Char, Int>()
-        var idx = groups.size + 2
+        var idx = 1
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
             idx += 1 + apps.size
@@ -204,12 +183,6 @@ fun AppCenterContent(
         } catch (_: Exception) {
             Toast.makeText(context, "「${app.label}」暂不可用", Toast.LENGTH_SHORT).show()
         }
-    }
-
-    fun launchResolvedApp(app: ResolvedCapability) {
-        val ok = CapabilityRegistry.launchResolved(context, app)
-        if (ok) AppUsageTracker.recordLaunch(context, app.packageName)
-        else Toast.makeText(context, "「${app.label}」暂不可用", Toast.LENGTH_SHORT).show()
     }
 
     // 右滑隐藏（手势签名：右滑=少），HiddenApps.version +1 后列表自动重算
@@ -231,34 +204,11 @@ fun AppCenterContent(
         }
     }
 
-    // AI 智能分类（从能力页搬过来，逻辑复用 AppClassifier）
-    var classifying by remember { mutableStateOf(false) }
-    var classifyProgress by remember { mutableStateOf(0 to 0) }
     // v0.16.1：A-Z 行左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
     var expandedActionsPkg by remember { mutableStateOf<String?>(null) }
-    fun startAiClassify() {
-        if (classifying) return
-        classifying = true
-        classifyProgress = 0 to 0
-        scope.launch {
-            when (val r = AppClassifier.classifyAll(context) { done, total ->
-                classifyProgress = done to total
-            }) {
-                is ClassifyResult.Ok -> {
-                    CustomCategories.setMappings(context, r.mapping)
-                    refreshTick++
-                    Toast.makeText(context, "已智能分类 ${r.classifiedCount} 个应用", Toast.LENGTH_SHORT).show()
-                }
-                is ClassifyResult.Err -> {
-                    Toast.makeText(context, r.message, Toast.LENGTH_LONG).show()
-                }
-            }
-            classifying = false
-        }
-    }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // ---- Header：标题 + AI 智能分类 + 设置；标题区右滑/顶部下滑 → D2 ----
+        // ---- Header：标题 + 设置；标题区右滑/顶部下滑 → D2 ----
         val headThreshPx = with(density) { 80.dp.toPx() }
         Column(
             modifier = Modifier.pointerInput(Unit) {
@@ -310,9 +260,6 @@ fun AppCenterContent(
                     color = AILauncherColors.Title,
                     modifier = Modifier.weight(1f)
                 )
-                TextButton(onClick = { startAiClassify() }) {
-                    Text(text = "AI 智能分类", fontSize = 13.sp, color = AILauncherColors.Hint)
-                }
                 IconButton(onClick = onOpenSettings) {
                     Icon(
                         Icons.Filled.Settings,
@@ -409,7 +356,6 @@ fun AppCenterContent(
                                 onLaunch = { launchApp(app) },
                                 onLongClick = { quickActionsApp = app },
                                 onHide = ::hideApp,
-                                onOrganize = { organizeApp = it },
                                 actionsVisible = expandedActionsPkg == app.packageName,
                                 onActionsVisibleChange = { expanded ->
                                     expandedActionsPkg =
@@ -422,31 +368,8 @@ fun AppCenterContent(
                     }
                     item { Spacer(modifier = Modifier.height(24.dp)) }
                 } else {
-                // 分类区
-                // 顶部预留空白区（约 140dp，未来给宠物使用，先空着）
-                item(key = "pet-slot") {
-                    Spacer(modifier = Modifier.height(140.dp))
-                }
-                items(groups, key = { "g:${it.id}" }) { group ->
-                    val collapsed = group.id !in expandedGroups
-                    GroupBlock(
-                        group = group,
-                        collapsed = collapsed,
-                        onToggle = {
-                            expandedGroups =
-                                if (group.id in expandedGroups) expandedGroups - group.id
-                                else expandedGroups + group.id
-                        },
-                        onExpand = { expandedGroups = expandedGroups + group.id },
-                        onCollapse = { expandedGroups = expandedGroups - group.id },
-                        onLaunch = ::launchResolvedApp,
-                        onOrganize = { app ->
-                            // v0.16：长按 → 常用操作 bottom sheet（调整分类入口搬到 sheet 里）
-                            quickActionsApp = AppInfo(app.packageName, app.label, app.icon)
-                        }
-                    )
-                }
-                // A-Z 分隔
+                // v0.22：分类区取消，直接 A-Z 列表
+                // "全部应用"分隔（item0，rail 跳转锚点基准）
                 item(key = "az-divider") {
                     Text(
                         text = "全部应用",
@@ -472,7 +395,6 @@ fun AppCenterContent(
                             onLaunch = { launchApp(app) },
                             onLongClick = { quickActionsApp = app },
                             onHide = ::hideApp,
-                            onOrganize = { organizeApp = it },
                             actionsVisible = expandedActionsPkg == app.packageName,
                             onActionsVisibleChange = { expanded ->
                                 expandedActionsPkg =
@@ -486,11 +408,11 @@ fun AppCenterContent(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
-            // Rail：只做定位——"类"跳回顶部整个分类区，字母跳对应字母；惯用手镜像
+            // Rail：只做定位——字母跳对应字母；惯用手镜像
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp），
             // 气泡仍在 rail 外侧紧贴边缘，允许轻微溢出绘制
             // v0.21：搜索态隐藏 rail（定位无意义）
-            if (!searching && (groups.isNotEmpty() || letters.isNotEmpty())) {
+            if (!searching && letters.isNotEmpty()) {
                 val railOutX = if (handed == UiPrefs.Handed.RIGHT) 18.dp else (-18).dp
                 CenterRail(
                     letters = letters,
@@ -515,47 +437,15 @@ fun AppCenterContent(
         }
     }
 
-    // 长按整理分类 Dialog
-    organizeApp?.let { app ->
-        OrganizeDialog(app = app, onDismiss = {
-            organizeApp = null
-            refreshTick++
-        })
-    }
-
-    // v0.16：长按常用操作 bottom sheet（系统快捷方式 + 调整分类 + 应用信息）
+    // v0.16：长按常用操作 bottom sheet（系统快捷方式 + 应用信息）
     quickActionsApp?.let { app ->
         AppQuickActionsSheet(
             app = app,
             onDismiss = { quickActionsApp = null },
-            onOrganize = {
-                quickActionsApp = null
-                organizeApp = app
-            },
             onAppInfo = { openAppDetails(app) }
         )
     }
 
-    // AI 智能分类进度框
-    if (classifying) {
-        val (done, total) = classifyProgress
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text("AI 智能分类", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
-            text = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = if (total > 0) "正在智能分类…$done/$total" else "正在智能分类…",
-                        fontSize = 14.sp,
-                        color = AILauncherColors.Body
-                    )
-                }
-            },
-            confirmButton = {}
-        )
-    }
 }
 
 /** 列表到顶继续下滑 → D2 的嵌套滚动连接 */
@@ -756,268 +646,3 @@ private fun CenterRail(
     }
 }
 
-/**
- * 分组卡片：直接复用能力页 v0.9 扁平样式（透明背景、无白卡）。
- * - 组头 54dp：6dp 分类色点 + 名称(13sp) + 数量(11sp)；收起态右侧图标 strip
- *   （36dp 真实图标 8dp 间距，最多 3 个 + "+n" 胶囊），展开态右侧"收起"文字
- * - 收起态行底 1dp 分割线（两端渐隐）
- * - 展开态：4 列图标网格（44dp 真实图标 + 应用名）
- * - 长按图标 → 常用操作 bottom sheet（v0.16，调整分类入口在 sheet 里）
- * - 手势签名（v0.14 纠正）：组头左滑=多（展开）、右滑=少（折叠），点按也可切换
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun GroupBlock(
-    group: ResolvedGroup,
-    collapsed: Boolean,
-    onToggle: () -> Unit,
-    onExpand: () -> Unit,
-    onCollapse: () -> Unit,
-    onLaunch: (ResolvedCapability) -> Unit,
-    onOrganize: (ResolvedCapability) -> Unit
-) {
-    val density = LocalDensity.current
-    val swipePx = with(density) { 48.dp.toPx() }
-    val catColor = groupColor(group.id)
-
-    // v0.15.1：右侧缩进 56dp，避让 rail（rail 已移到距边缘约 10dp）
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(end = 56.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp)
-                .pointerInput(group.id) {
-                    var accumX = 0f
-                    var fired = false
-                    detectHorizontalDragGestures(
-                        onDragStart = { accumX = 0f; fired = false },
-                        onDragCancel = { fired = true },
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            if (!fired) accumX += dragAmount
-                        },
-                        onDragEnd = {
-                            if (!fired) {
-                                if (accumX < -swipePx) onExpand()
-                                else if (accumX > swipePx) onCollapse()
-                            }
-                        }
-                    )
-                }
-                .clickable { onToggle() }
-                .padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(catColor)
-            )
-            Spacer(modifier = Modifier.width(7.dp))
-            Text(
-                text = group.label,
-                fontSize = 13.sp,
-                color = AILauncherColors.Hint,
-                maxLines = 1
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = group.apps.size.toString(),
-                fontSize = 11.sp,
-                color = AILauncherColors.Hint,
-                maxLines = 1
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            if (collapsed) {
-                CollapsedAppStrip(
-                    apps = group.apps,
-                    catColor = catColor,
-                    onLaunch = onLaunch,
-                    onOrganize = onOrganize,
-                    onExpand = onToggle
-                )
-            } else {
-                Text(
-                    text = "收起",
-                    fontSize = 13.sp,
-                    color = catColor,
-                    modifier = Modifier.clickable { onToggle() }
-                )
-            }
-        }
-        // 收起态行底细分割线（两端渐隐，参考原型 .shelf1-line）
-        if (collapsed) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(
-                        Brush.horizontalGradient(
-                            0f to Color.Transparent,
-                            0.12f to AILauncherColors.Divider,
-                            0.88f to AILauncherColors.Divider,
-                            1f to Color.Transparent
-                        )
-                    )
-            )
-        }
-        AnimatedVisibility(
-            visible = !collapsed,
-            enter = expandVertically(
-                animationSpec = androidx.compose.animation.core.spring(
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
-                    dampingRatio = 0.9f
-                )
-            ) + fadeIn(),
-            exit = shrinkVertically(
-                animationSpec = androidx.compose.animation.core.spring(
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
-                    dampingRatio = 0.9f
-                )
-            ) + fadeOut()
-        ) {
-            Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-                group.apps.chunked(4).forEach { row ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        row.forEach { app ->
-                            ResolvedAppCell(
-                                app = app,
-                                onLaunch = { onLaunch(app) },
-                                onOrganize = { onOrganize(app) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        repeat(4 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * 收起态右侧：36dp 真实图标分开排布（8dp 间距，直接点启动，长按整理分类），
- * 超出 3 个时末尾放 "+n" 分类色描边胶囊（点击展开）
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun CollapsedAppStrip(
-    apps: List<ResolvedCapability>,
-    catColor: Color,
-    onLaunch: (ResolvedCapability) -> Unit,
-    onOrganize: (ResolvedCapability) -> Unit,
-    onExpand: () -> Unit
-) {
-    val shown = if (apps.size > 3) apps.take(3) else apps
-    val rest = apps.size - shown.size
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        shown.forEach { app ->
-            AppIconImage(
-                drawable = app.icon,
-                contentDescription = app.label.toString(),
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(11.dp))
-                    .border(
-                        1.dp,
-                        Color.Black.copy(alpha = 0.06f),
-                        RoundedCornerShape(11.dp)
-                    )
-                    .combinedClickable(
-                        onClick = { onLaunch(app) },
-                        onLongClick = { onOrganize(app) }
-                    )
-            )
-        }
-        if (rest > 0) {
-            MoreCapsule(count = rest, catColor = catColor, onClick = onExpand)
-        }
-    }
-}
-
-/** "+n" 分类色描边胶囊：点击切换展开 / 收起 */
-@Composable
-private fun MoreCapsule(
-    count: Int,
-    catColor: Color,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .height(36.dp)
-            .defaultMinSize(minWidth = 46.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, catColor.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-            .background(catColor.copy(alpha = 0.13f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "+$count",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = catColor
-        )
-    }
-}
-
-/** 展开态：真实应用图标 + 应用名（点按启动，长按整理分类） */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ResolvedAppCell(
-    app: ResolvedCapability,
-    onLaunch: () -> Unit,
-    onOrganize: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-            .combinedClickable(
-                onClick = onLaunch,
-                onLongClick = onOrganize
-            )
-            .padding(vertical = 4.dp)
-    ) {
-        AppIconImage(
-            drawable = app.icon,
-            contentDescription = app.label.toString(),
-            modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(12.dp))
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = app.label.toString(),
-            fontSize = 12.sp,
-            color = AILauncherColors.Body,
-            maxLines = 1
-        )
-    }
-}
-
-/** 分组色（能力页 v4 沿用） */
-fun groupColor(id: String): Color = when (id) {
-    "ai" -> Color(0xFF5B8DEF)
-    "social" -> Color(0xFF3CB54A)
-    "travel" -> Color(0xFFE8933D)
-    "pay" -> Color(0xFFB45BE8)
-    "work" -> Color(0xFF4A7DDB)
-    "life" -> Color(0xFF2BB5A0)
-    "shop" -> Color(0xFFE86A8A)
-    else -> Color(0xFF8A8A93)
-}
