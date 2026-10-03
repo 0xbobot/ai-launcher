@@ -354,9 +354,7 @@ fun AppCenterContent(
                 if (scrub != null) {
                     // v0.25 聚焦模式：只显示当前字母的应用，字母头固定在 rail 顶端高度；
                     // 松手后恢复全量。屏幕锚点不动，不乱跳。
-                    val scrubApps = remember(scrub, azGroups) {
-                        azGroups.firstOrNull { it.first == scrub }?.second.orEmpty()
-                    }
+                    val scrubApps = azGroups.firstOrNull { it.first == scrub }?.second.orEmpty()
                     item(key = "scrub-pad") {
                         Spacer(
                             modifier = Modifier.height(

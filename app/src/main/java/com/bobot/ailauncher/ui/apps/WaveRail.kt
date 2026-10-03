@@ -111,7 +111,7 @@ internal fun WaveRail(
 
         fun indexAt(y: Float): Int {
             return (((y - railTopPx) / railHpx) * letters.size)
-                .toInt().coerceIn(letters.indices))
+                .toInt().coerceIn(letters.indices)
         }
 
         // 触摸层：整块可触摸（含点按与纵向拖动）；平时隐形但可命中
