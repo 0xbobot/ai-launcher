@@ -162,9 +162,9 @@ internal fun WaveRail(
                     Text(
                         text = ch.toString(),
                         fontSize = 11.sp,
-                        color = if (g > 0.5f) AILauncherColors.Accent
-                        else AILauncherColors.Title.copy(alpha = 0.85f),
-                        fontWeight = if (g > 0.5f) FontWeight.Bold else FontWeight.SemiBold,
+                        // v0.25.10：滑动时不换颜色（Bob）
+                        color = AILauncherColors.Title.copy(alpha = 0.85f),
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         style = TextStyle(
                             shadow = Shadow(
