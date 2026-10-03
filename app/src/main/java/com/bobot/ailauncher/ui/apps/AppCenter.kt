@@ -68,6 +68,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -164,8 +165,6 @@ fun AppCenterContent(
     // v0.25：rail 聚焦模式——拖动字母导航时只显示当前字母，松手恢复全量
     var scrubLetter by remember { mutableStateOf<Char?>(null) }
     var railLettersTopPx by remember { mutableFloatStateOf(0f) }
-    // 松手后的滚动目标：等列表恢复全量重组完成后再滚，避免打在旧内容上
-    var scrollTarget by remember { mutableStateOf<Char?>(null) }
     val searchIndex = remember(azApps) { AppSearchIndex.build(context, azApps) }
     val searchResults = remember(query, searchIndex) {
         if (query.trim().isBlank()) null
@@ -195,13 +194,6 @@ fun AppCenterContent(
     }
 
     // v0.25.2：松手滚动——等列表恢复全量重组完成后再滚，避免打在旧内容上
-    LaunchedEffect(scrollTarget) {
-        val letter = scrollTarget ?: return@LaunchedEffect
-        val anchor = letterAnchors[letter] ?: 0
-        listState.scrollToItem(anchor)
-        scrollTarget = null
-    }
-
     fun launchApp(app: AppInfo) {
         AppUsageTracker.recordLaunch(context, app.packageName)
         try {
@@ -355,46 +347,34 @@ fun AppCenterContent(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
             )
-            // v0.25.3：最近使用横条（搜索下方）
+            // v0.25.3：最近使用横条（搜索下方）——只显示图标，一行排满
             if (!searching && recentApps.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                androidx.compose.foundation.lazy.LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    contentPadding = PaddingValues(horizontal = 20.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    items(recentApps, key = { "recent:${it.packageName}" }) { app ->
+                    recentApps.forEach { app ->
                         val iconBitmap = remember(app.packageName) {
                             try {
-                                app.icon?.toBitmap()?.asImageBitmap()
+                                app.icon.toBitmap().asImageBitmap()
                             } catch (_: Exception) { null }
                         }
                         if (iconBitmap != null) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.combinedClickable(
-                                    onClick = { launchApp(app) },
-                                    onLongClick = { quickActionsApp = app }
-                                )
-                            ) {
-                                Image(
-                                    bitmap = iconBitmap,
-                                    contentDescription = app.label.toString(),
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = app.label.toString(),
-                                    fontSize = 11.sp,
-                                    color = AILauncherColors.Title,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.width(56.dp),
-                                    textAlign = TextAlign.Center
-                                )
-                            }
+                            Image(
+                                bitmap = iconBitmap,
+                                contentDescription = app.label.toString(),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .combinedClickable(
+                                        onClick = { launchApp(app) },
+                                        onLongClick = { quickActionsApp = app }
+                                    )
+                            )
                         }
                     }
                 }
@@ -413,47 +393,12 @@ fun AppCenterContent(
                 modifier = Modifier
                     .fillMaxSize()
                     .nestedScroll(nested)
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = 20.dp)
+                    .alpha(if (scrubLetter != null) 0f else 1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 val results = searchResults
-                val scrub = scrubLetter
-                if (scrub != null) {
-                    // v0.25 聚焦模式：只显示当前字母的应用，字母头固定在 rail 顶端高度；
-                    // 松手后恢复全量。屏幕锚点不动，不乱跳。
-                    val scrubApps = azGroups.firstOrNull { it.first == scrub }?.second.orEmpty()
-                    item(key = "scrub-pad") {
-                        Spacer(
-                            modifier = Modifier.height(
-                                with(density) { railLettersTopPx.toDp() }
-                            )
-                        )
-                    }
-                    item(key = "scrub-letter") {
-                        Text(
-                            text = scrub.toString(),
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AILauncherColors.Title,
-                            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-                        )
-                    }
-                    items(scrubApps, key = { "sc:${it.packageName}" }) { app ->
-                        AppRow(
-                            app = app,
-                            onLaunch = { launchApp(app) },
-                            onLongClick = { quickActionsApp = app },
-                            onHide = ::hideApp,
-                            actionsVisible = expandedActionsPkg == app.packageName,
-                            onActionsVisibleChange = { expanded ->
-                                expandedActionsPkg =
-                                    if (expanded) app.packageName
-                                    else if (expandedActionsPkg == app.packageName) null
-                                    else expandedActionsPkg
-                            }
-                        )
-                    }
-                } else if (results != null) {
+                if (results != null) {
                     // 搜索态：只显示搜索结果（拼音/首字母/自然语言/模糊）
                     if (results.isEmpty()) {
                         item(key = "search-empty") {
@@ -523,6 +468,47 @@ fun AppCenterContent(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
+            // v0.25.4：聚焦遮罩——拖动 rail 时覆盖在列表上，只显示当前字母；
+            // 底下的完整列表同步滚动，松手时直接显现，零位移
+            val scrub = scrubLetter
+            if (scrub != null) {
+                val scrubApps = azGroups.firstOrNull { it.first == scrub }?.second.orEmpty()
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(AILauncherColors.Background)
+                        .padding(horizontal = 20.dp)
+                ) {
+                    Spacer(
+                        modifier = Modifier.height(
+                            with(density) { railLettersTopPx.toDp() }
+                        )
+                    )
+                    // 字母头与正常列表同样式，保证松手显现时视觉一致
+                    Text(
+                        text = scrub.toString(),
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Hint,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp, start = 4.dp)
+                    )
+                    scrubApps.forEach { app ->
+                        AppRow(
+                            app = app,
+                            onLaunch = { launchApp(app) },
+                            onLongClick = { quickActionsApp = app },
+                            onHide = ::hideApp,
+                            actionsVisible = expandedActionsPkg == app.packageName,
+                            onActionsVisibleChange = { expanded ->
+                                expandedActionsPkg =
+                                    if (expanded) app.packageName
+                                    else if (expandedActionsPkg == app.packageName) null
+                                    else expandedActionsPkg
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
+            }
             // Rail：波浪字母导航（v0.24，学 Niagara/参考视频）——只做定位
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）
             // v0.21：搜索态隐藏 rail（定位无意义）
@@ -533,13 +519,20 @@ fun AppCenterContent(
                     handed = handed,
                     onLettersTopMeasured = { railLettersTopPx = it },
                     onActiveLetter = { letter ->
-                        // 聚焦模式：只显示当前字母（父组件切换列表内容，不滚动）
+                        // 聚焦模式：显示遮罩；同时滚动底下的完整列表（不可见），
+                        // 松手时直接显现，零位移
                         scrubLetter = letter
+                        scope.launch {
+                            val anchor = letterAnchors[letter] ?: 0
+                            listState.scrollToItem(
+                                anchor,
+                                scrollOffset = railLettersTopPx.roundToInt()
+                            )
+                        }
                     },
-                    onRelease = { letter ->
-                        // 松手：退出聚焦，恢复全量；滚动由 LaunchedEffect 在重组后执行
+                    onRelease = {
+                        // 底下的列表已在正确位置，直接显现即可
                         scrubLetter = null
-                        scrollTarget = letter
                     },
                     modifier = Modifier
                         .align(

@@ -57,7 +57,7 @@ import kotlin.math.roundToInt
 internal fun WaveRail(
     letters: List<Char>,
     onActiveLetter: (Char) -> Unit,
-    onRelease: (letter: Char?) -> Unit,
+    onRelease: () -> Unit,
     modifier: Modifier = Modifier,
     handed: UiPrefs.Handed = UiPrefs.Handed.RIGHT,
     /** 字母列顶部相对父容器的 Y（px），父组件用它对齐聚焦模式的字母头 */
@@ -111,7 +111,7 @@ internal fun WaveRail(
                         // 点按：直接跳转
                         val i = indexAt(offset.y)
                         onActiveLetter(letters[i])
-                        onRelease(letters[i])
+                        onRelease()
                     })
                 }
                 .pointerInput(letters, hPx) {
@@ -125,11 +125,11 @@ internal fun WaveRail(
                             val last = activeIndex.takeIf { it >= 0 }
                                 ?.let { letters[it] }
                             activeIndex = -1
-                            onRelease(last)
+                            onRelease()
                         },
                         onDragCancel = {
                             activeIndex = -1
-                            onRelease(null)
+                            onRelease()
                         },
                         onVerticalDrag = { change, _ ->
                             change.consume()
