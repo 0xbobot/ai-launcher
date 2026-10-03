@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.data
 
-import net.sourceforge.pinyin4j.PinyinHelper
+import android.content.Context
+import org.json.JSONObject
 
 /**
  * 应用中心搜索索引（PRD §三十三）。
@@ -66,6 +67,32 @@ object AppSearchIndex {
         "资讯" to listOf("news", "toutiao"),
     )
 
+    /** 拼音字典（assets/pinyin_dict.json，20924 字，懒加载一次） */
+    @Volatile
+    private var dict: Map<String, String>? = null
+
+    private fun loadDict(context: Context): Map<String, String> {
+        dict?.let { return it }
+        synchronized(this) {
+            dict?.let { return it }
+            val map = mutableMapOf<String, String>()
+            try {
+                val json = context.assets.open("pinyin_dict.json")
+                    .bufferedReader().use { it.readText() }
+                val obj = JSONObject(json)
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    map[k] = obj.optString(k, "")
+                }
+            } catch (_: Exception) {
+                // 字典缺失时拼音匹配自动降级（按名称/包名照常搜）
+            }
+            dict = map
+            return map
+        }
+    }
+
     data class Entry(
         val app: AppInfo,
         /** 名称拼音全拼（小写无调），如微信→weixin */
@@ -74,24 +101,40 @@ object AppSearchIndex {
         val pinyinInitials: String,
     )
 
-    /** 关键词的拼音（懒加载）：输"dache"也能命中"打车" */
-    private val keywordPinyin: Map<String, String> by lazy {
-        keywordPackages.keys.associateWith { pinyinOf(it).first }
+    /** 关键词的拼音（懒加载）：输"dache"也能命中"打车”；需先 ensureKeywordsLoaded */
+    private var keywordPinyin: Map<String, List<String>> = emptyMap()
+
+    /** 多音字别名：默认读音不是常用词读音时补上（如音乐→yinyue，银行→yinhang） */
+    private val keywordPinyinAlias: Map<String, List<String>> = mapOf(
+        "音乐" to listOf("yinyue"),
+        "银行" to listOf("yinhang"),
+    )
+
+    private fun ensureKeywordsLoaded(context: Context) {
+        if (keywordPinyin.isNotEmpty()) return
+        val d = loadDict(context)
+        keywordPinyin = keywordPackages.keys.associateWith { k ->
+            listOf(pinyinOf(k, d).first) + (keywordPinyinAlias[k].orEmpty())
+        }
     }
 
-    /** 为应用列表建索引（重操作，调用方 remember 缓存） */
-    fun build(apps: List<AppInfo>): List<Entry> =
-        apps.map { app ->
-            val (full, initials) = pinyinOf(app.label.toString())
+    /** 为应用列表建索引（重操作，调用方 remember 缓存；需 Context 读拼音字典） */
+    fun build(context: Context, apps: List<AppInfo>): List<Entry> {
+        val d = loadDict(context)
+        return apps.map { app ->
+            val (full, initials) = pinyinOf(app.label.toString(), d)
             Entry(app, full, initials)
         }
+    }
 
     /**
      * 搜索，返回按相关度排序的应用。空查询返回全部（保持原序）。
+     * 需 Context（读拼音字典），调用方 remember 索引后复用。
      */
-    fun search(query: String, index: List<Entry>): List<AppInfo> {
+    fun search(context: Context, query: String, index: List<Entry>): List<AppInfo> {
         val q = query.trim().lowercase().replace(" ", "")
         if (q.isBlank()) return index.map { it.app }
+        ensureKeywordsLoaded(context)
         data class Hit(val app: AppInfo, val score: Int)
         val hits = mutableListOf<Hit>()
         // 自然语言关键词：查询包含关键词（或关键词拼音）→ 相关包名
@@ -103,8 +146,10 @@ object AppSearchIndex {
                 }
                 // 拼音关键词：q 至少 2 个字符才参与，避免单字母噪音
                 if (q.length >= 2) {
-                    val kp = keywordPinyin[k].orEmpty()
-                    if (kp.isNotEmpty() && (kp.contains(q) || q.contains(kp))) addAll(pkgs)
+                    val kps = keywordPinyin[k].orEmpty()
+                    if (kps.any { it.isNotEmpty() && (it.contains(q) || q.contains(it)) }) {
+                        addAll(pkgs)
+                    }
                 }
             }
         }
@@ -138,23 +183,15 @@ object AppSearchIndex {
         return false
     }
 
-    /** 中文→拼音全拼/首字母（pinyin4j，多音字取第一个读音） */
-    private fun pinyinOf(label: String): Pair<String, String> {
+    /** 中文→拼音全拼/首字母（内置字典，多音字取第一读音；缺字自动降级） */
+    private fun pinyinOf(label: String, dict: Map<String, String>): Pair<String, String> {
         val full = StringBuilder()
         val initials = StringBuilder()
         for (ch in label) {
-            val arr = try {
-                PinyinHelper.toHanyuPinyinStringArray(ch)
-            } catch (_: Exception) {
-                null
-            }
-            if (arr != null && arr.isNotEmpty()) {
-                // 默认格式如 "wei4"：去声调数字转小写
-                val p = arr[0].lowercase().filter { it in 'a'..'z' }
-                if (p.isNotEmpty()) {
-                    full.append(p)
-                    initials.append(p[0])
-                }
+            val py = dict[ch.toString()]
+            if (py != null && py.isNotEmpty()) {
+                full.append(py)
+                initials.append(py[0])
             } else if (ch.isLetterOrDigit()) {
                 // 英文/数字原样保留（英文应用名可直接搜）
                 full.append(ch.lowercaseChar())

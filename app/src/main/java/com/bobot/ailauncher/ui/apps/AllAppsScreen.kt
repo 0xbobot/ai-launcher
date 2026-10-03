@@ -146,9 +146,9 @@ fun AllAppsContent(
     }
     val searching = query.trim().isNotBlank()
     // v0.21（PRD §三十三）：拼音/首字母/自然语言/模糊搜索；索引按应用列表建一次
-    val searchIndex = remember(apps) { AppSearchIndex.build(apps) }
+    val searchIndex = remember(apps) { AppSearchIndex.build(context, apps) }
     val filtered = remember(query, searchIndex) {
-        AppSearchIndex.search(query, searchIndex)
+        AppSearchIndex.search(context, query, searchIndex)
     }
 
     // 首字母分组：A-Z 在前，"#"（非字母开头）最后；中文按拼音首字母
