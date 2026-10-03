@@ -117,22 +117,10 @@ fun PullUpDock(
     val cardVisible = state == DockState.D1 || state == DockState.D2
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        // ---- D1/D2 点按外部：只收一档（D2→D1），不再隐藏（v0.16：隐藏唯一入口是 D1 右滑） ----
-        AnimatedVisibility(
-            visible = cardVisible,
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(150))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable {
-                        if (state == DockState.D2) onStateChangeState.value(DockState.D1)
-                    }
-            )
-        }
+        // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
+        // D2→D1 改由下滑/右滑手势触发
 
-        // ---- D1/D2 悬浮玻璃卡 ----
+        // ---- D1/D2 悬浮图标（无卡片，v0.27.1 去底） ----
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomCenter
