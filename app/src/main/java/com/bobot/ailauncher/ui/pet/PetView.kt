@@ -155,7 +155,8 @@ fun PetView(
     val maxDragPx = with(density) { 40.dp.toPx() }
 
     Box(
-        modifier = modifier
+        // v0.26.4：拖拽放外层（先于 clickable），解决拖拽不动
+        modifier = Modifier
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDrag = { change, dragAmount ->
@@ -182,6 +183,7 @@ fun PetView(
                     }
                 )
             }
+            .then(modifier)
             .graphicsLayer {
                 translationX = with(density) { offX.dp.toPx() } + dragX
                 translationY = with(density) { (offY + bob).dp.toPx() } + dragY
