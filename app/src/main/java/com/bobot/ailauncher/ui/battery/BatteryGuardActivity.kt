@@ -66,9 +66,9 @@ class BatteryGuardActivity : ComponentActivity() {
                     // 只引导：跳系统省电设置，开关用户自己点
                     try {
                         val i = Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
-                        // 部分机型没有这个 action，兜底到电池设置
+                        // 部分机型没有这个 action，兜底到电池用量页
                         if (i.resolveActivity(packageManager) == null) {
-                            startActivity(Intent(Settings.ACTION_BATTERY_SETTINGS))
+                            startActivity(Intent(Settings.ACTION_POWER_USAGE_SUMMARY))
                         } else {
                             startActivity(i)
                         }

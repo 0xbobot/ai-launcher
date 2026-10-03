@@ -93,7 +93,16 @@ class BatteryGuardService : Service() {
         super.onCreate()
         createChannels()
         startForeground(FOREGROUND_ID, keepaliveNotification())
-        registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        // targetSdk 34+：动态注册广播必须显式声明 exported 状态
+        if (Build.VERSION.SDK_INT >= 34) {
+            registerReceiver(
+                batteryReceiver,
+                IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        }
     }
 
     override fun onDestroy() {
