@@ -151,30 +151,29 @@ fun HomeScreen(onOpenAppDrawer: () -> Unit) {
     // v0.26.0：信息密度（左滑=多/右滑=少，PRD §三十四）
     // 0=极简（只宠物），1=标准（+1 条信息），2=丰富（+天气+日程详情）
     var densityLevel by remember { mutableIntStateOf(1) }
-    val densityConn = remember {
-        object : NestedScrollConnection {
-            var accumX = 0f
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source != NestedScrollSource.UserInput) return Offset.Zero
-                // 只处理水平滑动
-                if (kotlin.math.abs(available.x) > kotlin.math.abs(available.y) * 1.5f) {
-                    accumX += available.x
-                    val threshold = 120f // dp 转 px 简化
-                    if (accumX < -threshold && densityLevel < 2) {
-                        // 左滑=多
-                        densityLevel++
-                        accumX = 0f
-                        return available
-                    } else if (accumX > threshold && densityLevel > 0) {
-                        // 右滑=少
-                        densityLevel--
-                        accumX = 0f
-                        return available
-                    }
+    // v0.26.0：不用 remember 包裹，避免捕获旧的 densityLevel
+    val densityConn = object : NestedScrollConnection {
+        var accumX = 0f
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            if (source != NestedScrollSource.UserInput) return Offset.Zero
+            // 只处理水平滑动
+            if (kotlin.math.abs(available.x) > kotlin.math.abs(available.y) * 1.5f) {
+                accumX += available.x
+                val threshold = 120f // dp 转 px 简化
+                if (accumX < -threshold && densityLevel < 2) {
+                    // 左滑=多
+                    densityLevel++
+                    accumX = 0f
+                    return available
+                } else if (accumX > threshold && densityLevel > 0) {
+                    // 右滑=少
+                    densityLevel--
+                    accumX = 0f
                     return available
                 }
-                return Offset.Zero
+                return available
             }
+            return Offset.Zero
         }
     }
 
