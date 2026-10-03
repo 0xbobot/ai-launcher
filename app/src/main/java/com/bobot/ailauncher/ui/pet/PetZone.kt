@@ -180,17 +180,18 @@ fun PetZone() {
                     .size(100.dp)
                     .pointerInput(Unit) {
                         detectTapGestures(onTap = {
-                            if (checkingUpdateNow) return@onTap
-                            checkingUpdate = true
-                            scope.launch {
-                                when (val r = OtaUpdater.checkForUpdateResult(context)) {
-                                    is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
-                                    OtaCheckResult.UpToDate ->
-                                        Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
-                                    OtaCheckResult.Failed ->
-                                        Toast.makeText(context, "检查失败，请稍后再试", Toast.LENGTH_SHORT).show()
+                            if (!checkingUpdateNow) {
+                                checkingUpdate = true
+                                scope.launch {
+                                    when (val r = OtaUpdater.checkForUpdateResult(context)) {
+                                        is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
+                                        OtaCheckResult.UpToDate ->
+                                            Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
+                                        OtaCheckResult.Failed ->
+                                            Toast.makeText(context, "检查失败，请稍后再试", Toast.LENGTH_SHORT).show()
+                                    }
+                                    checkingUpdate = false
                                 }
-                                checkingUpdate = false
                             }
                         })
                     }

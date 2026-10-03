@@ -105,7 +105,7 @@ internal fun WaveRail(
         // 触摸层：点按与纵向拖动
         Box(
             modifier = Modifier
-                .matchParentSize()
+                .fillMaxSize()
                 .pointerInput(letters, hPx) {
                     detectTapGestures(onTap = { offset ->
                         // 点按：直接跳转
