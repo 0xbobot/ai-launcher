@@ -176,11 +176,11 @@ fun AppCenterContent(
         else AppSearchIndex.search(context, query, searchIndex)
     }
     // 开始搜索时滚到顶部
+    val listState = rememberLazyListState()
     LaunchedEffect(searching) {
         if (searching) listState.scrollToItem(0)
     }
 
-    val listState = rememberLazyListState()
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
     // 字母 → LazyColumn item index（item0=宠物空白区，1..G=分组块，G+1="全部应用"分隔）
