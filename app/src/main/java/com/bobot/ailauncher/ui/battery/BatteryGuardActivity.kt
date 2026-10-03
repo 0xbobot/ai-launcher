@@ -64,11 +64,12 @@ class BatteryGuardActivity : ComponentActivity() {
                 critical = critical,
                 onOpenSaver = {
                     // 只引导：跳系统省电设置，开关用户自己点
+                    // 注意：SDK 里只有 ACTION_BATTERY_SAVER_SETTINGS，没有 ACTION_BATTERY_SETTINGS
+                    // / ACTION_POWER_USAGE_SUMMARY，兜底用 ACTION_SETTINGS
                     try {
                         val i = Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
-                        // 部分机型没有这个 action，兜底到电池用量页
                         if (i.resolveActivity(packageManager) == null) {
-                            startActivity(Intent(Settings.ACTION_POWER_USAGE_SUMMARY))
+                            startActivity(Intent(Settings.ACTION_SETTINGS))
                         } else {
                             startActivity(i)
                         }
@@ -94,10 +95,10 @@ private fun BatteryGuardDialog(
 ) {
     // 暖色系：低电量用暖橙，紧急用深橙（不用刺眼的警告红）
     val accent = if (critical) Color(0xFFE8734A) else Color(0xFFF0A24A)
-    val title = if (critical) "掉到 $pct% 了，还没充？"
-    else "电量到 $pct% 了"
-    val message = if (critical) "再不插电真要关机了。也可以开省电模式多撑一会儿"
-    else "充个电休息一下？也可以开省电模式多撑会儿"
+    val title = if (critical) "七仔快要睡着了…"
+    else "七仔快没能量了"
+    val message = if (critical) "电量掉到 $pct% 了，再不充电它就要关机了"
+    else "电量只剩 $pct%，充个电帮它回血吧？也可以开省电模式"
 
     Box(
         modifier = Modifier

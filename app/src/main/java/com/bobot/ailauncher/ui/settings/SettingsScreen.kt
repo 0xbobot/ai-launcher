@@ -337,7 +337,7 @@ fun SettingsScreen(
                         )
                     }
                     Text(
-                        text = "电量过低时温和提醒你（10% 和 5% 各提醒一次），只提醒、不做任何自动操作。",
+                        text = "七仔的能量=手机电量。能量过低时温和提醒你（10% 和 5% 各一次），只提醒、不做任何自动操作。",
                         fontSize = 13.sp,
                         color = AILauncherColors.Hint
                     )

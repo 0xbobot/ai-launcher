@@ -145,8 +145,8 @@ class BatteryGuardService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_KEEPALIVE)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("低电量守护运行中")
-            .setContentText("电量过低时会温和提醒你")
+            .setContentTitle("七仔的能量守护运行中")
+            .setContentText("七仔快没能量时会温和提醒你")
             .setContentIntent(tap)
             .setOngoing(true)
             .setSilent(true)
@@ -164,9 +164,9 @@ class BatteryGuardService : Service() {
             this, if (critical) 2 else 1, fullScreen,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val title = if (critical) "掉到 $pct% 了，还没充？" else "电量到 $pct% 了"
-        val text = if (critical) "再不插电真要关机了"
-        else "充个电休息一下？"
+        val title = if (critical) "七仔快要睡着了…" else "七仔快没能量了"
+        val text = if (critical) "电量掉到 $pct% 了，再不充电就关机了"
+        else "充个电帮它回血吧"
         val notification = NotificationCompat.Builder(this, CHANNEL_ALERT)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
