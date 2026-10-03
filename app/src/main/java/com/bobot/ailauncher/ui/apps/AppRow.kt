@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -53,6 +54,8 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * 应用行（从已删除的 AllAppsScreen.kt 迁移，v0.22 分类取消后去掉"移到分组"）。
  * 左滑=更多（快捷操作），右滑=更少（隐藏，需确认）。
  */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 internal fun AppRow(
     app: AppInfo,
     onLaunch: () -> Unit,
