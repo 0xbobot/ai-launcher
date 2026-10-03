@@ -46,6 +46,10 @@ class MainActivity : ComponentActivity() {
         CapabilityRegistry.load(this)
         // v0.15 宠物整理员：初始化（亲密度持久化等）
         PetRepository.init(this)
+        // v0.28.0：低电量守护（默认开启，温和提醒）
+        if (com.bobot.ailauncher.data.BatteryGuardPrefs.isEnabled(this)) {
+            com.bobot.ailauncher.service.BatteryGuardService.start(this)
+        }
         // OTA：版本变化后清理旧安装包，避免"直接安装"命中旧包
         OtaUpdater.onAppUpgraded(this)
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)

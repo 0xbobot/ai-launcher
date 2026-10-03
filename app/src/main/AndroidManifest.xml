@@ -8,6 +8,11 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 通知渠道（API 33+，桌面自身发通知时用） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 低电量守护：前台服务保活 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 低电量提醒：全屏温和弹窗（来电同款机制，Android 14+ 需声明） -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- 日历：首页「今日日程」卡片 -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- 录音：意图框语音输入 -->
@@ -54,6 +59,24 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- 低电量守护：前台服务，实时监听电量 -->
+        <service
+            android:name=".service.BatteryGuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="低电量守护：电量过低时温和提醒" />
+        </service>
+
+        <!-- 低电量提醒弹窗：半透明主题，居中温和卡片 -->
+        <activity
+            android:name=".ui.battery.BatteryGuardActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AILauncher.BatteryGuard"
+            android:showOnLockScreen="false"
+            android:turnScreenOn="false" />
 
         <!-- OTA 安装：FileProvider 把下载好的 APK 授权给系统安装器 -->
         <provider

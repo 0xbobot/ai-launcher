@@ -53,6 +53,8 @@ import com.bobot.ailauncher.data.OtaCheckResult
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.data.BatteryGuardPrefs
+import com.bobot.ailauncher.service.BatteryGuardService
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
@@ -297,6 +299,54 @@ fun SettingsScreen(
                                 Text(label)
                             }
                         }
+                    }
+                }
+            }
+        }
+        // v0.28.0：低电量守护——只做温和提醒，零干预
+        item {
+            var guardOn by remember { mutableStateOf(BatteryGuardPrefs.isEnabled(context)) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "低电量守护",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.Title
+                        )
+                        Switch(
+                            checked = guardOn,
+                            onCheckedChange = {
+                                guardOn = it
+                                BatteryGuardPrefs.setEnabled(context, it)
+                                if (it) BatteryGuardService.start(context)
+                                else BatteryGuardService.stop(context)
+                            }
+                        )
+                    }
+                    Text(
+                        text = "电量过低时温和提醒你（10% 和 5% 各提醒一次），只提醒、不做任何自动操作。",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Hint
+                    )
+                    if (guardOn) {
+                        Text(
+                            text = "需要通知权限才能在看视频、玩游戏时弹出提醒。",
+                            fontSize = 12.sp,
+                            color = AILauncherColors.Hint
+                        )
                     }
                 }
             }
