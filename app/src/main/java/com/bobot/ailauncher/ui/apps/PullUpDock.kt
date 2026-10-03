@@ -298,7 +298,8 @@ private fun FullAppsOverlay(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(AILauncherColors.Background) // 不透明整屏替换，不再透出下层
+            // v0.25.7：玻璃半透明——壁纸透出， frosted glass 效果
+            .background(Color.White.copy(alpha = 0.72f))
     ) {
         AppCenterContent(
             onOpenSettings = onOpenSettings,

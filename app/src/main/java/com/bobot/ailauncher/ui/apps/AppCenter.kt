@@ -179,7 +179,7 @@ fun AppCenterContent(
     // 字母 → LazyColumn item index（item0="全部应用"分隔，之后每字母：1 头 + N 行）
     val letterAnchors = remember(azGroups) {
         val m = mutableMapOf<Char, Int>()
-        var idx = 1
+        var idx = 0
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
             idx += 1 + apps.size
@@ -390,17 +390,7 @@ fun AppCenterContent(
                     }
                     item { Spacer(modifier = Modifier.height(24.dp)) }
                 } else {
-                // v0.22：分类区取消，直接 A-Z 列表
-                // "全部应用"分隔（item0，rail 跳转锚点基准）
-                item(key = "az-divider") {
-                    Text(
-                        text = "全部应用",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AILauncherColors.Title,
-                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp, start = 4.dp)
-                    )
-                }
+                // v0.25.7：去掉"全部应用"标题（Bob）
                 // A-Z 列表
                 azGroups.forEach { (letter, apps) ->
                     item(key = "h:$letter") {

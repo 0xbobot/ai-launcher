@@ -148,7 +148,8 @@ internal fun WaveRail(
         ) {
             letters.forEachIndexed { i, ch ->
                 val d = if (activeIndex >= 0) (i - activeIndex).toFloat() else 999f
-                val gTarget = if (activeIndex >= 0) exp(-(d * d) / 15.68f) else 0f
+                // v0.25.7：波浪更宽更平（sigma 4.5），头尾字母也有弧度，更优美
+                val gTarget = if (activeIndex >= 0) exp(-(d * d) / 40.5f) else 0f
                 val g by animateFloatAsState(
                     targetValue = gTarget,
                     animationSpec = tween(120),
