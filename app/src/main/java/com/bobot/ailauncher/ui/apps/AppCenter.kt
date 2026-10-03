@@ -470,13 +470,16 @@ fun AppCenterContent(
                         scrubLetter = letter
                     },
                     onRelease = { letter ->
-                        // 松手：退出聚焦，恢复全量并定位到该字母（居中）
+                        // 松手：退出聚焦，恢复全量；字母头落在和聚焦时同样的高度
+                        //（rail 顶端），避免视觉跳变
                         scrubLetter = null
                         if (letter != null) {
                             scope.launch {
                                 val anchor = letterAnchors[letter] ?: 0
-                                val viewportH = listState.layoutInfo.viewportSize.height
-                                listState.scrollToItem(anchor, scrollOffset = -(viewportH / 2))
+                                listState.scrollToItem(
+                                    anchor,
+                                    scrollOffset = railLettersTopPx.roundToInt()
+                                )
                             }
                         }
                     },
