@@ -157,13 +157,6 @@ fun AppCenterContent(
     var railLettersTopPx by remember { mutableFloatStateOf(0f) }
     // 松手后的滚动目标：等列表恢复全量重组完成后再滚，避免打在旧内容上
     var scrollTarget by remember { mutableStateOf<Char?>(null) }
-    LaunchedEffect(scrollTarget) {
-        val letter = scrollTarget ?: return@LaunchedEffect
-        val anchor = letterAnchors[letter] ?: 0
-        // 字母头落在和聚焦时同样的高度（rail 顶端），避免视觉跳变
-        listState.scrollToItem(anchor, scrollOffset = railLettersTopPx.roundToInt())
-        scrollTarget = null
-    }
     val searchIndex = remember(azApps) { AppSearchIndex.build(context, azApps) }
     val searchResults = remember(query, searchIndex) {
         if (query.trim().isBlank()) null
@@ -186,6 +179,15 @@ fun AppCenterContent(
             idx += 1 + apps.size
         }
         m
+    }
+
+    // v0.25.2：松手滚动——等列表恢复全量重组完成后再滚，避免打在旧内容上
+    LaunchedEffect(scrollTarget) {
+        val letter = scrollTarget ?: return@LaunchedEffect
+        val anchor = letterAnchors[letter] ?: 0
+        // 字母头落在和聚焦时同样的高度（rail 顶端），避免视觉跳变
+        listState.scrollToItem(anchor, scrollOffset = railLettersTopPx.roundToInt())
+        scrollTarget = null
     }
 
     fun launchApp(app: AppInfo) {
