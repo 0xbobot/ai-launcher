@@ -2,6 +2,7 @@ package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -12,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -69,6 +72,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -142,8 +146,13 @@ fun AppCenterContent(
     }
     val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps) {
         val map = linkedMapOf<Char, MutableList<AppInfo>>()
+        // 拼音首字母分组：用字典（20924 字），GB2312 区位码做兜底
+        val pinyinOf: (Char) -> Char = { c ->
+            val fromDict = AppSearchIndex.pinyinInitialOf(context, c)
+            if (fromDict != '#') fromDict else pinyinInitial(c)
+        }
         azApps.forEach { app ->
-            map.getOrPut(groupKey(app.label)) { mutableListOf() }.add(app)
+            map.getOrPut(groupKey(app.label, pinyinOf)) { mutableListOf() }.add(app)
         }
         map.toList().sortedWith(compareBy({ if (it.first == '#') 1 else 0 }, { it.first }))
     }
@@ -161,6 +170,10 @@ fun AppCenterContent(
     val searchResults = remember(query, searchIndex) {
         if (query.trim().isBlank()) null
         else AppSearchIndex.search(context, query, searchIndex)
+    }
+    // v0.25.3：最近使用横条（搜索下方），取高频应用
+    val recentApps = remember(azApps, refreshTick) {
+        AppUsageTracker.topApps(context, azApps, count = 8, smartSort = true)
     }
     // 开始搜索时滚到顶部
     val listState = rememberLazyListState()
@@ -185,8 +198,7 @@ fun AppCenterContent(
     LaunchedEffect(scrollTarget) {
         val letter = scrollTarget ?: return@LaunchedEffect
         val anchor = letterAnchors[letter] ?: 0
-        // 字母头落在和聚焦时同样的高度（rail 顶端），避免视觉跳变
-        listState.scrollToItem(anchor, scrollOffset = railLettersTopPx.roundToInt())
+        listState.scrollToItem(anchor)
         scrollTarget = null
     }
 
@@ -343,6 +355,50 @@ fun AppCenterContent(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
             )
+            // v0.25.3：最近使用横条（搜索下方）
+            if (!searching && recentApps.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp)
+                ) {
+                    items(recentApps, key = { "recent:${it.packageName}" }) { app ->
+                        val iconBitmap = remember(app.packageName) {
+                            try {
+                                app.icon?.toBitmap()?.asImageBitmap()
+                            } catch (_: Exception) { null }
+                        }
+                        if (iconBitmap != null) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.combinedClickable(
+                                    onClick = { launchApp(app) },
+                                    onLongClick = { quickActionsApp = app }
+                                )
+                            ) {
+                                Image(
+                                    bitmap = iconBitmap,
+                                    contentDescription = app.label.toString(),
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = app.label.toString(),
+                                    fontSize = 11.sp,
+                                    color = AILauncherColors.Title,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.width(56.dp),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(8.dp))
         }
 

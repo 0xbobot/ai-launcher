@@ -210,16 +210,16 @@ private fun AppRowAction(text: String, onClick: () -> Unit) {
 }
 
 /** 分组 key：a-z/A-Z→大写；中文→拼音首字母大写（GB2312 区位边界法，无需第三方库）；数字及其他→'#' */
-internal fun groupKey(label: CharSequence): Char {
+internal fun groupKey(label: CharSequence, pinyinInitialOf: (Char) -> Char): Char {
     val c = label.firstOrNull() ?: return '#'
     if (c in 'a'..'z') return c.uppercaseChar()
     if (c in 'A'..'Z') return c
     if (c in '0'..'9') return '#'
-    return pinyinInitial(c)
+    return pinyinInitialOf(c)
 }
 
 /** 汉字拼音首字母：GB2312 编码区位与拼音首字母边界对照（i/u/v 不做声母，23 个字母） */
-private fun pinyinInitial(c: Char): Char {
+internal fun pinyinInitial(c: Char): Char {
     return try {
         val bytes = c.toString().toByteArray(charset("GB2312"))
         if (bytes.size < 2) return '#'

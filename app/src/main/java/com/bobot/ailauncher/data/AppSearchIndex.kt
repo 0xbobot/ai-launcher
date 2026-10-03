@@ -17,6 +17,16 @@ import org.json.JSONObject
  */
 object AppSearchIndex {
 
+    /**
+     * 单个汉字的拼音首字母（大写），查不到返回 '#'。
+     * 供应用中心 A-Z 分组使用，比 GB2312 区位码更准（覆盖 20924 字）。
+     */
+    fun pinyinInitialOf(context: Context, c: Char): Char {
+        val pinyin = loadDict(context)[c.toString()] ?: return '#'
+        val first = pinyin.firstOrNull() ?: return '#'
+        return if (first in 'a'..'z') first.uppercaseChar() else '#'
+    }
+
     /** 自然语言 → 包名片段（命中任一片段即相关） */
     private val keywordPackages: Map<String, List<String>> = mapOf(
         "打车" to listOf("didi", "t3go", "caocao", "autonavi", "baidumap"),
