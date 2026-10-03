@@ -37,7 +37,6 @@ import com.bobot.ailauncher.ui.apps.DockState
 import com.bobot.ailauncher.ui.apps.PullUpDock
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.home.HomeScreen
-import com.bobot.ailauncher.ui.pet.PetTabsOverlay
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 
@@ -55,6 +54,16 @@ fun MainScreen() {
     // v0.15.1：Dock 默认显示记住的行数（默认 D1 一行），不再默认隐藏
     var dockState by remember {
         mutableStateOf(if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1)
+    }
+    // v0.26.6：返回键处理——D3（应用中心）返回主页，首页不做事
+    // 用 BackHandler 拦截，避免系统默认行为导致页面刷新/重建
+    androidx.activity.compose.BackHandler(enabled = true) {
+        if (dockState == DockState.D3) {
+            // 应用中心返回主页
+            val target = if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1
+            dockState = target
+        }
+        // 首页：不做事（消费掉返回键）
     }
     var showHideDockDialog by remember { mutableStateOf(false) }
 
@@ -184,8 +193,7 @@ private fun HomeHost(
             onHideDockRequest = onHideDockRequest,
             onOpenSettings = onOpenSettings
         )
-        // v0.15 宠物整理员：右侧文件夹标签栏（D3 打开时隐藏，避免和 A-Z rail 冲突）
-        PetTabsOverlay(dockHidden = dockState != DockState.D3)
+        // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
         // OTA 更新对话框（自动检查 / 设置页手动检查共用 UpdateDialog）
         updateInfo?.let { info ->
             UpdateDialog(info = info, onDismiss = { updateInfo = null })

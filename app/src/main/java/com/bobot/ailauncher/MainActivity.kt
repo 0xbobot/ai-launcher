@@ -91,15 +91,30 @@ class MainActivity : ComponentActivity() {
                 var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
                 // v0.26.5：自己绘制系统壁纸（解决多任务缩略图透明问题）
                 // 之前靠 windowShowWallpaper 透出壁纸，缩略图捕获不到，显示白色
-                val wallpaperDrawable = remember {
+                // v0.26.6：缩放壁纸防 OOM（原图可能 4K，快速切换时闪退）
+                val wallpaperBitmap = remember {
                     try {
-                        android.app.WallpaperManager.getInstance(this).drawable
-                    } catch (_: Exception) { null }
-                }
-                val wallpaperBitmap = remember(wallpaperDrawable) {
-                    try {
-                        (wallpaperDrawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                            ?.asImageBitmap()
+                        val wm = android.app.WallpaperManager.getInstance(this)
+                        val drawable = wm.drawable
+                        val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                        bitmap?.let {
+                            // 缩放到屏幕尺寸，避免 OOM
+                            val displayMetrics = resources.displayMetrics
+                            val targetW = displayMetrics.widthPixels
+                            val targetH = displayMetrics.heightPixels
+                            if (it.width > targetW || it.height > targetH) {
+                                val scale = minOf(
+                                    targetW.toFloat() / it.width,
+                                    targetH.toFloat() / it.height
+                                )
+                                val w = (it.width * scale).toInt().coerceAtLeast(1)
+                                val h = (it.height * scale).toInt().coerceAtLeast(1)
+                                android.graphics.Bitmap.createScaledBitmap(it, w, h, true)
+                                    .asImageBitmap()
+                            } else {
+                                it.asImageBitmap()
+                            }
+                        }
                     } catch (_: Exception) { null }
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -144,12 +159,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // v0.26.5：启动器按返回键不做任何事（避免重复刷新主页）
-    // 系统桌面按返回键本就不该有行为
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        // 空实现：不调用 super，避免 Activity 出栈/重建
-    }
+    // v0.26.6：返回键由 MainScreen 的 BackHandler 处理（D3 返回主页，首页不做事）
+    // 这里不再重写 onBackPressed
 
     // v0.26.5：singleTask 模式下按 Home 键回来走这里，确保不重建页面
     override fun onNewIntent(intent: Intent) {
