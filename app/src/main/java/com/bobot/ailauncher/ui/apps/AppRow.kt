@@ -209,7 +209,7 @@ internal fun AppRow(
                             contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
                             delayMillis = 0
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         SlideInIconButton(
                             onClick = ::openAppDetails,
                             icon = Icons.Filled.Info,
@@ -217,7 +217,7 @@ internal fun AppRow(
                             contentDescription = "应用信息",
                             delayMillis = 70
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         SlideInIconButton(
                             onClick = ::uninstallApp,
                             icon = Icons.Filled.Delete,

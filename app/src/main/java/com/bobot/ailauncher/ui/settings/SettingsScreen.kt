@@ -1,6 +1,11 @@
 package com.bobot.ailauncher.ui.settings
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.LlmConfig
@@ -88,6 +94,12 @@ fun SettingsScreen(
 
     fun persist() = LlmConfig.save(context, apiKey, baseUrl, model)
 
+    // v0.36.0：打开低电量守护时，一并申请通知权限（Android 13+）——
+    // 之前只开了开关但没申请权限，提醒发不出来，用户会觉得功能没了
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* 拒绝也不强求：服务照常跑，只是弹窗出不来 */ }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -103,13 +115,15 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    text = "大模型设置",
+                    text = "设置",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = AILauncherColors.Title
                 )
             }
         }
+        // v0.36.0：按主题分 section
+        item { SectionTitle("大模型") }
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -188,7 +202,7 @@ fun SettingsScreen(
                 }
             }
         }
-        item { Spacer(modifier = Modifier.height(8.dp)) }
+        item { SectionTitle("桌面与 Dock") }
 
         // v0.16：Dock 显示开关（D1 右滑隐藏后，在这里重新打开）
         item {
@@ -268,6 +282,7 @@ fun SettingsScreen(
             DockPinnedManager()
         }
 
+        item { SectionTitle("手势") }
         // 惯用手：决定 A-Z 导航 rail 在哪一侧、按住时往哪边偏移
         item {
             var handed by remember { mutableStateOf(UiPrefs.getHanded(context)) }
@@ -317,6 +332,7 @@ fun SettingsScreen(
                 }
             }
         }
+        item { SectionTitle("通知与电量") }
         // v0.28.0：低电量守护——只做温和提醒，零干预
         item {
             var guardOn by remember { mutableStateOf(BatteryGuardPrefs.isEnabled(context)) }
@@ -345,8 +361,18 @@ fun SettingsScreen(
                             onCheckedChange = {
                                 guardOn = it
                                 BatteryGuardPrefs.setEnabled(context, it)
-                                if (it) BatteryGuardService.start(context)
-                                else BatteryGuardService.stop(context)
+                                if (it) {
+                                    // v0.36.0：Android 13+ 先申请通知权限，否则提醒发不出
+                                    if (Build.VERSION.SDK_INT >= 33 &&
+                                        ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.POST_NOTIFICATIONS
+                                        ) != PackageManager.PERMISSION_GRANTED
+                                    ) {
+                                        notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                    BatteryGuardService.start(context)
+                                } else BatteryGuardService.stop(context)
                             }
                         )
                     }
@@ -365,6 +391,7 @@ fun SettingsScreen(
                 }
             }
         }
+        item { SectionTitle("应用") }
         // 已隐藏应用：在应用中心右滑隐藏的应用，在这里恢复
         item {
             val hiddenVersion = HiddenApps.version.intValue
@@ -449,7 +476,7 @@ fun SettingsScreen(
                 }
             }
         }
-        item { Spacer(modifier = Modifier.height(24.dp)) }
+        item { SectionTitle("通用") }
 
         // OTA：手动检查更新
         item {
@@ -513,6 +540,20 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+/**
+ * v0.36.0：设置页分 section 小标题
+ */
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        color = AILauncherColors.Hint,
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+    )
 }
 
 /**

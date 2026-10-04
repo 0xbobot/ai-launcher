@@ -13,6 +13,8 @@ object UiPrefs {
     private const val KEY_DOCK_SMART_SORT = "dock_smart_sort"
     private const val KEY_DOCK_PINNED = "dock_pinned"
     private const val KEY_ROW_ACTIONS_GUIDE_SEEN = "row_actions_guide_seen"
+    private const val KEY_PANEL_GUIDE_SEEN = "panel_guide_seen"
+    private const val KEY_PANEL_GUIDE_REMIND = "panel_guide_reminded"
 
     /** Dock 数据变化通知：置顶增删/排序后 bump，Dock 侧重算 */
     val dockTick = MutableStateFlow(0)
@@ -112,5 +114,33 @@ object UiPrefs {
     fun setRowActionsGuideSeen(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_ROW_ACTIONS_GUIDE_SEEN, true).apply()
+    }
+
+    /**
+     * 首屏下滑手势的权限说明卡（v0.36.0）：第一次触发下滑手势但无障碍未开启时，
+     * 先弹 App 内说明卡而不是直接跳系统设置。看过一次后不再弹整卡。
+     */
+    fun hasSeenPanelGuide(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_PANEL_GUIDE_SEEN, false)
+    }
+
+    fun setPanelGuideSeen(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_PANEL_GUIDE_SEEN, true).apply()
+    }
+
+    /**
+     * 未授权时的二次轻提醒（v0.36.0）：说明卡看过、点了"去开启"但仍没授权，
+     * 下次触发时再轻提醒一次，之后不再打扰（回落到 Toast）。
+     */
+    fun hasRemindedPanelGuide(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_PANEL_GUIDE_REMIND, false)
+    }
+
+    fun setPanelGuideReminded(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_PANEL_GUIDE_REMIND, true).apply()
     }
 }
