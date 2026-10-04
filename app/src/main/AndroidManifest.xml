@@ -48,6 +48,10 @@
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <!-- v0.32.3：长按图标快捷方式 -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- 通知监听："正在进行时"信息流的数据来源，需用户在设置中手动开启 -->

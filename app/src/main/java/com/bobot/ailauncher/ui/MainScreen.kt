@@ -181,9 +181,15 @@ private fun HomeHost(
             onOpenSettings = onOpenSettings
         )
         // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
-        // OTA 更新对话框（自动检查 / 设置页手动检查共用 UpdateDialog）
+        // OTA 更新对话框（自动检查 / 设置页手动检查 / 长按快捷方式共用 UpdateDialog）
         updateInfo?.let { info ->
             UpdateDialog(info = info, onDismiss = { updateInfo = null })
+        }
+        // v0.32.3：长按快捷方式的检查结果
+        com.bobot.ailauncher.MainActivity.checkUpdateResult.value?.let { info ->
+            UpdateDialog(info = info, onDismiss = {
+                com.bobot.ailauncher.MainActivity.checkUpdateResult.value = null
+            })
         }
         // v0.16：D1 右滑隐藏确认框（"不再提醒"可记）
         if (showHideDockDialog) {

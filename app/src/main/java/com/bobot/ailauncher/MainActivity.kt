@@ -41,6 +41,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // v0.32.3：冷启动时也处理快捷方式
+        if (intent?.action == "com.bobot.ailauncher.CHECK_UPDATE") {
+            // 延迟到 UI 就绪后检查
+            lifecycleScope.launch {
+                kotlinx.coroutines.delay(1000)
+                checkUpdateNow()
+            }
+        }
         // v0.25：全屏 edge-to-edge，桌面内容延伸到状态栏/导航栏后面
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         CapabilityRegistry.load(this)
@@ -94,20 +102,32 @@ class MainActivity : ComponentActivity() {
             AILauncherTheme {
                 var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
                 // v0.32.1：Compose 内绘制系统壁纸（视觉透明，窗口不透明保证触摸）
-                // v0.26.6：缩放壁纸防 OOM（原图可能 4K）
-                // v0.32.2：兼容非 BitmapDrawable（有些机型 drawable 不是 BitmapDrawable）
+                // v0.32.3：改用 getWallpaperFile（部分机型 getDrawable 不可靠）
                 val wallpaperBitmap = remember {
                     try {
                         val wm = android.app.WallpaperManager.getInstance(this)
-                        val drawable = wm.drawable
-                        val bitmap = drawable?.let { d ->
-                            val w = d.intrinsicWidth.coerceAtLeast(1)
-                            val h = d.intrinsicHeight.coerceAtLeast(1)
-                            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
-                            val canvas = android.graphics.Canvas(bmp)
-                            d.setBounds(0, 0, w, h)
-                            d.draw(canvas)
-                            bmp
+                        // 优先用 wallpaper file（最可靠）
+                        var bitmap: android.graphics.Bitmap? = null
+                        try {
+                            wm.getWallpaperFile(android.app.WallpaperManager.FLAG_SYSTEM)?.use { pfd ->
+                                val fd = pfd.fileDescriptor
+                                bitmap = android.graphics.BitmapFactory.decodeFileDescriptor(fd)
+                            }
+                        } catch (_: Exception) { }
+                        // 兜底：drawable 转 bitmap
+                        if (bitmap == null) {
+                            val drawable = wm.drawable
+                            bitmap = drawable?.let { d ->
+                                val w = d.intrinsicWidth.coerceAtLeast(1)
+                                val h = d.intrinsicHeight.coerceAtLeast(1)
+                                if (w > 0 && h > 0) {
+                                    val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                                    val canvas = android.graphics.Canvas(bmp)
+                                    d.setBounds(0, 0, w, h)
+                                    d.draw(canvas)
+                                    bmp
+                                } else null
+                            }
                         }
                         bitmap?.let {
                             val displayMetrics = resources.displayMetrics
@@ -174,7 +194,38 @@ class MainActivity : ComponentActivity() {
     // v0.26.5：singleTask 模式下按 Home 键回来走这里，确保不重建页面
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // 不做任何事：MainScreen 的 Compose 状态保持，避免"空页面"
+        // v0.32.3：长按快捷方式"检查更新"
+        if (intent.action == "com.bobot.ailauncher.CHECK_UPDATE") {
+            checkUpdateNow()
+        }
+        // 其他情况不做任何事：MainScreen 的 Compose 状态保持，避免"空页面"
+    }
+
+    /** v0.32.3：快捷方式触发立即检查更新 */
+    private fun checkUpdateNow() {
+        lifecycleScope.launch {
+            try {
+                val info = com.bobot.ailauncher.data.OtaUpdater.checkForUpdate(this@MainActivity)
+                if (info != null) {
+                    // 有新版：通过广播或直接弹对话框
+                    // 简单起见，发一个本地事件让 MainScreen 显示
+                    checkUpdateResult.value = info
+                } else {
+                    android.widget.Toast.makeText(
+                        this@MainActivity, "已是最新版本", android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } catch (_: Exception) {
+                android.widget.Toast.makeText(
+                    this@MainActivity, "检查失败，请稍后重试", android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    companion object {
+        /** 快捷方式检查更新结果，MainScreen 观察后弹对话框 */
+        val checkUpdateResult = androidx.compose.runtime.mutableStateOf<com.bobot.ailauncher.data.OtaInfo?>(null)
     }
 
     override fun onDestroy() {

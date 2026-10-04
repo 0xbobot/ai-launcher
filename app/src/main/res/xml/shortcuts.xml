@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- v0.32.3：长按图标快捷检查更新 -->
+    <shortcut
+        android:shortcutId="check_update"
+        android:enabled="true"
+        android:icon="@android:drawable/ic_menu_upload"
+        android:shortcutShortLabel="检查更新"
+        android:shortcutLongLabel="检查桌面更新">
+        <intent
+            android:action="com.bobot.ailauncher.CHECK_UPDATE"
+            android:targetPackage="com.bobot.ailauncher"
+            android:targetClass="com.bobot.ailauncher.MainActivity" />
+    </shortcut>
+</shortcuts>
