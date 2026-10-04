@@ -3,6 +3,9 @@ package com.bobot.ailauncher.ui.apps
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.background
@@ -22,6 +25,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
@@ -156,55 +160,39 @@ internal fun AppRow(
                         )
                     }
                 } else {
-                    // 展开态：图标（降透明）+ 两个胶囊图标按钮（同行，不另起行）
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
+                    // 展开态：名字保留，右侧两个圆形按钮（滑入动效）
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         AppIconImage(
                             drawable = app.icon,
                             contentDescription = app.label.toString(),
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(9.dp))
-                                .graphicsLayer { alpha = 0.7f }
                         )
-                        // 应用信息：灰色描边胶囊
-                        Box(
-                            modifier = Modifier
-                                .size(width = 64.dp, height = 44.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .border(
-                                    1.dp,
-                                    AILauncherColors.Divider,
-                                    RoundedCornerShape(999.dp)
-                                )
-                                .clickable(onClick = ::openAppDetails),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Info,
-                                contentDescription = "应用信息",
-                                tint = AILauncherColors.Body,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        // 卸载：柔和红底胶囊
-                        Box(
-                            modifier = Modifier
-                                .size(width = 64.dp, height = 44.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(Color(0xFFE57373))
-                                .clickable(onClick = ::uninstallApp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Delete,
-                                contentDescription = "卸载",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = app.label.toString(),
+                            fontSize = 15.sp,
+                            color = AILauncherColors.Title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        CircleActionButton(
+                            onClick = ::openAppDetails,
+                            icon = Icons.Filled.Info,
+                            iconTint = AILauncherColors.Hint,
+                            contentDescription = "应用信息",
+                            delayMillis = 0
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        CircleActionButton(
+                            onClick = ::uninstallApp,
+                            icon = Icons.Filled.Delete,
+                            iconTint = Color(0xFFE57373),
+                            contentDescription = "卸载",
+                            delayMillis = 70
+                        )
                     }
                 }
             }
@@ -232,6 +220,47 @@ internal fun AppRow(
             dismissButton = {
                 TextButton(onClick = { showHideConfirm = false }) { Text("取消") }
             }
+        )
+    }
+}
+
+/** 右侧圆形操作按钮：从右侧滑入 + 淡入，delay 形成先后效果 */
+@Composable
+private fun CircleActionButton(
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconTint: Color,
+    contentDescription: String,
+    delayMillis: Int
+) {
+    val density = LocalDensity.current
+    val slidePx = with(density) { 24.dp.toPx() }
+    val progress by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = tween(
+            durationMillis = 220,
+            delayMillis = delayMillis,
+            easing = FastOutSlowInEasing
+        ),
+        label = "circleBtnIn"
+    )
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .graphicsLayer {
+                alpha = progress
+                translationX = (1f - progress) * slidePx
+            }
+            .clip(CircleShape)
+            .background(Color(0xFF3A3D44))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = iconTint,
+            modifier = Modifier.size(20.dp)
         )
     }
 }
