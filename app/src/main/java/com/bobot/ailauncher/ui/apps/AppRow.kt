@@ -31,11 +31,13 @@ import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 
@@ -96,6 +99,27 @@ internal fun AppRow(
             context.startActivity(intent)
         } catch (_: Exception) {
             Toast.makeText(context, "无法卸载", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // v0.35.0：Dock 置顶切换——已置顶则移出，未置顶则追加到末尾（Dock 里按此顺序排最前）
+    val dockTick by UiPrefs.dockTick.collectAsState()
+    val isPinned = remember(dockTick) { UiPrefs.getDockPinned(context).contains(app.packageName) }
+
+    fun togglePin() {
+        val cur = UiPrefs.getDockPinned(context).toMutableList()
+        if (app.packageName in cur) {
+            cur.remove(app.packageName)
+            UiPrefs.setDockPinned(context, cur)
+            Toast.makeText(context, "已从 Dock 移出", Toast.LENGTH_SHORT).show()
+        } else {
+            if (cur.size >= 10) {
+                Toast.makeText(context, "Dock 最多置顶 10 个", Toast.LENGTH_SHORT).show()
+                return
+            }
+            cur.add(app.packageName)
+            UiPrefs.setDockPinned(context, cur)
+            Toast.makeText(context, "已加到 Dock", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -160,7 +184,7 @@ internal fun AppRow(
                         )
                     }
                 } else {
-                    // 展开态：名字保留，右侧两个圆形按钮（滑入动效）
+                    // 展开态：名字保留，右侧三个操作按钮（v0.35.0：新增"加到 Dock"放最前，间距统一 8dp）
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AppIconImage(
                             drawable = app.icon,
@@ -179,19 +203,27 @@ internal fun AppRow(
                             modifier = Modifier.weight(1f)
                         )
                         SlideInIconButton(
+                            onClick = ::togglePin,
+                            icon = Icons.Filled.Star,
+                            iconTint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
+                            contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
+                            delayMillis = 0
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        SlideInIconButton(
                             onClick = ::openAppDetails,
                             icon = Icons.Filled.Info,
                             iconTint = Color(0xFF8A8478),
                             contentDescription = "应用信息",
-                            delayMillis = 0
+                            delayMillis = 70
                         )
-                        Spacer(modifier = Modifier.width(2.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         SlideInIconButton(
                             onClick = ::uninstallApp,
                             icon = Icons.Filled.Delete,
                             iconTint = Color(0xFFD16A6A),
                             contentDescription = "卸载",
-                            delayMillis = 70
+                            delayMillis = 140
                         )
                     }
                 }

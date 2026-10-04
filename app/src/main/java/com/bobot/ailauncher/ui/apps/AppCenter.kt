@@ -46,8 +46,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -222,8 +227,17 @@ fun AppCenterContent(
     // v0.16.1：A-Z 行左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
     var expandedActionsPkg by remember { mutableStateOf<String?>(null) }
 
+    // v0.35.0：首次左滑新手引导——只展示一次，之后不再打扰
+    var showActionsGuide by remember { mutableStateOf(false) }
+    LaunchedEffect(expandedActionsPkg) {
+        if (expandedActionsPkg != null && !UiPrefs.hasSeenRowActionsGuide(context)) {
+            showActionsGuide = true
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
     ) {
@@ -459,6 +473,107 @@ fun AppCenterContent(
         )
     }
 
+    // v0.35.0：首次左滑新手引导——点任意处关闭，只出现一次
+    if (showActionsGuide) {
+        RowActionsGuideOverlay(
+            onDismiss = {
+                UiPrefs.setRowActionsGuideSeen(context)
+                showActionsGuide = false
+            }
+        )
+    }
+    } // Box
+}
+
+/**
+ * v0.35.0：行左滑操作区新手引导——一次性半透明遮罩 + 白卡片，
+ * 给三个按钮各配一句短说明。点任意处关闭，看过一次后不再打扰。
+ * 配色跟 App 主题走（浅暖灰系）。
+ */
+@Composable
+private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.28f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            modifier = Modifier
+                .padding(horizontal = 36.dp)
+                .clickable(enabled = false, onClick = {})
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "左滑打开快捷操作",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AILauncherColors.Title
+                )
+                GuideRow(
+                    icon = Icons.Filled.Star,
+                    tint = Color(0xFFC9A227),
+                    title = "加到 Dock",
+                    desc = "把应用固定到底部 Dock，再点一次可移出"
+                )
+                GuideRow(
+                    icon = Icons.Filled.Info,
+                    tint = Color(0xFF8A8478),
+                    title = "应用信息",
+                    desc = "打开系统应用信息页"
+                )
+                GuideRow(
+                    icon = Icons.Filled.Delete,
+                    tint = Color(0xFFD16A6A),
+                    title = "卸载",
+                    desc = "卸载这个应用"
+                )
+                Text(
+                    text = "点任意处关闭",
+                    fontSize = 12.sp,
+                    color = AILauncherColors.Hint,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GuideRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    title: String,
+    desc: String
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = icon,
+            contentDescription = title,
+            tint = tint,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column {
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = AILauncherColors.Title
+            )
+            Text(
+                text = desc,
+                fontSize = 12.sp,
+                color = AILauncherColors.Hint
+            )
+        }
+    }
 }
 
 /** 列表到顶继续下滑 → D2 的嵌套滚动连接 */

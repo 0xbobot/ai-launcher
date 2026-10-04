@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -95,8 +96,18 @@ fun PullUpDock(
     var usageTick by remember { mutableIntStateOf(0) }
     // v0.20：智能排序开关（设置页可关）；key 里带上开关值，切换后返回即生效
     val smartSort = UiPrefs.getDockSmartSort(context)
-    val top10 = remember(allApps, usageTick, smartSort) {
-        AppUsageTracker.topApps(context, allApps, 10, smartSort)
+    // v0.35.0：用户置顶——排最前（按用户自定义顺序），后面用智能排序补齐并去重
+    val dockTick by UiPrefs.dockTick.collectAsState()
+    val pinnedPkgs = remember(dockTick) { UiPrefs.getDockPinned(context) }
+    val top10 = remember(allApps, usageTick, smartSort, dockTick) {
+        val pinned = pinnedPkgs.mapNotNull { pkg -> allApps.find { it.packageName == pkg } }
+        val rest = AppUsageTracker.topApps(
+            context,
+            allApps.filter { it.packageName !in pinnedPkgs },
+            10,
+            smartSort
+        )
+        (pinned + rest).take(10)
     }
     val top4 = remember(top10) { top10.take(4) }
 

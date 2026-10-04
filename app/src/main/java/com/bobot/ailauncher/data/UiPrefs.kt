@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.data
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /** 界面偏好：存 SharedPreferences "ui_prefs" */
 object UiPrefs {
@@ -10,6 +11,14 @@ object UiPrefs {
     private const val KEY_DOCK_VISIBLE = "dock_visible"
     private const val KEY_DOCK_HIDE_WARNED = "dock_hide_warned"
     private const val KEY_DOCK_SMART_SORT = "dock_smart_sort"
+    private const val KEY_DOCK_PINNED = "dock_pinned"
+    private const val KEY_ROW_ACTIONS_GUIDE_SEEN = "row_actions_guide_seen"
+
+    /** Dock 数据变化通知：置顶增删/排序后 bump，Dock 侧重算 */
+    val dockTick = MutableStateFlow(0)
+    fun bumpDock() {
+        dockTick.value++
+    }
 
     enum class Handed { LEFT, RIGHT }
 
@@ -73,5 +82,35 @@ object UiPrefs {
     fun setDockSmartSort(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_DOCK_SMART_SORT, enabled).apply()
+    }
+
+    /**
+     * Dock 置顶：用户手动固定的应用包名有序列表（v0.35.0）。
+     * Dock 渲染时置顶排最前（按此顺序），后面再跟智能排序补齐。
+     */
+    fun getDockPinned(context: Context): List<String> {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_DOCK_PINNED, "").orEmpty()
+            .split("\n")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+    }
+
+    fun setDockPinned(context: Context, pkgs: List<String>) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_DOCK_PINNED, pkgs.filter { it.isNotBlank() }.distinct().joinToString("\n")).apply()
+        bumpDock()
+    }
+
+    /** 应用行左滑操作区的新手引导是否已展示过（v0.35.0）：只打扰一次 */
+    fun hasSeenRowActionsGuide(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ROW_ACTIONS_GUIDE_SEEN, false)
+    }
+
+    fun setRowActionsGuideSeen(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_ROW_ACTIONS_GUIDE_SEEN, true).apply()
     }
 }

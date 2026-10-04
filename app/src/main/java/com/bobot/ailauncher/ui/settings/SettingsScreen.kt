@@ -13,11 +13,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -30,6 +35,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +59,8 @@ import com.bobot.ailauncher.data.OtaCheckResult
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.data.listLaunchableApps
+import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.data.BatteryGuardPrefs
 import com.bobot.ailauncher.service.BatteryGuardService
 import com.bobot.ailauncher.ui.components.UpdateDialog
@@ -252,6 +260,12 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
+
+        // v0.35.0：Dock 置顶管理——用户手动固定的应用，固定排在 Dock 最前面；
+        // 可调顺序、可移除（在应用列表左滑点 ★ 即可添加）
+        item {
+            DockPinnedManager()
         }
 
         // 惯用手：决定 A-Z 导航 rail 在哪一侧、按住时往哪边偏移
@@ -496,6 +510,136 @@ fun SettingsScreen(
             }
             updateInfo?.let { info ->
                 UpdateDialog(info = info, onDismiss = { updateInfo = null })
+            }
+        }
+    }
+}
+
+/**
+ * v0.35.0：Dock 置顶管理——列出用户置顶的应用（按 Dock 显示顺序），
+ * 支持上移/下移调整顺序、移除置顶。置顶为空时给出去应用列表添加的提示。
+ */
+@Composable
+private fun DockPinnedManager() {
+    val context = LocalContext.current
+    val dockTick by UiPrefs.dockTick.collectAsState()
+    val pinnedPkgs = remember(dockTick) { UiPrefs.getDockPinned(context) }
+    val pinnedApps = remember(dockTick) {
+        val all = listLaunchableApps(context)
+        pinnedPkgs.mapNotNull { pkg -> all.find { it.packageName == pkg } }
+    }
+
+    fun persist(pkgs: List<String>) = UiPrefs.setDockPinned(context, pkgs)
+
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Dock 置顶",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = AILauncherColors.Title
+            )
+            Text(
+                text = "置顶的应用固定排在 Dock 最前面。在应用列表左滑点 ★ 即可添加，最多 10 个。",
+                fontSize = 13.sp,
+                color = AILauncherColors.Hint
+            )
+            if (pinnedApps.isEmpty()) {
+                Text(
+                    text = "还没有置顶应用",
+                    fontSize = 14.sp,
+                    color = AILauncherColors.Hint,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            } else {
+                pinnedApps.forEachIndexed { index, app ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "${index + 1}",
+                            fontSize = 13.sp,
+                            color = AILauncherColors.Hint,
+                            modifier = Modifier.width(20.dp)
+                        )
+                        AppIconImage(
+                            drawable = app.icon,
+                            contentDescription = app.label.toString(),
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = app.label.toString(),
+                            fontSize = 14.sp,
+                            color = AILauncherColors.Title,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                if (index > 0) {
+                                    val cur = pinnedPkgs.toMutableList()
+                                    val item = cur.removeAt(index)
+                                    cur.add(index - 1, item)
+                                    persist(cur)
+                                }
+                            },
+                            enabled = index > 0,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowUp,
+                                contentDescription = "上移",
+                                tint = if (index > 0) AILauncherColors.Title else AILauncherColors.Hint.copy(alpha = 0.4f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                if (index < pinnedPkgs.size - 1) {
+                                    val cur = pinnedPkgs.toMutableList()
+                                    val item = cur.removeAt(index)
+                                    cur.add(index + 1, item)
+                                    persist(cur)
+                                }
+                            },
+                            enabled = index < pinnedPkgs.size - 1,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowDown,
+                                contentDescription = "下移",
+                                tint = if (index < pinnedPkgs.size - 1) AILauncherColors.Title else AILauncherColors.Hint.copy(alpha = 0.4f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                persist(pinnedPkgs.filter { it != app.packageName })
+                                Toast.makeText(context, "已从 Dock 移出", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "移出 Dock",
+                                tint = Color(0xFFD16A6A),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
