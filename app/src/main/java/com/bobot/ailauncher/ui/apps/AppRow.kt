@@ -2,14 +2,11 @@ package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
 import android.widget.Toast
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -27,7 +24,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -107,9 +109,8 @@ internal fun AppRow(
                         onDragEnd = {
                             if (!fired) {
                                 if (accumX < -swipePx) {
-                                    // 左滑=多：一段展开操作，二段进系统应用管理
-                                    if (actionsVisible) openAppDetails()
-                                    else onActionsVisibleChange(true)
+                                    // 左滑=多：展开操作（胶囊按钮已在行内）
+                                    if (!actionsVisible) onActionsVisibleChange(true)
                                 } else if (accumX > swipePx) {
                                     // 右滑=少：展开态收起；收起态弹确认框再隐藏
                                     if (actionsVisible) onActionsVisibleChange(false)
@@ -128,43 +129,84 @@ internal fun AppRow(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AppIconImage(
-                drawable = app.icon,
-                contentDescription = app.label.toString(),
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(9.dp))
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = app.label.toString(),
-                fontSize = 15.sp,
-                color = AILauncherColors.Title
-            )
-        }
-        androidx.compose.animation.AnimatedVisibility(
-            visible = actionsVisible,
-            enter = expandVertically(
-                animationSpec = spring(
-                    stiffness = Spring.StiffnessMediumLow,
-                    dampingRatio = 0.9f
-                )
-            ) + fadeIn(),
-            exit = shrinkVertically(
+            Crossfade(
+                targetState = actionsVisible,
                 animationSpec = spring(
                     stiffness = Spring.StiffnessMedium,
                     dampingRatio = 0.9f
-                )
-            ) + fadeOut()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 56.dp, end = 12.dp, bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AppRowAction(text = "应用信息", onClick = ::openAppDetails)
-                AppRowAction(text = "卸载", onClick = ::uninstallApp)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) { expanded ->
+                if (!expanded) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AppIconImage(
+                            drawable = app.icon,
+                            contentDescription = app.label.toString(),
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = app.label.toString(),
+                            fontSize = 15.sp,
+                            color = AILauncherColors.Title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else {
+                    // 展开态：图标（降透明）+ 两个胶囊图标按钮（同行，不另起行）
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        AppIconImage(
+                            drawable = app.icon,
+                            contentDescription = app.label.toString(),
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .graphicsLayer { alpha = 0.7f }
+                        )
+                        // 应用信息：灰色描边胶囊
+                        Box(
+                            modifier = Modifier
+                                .size(width = 64.dp, height = 44.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .border(
+                                    1.dp,
+                                    AILauncherColors.Divider,
+                                    RoundedCornerShape(999.dp)
+                                )
+                                .clickable(onClick = ::openAppDetails),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Info,
+                                contentDescription = "应用信息",
+                                tint = AILauncherColors.Body,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        // 卸载：柔和红底胶囊
+                        Box(
+                            modifier = Modifier
+                                .size(width = 64.dp, height = 44.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Color(0xFFE57373))
+                                .clickable(onClick = ::uninstallApp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = "卸载",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -191,22 +233,6 @@ internal fun AppRow(
                 TextButton(onClick = { showHideConfirm = false }) { Text("取消") }
             }
         )
-    }
-}
-
-/** A-Z 行快捷操作小按钮 */
-@Composable
-private fun AppRowAction(text: String, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        modifier = Modifier
-            .border(
-                1.dp,
-                AILauncherColors.Divider,
-                RoundedCornerShape(999.dp)
-            )
-    ) {
-        Text(text = text, fontSize = 12.sp, color = AILauncherColors.Accent)
     }
 }
 
