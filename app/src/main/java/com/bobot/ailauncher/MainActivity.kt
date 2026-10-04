@@ -223,11 +223,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    companion object {
-        /** 快捷方式检查更新结果，MainScreen 观察后弹对话框 */
-        val checkUpdateResult = androidx.compose.runtime.mutableStateOf<com.bobot.ailauncher.data.OtaInfo?>(null)
-    }
-
     override fun onDestroy() {
         downloadReceiver?.let { unregisterReceiver(it) }
         super.onDestroy()
@@ -236,5 +231,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val PREFS = "ai_launcher"
         private const val KEY_ONBOARDED = "onboarded"
+        /** v0.32.3：快捷方式检查更新结果，MainScreen 观察后弹对话框 */
+        val checkUpdateResult = androidx.compose.runtime.mutableStateOf<com.bobot.ailauncher.data.OtaInfo?>(null)
     }
 }
