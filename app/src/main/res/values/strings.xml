@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_check_update_short">检查更新</string>
+    <string name="shortcut_check_update_long">检查桌面更新</string>
+</resources>
