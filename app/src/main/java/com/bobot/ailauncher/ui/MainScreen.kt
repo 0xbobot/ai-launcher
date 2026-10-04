@@ -1,7 +1,6 @@
 package com.bobot.ailauncher.ui
 
 import android.widget.Toast
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,8 +20,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -171,18 +168,7 @@ private fun HomeHost(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // v0.11：壁纸轻微渐隐罩，保证悬浮在壁纸上的文字可读（上深下浅）
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.16f),
-                        0.4f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.12f)
-                    )
-                )
-        )
+        // v0.32.0：全透明——去掉渐隐罩，壁纸直接透出（Bob）
         // 单页桌面：只有首页；v0.16 首页上滑直达 D3，不再经 D1
         // v0.31.0：首屏只留 Dock（Bob）
         HomeScreen(onOpenAppDrawer = onOpenAppDrawer)

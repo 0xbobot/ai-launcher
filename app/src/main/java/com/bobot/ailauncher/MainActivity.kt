@@ -9,8 +9,6 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
@@ -18,10 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.bobot.ailauncher.core.brain.AiBrain
@@ -93,52 +88,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             AILauncherTheme {
                 var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
-                // v0.26.5：自己绘制系统壁纸（解决多任务缩略图透明问题）
-                // 之前靠 windowShowWallpaper 透出壁纸，缩略图捕获不到，显示白色
-                // v0.26.6：缩放壁纸防 OOM（原图可能 4K，快速切换时闪退）
-                val wallpaperBitmap = remember {
-                    try {
-                        val wm = android.app.WallpaperManager.getInstance(this)
-                        val drawable = wm.drawable
-                        val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                        bitmap?.let {
-                            // 缩放到屏幕尺寸，避免 OOM
-                            val displayMetrics = resources.displayMetrics
-                            val targetW = displayMetrics.widthPixels
-                            val targetH = displayMetrics.heightPixels
-                            if (it.width > targetW || it.height > targetH) {
-                                val scale = minOf(
-                                    targetW.toFloat() / it.width,
-                                    targetH.toFloat() / it.height
-                                )
-                                val w = (it.width * scale).toInt().coerceAtLeast(1)
-                                val h = (it.height * scale).toInt().coerceAtLeast(1)
-                                android.graphics.Bitmap.createScaledBitmap(it, w, h, true)
-                                    .asImageBitmap()
-                            } else {
-                                it.asImageBitmap()
-                            }
-                        }
-                    } catch (_: Exception) { null }
-                }
+                // v0.32.0：全透明——窗口半透明，系统壁纸直接透出（Bob）
+                // 不再 Compose 内绘制壁纸
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // 底层：系统壁纸
-                    if (wallpaperBitmap != null) {
-                        Image(
-                            bitmap = wallpaperBitmap,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        // 兜底：暖灰底
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color(0xFFF4F2EE))
-                        )
-                    }
-                    // 上层：原有内容（半透明 Surface 改为直接内容，玻璃效果靠各页面半透明遮罩）
+                    // 上层：原有内容（玻璃效果靠各页面半透明遮罩）
                     if (onboarded) {
                         MainScreen()
                     } else {

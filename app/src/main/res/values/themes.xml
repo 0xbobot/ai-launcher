@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- v0.26.5：窗口改不透明——解决多任务缩略图透明度异常。
-         壁纸改由 Compose 内绘制（WallpaperManager），缩略图能正常捕获。
-         玻璃拟态靠 Compose 半透明遮罩实现，视觉不变 -->
+    <!-- v0.32.0：全透明——系统壁纸直接透出（Bob） -->
     <style name="Theme.AILauncher" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
