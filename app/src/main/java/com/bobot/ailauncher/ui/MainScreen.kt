@@ -153,10 +153,8 @@ private fun HomeHost(
 ) {
     val context = LocalContext.current
     var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
-    // v0.29.0：升级提醒宠物化——有新版时七仔抱礼物盒，点按才弹对话框
-    var showUpgradeDialog by remember { mutableStateOf(false) }
 
-    // OTA：每天最多自动检查一次，有新版先存着（七仔抱礼物盒提示）
+    // OTA：每天最多自动检查一次，有新版弹更新对话框
     LaunchedEffect(Unit) {
         if (OtaUpdater.shouldAutoCheck(context)) {
             val info = OtaUpdater.checkForUpdate(context)
@@ -186,12 +184,8 @@ private fun HomeHost(
                 )
         )
         // 单页桌面：只有首页；v0.16 首页上滑直达 D3，不再经 D1
-        // v0.29.0：升级提醒宠物化——有新版时七仔抱礼物盒
-        HomeScreen(
-            onOpenAppDrawer = onOpenAppDrawer,
-            hasUpgrade = updateInfo != null,
-            onUpgradeTap = { showUpgradeDialog = true }
-        )
+        // v0.31.0：首屏只留 Dock（Bob）
+        HomeScreen(onOpenAppDrawer = onOpenAppDrawer)
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         PullUpDock(
             state = dockState,
@@ -201,15 +195,9 @@ private fun HomeHost(
             onOpenSettings = onOpenSettings
         )
         // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
-        // v0.29.0：OTA 更新对话框——只在用户点按礼物盒七仔后弹出（宠物化）
-        if (showUpgradeDialog) {
-            updateInfo?.let { info ->
-                UpdateDialog(info = info, onDismiss = {
-                    showUpgradeDialog = false
-                    // 用户关闭对话框后，本轮不再用礼物盒打扰（除非有更新的版本）
-                    // updateInfo 保留，下次 auto-check 有新版时会刷新
-                })
-            }
+        // OTA 更新对话框（自动检查 / 设置页手动检查共用 UpdateDialog）
+        updateInfo?.let { info ->
+            UpdateDialog(info = info, onDismiss = { updateInfo = null })
         }
         // v0.16：D1 右滑隐藏确认框（"不再提醒"可记）
         if (showHideDockDialog) {
