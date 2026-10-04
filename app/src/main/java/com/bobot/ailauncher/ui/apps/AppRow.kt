@@ -185,7 +185,7 @@ internal fun AppRow(
                             contentDescription = "应用信息",
                             delayMillis = 0
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
                         SlideInIconButton(
                             onClick = ::uninstallApp,
                             icon = Icons.Filled.Delete,

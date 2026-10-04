@@ -2,4 +2,5 @@
 <resources>
     <string name="shortcut_check_update_short">检查更新</string>
     <string name="shortcut_check_update_long">检查桌面更新</string>
+    <string name="accessibility_service_desc">用于在首屏下滑手势时打开通知中心与控制中心</string>
 </resources>
