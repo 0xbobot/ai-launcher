@@ -95,11 +95,20 @@ class MainActivity : ComponentActivity() {
                 var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
                 // v0.32.1：Compose 内绘制系统壁纸（视觉透明，窗口不透明保证触摸）
                 // v0.26.6：缩放壁纸防 OOM（原图可能 4K）
+                // v0.32.2：兼容非 BitmapDrawable（有些机型 drawable 不是 BitmapDrawable）
                 val wallpaperBitmap = remember {
                     try {
                         val wm = android.app.WallpaperManager.getInstance(this)
                         val drawable = wm.drawable
-                        val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                        val bitmap = drawable?.let { d ->
+                            val w = d.intrinsicWidth.coerceAtLeast(1)
+                            val h = d.intrinsicHeight.coerceAtLeast(1)
+                            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                            val canvas = android.graphics.Canvas(bmp)
+                            d.setBounds(0, 0, w, h)
+                            d.draw(canvas)
+                            bmp
+                        }
                         bitmap?.let {
                             val displayMetrics = resources.displayMetrics
                             val targetW = displayMetrics.widthPixels
