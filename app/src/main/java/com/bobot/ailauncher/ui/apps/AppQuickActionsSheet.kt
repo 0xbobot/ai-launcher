@@ -131,7 +131,7 @@ private fun SheetRow(
 }
 
 /** 取系统快捷方式；非默认桌面/异常时返回空列表（优雅降级） */
-internal fun loadShortcuts(context: Context, packageName: String): List<ShortcutInfo> {
+private fun loadShortcuts(context: Context, packageName: String): List<ShortcutInfo> {
     return try {
         val lm = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
         val query = LauncherApps.ShortcutQuery().apply {
@@ -148,7 +148,7 @@ internal fun loadShortcuts(context: Context, packageName: String): List<Shortcut
     }
 }
 
-internal fun shortcutIcon(context: Context, packageName: String, shortcutId: String): Drawable? {
+private fun shortcutIcon(context: Context, packageName: String, shortcutId: String): Drawable? {
     return try {
         val lm = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
         val query = LauncherApps.ShortcutQuery().apply {
@@ -167,7 +167,7 @@ internal fun shortcutIcon(context: Context, packageName: String, shortcutId: Str
     }
 }
 
-internal fun launchShortcut(context: Context, packageName: String, shortcutId: String) {
+private fun launchShortcut(context: Context, packageName: String, shortcutId: String) {
     try {
         val lm = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
         lm.startShortcut(packageName, shortcutId, null, null, Process.myUserHandle())

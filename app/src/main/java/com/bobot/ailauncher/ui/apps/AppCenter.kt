@@ -221,8 +221,6 @@ fun AppCenterContent(
 
     // v0.16.1：A-Z 行左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
     var expandedActionsPkg by remember { mutableStateOf<String?>(null) }
-    // 两段式左滑：1=快捷方式，2=快捷方式+管理按钮
-    var expandedStage by remember { mutableStateOf(1) }
 
     Column(
         modifier = modifier
@@ -381,14 +379,12 @@ fun AppCenterContent(
                                 onLaunch = { launchApp(app) },
                                 onLongClick = { quickActionsApp = app },
                                 onHide = ::hideApp,
-                                expandStage = if (expandedActionsPkg == app.packageName) expandedStage else 0,
-                                onExpandStageChange = { stage ->
-                                    if (stage == 0) {
-                                        if (expandedActionsPkg == app.packageName) expandedActionsPkg = null
-                                    } else {
-                                        expandedActionsPkg = app.packageName
-                                        expandedStage = stage
-                                    }
+                                actionsVisible = expandedActionsPkg == app.packageName,
+                                onActionsVisibleChange = { expanded ->
+                                    expandedActionsPkg =
+                                        if (expanded) app.packageName
+                                        else if (expandedActionsPkg == app.packageName) null
+                                        else expandedActionsPkg
                                 }
                             )
                         }
@@ -412,14 +408,12 @@ fun AppCenterContent(
                             onLaunch = { launchApp(app) },
                             onLongClick = { quickActionsApp = app },
                             onHide = ::hideApp,
-                            expandStage = if (expandedActionsPkg == app.packageName) expandedStage else 0,
-                            onExpandStageChange = { stage ->
-                                if (stage == 0) {
-                                    if (expandedActionsPkg == app.packageName) expandedActionsPkg = null
-                                } else {
-                                    expandedActionsPkg = app.packageName
-                                    expandedStage = stage
-                                }
+                            actionsVisible = expandedActionsPkg == app.packageName,
+                            onActionsVisibleChange = { expanded ->
+                                expandedActionsPkg =
+                                    if (expanded) app.packageName
+                                    else if (expandedActionsPkg == app.packageName) null
+                                    else expandedActionsPkg
                             }
                         )
                     }
