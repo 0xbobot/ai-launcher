@@ -178,18 +178,18 @@ internal fun AppRow(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
-                        CircleActionButton(
+                        SlideInIconButton(
                             onClick = ::openAppDetails,
                             icon = Icons.Filled.Info,
-                            iconTint = AILauncherColors.Hint,
+                            iconTint = Color(0xFF8A8478),
                             contentDescription = "应用信息",
                             delayMillis = 0
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        CircleActionButton(
+                        SlideInIconButton(
                             onClick = ::uninstallApp,
                             icon = Icons.Filled.Delete,
-                            iconTint = Color(0xFFE57373),
+                            iconTint = Color(0xFFD16A6A),
                             contentDescription = "卸载",
                             delayMillis = 70
                         )
@@ -224,9 +224,9 @@ internal fun AppRow(
     }
 }
 
-/** 右侧圆形操作按钮：从右侧滑入 + 淡入，delay 形成先后效果 */
+/** 右侧图标按钮：无底，从右侧滑入 + 淡入，delay 形成先后效果 */
 @Composable
-private fun CircleActionButton(
+private fun SlideInIconButton(
     onClick: () -> Unit,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     iconTint: Color,
@@ -252,7 +252,6 @@ private fun CircleActionButton(
                 translationX = (1f - progress) * slidePx
             }
             .clip(CircleShape)
-            .background(Color(0xFFE8E2D9))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -260,7 +259,7 @@ private fun CircleActionButton(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = iconTint,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(22.dp)
         )
     }
 }
