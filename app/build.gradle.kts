@@ -82,4 +82,11 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // Live2D demo（live2d-mvp 分支，debug only）：SDK 就位时才接入。
+    // Core AAR 运行时由 app 提供（Framework 侧声明为 compileOnly）。
+    if (file("../third_party/live2d/sdk/Core/android/Live2DCubismCore.aar").exists()) {
+        debugImplementation(project(":live2d"))
+        debugImplementation(files("../third_party/live2d/sdk/Core/android/Live2DCubismCore.aar"))
+    }
 }

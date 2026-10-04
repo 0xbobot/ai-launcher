@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- debug-only manifest：Live2D 渲染验证 demo 入口（live2d-mvp 分支）。
+     不影响 release 包，不碰主 manifest。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name="com.bobot.ailauncher.debug.Live2DDemoActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+    </application>
+</manifest>
