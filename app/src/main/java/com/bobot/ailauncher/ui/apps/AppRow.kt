@@ -252,7 +252,7 @@ private fun CircleActionButton(
                 translationX = (1f - progress) * slidePx
             }
             .clip(CircleShape)
-            .background(Color(0xFF3A3D44))
+            .background(Color(0xFFE8E2D9))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
