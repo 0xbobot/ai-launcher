@@ -105,6 +105,8 @@ class MainActivity : ComponentActivity() {
                 var showBatteryPrompt by remember {
                     mutableStateOf(!prefs.getBoolean(KEY_BATTERY_ASKED, false))
                 }
+                // v0.38.0：全屏 intent 权限引导（被关掉会降级成普通通知）
+                var showFullScreenGuide by remember { mutableStateOf(false) }
                 // v0.37.2：系统壁纸直接透出（windowShowWallpaper），不再手动绘制
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (onboarded) {
@@ -143,6 +145,10 @@ class MainActivity : ComponentActivity() {
                                             notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                                         }
                                         com.bobot.ailauncher.service.BatteryGuardService.start(this@MainActivity)
+                                        // v0.38.0：全屏 intent 被关掉会降级成普通通知，引导去开
+                                        if (!com.bobot.ailauncher.data.BatteryFullScreen.canUse(this@MainActivity)) {
+                                            showFullScreenGuide = true
+                                        }
                                     }
                                 ) { androidx.compose.material3.Text("开启") }
                             },
@@ -154,6 +160,31 @@ class MainActivity : ComponentActivity() {
                                         com.bobot.ailauncher.data.BatteryGuardPrefs.setEnabled(this@MainActivity, false)
                                     }
                                 ) { androidx.compose.material3.Text("不用") }
+                            }
+                        )
+                    }
+                    // v0.38.0：全屏 intent 权限引导
+                    if (showFullScreenGuide) {
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { showFullScreenGuide = false },
+                            title = { androidx.compose.material3.Text("让七仔直接弹到最前面？") },
+                            text = {
+                                androidx.compose.material3.Text(
+                                    "电量低时，七仔可以直接弹到屏幕最上层（看视频会自动暂停），不用先点通知。\n\n需要在系统设置里允许「全屏通知」。小米/华为/OPPO/vivo 用户还需开启「后台弹出界面」。"
+                                )
+                            },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        showFullScreenGuide = false
+                                        com.bobot.ailauncher.data.BatteryFullScreen.openSettings(this@MainActivity)
+                                    }
+                                ) { androidx.compose.material3.Text("去开启") }
+                            },
+                            dismissButton = {
+                                androidx.compose.material3.TextButton(
+                                    onClick = { showFullScreenGuide = false }
+                                ) { androidx.compose.material3.Text("以后再说") }
                             }
                         )
                     }

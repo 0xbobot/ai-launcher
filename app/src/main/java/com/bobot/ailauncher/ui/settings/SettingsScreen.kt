@@ -40,12 +40,16 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
@@ -67,6 +71,7 @@ import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
+import com.bobot.ailauncher.data.BatteryFullScreen
 import com.bobot.ailauncher.data.BatteryGuardPrefs
 import com.bobot.ailauncher.service.BatteryGuardService
 import com.bobot.ailauncher.ui.components.UpdateDialog
@@ -336,6 +341,17 @@ fun SettingsScreen(
         // v0.28.0：低电量守护——只做温和提醒，零干预
         item {
             var guardOn by remember { mutableStateOf(BatteryGuardPrefs.isEnabled(context)) }
+            // v0.38.0：全屏 intent 权限状态——从设置页返回时刷新
+            var fullScreenOk by remember { mutableStateOf(BatteryFullScreen.canUse(context)) }
+            val guardLifecycle = LocalLifecycleOwner.current
+            DisposableEffect(guardLifecycle) {
+                val obs = LifecycleEventObserver { _, e ->
+                    if (e == Lifecycle.Event.ON_RESUME)
+                        fullScreenOk = BatteryFullScreen.canUse(context)
+                }
+                guardLifecycle.lifecycle.addObserver(obs)
+                onDispose { guardLifecycle.lifecycle.removeObserver(obs) }
+            }
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -387,6 +403,33 @@ fun SettingsScreen(
                             fontSize = 12.sp,
                             color = AILauncherColors.Hint
                         )
+                        // v0.38.0：全屏 intent 被关掉会降级成普通通知，在这里引导打开
+                        if (!fullScreenOk) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "全屏弹出未开启：低电量时只会先收到通知",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFB7791F),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = { BatteryFullScreen.openSettings(context) }) {
+                                    Text(
+                                        text = "去开启",
+                                        fontSize = 13.sp,
+                                        color = AILauncherColors.Accent
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "小米/华为/OPPO/vivo 还需在系统设置里给 AI桌面 开启「后台弹出界面」",
+                                fontSize = 12.sp,
+                                color = AILauncherColors.Hint
+                            )
+                        }
                     }
                 }
             }
