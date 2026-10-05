@@ -101,6 +101,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             AILauncherTheme {
                 var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
+                // v0.36.2：首次启动主动询问是否开启低电量保护
+                var showBatteryPrompt by remember {
+                    mutableStateOf(!prefs.getBoolean(KEY_BATTERY_ASKED, false))
+                }
                 // v0.32.1：Compose 内绘制系统壁纸（视觉透明，窗口不透明保证触摸）
                 // v0.32.3：改用 getWallpaperFile（部分机型 getDrawable 不可靠）
                 val wallpaperBitmap = remember {
@@ -172,6 +176,48 @@ class MainActivity : ComponentActivity() {
                             onboarded = true
                         })
                     }
+                    // v0.36.2：首次启动询问低电量保护
+                    if (showBatteryPrompt) {
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { },
+                            title = {
+                                androidx.compose.material3.Text("开启低电量保护？")
+                            },
+                            text = {
+                                androidx.compose.material3.Text(
+                                    "电量低时七仔会温和提醒你（10% 和 5% 各一次），只提醒、不做任何自动操作。"
+                                )
+                            },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        prefs.edit().putBoolean(KEY_BATTERY_ASKED, true).apply()
+                                        showBatteryPrompt = false
+                                        com.bobot.ailauncher.data.BatteryGuardPrefs.setEnabled(this, true)
+                                        // 主动申请通知权限
+                                        if (Build.VERSION.SDK_INT >= 33 &&
+                                            ContextCompat.checkSelfPermission(
+                                                this,
+                                                android.Manifest.permission.POST_NOTIFICATIONS
+                                            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                                        ) {
+                                            notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                        }
+                                        com.bobot.ailauncher.service.BatteryGuardService.start(this)
+                                    }
+                                ) { androidx.compose.material3.Text("开启") }
+                            },
+                            dismissButton = {
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        prefs.edit().putBoolean(KEY_BATTERY_ASKED, true).apply()
+                                        showBatteryPrompt = false
+                                        com.bobot.ailauncher.data.BatteryGuardPrefs.setEnabled(this, false)
+                                    }
+                                ) { androidx.compose.material3.Text("不用") }
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -231,6 +277,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val PREFS = "ai_launcher"
         private const val KEY_ONBOARDED = "onboarded"
+        private const val KEY_BATTERY_ASKED = "battery_asked"
         /** v0.32.3：快捷方式检查更新结果，MainScreen 观察后弹对话框 */
         val checkUpdateResult = androidx.compose.runtime.mutableStateOf<com.bobot.ailauncher.data.OtaInfo?>(null)
     }
