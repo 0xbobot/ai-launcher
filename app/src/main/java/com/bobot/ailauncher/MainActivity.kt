@@ -39,6 +39,11 @@ class MainActivity : ComponentActivity() {
 
     private var downloadReceiver: BroadcastReceiver? = null
 
+    // v0.36.1：低电量守护的通知权限申请
+    private val notifPermissionLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { /* 用户拒绝就安静失败 */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // v0.32.3：冷启动时也处理快捷方式
