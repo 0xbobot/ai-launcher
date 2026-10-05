@@ -62,13 +62,15 @@ android {
         }
     }
 
-    // Live2D demo 的 debug Activity 引用 :live2d 模块；SDK（Core AAR）不存在时
-    // 模块不会被 include（见 settings.gradle.kts），此时把该文件排除在编译外，
-    // 保证没 SDK 的机器（CI）也能正常构建。有 SDK 的机器（VPS）不受影响。
+    // Live2D demo 的 debug Activity 引用 :live2d 模块；该模块只在 SDK（Core AAR）
+    // 存在时才被 include（见 settings.gradle.kts）。把文件放在独立 source root，
+    // SDK 不存在时（CI）不加入编译，保证无 SDK 机器也能正常构建；
+    // 有 SDK 的机器（VPS）自动编入。debug manifest 声明不受影响（manifest
+    // merger 不校验类是否存在）。
     sourceSets {
         getByName("debug") {
-            if (!file("../third_party/live2d/sdk/Core/android/Live2DCubismCore.aar").exists()) {
-                java.exclude("**/Live2DDemoActivity.kt")
+            if (file("../third_party/live2d/sdk/Core/android/Live2DCubismCore.aar").exists()) {
+                java.srcDir("src/live2dDebug/java")
             }
         }
     }

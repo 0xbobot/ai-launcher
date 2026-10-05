@@ -28,7 +28,8 @@ settings.gradle.kts
 
 :app（仅加法修改）
   ├─ SDK 就位时：debugImplementation(:live2d) + debugImplementation(Core AAR)
-  └─ app/src/debug/：Live2DDemoActivity + debug manifest（不碰主 manifest）
+  └─ app/src/debug/：debug manifest（不碰主 manifest）；app/src/live2dDebug/：Live2DDemoActivity
+     （独立 source root，SDK 不存在时不参与编译，CI 可正常构建）
 ```
 
 ## 2. Demo 怎么跑
