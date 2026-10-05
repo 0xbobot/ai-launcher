@@ -9,8 +9,6 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
@@ -18,10 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.bobot.ailauncher.core.brain.AiBrain
@@ -110,69 +105,8 @@ class MainActivity : ComponentActivity() {
                 var showBatteryPrompt by remember {
                     mutableStateOf(!prefs.getBoolean(KEY_BATTERY_ASKED, false))
                 }
-                // v0.32.1：Compose 内绘制系统壁纸（视觉透明，窗口不透明保证触摸）
-                // v0.32.3：改用 getWallpaperFile（部分机型 getDrawable 不可靠）
-                val wallpaperBitmap = remember {
-                    try {
-                        val wm = android.app.WallpaperManager.getInstance(this)
-                        // 优先用 wallpaper file（最可靠）
-                        var bitmap: android.graphics.Bitmap? = null
-                        try {
-                            wm.getWallpaperFile(android.app.WallpaperManager.FLAG_SYSTEM)?.use { pfd ->
-                                val fd = pfd.fileDescriptor
-                                bitmap = android.graphics.BitmapFactory.decodeFileDescriptor(fd)
-                            }
-                        } catch (_: Exception) { }
-                        // 兜底：drawable 转 bitmap
-                        if (bitmap == null) {
-                            val drawable = wm.drawable
-                            bitmap = drawable?.let { d ->
-                                val w = d.intrinsicWidth.coerceAtLeast(1)
-                                val h = d.intrinsicHeight.coerceAtLeast(1)
-                                if (w > 0 && h > 0) {
-                                    val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
-                                    val canvas = android.graphics.Canvas(bmp)
-                                    d.setBounds(0, 0, w, h)
-                                    d.draw(canvas)
-                                    bmp
-                                } else null
-                            }
-                        }
-                        bitmap?.let {
-                            val displayMetrics = resources.displayMetrics
-                            val targetW = displayMetrics.widthPixels
-                            val targetH = displayMetrics.heightPixels
-                            if (it.width > targetW || it.height > targetH) {
-                                val scale = minOf(
-                                    targetW.toFloat() / it.width,
-                                    targetH.toFloat() / it.height
-                                )
-                                val w = (it.width * scale).toInt().coerceAtLeast(1)
-                                val h = (it.height * scale).toInt().coerceAtLeast(1)
-                                android.graphics.Bitmap.createScaledBitmap(it, w, h, true)
-                                    .asImageBitmap()
-                            } else {
-                                it.asImageBitmap()
-                            }
-                        }
-                    } catch (_: Exception) { null }
-                }
+                // v0.37.2：系统壁纸直接透出（windowShowWallpaper），不再手动绘制
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // 底层：系统壁纸（视觉透明）
-                    if (wallpaperBitmap != null) {
-                        Image(
-                            bitmap = wallpaperBitmap,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color(0xFFF4F2EE))
-                        )
-                    }
                     if (onboarded) {
                         MainScreen()
                     } else {
