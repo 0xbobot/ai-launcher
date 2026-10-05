@@ -39,6 +39,12 @@ class MainActivity : ComponentActivity() {
 
     private var downloadReceiver: BroadcastReceiver? = null
 
+    // v0.36.1：低电量守护默认开启，但用户可能从没拨过开关，
+    // 导致 POST_NOTIFICATIONS 从未申请、提醒发不出。启动时补申请。
+    private val notifPermissionLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { /* 用户拒绝就安静失败，下次启动再问 */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // v0.32.3：冷启动时也处理快捷方式
@@ -56,6 +62,14 @@ class MainActivity : ComponentActivity() {
         PetRepository.init(this)
         // v0.28.0：低电量守护（默认开启，温和提醒）
         if (com.bobot.ailauncher.data.BatteryGuardPrefs.isEnabled(this)) {
+            // v0.36.1：Android 13+ 没通知权限就申请，否则提醒发不出
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(
+                    this, android.Manifest.permission.POST_NOTIFICATIONS
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
             com.bobot.ailauncher.service.BatteryGuardService.start(this)
         }
         // OTA：版本变化后清理旧安装包，避免"直接安装"命中旧包
