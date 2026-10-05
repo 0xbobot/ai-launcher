@@ -56,6 +56,17 @@ class BatteryGuardActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // v0.36.1：确保能盖住全屏视频/游戏
+        if (android.os.Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
         val pct = intent.getIntExtra(EXTRA_PCT, 10)
         val critical = intent.getBooleanExtra(EXTRA_CRITICAL, false)
         setContent {

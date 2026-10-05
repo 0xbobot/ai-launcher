@@ -88,13 +88,14 @@
                 android:value="低电量守护：电量过低时温和提醒" />
         </service>
 
-        <!-- 低电量提醒弹窗：半透明主题，居中温和卡片 -->
+        <!-- 低电量提醒弹窗：半透明主题，居中温和卡片。
+             v0.36.1：全屏 intent 必须能盖住视频/游戏等全屏应用 -->
         <activity
             android:name=".ui.battery.BatteryGuardActivity"
             android:exported="false"
             android:theme="@style/Theme.AILauncher.BatteryGuard"
-            android:showOnLockScreen="false"
-            android:turnScreenOn="false" />
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
 
         <!-- OTA 安装：FileProvider 把下载好的 APK 授权给系统安装器 -->
         <provider
