@@ -3,7 +3,9 @@
     <!-- v0.32.1：窗口改回不透明——半透明窗口导致触摸层级错乱（有时浮上层可点，有时沉下层无响应）。
          视觉透明靠 Compose 内绘制系统壁纸实现，触摸正常 -->
     <style name="Theme.AILauncher" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
+        <!-- v0.37.0：Niagara 式壁纸——系统壁纸直接透出，不再手动 draw bitmap -->
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
