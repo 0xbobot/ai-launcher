@@ -18,3 +18,7 @@ app/build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Live2D（七仔小世界，live2d-mvp 分支）：官方 SDK 二进制/源码不进 git，
+# 需手动下载到 third_party/live2d/sdk（见 docs/live2d-mvp/ANDROID_RENDERING.md）。
+/third_party/live2d/sdk/
