@@ -136,17 +136,17 @@ class MainActivity : ComponentActivity() {
                                     onClick = {
                                         prefs.edit().putBoolean(KEY_BATTERY_ASKED, true).apply()
                                         showBatteryPrompt = false
-                                        com.bobot.ailauncher.data.BatteryGuardPrefs.setEnabled(this, true)
+                                        com.bobot.ailauncher.data.BatteryGuardPrefs.setEnabled(this@MainActivity, true)
                                         // 主动申请通知权限
                                         if (Build.VERSION.SDK_INT >= 33 &&
                                             ContextCompat.checkSelfPermission(
-                                                this,
+                                                this@MainActivity,
                                                 android.Manifest.permission.POST_NOTIFICATIONS
                                             ) != android.content.pm.PackageManager.PERMISSION_GRANTED
                                         ) {
                                             notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                                         }
-                                        com.bobot.ailauncher.service.BatteryGuardService.start(this)
+                                        com.bobot.ailauncher.service.BatteryGuardService.start(this@MainActivity)
                                     }
                                 ) { androidx.compose.material3.Text("开启") }
                             },
@@ -155,7 +155,7 @@ class MainActivity : ComponentActivity() {
                                     onClick = {
                                         prefs.edit().putBoolean(KEY_BATTERY_ASKED, true).apply()
                                         showBatteryPrompt = false
-                                        com.bobot.ailauncher.data.BatteryGuardPrefs.setEnabled(this, false)
+                                        com.bobot.ailauncher.data.BatteryGuardPrefs.setEnabled(this@MainActivity, false)
                                     }
                                 ) { androidx.compose.material3.Text("不用") }
                             }

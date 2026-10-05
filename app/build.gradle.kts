@@ -61,6 +61,17 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // Live2D demo 的 debug Activity 引用 :live2d 模块；SDK（Core AAR）不存在时
+    // 模块不会被 include（见 settings.gradle.kts），此时把该文件排除在编译外，
+    // 保证没 SDK 的机器（CI）也能正常构建。有 SDK 的机器（VPS）不受影响。
+    sourceSets {
+        getByName("debug") {
+            if (!file("../third_party/live2d/sdk/Core/android/Live2DCubismCore.aar").exists()) {
+                java.exclude("**/Live2DDemoActivity.kt")
+            }
+        }
+    }
 }
 
 dependencies {
