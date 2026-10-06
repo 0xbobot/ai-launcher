@@ -125,10 +125,13 @@ internal fun AppRow(
                 .clip(RoundedCornerShape(12.dp))
         ) {
             // 内容：跟手滑动，保持透明（B 方案呼吸感，不加白底）
+            // v0.41.15：左滑时内容整体淡出——图标先变透明，避免被生硬裁掉（Bob 反馈丑）
+            val contentAlpha = 1f - (-offsetX.value / buttonWidthPx).coerceIn(0f, 1f)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                    .graphicsLayer { alpha = contentAlpha }
                     .pointerInput(app.packageName) {
                         detectHorizontalDragGestures(
                             onDragEnd = {
