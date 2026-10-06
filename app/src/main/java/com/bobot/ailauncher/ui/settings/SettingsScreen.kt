@@ -73,6 +73,7 @@ import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.data.BatteryFullScreen
 import com.bobot.ailauncher.data.BatteryGuard
 import com.bobot.ailauncher.data.BatteryGuardPrefs
+import com.bobot.ailauncher.data.BatteryInterrupt
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
@@ -380,6 +381,41 @@ fun SettingsScreen(
                                 fontSize = 12.sp,
                                 color = AILauncherColors.Hint
                             )
+                            // v0.41.14：悬浮窗权限——开了才能在看视频/玩游戏时强制弹出并暂停播放
+                            var overlayOk by remember {
+                                mutableStateOf(BatteryInterrupt.canDrawOverlays(context))
+                            }
+                            DisposableEffect(guardLifecycle) {
+                                val obs2 = LifecycleEventObserver { _, e ->
+                                    if (e == Lifecycle.Event.ON_RESUME)
+                                        overlayOk = BatteryInterrupt.canDrawOverlays(context)
+                                }
+                                guardLifecycle.lifecycle.addObserver(obs2)
+                                onDispose { guardLifecycle.lifecycle.removeObserver(obs2) }
+                            }
+                            if (!overlayOk) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "强制打断未开启：低电时不能盖住视频并暂停播放",
+                                        fontSize = 12.sp,
+                                        color = Color(0xFFB7791F),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(onClick = {
+                                        BatteryInterrupt.openOverlaySettings(context)
+                                    }) {
+                                        Text(
+                                            text = "去开启",
+                                            fontSize = 13.sp,
+                                            color = AILauncherColors.Accent
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

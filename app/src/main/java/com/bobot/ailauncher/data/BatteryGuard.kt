@@ -50,10 +50,11 @@ object BatteryGuard {
             // 电池状态同步给七仔省电模式
             BatteryState.update(pct, charging)
 
-            // 充电中或回升到安全线以上：重置，下轮再提醒
+            // 充电中或回升到安全线以上：重置，下轮再提醒；归还音频焦点
             if (charging || pct >= RESET_PCT) {
                 warnFired = false
                 criticalFired = false
+                BatteryInterrupt.abandonAudioFocus()
                 return
             }
 
@@ -116,8 +117,19 @@ object BatteryGuard {
         )
     }
 
-    /** 低电量提醒：高优先级通知 + 全屏温和弹窗（来电同款机制） */
+    /**
+     * 低电量提醒。
+     * v0.41.14（Bob 要求中断播放）：critical 档先申请音频焦点（暂停视频省电），
+     * 再尝试直接启动全屏（有悬浮窗权限时稳定盖住）；没权限则降级全屏通知。
+     * warn 档保持温和：只通知，不抢焦点。
+     */
     private fun fireAlert(context: Context, pct: Int, critical: Boolean) {
+        if (critical) {
+            // 先暂停正在播放的视频/音乐（省电的关键）
+            BatteryInterrupt.requestAudioFocus(context)
+            // 有悬浮窗权限 → 直接全屏盖住；没有 → 降级全屏通知
+            if (BatteryInterrupt.launchAlertDirectly(context, pct, critical)) return
+        }
         val fullScreen = Intent(context, BatteryGuardActivity::class.java).apply {
             putExtra(BatteryGuardActivity.EXTRA_PCT, pct)
             putExtra(BatteryGuardActivity.EXTRA_CRITICAL, critical)

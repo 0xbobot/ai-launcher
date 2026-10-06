@@ -95,6 +95,12 @@ class BatteryGuardActivity : ComponentActivity() {
             )
         }
     }
+
+    override fun onDestroy() {
+        // v0.41.14：提醒关掉 → 归还音频焦点，视频 App 可恢复播放
+        com.bobot.ailauncher.data.BatteryInterrupt.abandonAudioFocus()
+        super.onDestroy()
+    }
 }
 
 @Composable

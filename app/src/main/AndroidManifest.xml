@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- 低电量提醒：全屏温和弹窗（来电同款机制，Android 14+ 需声明） -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- v0.41.14：低电强制打断——悬浮窗权限，后台直接启动全屏提醒（用户去设置开一次） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 日历：首页「今日日程」卡片 -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- 录音：意图框语音输入 -->
