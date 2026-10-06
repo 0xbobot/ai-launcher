@@ -833,7 +833,6 @@ private fun rememberPullDownConnection(
  * v0.41.9：已隐藏应用视图（Bob）——字母导航的眼睛入口 + 生物识别通过后显示。
  * 列表只显示已隐藏应用，每行可"恢复显示"；返回按钮回到正常列表。
  */
-@Composable
 /**
  * v0.41.17（Bob）：隐藏区"已锁定"状态页——解锁前显示，不直接弹验证。
  * 中央锁图标 + "已隐藏应用" + "解锁查看"按钮；验证失败在页内显示错误，不 toast。
@@ -935,6 +934,7 @@ private fun HiddenAppsLockedView(
     }
 }
 
+@Composable
 private fun HiddenAppsView(
     hiddenApps: List<AppInfo>,
     onBack: () -> Unit,
