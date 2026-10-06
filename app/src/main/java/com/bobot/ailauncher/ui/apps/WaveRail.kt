@@ -4,7 +4,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
@@ -25,17 +25,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -56,6 +51,8 @@ internal enum class RailSide { LEFT, RIGHT }
  * - 拖动时：附近字母按高斯衰减放大并向内鼓起，大气泡在靠应用的一侧跟随手指；
  *   列表进入聚焦模式（只显示当前字母），松手恢复全量
  * - 字母切换时给一记震动（v0.40.2：用 LongPress，TextHandleMove 在部分机型上无感）
+ * - v0.41.0（B 方案·呼吸感）：rail 字母更细更淡（10sp/Normal/提示灰），
+ *   当前字母气泡从实心金圆改为金环（描边 2dp + 深色字母），更轻
  * - 只做定位，不承载其他功能
  */
 @Composable
@@ -180,18 +177,11 @@ internal fun WaveRail(
                 ) {
                     Text(
                         text = ch.toString(),
-                        fontSize = 11.sp,
-                        // v0.25.10：滑动时不换颜色（Bob）
-                        color = AILauncherColors.Title.copy(alpha = 0.85f),
-                        fontWeight = FontWeight.SemiBold,
+                        // v0.41.0（B 方案）：更细更淡——10sp/常规字重/提示灰
+                        fontSize = 10.sp,
+                        color = AILauncherColors.Hint,
+                        fontWeight = FontWeight.Normal,
                         maxLines = 1,
-                        style = TextStyle(
-                            shadow = Shadow(
-                                color = Color.White.copy(alpha = 0.6f),
-                                offset = Offset(0f, 1f),
-                                blurRadius = 2f
-                            )
-                        ),
                         modifier = Modifier.graphicsLayer {
                             // 高斯波浪：越靠近手指越大；波浪整体再往拇指反方向避让
                             translationX = dirSign * bulgePx * g + waveShiftX * g
@@ -206,6 +196,7 @@ internal fun WaveRail(
         } // if (visible)
 
         // 当前字母气泡：靠应用的一侧（远离 rail），跟随手指高度（隐形触发区不画）
+        // v0.41.0（B 方案）：实心金圆 → 金环（2dp 描边 + 深色字母），更轻
         if (visible && displayIndex >= 0) {
             val idx = displayIndex.coerceIn(letters.indices)
             val rPx = with(density) { 24.dp.toPx() }
@@ -219,15 +210,14 @@ internal fun WaveRail(
                         )
                     }
                     .size(48.dp)
-                    .clip(CircleShape)
-                    .background(AILauncherColors.Accent),
+                    .border(2.dp, AILauncherColors.Accent, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = letters[idx].toString(),
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = AILauncherColors.Title
                 )
             }
         }

@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,11 +49,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -185,13 +186,14 @@ fun AppCenterContent(
 
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
-    // 字母 → LazyColumn item index（每字母：1 头 + N 行）
+    // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
+    // v0.41.0（B 方案）：组头字母已并入组首行的幽灵字母（AppRow ghostLetter），不再占 item
     val letterAnchors = remember(azGroups) {
         val m = mutableMapOf<Char, Int>()
         var idx = 0
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
-            idx += 1 + apps.size
+            idx += apps.size + 1
         }
         m
     }
@@ -232,7 +234,8 @@ fun AppCenterContent(
             .fillMaxSize()
             .statusBarsPadding()
     ) {
-        // ---- Header：标题 + 设置；标题区右滑/顶部下滑 → D2 ----
+        // ---- Header（v0.41.0 B 方案·呼吸感）：去大标题，搜索收成一条细线 + 设置齿轮 ----
+        // 顶栏下滑 → D2；顶栏右滑 → 回记住的 Dock 档（手势签名：右滑=更少）
         val headThreshPx = with(density) { 80.dp.toPx() }
         Column(
             modifier = Modifier.pointerInput(Unit) {
@@ -257,7 +260,7 @@ fun AppCenterContent(
                     .fillMaxWidth()
                     .padding(start = 20.dp, end = 12.dp, top = 20.dp)
                     .pointerInput(Unit) {
-                        // 标题区右滑 → 回到记住的 Dock 行数（手势签名：右滑=更少）
+                        // 顶栏右滑 → 回到记住的 Dock 行数（手势签名：右滑=更少）
                         var accumX = 0f
                         var fired = false
                         val hPx = with(density) { 48.dp.toPx() }
@@ -277,13 +280,55 @@ fun AppCenterContent(
                     },
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "应用",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AILauncherColors.Title,
-                    modifier = Modifier.weight(1f)
-                )
+                // v0.21 搜索框：拼音/首字母/自然语言/模糊（PRD §三十三）
+                val keyboardController =
+                    androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                Column(modifier = Modifier.weight(1f)) {
+                    TextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = {
+                            Text(
+                                "搜索应用，支持拼音/首字母",
+                                fontSize = 14.sp,
+                                color = AILauncherColors.Hint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        trailingIcon = {
+                            if (query.isNotEmpty()) {
+                                IconButton(onClick = { query = "" }) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "清空",
+                                        tint = AILauncherColors.Hint
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            keyboardController?.hide()
+                        }),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            focusedTextColor = AILauncherColors.Title,
+                            unfocusedTextColor = AILauncherColors.Title,
+                            cursorColor = AILauncherColors.Accent
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    HorizontalDivider(
+                        color = AILauncherColors.Divider,
+                        thickness = 1.dp
+                    )
+                }
                 IconButton(onClick = onOpenSettings) {
                     Icon(
                         Icons.Filled.Settings,
@@ -292,61 +337,6 @@ fun AppCenterContent(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            // v0.21 搜索框：拼音/首字母/自然语言/模糊（PRD §三十三）
-            val keyboardController =
-                androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-            TextField(
-                value = query,
-                onValueChange = { query = it },
-                placeholder = {
-                    Text(
-                        "搜索应用，支持拼音/首字母",
-                        fontSize = 14.sp,
-                        color = AILauncherColors.Hint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        Icons.Filled.Search,
-                        contentDescription = null,
-                        tint = AILauncherColors.Hint
-                    )
-                },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(
-                                Icons.Filled.Close,
-                                contentDescription = "清空",
-                                tint = AILauncherColors.Hint
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = {
-                    keyboardController?.hide()
-                }),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = AILauncherColors.GlassCard,
-                    unfocusedContainerColor = AILauncherColors.GlassCard,
-                    disabledContainerColor = AILauncherColors.GlassCard,
-                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    focusedTextColor = AILauncherColors.Title,
-                    unfocusedTextColor = AILauncherColors.Title,
-                    cursorColor = AILauncherColors.Accent
-                ),
-                shape = RoundedCornerShape(99.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-            )
-            // v0.25.5：最近使用横条已删除（Bob：不好看不协调）
             Spacer(modifier = Modifier.height(8.dp))
         }
 
@@ -412,17 +402,9 @@ fun AppCenterContent(
                     item { Spacer(modifier = Modifier.height(24.dp)) }
                 } else {
                 // v0.25.7：去掉"全部应用"标题（Bob）
-                // A-Z 列表
+                // A-Z 列表（v0.41.0 B 方案：组头字母并入组首行幽灵字母，组间留呼吸间距）
                 azGroups.forEach { (letter, apps) ->
-                    item(key = "h:$letter") {
-                        Text(
-                            text = letter.toString(),
-                            fontSize = 13.sp,
-                            color = AILauncherColors.Hint,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp, start = 4.dp)
-                        )
-                    }
-                    items(apps, key = { "a:${it.packageName}" }) { app ->
+                    itemsIndexed(apps, key = { _, app -> "a:${app.packageName}" }) { index, app ->
                         Box(modifier = Modifier.fillMaxWidth()) {
                             AppRow(
                                 app = app,
@@ -438,7 +420,8 @@ fun AppCenterContent(
                                         if (expanded) app.packageName
                                         else if (expandedActionsPkg == app.packageName) null
                                         else expandedActionsPkg
-                                }
+                                },
+                                ghostLetter = if (index == 0) letter else null
                             )
                             AppPopupMenu(
                                 app = app,
@@ -447,6 +430,7 @@ fun AppCenterContent(
                             )
                         }
                     }
+                    item(key = "sp:$letter") { Spacer(modifier = Modifier.height(24.dp)) }
                 }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表

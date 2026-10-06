@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,7 +72,10 @@ internal fun AppRow(
     onLongClick: () -> Unit,
     onHide: (AppInfo) -> Unit,
     actionsVisible: Boolean,
-    onActionsVisibleChange: (Boolean) -> Unit
+    onActionsVisibleChange: (Boolean) -> Unit,
+    // v0.41.0（B 方案·呼吸感）：组首行在左侧 72dp 留白里画一枚幽灵衬线字母，
+    // 极淡（9%），不与行重叠；搜索态传 null
+    ghostLetter: Char? = null
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -123,6 +127,20 @@ internal fun AppRow(
         }
     }
 
+    // v0.41.0（B 方案）：幽灵字母——衬线、极淡，收进左侧 72dp 留白（列表 start padding），
+    // 不与行重叠；那块留白同时是左侧隐形 rail 触发区，一举两用
+    Box(modifier = Modifier.fillMaxWidth()) {
+        if (ghostLetter != null) {
+            Text(
+                text = ghostLetter.toString(),
+                fontFamily = FontFamily.Serif,
+                fontSize = 44.sp,
+                color = AILauncherColors.Title.copy(alpha = 0.09f),
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = (-58).dp)
+            )
+        }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -153,8 +171,8 @@ internal fun AppRow(
                     )
                 }
                 .combinedClickable(onClick = onLaunch, onLongClick = onLongClick)
-                // v0.25.9：更紧凑——纵向 padding 8dp，图标 36dp
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                // v0.41.0（B 方案）：行距拉大——纵向 padding 12dp，图标 40dp，呼吸感
+                .padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Crossfade(
@@ -171,8 +189,8 @@ internal fun AppRow(
                             drawable = app.icon,
                             contentDescription = app.label.toString(),
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(9.dp))
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
@@ -190,8 +208,8 @@ internal fun AppRow(
                             drawable = app.icon,
                             contentDescription = app.label.toString(),
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(9.dp))
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
@@ -229,6 +247,7 @@ internal fun AppRow(
                 }
             }
         }
+    }
     }
 
     // 右滑隐藏确认框
