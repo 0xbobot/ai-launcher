@@ -58,9 +58,8 @@ internal fun AppRow(
     onHide: (AppInfo) -> Unit,
     actionsVisible: Boolean,
     onActionsVisibleChange: (Boolean) -> Unit,
-    // v0.41.18：已隐藏分组内的应用——禁用右滑隐藏手势（已经是隐藏的）
-    isHidden: Boolean = false,
-    // v0.41.19（Bob）：隐藏分组内左滑=恢复显示（长按菜单与其他应用一致，不再放恢复）
+    // v0.41.20（Bob）：右滑=隐藏或取消隐藏——隐藏分组内的应用传 onUnhide，
+    // 普通应用 onUnhide 为 null，右滑=隐藏。
     onUnhide: ((AppInfo) -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -114,10 +113,15 @@ internal fun AppRow(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
         ) {
-            // 内容：完全静态，始终完整可见（B 方案呼吸感）
+            // 内容：左滑时完全静态（v0.41.16 Bob：不再位移）；
+            // v0.41.20（Bob）：右滑时内容跟手往右滑动，露出左侧眼睛图标
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .graphicsLayer {
+                        // 右滑（dragDist 为负）时内容右移
+                        translationX = (-dragDist).coerceAtLeast(0f)
+                    }
                     .pointerInput(app.packageName) {
                         detectHorizontalDragGestures(
                             onDragEnd = {
@@ -143,10 +147,9 @@ internal fun AppRow(
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
                                 // 左滑 dragAmount 为负，转成正数距离
-                                // v0.41.18：已隐藏的应用禁用右滑（dragDist 不为负）
-                                val newDist = (dragDist - dragAmount)
+                                // v0.41.20：右滑（dragDist 为负）内容跟手右移
+                                dragDist = (dragDist - dragAmount)
                                     .coerceIn(-maxDragPx, maxDragPx)
-                                dragDist = if (isHidden) newDist.coerceAtLeast(0f) else newDist
                             }
                         )
                     }
@@ -180,7 +183,7 @@ internal fun AppRow(
             }
 
             // ★：跟手出现/放大。dragDist 驱动透明度和缩放，松手后由 actionsVisible 保持。
-            // v0.41.19（Bob）：隐藏分组内左滑显示"恢复显示"（眼睛图标），不再是 ★
+            // v0.41.20（Bob）：所有应用左滑统一是 ★（加到/取消 Dock），包括隐藏分组内的
             val starProgress = if (actionsVisible) 1f
                 else (dragDist / revealPx).coerceIn(0f, 1f)
             if (starProgress > 0.01f) {
@@ -200,36 +203,24 @@ internal fun AppRow(
                         .clickable(
                             enabled = actionsVisible || dragDist > revealPx / 2,
                             onClick = {
-                                if (isHidden) {
-                                    onUnhide?.invoke(app)
-                                } else {
-                                    togglePin()
-                                }
+                                togglePin()
                                 hideStar()
                             }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isHidden) {
-                        Icon(
-                            imageVector = Icons.Filled.Visibility,
-                            contentDescription = "恢复显示",
-                            tint = Color(0xFF8A8478),
-                            modifier = Modifier.size(26.dp)
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Filled.Star,
-                            contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
-                            tint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Filled.Star,
+                        contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
+                        tint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
+                        modifier = Modifier.size(26.dp)
+                    )
                 }
             }
 
-            // v0.41.17（Bob）：右滑隐藏也用图标表示——左侧眼睛图标，跟手出现，点按直接隐藏
-            // v0.41.18（Bob）：图标移到左侧留白（translationX），不和应用图标重叠
+            // v0.41.20（Bob）：右滑=隐藏或取消隐藏——内容跟手右移，左侧露出眼睛图标；
+            // 隐藏分组内的应用点眼睛=取消隐藏（onUnhide），普通应用=隐藏（onHide）。
+            // 拖动时图标在原位（内容已右移让出空间）；松手保持后移到留白避免重叠。
             val hideProgress = if (hideIconShown) 1f
                 else (-dragDist / revealPx).coerceIn(0f, 1f)
             if (hideProgress > 0.01f) {
@@ -239,22 +230,25 @@ internal fun AppRow(
                         .size(48.dp)
                         .graphicsLayer {
                             alpha = hideProgress
-                            // 左移 30dp 到行左留白区，避开应用图标（12dp 起）
-                            translationX = with(density) { (-30).dp.toPx() }
+                            // 保持显示时左移 30dp 到留白，拖动时在原位（内容右移已让位）
+                            translationX = with(density) {
+                                (if (hideIconShown) -30 else 0).dp.toPx()
+                            }
                         }
                         .clip(CircleShape)
                         .clickable(
                             enabled = hideIconShown || dragDist < -revealPx / 2,
                             onClick = {
-                                onHide(app)
+                                if (onUnhide != null) onUnhide(app) else onHide(app)
                                 hideStar()
                             }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.VisibilityOff,
-                        contentDescription = "隐藏",
+                        imageVector = if (onUnhide != null) Icons.Filled.Visibility
+                            else Icons.Filled.VisibilityOff,
+                        contentDescription = if (onUnhide != null) "取消隐藏" else "隐藏",
                         tint = Color(0xFF8A8478),
                         modifier = Modifier.size(26.dp)
                     )

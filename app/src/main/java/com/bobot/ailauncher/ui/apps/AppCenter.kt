@@ -221,12 +221,6 @@ fun AppCenterContent(
         }
         m
     }
-    // v0.41.18：隐藏分组的滚动锚点（主列表末尾，A-Z 之后）
-    val hiddenAnchor = remember(azGroups, hiddenApps) {
-        var idx = 0
-        azGroups.forEach { (_, apps) -> idx += apps.size + 1 }
-        idx
-    }
 
     // v0.41.8：手动吸顶——当前组首行滚出顶部后，悬停 overlay 接管显示；
     // 下一组首行接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走）
@@ -560,6 +554,7 @@ fun AppCenterContent(
                     item(key = "sp:$letter") { Spacer(modifier = Modifier.height(24.dp)) }
                 }
                 // v0.41.18（Bob）：隐藏分组——主列表末尾，像 ABCD 分组一样；
+                // v0.41.20（Bob）：不显示"已隐藏"标题文字，只留幽灵图标。
                 // 未解锁显示锁定占位，解锁后应用可直接打开（不用先恢复）。
                 if (hiddenApps.isNotEmpty()) {
                     item(key = "hidden-header") {
@@ -573,14 +568,6 @@ fun AppCenterContent(
                                     .align(Alignment.CenterStart)
                                     .padding(start = 20.dp)
                                     .size(36.dp)
-                            )
-                            Text(
-                                text = "已隐藏",
-                                fontSize = 13.sp,
-                                color = AILauncherColors.Hint,
-                                modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .padding(start = 64.dp)
                             )
                         }
                     }
@@ -627,8 +614,7 @@ fun AppCenterContent(
                                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                         popupApp = app
                                     },
-                                    onHide = {}, // 已隐藏：右滑不再隐藏
-                                    isHidden = true, // 禁用右滑隐藏手势；左滑=恢复显示
+                                    onHide = {}, // 隐藏分组内：右滑=取消隐藏
                                     onUnhide = ::unhideApp,
                                     actionsVisible = expandedActionsPkg == app.packageName,
                                     onActionsVisibleChange = { expanded ->
@@ -743,31 +729,8 @@ fun AppCenterContent(
                     onRelease = { mirrorIndex = null },
                     modifier = Modifier.align(Alignment.CenterStart)
                 )
-                // v0.41.18（Bob）：眼睛图标——点按滚动到主列表末尾的"隐藏"分组。
-                // 若未解锁，先触发面部/指纹，验证通过后自动滚到分组。
-                if (!searching && hiddenApps.isNotEmpty()) {
-                    IconButton(
-                        onClick = {
-                            if (!hiddenUnlocked) {
-                                unlockHiddenApps()
-                            }
-                            // 滚到隐藏分组（解锁后列表会展开，锚点仍有效）
-                            scope.launch {
-                                listState.animateScrollToItem(hiddenAnchor)
-                            }
-                        },
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(bottom = 28.dp, end = 12.dp)
-                    ) {
-                        Icon(
-                            Icons.Filled.VisibilityOff,
-                            contentDescription = "已隐藏应用",
-                            tint = AILauncherColors.Hint,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
+                // v0.41.20（Bob）：右下角眼睛按钮已删除——隐藏分组在主列表末尾，
+                // 直接滚动到底就能看到（未解锁显示锁定占位）。
             }
         }
     }
