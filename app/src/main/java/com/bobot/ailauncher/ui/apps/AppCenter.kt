@@ -299,6 +299,9 @@ fun AppCenterContent(
 
     // v0.16.1：A-Z 行左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
     var expandedActionsPkg by remember { mutableStateOf<String?>(null) }
+    // v0.41.23（Bob v4）：右滑眼睛保持状态——与 expandedActionsPkg 互斥，
+    // 同一时间只有一个应用生效
+    var revealedHidePkg by remember { mutableStateOf<String?>(null) }
 
     // v0.35.0：首次左滑新手引导——只展示一次，之后不再打扰
     var showActionsGuide by remember { mutableStateOf(false) }
@@ -485,10 +488,22 @@ fun AppCenterContent(
                                     onHide = ::hideApp,
                                     actionsVisible = expandedActionsPkg == app.packageName,
                                     onActionsVisibleChange = { expanded ->
-                                        expandedActionsPkg =
-                                            if (expanded) app.packageName
-                                            else if (expandedActionsPkg == app.packageName) null
-                                            else expandedActionsPkg
+                                        // v0.41.23：与 revealedHidePkg 互斥
+                                        if (expanded) {
+                                            expandedActionsPkg = app.packageName
+                                            revealedHidePkg = null
+                                        } else if (expandedActionsPkg == app.packageName) {
+                                            expandedActionsPkg = null
+                                        }
+                                    },
+                                    hideVisible = revealedHidePkg == app.packageName,
+                                    onHideVisibleChange = { visible ->
+                                        if (visible) {
+                                            revealedHidePkg = app.packageName
+                                            expandedActionsPkg = null
+                                        } else if (revealedHidePkg == app.packageName) {
+                                            revealedHidePkg = null
+                                        }
                                     }
                                 )
                                 AppPopupMenu(
@@ -626,10 +641,22 @@ fun AppCenterContent(
                                     onUnhide = ::unhideApp,
                                     actionsVisible = expandedActionsPkg == app.packageName,
                                     onActionsVisibleChange = { expanded ->
-                                        expandedActionsPkg =
-                                            if (expanded) app.packageName
-                                            else if (expandedActionsPkg == app.packageName) null
-                                            else expandedActionsPkg
+                                        // v0.41.23：与 revealedHidePkg 互斥
+                                        if (expanded) {
+                                            expandedActionsPkg = app.packageName
+                                            revealedHidePkg = null
+                                        } else if (expandedActionsPkg == app.packageName) {
+                                            expandedActionsPkg = null
+                                        }
+                                    },
+                                    hideVisible = revealedHidePkg == app.packageName,
+                                    onHideVisibleChange = { visible ->
+                                        if (visible) {
+                                            revealedHidePkg = app.packageName
+                                            expandedActionsPkg = null
+                                        } else if (revealedHidePkg == app.packageName) {
+                                            revealedHidePkg = null
+                                        }
                                     }
                                 )
                                 AppPopupMenu(

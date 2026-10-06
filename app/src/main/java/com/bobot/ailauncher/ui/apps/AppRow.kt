@@ -60,7 +60,10 @@ internal fun AppRow(
     onActionsVisibleChange: (Boolean) -> Unit,
     // v0.41.20（Bob）：右滑=隐藏或取消隐藏——隐藏分组内的应用传 onUnhide，
     // 普通应用 onUnhide 为 null，右滑=隐藏。
-    onUnhide: ((AppInfo) -> Unit)? = null
+    onUnhide: ((AppInfo) -> Unit)? = null,
+    // v0.41.23（Bob v4 统一版）：右滑眼睛的保持状态（与 actionsVisible 互斥，列表级管理）
+    hideVisible: Boolean = false,
+    onHideVisibleChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -88,41 +91,42 @@ internal fun AppRow(
         }
     }
 
-    // v0.41.16（Bob）：滑动后空白分不清——内容不再移动/淡出，始终完整可见；
-    // ★ 的出现/放大跟手指走（跟手反馈），松手后按阈值定。图标不再被裁。
+    // v0.41.23（Bob v4 统一版）：图标原地交叉溶解成动作图标，标题淡出，位置不动。
+    // 左滑=★（金），右滑=眼睛（灰）。溶解进度跟手指走。
     var dragDist by remember { mutableStateOf(0f) } // 左滑为正
-    var hideIconShown by remember { mutableStateOf(false) } // 右滑隐藏图标是否保持显示
     val revealPx = with(density) { 56.dp.toPx() }
     val fullPx = with(density) { 120.dp.toPx() }
     val maxDragPx = with(density) { 160.dp.toPx() }
 
-    fun hideStar() {
+    fun hideAll() {
         dragDist = 0f
         onActionsVisibleChange(false)
-        hideIconShown = false
+        onHideVisibleChange(false)
+    }
+
+    // 溶解进度：左滑或 ★ 保持时用左进度，右滑或眼睛保持时用右进度
+    val isLeft = actionsVisible || dragDist > 0
+    val dissolveProgress = when {
+        actionsVisible || hideVisible -> 1f
+        dragDist > 0 -> (dragDist / revealPx).coerceIn(0f, 1f)
+        dragDist < 0 -> (-dragDist / revealPx).coerceIn(0f, 1f)
+        else -> 0f
     }
 
     // 外部收起（如另一行展开）时
-    LaunchedEffect(actionsVisible) {
-        if (!actionsVisible) dragDist = 0f
+    LaunchedEffect(actionsVisible, hideVisible) {
+        if (!actionsVisible && !hideVisible) dragDist = 0f
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                // v0.41.21（Bob）：去掉圆角裁剪——右滑眼睛图标移到左侧留白时
-                // 会被父容器 clip 掉一半，显示不完整
         ) {
-            // 内容：左滑时完全静态（v0.41.16 Bob：不再位移）；
-            // v0.41.20（Bob）：右滑时内容跟手往右滑动，露出左侧眼睛图标
+            // 内容：v0.41.23 统一版——位置不动，图标溶解、标题淡出
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .graphicsLayer {
-                        // 右滑（dragDist 为负）时内容右移
-                        translationX = (-dragDist).coerceAtLeast(0f)
-                    }
                     .pointerInput(app.packageName) {
                         detectHorizontalDragGestures(
                             onDragEnd = {
@@ -130,7 +134,7 @@ internal fun AppRow(
                                     dragDist > fullPx -> {
                                         // 左滑满 → 直接加到 Dock（或移出）
                                         togglePin()
-                                        hideStar()
+                                        hideAll()
                                     }
                                     dragDist > revealPx -> {
                                         // 左滑=多：★ 保持显示，点按触发
@@ -138,9 +142,15 @@ internal fun AppRow(
                                         onActionsVisibleChange(true)
                                     }
                                     dragDist < -revealPx -> {
-                                        // 右滑=少：隐藏图标保持显示，点按隐藏（v0.41.17 Bob：用图标表示）
+                                    dragDist > revealPx -> {
+                                        // 左滑=多：★ 保持显示，点按触发
                                         dragDist = 0f
-                                        hideIconShown = true
+                                        onActionsVisibleChange(true)
+                                    }
+                                    dragDist < -revealPx -> {
+                                        // 右滑=少：眼睛保持显示，点按隐藏/取消隐藏
+                                        dragDist = 0f
+                                        onHideVisibleChange(true)
                                     }
                                     else -> dragDist = 0f
                                 }
@@ -148,7 +158,6 @@ internal fun AppRow(
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
                                 // 左滑 dragAmount 为负，转成正数距离
-                                // v0.41.20：右滑（dragDist 为负）内容跟手右移
                                 dragDist = (dragDist - dragAmount)
                                     .coerceIn(-maxDragPx, maxDragPx)
                             }
@@ -156,8 +165,8 @@ internal fun AppRow(
                     }
                     .combinedClickable(
                         onClick = {
-                            // ★/隐藏图标显示时点行 = 收起；否则启动应用
-                            if (actionsVisible || hideIconShown) hideStar()
+                            // 动作图标显示时点行 = 收起复原；否则启动应用
+                            if (actionsVisible || hideVisible) hideAll()
                             else onLaunch()
                         },
                         onLongClick = onLongClick
@@ -166,95 +175,74 @@ internal fun AppRow(
                     .padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AppIconImage(
-                    drawable = app.icon,
-                    contentDescription = app.label.toString(),
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                )
+                // v0.41.23 统一版：图标原地交叉溶解
+                // 原图标淡出，动作图标（★/眼睛）淡入，位置不动
+                Box(
+                    modifier = Modifier.size(40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AppIconImage(
+                        drawable = app.icon,
+                        contentDescription = app.label.toString(),
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .graphicsLayer { alpha = 1f - dissolveProgress }
+                    )
+                    if (dissolveProgress > 0.01f) {
+                        val actionBg = if (isLeft) Color(0xFFC9A227) else Color(0xFF8A8478)
+                        val actionIcon = when {
+                            isLeft -> Icons.Filled.Star
+                            onUnhide != null -> Icons.Filled.Visibility
+                            else -> Icons.Filled.VisibilityOff
+                        }
+                        val actionDesc = when {
+                            isLeft -> if (isPinned) "移出 Dock" else "加到 Dock"
+                            onUnhide != null -> "取消隐藏"
+                            else -> "隐藏"
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(actionBg)
+                                .graphicsLayer { alpha = dissolveProgress }
+                                .clickable(
+                                    enabled = actionsVisible || hideVisible ||
+                                        dissolveProgress > 0.5f,
+                                    onClick = {
+                                        when {
+                                            isLeft -> togglePin()
+                                            onUnhide != null -> onUnhide(app)
+                                            else -> onHide(app)
+                                        }
+                                        hideAll()
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = actionIcon,
+                                contentDescription = actionDesc,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.width(10.dp))
+                // v0.41.23：标题淡出到 15%，位置不动
                 Text(
                     text = app.label.toString(),
                     fontSize = 15.sp,
-                    color = AILauncherColors.Title,
+                    color = AILauncherColors.Title.copy(
+                        alpha = 1f - dissolveProgress * 0.85f
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            // ★：跟手出现/放大。dragDist 驱动透明度和缩放，松手后由 actionsVisible 保持。
-            // v0.41.20（Bob）：所有应用左滑统一是 ★（加到/取消 Dock），包括隐藏分组内的
-            val starProgress = if (actionsVisible) 1f
-                else (dragDist / revealPx).coerceIn(0f, 1f)
-            if (starProgress > 0.01f) {
-                val overscroll = (dragDist - revealPx).coerceAtLeast(0f)
-                val starScale = 1f +
-                    (overscroll / (maxDragPx - revealPx)).coerceIn(0f, 1f) * 0.35f
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .size(48.dp)
-                        .graphicsLayer {
-                            alpha = starProgress
-                            scaleX = starScale
-                            scaleY = starScale
-                        }
-                        .clip(CircleShape)
-                        .clickable(
-                            enabled = actionsVisible || dragDist > revealPx / 2,
-                            onClick = {
-                                togglePin()
-                                hideStar()
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Star,
-                        contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
-                        tint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-            }
-
-            // v0.41.20（Bob）：右滑=隐藏或取消隐藏——内容跟手右移，左侧露出眼睛图标；
-            // 隐藏分组内的应用点眼睛=取消隐藏（onUnhide），普通应用=隐藏（onHide）。
-            // 拖动时图标在原位（内容已右移让出空间）；松手保持后移到留白避免重叠。
-            val hideProgress = if (hideIconShown) 1f
-                else (-dragDist / revealPx).coerceIn(0f, 1f)
-            if (hideProgress > 0.01f) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .size(48.dp)
-                        .graphicsLayer {
-                            alpha = hideProgress
-                            // 保持显示时左移 30dp 到留白，拖动时在原位（内容右移已让位）
-                            translationX = with(density) {
-                                (if (hideIconShown) -30 else 0).dp.toPx()
-                            }
-                        }
-                        .clip(CircleShape)
-                        .clickable(
-                            enabled = hideIconShown || dragDist < -revealPx / 2,
-                            onClick = {
-                                if (onUnhide != null) onUnhide(app) else onHide(app)
-                                hideStar()
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (onUnhide != null) Icons.Filled.Visibility
-                            else Icons.Filled.VisibilityOff,
-                        contentDescription = if (onUnhide != null) "取消隐藏" else "隐藏",
-                        tint = Color(0xFF8A8478),
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-            }
         }
     }
 
