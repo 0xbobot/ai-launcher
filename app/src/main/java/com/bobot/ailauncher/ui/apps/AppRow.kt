@@ -100,6 +100,7 @@ internal fun AppRow(
     var dragDist by remember { mutableStateOf(0f) } // 左滑为正
     // v0.41.25（Bob）：过渡动画——拖动时 1:1 跟手，松手后弹簧动画到目标
     var isDragging by remember { mutableStateOf(false) }
+    val revealPx = with(density) { 56.dp.toPx() }
     val dragProgress = (kotlin.math.abs(dragDist) / revealPx).coerceIn(0f, 1f)
     val settleTarget = if (actionsVisible || hideVisible) 1f else 0f
     val settleProgress by animateFloatAsState(
@@ -112,7 +113,6 @@ internal fun AppRow(
     )
     // 拖动中直接跟手；松手后用弹簧动画
     val baseProgress = if (isDragging) dragProgress else settleProgress
-    val revealPx = with(density) { 56.dp.toPx() }
     val fullPx = with(density) { 120.dp.toPx() }
     val maxDragPx = with(density) { 160.dp.toPx() }
 
