@@ -6,7 +6,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 /** 界面偏好：存 SharedPreferences "ui_prefs" */
 object UiPrefs {
     private const val PREFS = "ui_prefs"
-    private const val KEY_HANDED = "handed"
     private const val KEY_DOCK_ROWS = "dock_rows"
     private const val KEY_DOCK_VISIBLE = "dock_visible"
     private const val KEY_DOCK_HIDE_WARNED = "dock_hide_warned"
@@ -20,23 +19,6 @@ object UiPrefs {
     val dockTick = MutableStateFlow(0)
     fun bumpDock() {
         dockTick.value++
-    }
-
-    enum class Handed { LEFT, RIGHT }
-
-    fun getHanded(context: Context): Handed {
-        val v = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_HANDED, Handed.RIGHT.name).orEmpty()
-        return try {
-            Handed.valueOf(v)
-        } catch (_: Exception) {
-            Handed.RIGHT
-        }
-    }
-
-    fun setHanded(context: Context, handed: Handed) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(KEY_HANDED, handed.name).apply()
     }
 
     /** 首页 Dock 记住的行数（1=D1 一行，2=D2 两行），默认 1 */

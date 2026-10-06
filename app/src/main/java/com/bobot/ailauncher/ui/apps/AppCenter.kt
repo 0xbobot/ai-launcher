@@ -139,8 +139,7 @@ fun AppCenterContent(
     var refreshTick by remember { mutableIntStateOf(0) }
     // v0.40.0：长按 → 真弹窗快捷菜单（与 Dock 长按同一套 AppPopupMenu，替代 bottom sheet）
     var popupApp by remember { mutableStateOf<AppInfo?>(null) }
-    val handed = remember { UiPrefs.getHanded(context) }
-
+    // v0.40.1：惯用手设置已删除，双 rail 常驻，左右手都可操作
     // 已隐藏应用版本号：变化时 A-Z 自动重算过滤
     val hiddenVersion = HiddenApps.version.intValue
     val hidden = remember(refreshTick, hiddenVersion) { HiddenApps.getHidden(context) }
@@ -482,26 +481,41 @@ fun AppCenterContent(
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）
             // v0.21：搜索态隐藏 rail（定位无意义）
             // v0.24：点按跳字母（居中）；拖动时波浪跟手，列表跟手滚动切换字母
+            // v0.40.1：左右双 rail 常驻（Bob）——左右手都可操作，不再需要设置里选惯用手；
+            // 切换更轻盈：相邻字母平滑跟手（animateScrollToItem），跨度大时直接跳。
             if (!searching && letters.isNotEmpty()) {
+                var glideJob by remember { mutableStateOf<Job?>(null) }
+                // Niagara 做法：直接滚完整列表，不做内容过滤；松手时列表本来就在位置上，零位移
+                val glideToLetter: (Char) -> Unit = { letter ->
+                    val anchor = letterAnchors[letter] ?: 0
+                    glideJob?.cancel()
+                    glideJob = scope.launch {
+                        val cur = listState.firstVisibleItemIndex
+                        if (kotlin.math.abs(anchor - cur) > 20) {
+                            listState.scrollToItem(anchor)
+                        } else {
+                            listState.animateScrollToItem(anchor)
+                        }
+                    }
+                }
+                val stopGlide: () -> Unit = {
+                    glideJob?.cancel()
+                    glideJob = null
+                    // 列表已在拖动中滚到位，松手无需任何操作
+                }
                 WaveRail(
                     letters = letters,
-                    handed = handed,
-                    onActiveLetter = { letter ->
-                        // Niagara 做法：直接滚完整列表，不做内容过滤；
-                        // 松手时列表本来就在位置上，零位移
-                        scope.launch {
-                            val anchor = letterAnchors[letter] ?: 0
-                            listState.scrollToItem(anchor)
-                        }
-                    },
-                    onRelease = {
-                        // 列表已在拖动中滚到位，松手无需任何操作
-                    },
-                    modifier = Modifier
-                        .align(
-                            if (handed == UiPrefs.Handed.RIGHT) Alignment.CenterEnd
-                            else Alignment.CenterStart
-                        )
+                    side = RailSide.RIGHT,
+                    onActiveLetter = glideToLetter,
+                    onRelease = stopGlide,
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                )
+                WaveRail(
+                    letters = letters,
+                    side = RailSide.LEFT,
+                    onActiveLetter = glideToLetter,
+                    onRelease = stopGlide,
+                    modifier = Modifier.align(Alignment.CenterStart)
                 )
             }
         }

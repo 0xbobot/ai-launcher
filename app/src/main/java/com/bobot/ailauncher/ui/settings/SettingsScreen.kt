@@ -288,55 +288,7 @@ fun SettingsScreen(
         }
 
         item { SectionTitle("手势") }
-        // 惯用手：决定 A-Z 导航 rail 在哪一侧、按住时往哪边偏移
-        item {
-            var handed by remember { mutableStateOf(UiPrefs.getHanded(context)) }
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "惯用手",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.Title
-                    )
-                    Text(
-                        text = "按住 A-Z 导航时，字母和气泡会往拇指反方向偏移，不被拇指盖住。",
-                        fontSize = 13.sp,
-                        color = AILauncherColors.Hint
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        listOf(
-                            UiPrefs.Handed.LEFT to "左手",
-                            UiPrefs.Handed.RIGHT to "右手"
-                        ).forEach { (h, label) ->
-                            val selected = handed == h
-                            Button(
-                                onClick = {
-                                    handed = h
-                                    UiPrefs.setHanded(context, h)
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (selected) AILauncherColors.Accent
-                                    else AILauncherColors.Divider,
-                                    contentColor = if (selected) Color.White
-                                    else AILauncherColors.Title
-                                ),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(label)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // v0.40.1：惯用手选项删除（Bob）——A-Z 导航改为左右双 rail 常驻，左右手都可操作
         item { SectionTitle("通知与电量") }
         // v0.28.0：低电量守护——只做温和提醒，零干预
         item {

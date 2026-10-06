@@ -32,23 +32,28 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlin.math.exp
 import kotlin.math.roundToInt
 
+/** v0.40.1：rail 所在的一侧（左右双 rail 常驻，不再需要设置里选惯用手） */
+internal enum class RailSide { LEFT, RIGHT }
+
 /**
  * 波浪字母导航 v2（v0.25）。
- * - 常显于屏幕右侧（修复 v0.24 藏入屏外看不见的问题）
+ * - v0.40.1：左右双 rail 常驻（Bob：左右手都可操作，不再需要设置里选惯用手）
  * - 紧凑高度（约 62% 屏高，居中），字母不拉得太开
  * - 拖动时：附近字母按高斯衰减放大并向内鼓起，大气泡在靠应用的一侧跟随手指；
  *   列表进入聚焦模式（只显示当前字母），松手恢复全量
+ * - 字母切换时给一记轻震动（v0.40.1）
  * - 只做定位，不承载其他功能
  */
 @Composable
@@ -57,12 +62,21 @@ internal fun WaveRail(
     onActiveLetter: (Char) -> Unit,
     onRelease: () -> Unit,
     modifier: Modifier = Modifier,
-    handed: UiPrefs.Handed = UiPrefs.Handed.RIGHT
+    side: RailSide = RailSide.RIGHT
 ) {
     val density = LocalDensity.current
-    // 右手：-1（往左/向内）；左手：+1（往右/向内）
-    val dirSign = if (handed == UiPrefs.Handed.RIGHT) -1f else 1f
+    val haptics = LocalHapticFeedback.current
+    // 右侧 rail：波浪/气泡往左（向内）；左侧 rail：往右（向内）
+    val dirSign = if (side == RailSide.RIGHT) -1f else 1f
     var activeIndex by remember { mutableIntStateOf(-1) }
+
+    // v0.40.1：字母切换给一记轻震动（TextHandleMove），手感更跟手
+    fun emitLetter(i: Int) {
+        if (i == activeIndex) return
+        activeIndex = i
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        onActiveLetter(letters[i])
+    }
 
     // 字母列占容器高度的比例（紧凑）
     val railFraction = 0.62f
@@ -105,20 +119,17 @@ internal fun WaveRail(
                     detectTapGestures(onTap = { offset ->
                         // 点按：直接跳转
                         val i = indexAt(offset.y)
-                        onActiveLetter(letters[i])
+                        activeIndex = -1 // 允许点按重复触发同一字母
+                        emitLetter(i)
                         onRelease()
                     })
                 }
                 .pointerInput(letters, hPx) {
                     detectVerticalDragGestures(
                         onDragStart = { offset ->
-                            val i = indexAt(offset.y)
-                            activeIndex = i
-                            onActiveLetter(letters[i])
+                            emitLetter(indexAt(offset.y))
                         },
                         onDragEnd = {
-                            val last = activeIndex.takeIf { it >= 0 }
-                                ?.let { letters[it] }
                             activeIndex = -1
                             onRelease()
                         },
@@ -128,11 +139,7 @@ internal fun WaveRail(
                         },
                         onVerticalDrag = { change, _ ->
                             change.consume()
-                            val i = indexAt(change.position.y)
-                            if (i != activeIndex) {
-                                activeIndex = i
-                                onActiveLetter(letters[i])
-                            }
+                            emitLetter(indexAt(change.position.y))
                         }
                     )
                 }
