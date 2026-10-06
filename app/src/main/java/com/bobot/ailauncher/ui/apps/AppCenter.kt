@@ -63,8 +63,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -153,12 +151,12 @@ fun AppCenterContent(
     // v0.40.0：长按 → 真弹窗快捷菜单（与 Dock 长按同一套 AppPopupMenu，替代 bottom sheet）
     var popupApp by remember { mutableStateOf<AppInfo?>(null) }
     // v0.40.2：惯用手设置已删除；右侧一条可见 rail + 左侧隐形触发区，左右手都可操作
-    // 已隐藏应用版本号：变化时 A-Z 自动重算过滤
+    // v0.41.9：已隐藏应用版本号：变化时 A-Z 自动重算过滤
     val hiddenVersion = HiddenApps.version.intValue
     val hidden = remember(refreshTick, hiddenVersion) { HiddenApps.getHidden(context) }
-    // v0.41.9：已隐藏应用视图（字母导航入口 + 生物识别通过后显示）
-    var showHiddenApps by remember { mutableStateOf(false) }
-    // v0.41.17：隐藏区解锁状态——未解锁时显示"已锁定"页，点"解锁查看"才触发面部/指纹
+    // v0.41.18（Bob）：隐藏应用不再用独立页面，放到主列表末尾的"隐藏"分组；
+    // 解锁后可像正常应用一样直接打开，不用先恢复。
+    // v0.41.17：隐藏区解锁状态——未解锁时分组显示锁定占位，点按才触发面部/指纹
     var hiddenUnlocked by remember { mutableStateOf(false) }
     val hiddenApps = remember(refreshTick, hiddenVersion) {
         if (hidden.isEmpty()) emptyList()
@@ -223,6 +221,12 @@ fun AppCenterContent(
         }
         m
     }
+    // v0.41.18：隐藏分组的滚动锚点（主列表末尾，A-Z 之后）
+    val hiddenAnchor = remember(azGroups, hiddenApps) {
+        var idx = 0
+        azGroups.forEach { (_, apps) -> idx += apps.size + 1 }
+        idx
+    }
 
     // v0.41.8：手动吸顶——当前组首行滚出顶部后，悬停 overlay 接管显示；
     // 下一组首行接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走）
@@ -273,6 +277,30 @@ fun AppCenterContent(
     fun hideApp(app: AppInfo) {
         HiddenApps.hide(context, app.packageName)
         Toast.makeText(context, "已隐藏「${app.label}」", Toast.LENGTH_SHORT).show()
+    }
+    // v0.41.18：从隐藏分组恢复显示
+    fun unhideApp(app: AppInfo) {
+        HiddenApps.unhide(context, app.packageName)
+        Toast.makeText(context, "「${app.label}」已恢复显示", Toast.LENGTH_SHORT).show()
+    }
+    // v0.41.18：解锁隐藏分组——触发面部/指纹，通过后展开
+    fun unlockHiddenApps() {
+        val activity = context as? FragmentActivity
+        if (activity == null) {
+            Toast.makeText(context, "无法启动验证", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!BiometricAuth.canAuthenticate(context)) {
+            Toast.makeText(context, "请先在系统设置中录入指纹或面容", Toast.LENGTH_LONG).show()
+            return
+        }
+        BiometricAuth.authenticate(
+            activity = activity,
+            onSuccess = { hiddenUnlocked = true },
+            onFail = {
+                Toast.makeText(context, "验证未通过", Toast.LENGTH_SHORT).show()
+            }
+        )
     }
 
     // v0.16.1：A-Z 行左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
@@ -531,6 +559,95 @@ fun AppCenterContent(
                     }
                     item(key = "sp:$letter") { Spacer(modifier = Modifier.height(24.dp)) }
                 }
+                // v0.41.18（Bob）：隐藏分组——主列表末尾，像 ABCD 分组一样；
+                // 未解锁显示锁定占位，解锁后应用可直接打开（不用先恢复）。
+                if (hiddenApps.isNotEmpty()) {
+                    item(key = "hidden-header") {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Icon(
+                                imageVector = if (hiddenUnlocked) Icons.Filled.VisibilityOff
+                                    else Icons.Filled.Lock,
+                                contentDescription = null,
+                                tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .padding(start = 20.dp)
+                                    .size(36.dp)
+                            )
+                            Text(
+                                text = "已隐藏",
+                                fontSize = 13.sp,
+                                color = AILauncherColors.Hint,
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .padding(start = 64.dp)
+                            )
+                        }
+                    }
+                    if (!hiddenUnlocked) {
+                        // 锁定占位：点按触发面部/指纹
+                        item(key = "hidden-locked") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 72.dp, end = 64.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { unlockHiddenApps() }
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Lock,
+                                        contentDescription = null,
+                                        tint = AILauncherColors.Hint,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "点击解锁查看",
+                                        fontSize = 14.sp,
+                                        color = AILauncherColors.Hint
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // 解锁后：隐藏应用像正常应用一样直接打开
+                        itemsIndexed(hiddenApps, key = { _, app -> "h:${app.packageName}" }) { _, app ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 72.dp, end = 64.dp)
+                            ) {
+                                AppRow(
+                                    app = app,
+                                    onLaunch = { launchApp(app) },
+                                    onLongClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        popupApp = app
+                                    },
+                                    onHide = {}, // 已隐藏：右滑不再隐藏
+                                    isHidden = true, // 禁用右滑隐藏手势
+                                    actionsVisible = expandedActionsPkg == app.packageName,
+                                    onActionsVisibleChange = { expanded ->
+                                        expandedActionsPkg =
+                                            if (expanded) app.packageName
+                                            else if (expandedActionsPkg == app.packageName) null
+                                            else expandedActionsPkg
+                                    }
+                                )
+                                AppPopupMenu(
+                                    app = app,
+                                    expanded = popupApp?.packageName == app.packageName,
+                                    onDismiss = { popupApp = null },
+                                    onUnhide = { unhideApp(it) }
+                                )
+                            }
+                        }
+                    }
+                    item(key = "sp:hidden") { Spacer(modifier = Modifier.height(24.dp)) }
+                }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
@@ -626,12 +743,19 @@ fun AppCenterContent(
                     onRelease = { mirrorIndex = null },
                     modifier = Modifier.align(Alignment.CenterStart)
                 )
-                // v0.41.17（Bob）：已隐藏应用入口移到字母导航最下方——
-                // 右下小眼睛图标，样式跟 rail 字母协调（不再是悬浮大按钮）。
-                // 点按后先显示"已锁定"状态页，再按"解锁查看"触发面部/指纹验证。
-                if (!searching && !showHiddenApps) {
+                // v0.41.18（Bob）：眼睛图标——点按滚动到主列表末尾的"隐藏"分组。
+                // 若未解锁，先触发面部/指纹，验证通过后自动滚到分组。
+                if (!searching && hiddenApps.isNotEmpty()) {
                     IconButton(
-                        onClick = { showHiddenApps = true },
+                        onClick = {
+                            if (!hiddenUnlocked) {
+                                unlockHiddenApps()
+                            }
+                            // 滚到隐藏分组（解锁后列表会展开，锚点仍有效）
+                            scope.launch {
+                                listState.animateScrollToItem(hiddenAnchor)
+                            }
+                        },
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(bottom = 28.dp, end = 12.dp)
@@ -648,46 +772,7 @@ fun AppCenterContent(
         }
     }
 
-    // v0.41.17：已隐藏应用——未解锁时先显示"已锁定"状态页（Bob 要求设计隐藏状态），
-    // 点"解锁查看"才触发面部/指纹；通过后显示列表。
-    if (showHiddenApps) {
-        if (!hiddenUnlocked) {
-            HiddenAppsLockedView(
-                onBack = {
-                    showHiddenApps = false
-                    hiddenUnlocked = false
-                },
-                onUnlock = { activity, onFailMsg ->
-                    if (!BiometricAuth.canAuthenticate(context)) {
-                        onFailMsg("请先在系统设置中录入指纹或面容")
-                        return@HiddenAppsLockedView
-                    }
-                    BiometricAuth.authenticate(
-                        activity = activity,
-                        onSuccess = { hiddenUnlocked = true },
-                        onFail = { onFailMsg("验证未通过") }
-                    )
-                }
-            )
-        } else {
-            HiddenAppsView(
-                hiddenApps = hiddenApps,
-                onBack = {
-                    showHiddenApps = false
-                    hiddenUnlocked = false
-                },
-                onUnhide = { app ->
-                    HiddenApps.unhide(context, app.packageName)
-                    Toast.makeText(context, "「${app.label}」已恢复显示", Toast.LENGTH_SHORT).show()
-                    // 全部恢复后自动返回列表
-                    if (HiddenApps.getHidden(context).isEmpty()) {
-                        showHiddenApps = false
-                        hiddenUnlocked = false
-                    }
-                }
-            )
-        }
-    }
+
 
     // v0.40.0：长按 bottom sheet 已删除，改用每行自带的真弹窗菜单（AppPopupMenu）
 
@@ -829,201 +914,4 @@ private fun rememberPullDownConnection(
 }
 
 
-/**
- * v0.41.9：已隐藏应用视图（Bob）——字母导航的眼睛入口 + 生物识别通过后显示。
- * 列表只显示已隐藏应用，每行可"恢复显示"；返回按钮回到正常列表。
- */
-/**
- * v0.41.17（Bob）：隐藏区"已锁定"状态页——解锁前显示，不直接弹验证。
- * 中央锁图标 + "已隐藏应用" + "解锁查看"按钮；验证失败在页内显示错误，不 toast。
- */
-@Composable
-private fun HiddenAppsLockedView(
-    onBack: () -> Unit,
-    onUnlock: (activity: FragmentActivity, onFailMsg: (String) -> Unit) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    var errorMsg by remember { mutableStateOf<String?>(null) }
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(AILauncherColors.Background)
-            .statusBarsPadding()
-    ) {
-        // 顶栏：返回
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 8.dp, end = 20.dp, top = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "返回",
-                    tint = AILauncherColors.Title
-                )
-            }
-            Text(
-                text = "已隐藏应用",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = AILauncherColors.Title
-            )
-        }
-        // 中央锁定状态
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Lock,
-                contentDescription = null,
-                tint = AILauncherColors.Hint,
-                modifier = Modifier.size(56.dp)
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "应用已锁定",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                color = AILauncherColors.Title
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "验证身份后查看",
-                fontSize = 13.sp,
-                color = AILauncherColors.Hint
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(
-                onClick = {
-                    errorMsg = null
-                    val activity = context as? FragmentActivity
-                    if (activity == null) {
-                        errorMsg = "无法启动验证"
-                        return@Button
-                    }
-                    onUnlock(activity) { msg -> errorMsg = msg }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AILauncherColors.Accent
-                ),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Text(
-                    text = "解锁查看",
-                    fontSize = 15.sp,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
-            }
-            if (errorMsg != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = errorMsg!!,
-                    fontSize = 13.sp,
-                    color = Color(0xFFD16A6A)
-                )
-            }
-        }
-    }
-}
 
-@Composable
-private fun HiddenAppsView(
-    hiddenApps: List<AppInfo>,
-    onBack: () -> Unit,
-    onUnhide: (AppInfo) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(AILauncherColors.Background)
-            .statusBarsPadding()
-    ) {
-        // 顶栏：返回 + 标题
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 8.dp, end = 20.dp, top = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "返回",
-                    tint = AILauncherColors.Title
-                )
-            }
-            Text(
-                text = "已隐藏应用",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium,
-                color = AILauncherColors.Title
-            )
-        }
-        HorizontalDivider(color = AILauncherColors.Divider, thickness = 1.dp)
-        if (hiddenApps.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "暂无已隐藏应用",
-                    fontSize = 14.sp,
-                    color = AILauncherColors.Hint
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 96.dp)
-            ) {
-                items(hiddenApps, key = { "h:${it.packageName}" }) { app ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 应用图标（AppInfo.icon 是 Drawable）
-                        Image(
-                            bitmap = app.icon.toBitmap().asImageBitmap(),
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = app.label.toString(),
-                            fontSize = 16.sp,
-                            color = AILauncherColors.Title,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        TextButton(onClick = { onUnhide(app) }) {
-                            Text(
-                                text = "恢复显示",
-                                fontSize = 14.sp,
-                                color = AILauncherColors.Accent
-                            )
-                        }
-                    }
-                    HorizontalDivider(
-                        color = AILauncherColors.Divider,
-                        thickness = 0.5.dp,
-                        modifier = Modifier.padding(start = 72.dp, end = 20.dp)
-                    )
-                }
-            }
-        }
-    }
-}

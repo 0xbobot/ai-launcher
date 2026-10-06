@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.settings
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
@@ -544,11 +545,38 @@ fun SettingsScreen(
                                 fontSize = 13.sp,
                                 color = AILauncherColors.Accent
                             )
-                            dlFailed -> Text(
-                                text = "点击重试",
-                                fontSize = 13.sp,
-                                color = Color(0xFFD16A6A)
-                            )
+                            dlFailed -> {
+                                Text(
+                                    text = "点击重试",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFFD16A6A)
+                                )
+                                // v0.41.18（Bob）：下载失败后提供手动下载链接，跳转浏览器
+                                val apkUrl = updateInfo?.apkUrl
+                                if (!apkUrl.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    TextButton(
+                                        onClick = {
+                                            try {
+                                                val intent = Intent(
+                                                    Intent.ACTION_VIEW,
+                                                    android.net.Uri.parse(apkUrl)
+                                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                                context.startActivity(intent)
+                                            } catch (_: Exception) {
+                                                Toast.makeText(context, "无法打开浏览器", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text(
+                                            text = "手动下载（浏览器打开）",
+                                            fontSize = 13.sp,
+                                            color = AILauncherColors.Accent
+                                        )
+                                    }
+                                }
+                            }
                             updateInfo != null -> Text(
                                 text = updateInfo!!.changelog,
                                 fontSize = 13.sp,

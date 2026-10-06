@@ -56,7 +56,9 @@ internal fun AppRow(
     onLongClick: () -> Unit,
     onHide: (AppInfo) -> Unit,
     actionsVisible: Boolean,
-    onActionsVisibleChange: (Boolean) -> Unit
+    onActionsVisibleChange: (Boolean) -> Unit,
+    // v0.41.18：已隐藏分组内的应用——禁用右滑隐藏手势（已经是隐藏的）
+    isHidden: Boolean = false
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -138,8 +140,10 @@ internal fun AppRow(
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
                                 // 左滑 dragAmount 为负，转成正数距离
-                                dragDist = (dragDist - dragAmount)
+                                // v0.41.18：已隐藏的应用禁用右滑（dragDist 不为负）
+                                val newDist = (dragDist - dragAmount)
                                     .coerceIn(-maxDragPx, maxDragPx)
+                                dragDist = if (isHidden) newDist.coerceAtLeast(0f) else newDist
                             }
                         )
                     }
@@ -208,6 +212,7 @@ internal fun AppRow(
             }
 
             // v0.41.17（Bob）：右滑隐藏也用图标表示——左侧眼睛图标，跟手出现，点按直接隐藏
+            // v0.41.18（Bob）：图标移到左侧留白（translationX），不和应用图标重叠
             val hideProgress = if (hideIconShown) 1f
                 else (-dragDist / revealPx).coerceIn(0f, 1f)
             if (hideProgress > 0.01f) {
@@ -215,7 +220,11 @@ internal fun AppRow(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .size(48.dp)
-                        .graphicsLayer { alpha = hideProgress }
+                        .graphicsLayer {
+                            alpha = hideProgress
+                            // 左移 30dp 到行左留白区，避开应用图标（12dp 起）
+                            translationX = with(density) { (-30).dp.toPx() }
+                        }
                         .clip(CircleShape)
                         .clickable(
                             enabled = hideIconShown || dragDist < -revealPx / 2,
