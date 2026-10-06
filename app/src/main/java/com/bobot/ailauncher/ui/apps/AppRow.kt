@@ -3,6 +3,7 @@ package com.bobot.ailauncher.ui.apps
 import android.widget.Toast
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -36,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -95,24 +97,11 @@ internal fun AppRow(
         }
     }
 
-    // v0.41.23（Bob v4 统一版）：图标原地交叉溶解成动作图标，标题淡出，位置不动。
-    // 左滑=★（金），右滑=眼睛（灰）。溶解进度跟手指走。
+    // v0.41.26（Bob 方案 C）：内容完全静态；动作按钮从屏幕边缘滑入悬浮。
+    // 左滑=金色 ★（右侧滑入），右滑=灰蓝眼睛（左侧滑入）。
     var dragDist by remember { mutableStateOf(0f) } // 左滑为正
-    // v0.41.25（Bob）：过渡动画——拖动时 1:1 跟手，松手后弹簧动画到目标
     var isDragging by remember { mutableStateOf(false) }
     val revealPx = with(density) { 56.dp.toPx() }
-    val dragProgress = (kotlin.math.abs(dragDist) / revealPx).coerceIn(0f, 1f)
-    val settleTarget = if (actionsVisible || hideVisible) 1f else 0f
-    val settleProgress by animateFloatAsState(
-        targetValue = settleTarget,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "dissolveSettle"
-    )
-    // 拖动中直接跟手；松手后用弹簧动画
-    val baseProgress = if (isDragging) dragProgress else settleProgress
     val fullPx = with(density) { 120.dp.toPx() }
     val maxDragPx = with(density) { 160.dp.toPx() }
 
@@ -122,17 +111,24 @@ internal fun AppRow(
         onHideVisibleChange(false)
     }
 
-    // 溶解进度：正在拖时按拖动方向（优先于保持状态），否则按保持状态
-    // v0.41.24（Bob）：修 bug——左滑保持 ★ 后再右滑，眼睛出不来
-    // （原来 actionsVisible 优先，导致拖右滑时仍显示 ★）
-    // v0.41.25：baseProgress 已包含拖动/弹簧动画
-    val isLeft = when {
+    // 按钮方向：拖动时按手指方向，否则按保持状态（两者互斥，AppCenter 保证）
+    val buttonIsLeft = when {
         isDragging -> dragDist > 0
         actionsVisible -> true
         hideVisible -> false
         else -> true
     }
-    val dissolveProgress = baseProgress
+    // 按钮进度：拖动时 snap 跟手（1:1 无延迟），松手后弹簧动画到目标
+    val dragButtonP = (kotlin.math.abs(dragDist) / revealPx).coerceIn(0f, 1f)
+    val settleButtonT = if (actionsVisible || hideVisible) 1f else 0f
+    val buttonProgress by animateFloatAsState(
+        targetValue = if (isDragging) dragButtonP else settleButtonT,
+        animationSpec = if (isDragging) snap() else spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "actionBtn"
+    )
 
     // 外部收起（如另一行展开）时
     LaunchedEffect(actionsVisible, hideVisible) {
@@ -196,92 +192,82 @@ internal fun AppRow(
                     .padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // v0.41.23 统一版：图标原地交叉溶解
-                // 原图标淡出，动作图标（★/眼睛）淡入，位置不动
-                Box(
-                    modifier = Modifier.size(40.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    AppIconImage(
-                        drawable = app.icon,
-                        contentDescription = app.label.toString(),
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .graphicsLayer { alpha = 1f - dissolveProgress }
-                    )
-                    if (dissolveProgress > 0.01f) {
-                        // v0.41.24（Bob）：★ 双状态——金底=点按加入 Dock，灰底=已在 Dock 点按移出；
-                        // 眼睛双状态——闭眼=隐藏，开眼=取消隐藏（图标区分）
-                        // v0.41.25（Bob）：颜色更显眼——★ 用亮金，眼睛用深灰蓝；
-                        // 动作图标带缩放弹入动画
-                        val actionBg = when {
-                            isLeft && isPinned -> Color(0xFF8A8478)
-                            isLeft -> Color(0xFFD4A017) // 更亮的金
-                            else -> Color(0xFF5A6C7D) // 深灰蓝，隐藏更显眼
-                        }
-                        val actionIcon = when {
-                            isLeft -> Icons.Filled.Star
-                            onUnhide != null -> Icons.Filled.Visibility
-                            else -> Icons.Filled.VisibilityOff
-                        }
-                        val actionDesc = when {
-                            isLeft -> if (isPinned) "移出 Dock" else "加到 Dock"
-                            onUnhide != null -> "取消隐藏"
-                            else -> "隐藏"
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(actionBg)
-                                .graphicsLayer {
-                                    alpha = dissolveProgress
-                                    // v0.41.25：弹入缩放（0.7→1.0）
-                                    val s = 0.7f + dissolveProgress * 0.3f
-                                    scaleX = s
-                                    scaleY = s
-                                }
-                                .clickable(
-                                    enabled = actionsVisible || hideVisible ||
-                                        dissolveProgress > 0.5f,
-                                    onClick = {
-                                        when {
-                                            isLeft -> togglePin()
-                                            onUnhide != null -> onUnhide(app)
-                                            else -> onHide(app)
-                                        }
-                                        hideAll()
-                                    }
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = actionIcon,
-                                contentDescription = actionDesc,
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                }
+                // v0.41.26（Bob 方案 C）：内容完全静态，不位移、不淡出、不溶解
+                AppIconImage(
+                    drawable = app.icon,
+                    contentDescription = app.label.toString(),
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                )
                 Spacer(modifier = Modifier.width(10.dp))
-                // v0.41.23：标题淡出到 15%，位置不动
                 Text(
                     text = app.label.toString(),
                     fontSize = 15.sp,
-                    color = AILauncherColors.Title.copy(
-                        alpha = 1f - dissolveProgress * 0.85f
-                    ),
+                    color = AILauncherColors.Title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
+            // v0.41.26（Bob 方案 C）：动作按钮从边缘滑入悬浮
+            // 左滑=★ 从右侧滑入，右滑=眼睛从左侧滑入；48dp 圆形 + 8dp 阴影
+            if (buttonProgress > 0.01f) {
+                // ★ 双状态：亮金=加入 Dock，灰=已在 Dock（点按移出）
+                // 眼睛双状态：闭眼=隐藏，开眼=取消隐藏
+                val btnBg = when {
+                    buttonIsLeft && isPinned -> Color(0xFF8A8478)
+                    buttonIsLeft -> Color(0xFFD4A017)
+                    else -> Color(0xFF5A6C7D)
+                }
+                val btnIcon = when {
+                    buttonIsLeft -> Icons.Filled.Star
+                    onUnhide != null -> Icons.Filled.Visibility
+                    else -> Icons.Filled.VisibilityOff
+                }
+                val btnDesc = when {
+                    buttonIsLeft -> if (isPinned) "移出 Dock" else "加到 Dock"
+                    onUnhide != null -> "取消隐藏"
+                    else -> "隐藏"
+                }
+                Box(
+                    modifier = Modifier
+                        .align(if (buttonIsLeft) Alignment.CenterEnd else Alignment.CenterStart)
+                        .size(48.dp)
+                        .graphicsLayer {
+                            alpha = buttonProgress
+                            // 从边缘 80dp 处滑到停留位
+                            val edge = with(density) { 80.dp.toPx() }
+                            translationX = (if (buttonIsLeft) edge else -edge) * (1f - buttonProgress)
+                        }
+                        .shadow(8.dp, CircleShape)
+                        .background(btnBg, CircleShape)
+                        .clickable(
+                            enabled = actionsVisible || hideVisible || buttonProgress > 0.5f,
+                            onClick = {
+                                when {
+                                    buttonIsLeft -> togglePin()
+                                    onUnhide != null -> onUnhide(app)
+                                    else -> onHide(app)
+                                }
+                                hideAll()
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = btnIcon,
+                        contentDescription = btnDesc,
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
+
         }
     }
 
-    // v0.41.17：右滑隐藏确认框已删除，改用左侧隐藏图标点按直接隐藏
+    // v0.41.26：右滑隐藏确认框已删除，改用悬浮眼睛按钮点按直接隐藏（方案 C）
 }
 
 /** 分组 key：a-z/A-Z→大写；中文→拼音首字母大写（GB2312 区位边界法，无需第三方库）；数字及其他→'#' */
