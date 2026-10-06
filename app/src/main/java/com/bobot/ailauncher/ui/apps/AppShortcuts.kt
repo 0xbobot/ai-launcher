@@ -10,7 +10,7 @@ import android.widget.Toast
 
 /**
  * v0.39.0：应用快捷方式公共 helpers。
- * 从 AppQuickActionsSheet 抽出，供 bottom sheet 与 Dock 真弹窗菜单共用。
+ * 快捷方式小工具（v0.39.0 从 bottom sheet 抽出，v0.40.0 起专供真弹窗菜单 AppPopupMenu）。
  */
 
 /** 取系统快捷方式；非默认桌面/异常时返回空列表（优雅降级） */

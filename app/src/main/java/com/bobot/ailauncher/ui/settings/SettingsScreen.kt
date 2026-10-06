@@ -72,8 +72,8 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.data.BatteryFullScreen
+import com.bobot.ailauncher.data.BatteryGuard
 import com.bobot.ailauncher.data.BatteryGuardPrefs
-import com.bobot.ailauncher.service.BatteryGuardService
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
@@ -376,7 +376,6 @@ fun SettingsScreen(
                             checked = guardOn,
                             onCheckedChange = {
                                 guardOn = it
-                                BatteryGuardPrefs.setEnabled(context, it)
                                 if (it) {
                                     // v0.36.0：Android 13+ 先申请通知权限，否则提醒发不出
                                     if (Build.VERSION.SDK_INT >= 33 &&
@@ -387,8 +386,9 @@ fun SettingsScreen(
                                     ) {
                                         notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                                     }
-                                    BatteryGuardService.start(context)
-                                } else BatteryGuardService.stop(context)
+                                }
+                                // v0.40.0：不再用前台服务（常驻通知打扰），跟随进程生命周期的动态监听
+                                BatteryGuard.setEnabled(context, it)
                             }
                         )
                     }

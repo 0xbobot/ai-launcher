@@ -318,6 +318,8 @@ private fun FullAppsOverlay(
             onOpenSettings = onOpenSettings,
             onPullDownToD2 = { onStateChangeState.value(DockState.D2) },
             onHeaderSwipeRight = { onD3SwipeRightState.value() },
+            // v0.40.0：底部上滑 → 回桌面（与标题区右滑同义：回到记住的 Dock 档）
+            onBottomSwipeUp = { onD3SwipeRightState.value() },
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)

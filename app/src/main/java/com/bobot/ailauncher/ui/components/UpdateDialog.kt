@@ -5,6 +5,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
@@ -17,12 +21,16 @@ import com.bobot.ailauncher.data.OtaUpdater
 @Composable
 fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    // v0.40.0：防双击——连点"立即更新"之前会产生两个下载任务抢同一个文件
+    var busy by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = { if (!info.forceUpdate) onDismiss() },
         title = { Text("发现新版本 v${info.versionName}") },
         text = { Text(info.changelog) },
         confirmButton = {
             TextButton(onClick = {
+                if (busy) return@TextButton
+                busy = true
                 onDismiss()
                 // 只有已下载的包正是这个新版本时才直接安装，否则重新下载
                 //（旧版本残留包不能复用，否则会"升级"成旧版）
@@ -30,9 +38,10 @@ fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
                     OtaUpdater.isDownloadComplete(context, OtaUpdater.pendingDownloadId(context))
                 ) {
                     OtaUpdater.downloadedApk(context)?.let {
-                        OtaUpdater.promptInstall(context, it)
+                        if (OtaUpdater.promptInstall(context, it)) {
+                            OtaUpdater.markInstallPrompted(context)
+                        }
                     }
-                    OtaUpdater.markInstallPrompted(context)
                 } else {
                     OtaUpdater.startDownload(context, info)
                     Toast.makeText(context, "正在后台下载，可在通知栏查看进度", Toast.LENGTH_LONG)

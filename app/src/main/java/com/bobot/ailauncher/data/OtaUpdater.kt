@@ -106,9 +106,13 @@ object OtaUpdater {
 
     /** 用系统 DownloadManager 下载 APK，返回 downloadId */
     fun startDownload(context: Context, info: OtaInfo): Long {
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        // v0.40.0：先清掉我们之前发起、还没跑完的下载任务——之前"等待下载 2 个文件"
+        // 一直卡住，就是"立即更新"被点了两次（或自动检查+手动检查各弹一次），
+        // 两个任务抢同一个目标文件互相打架。按标题前缀只清我们自己的任务。
+        sweepStaleDownloads(dm)
         // 先删掉旧残留包，避免 DownloadManager 目标文件冲突
         downloadedApk(context)?.delete()
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val req = DownloadManager.Request(Uri.parse(info.apkUrl)).apply {
             setTitle("AI桌面 v${info.versionName} 更新")
             setDescription("正在下载新版本安装包")
@@ -125,6 +129,33 @@ object OtaUpdater {
             .putBoolean(KEY_INSTALL_PROMPTED, false)
             .apply()
         return id
+    }
+
+    /**
+     * v0.40.0：清掉我们之前发起、还没结束的下载任务（标题前缀"AI桌面 v"）。
+     * 只动我们自己的任务，不碰用户别的下载。
+     */
+    private fun sweepStaleDownloads(dm: DownloadManager) {
+        try {
+            dm.query(DownloadManager.Query()).use { c ->
+                val idCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+                val titleCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)
+                val statusCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+                val stale = mutableListOf<Long>()
+                while (c.moveToNext()) {
+                    val title = c.getString(titleCol) ?: ""
+                    val status = c.getInt(statusCol)
+                    val running = status == DownloadManager.STATUS_PENDING ||
+                            status == DownloadManager.STATUS_PAUSED ||
+                            status == DownloadManager.STATUS_RUNNING
+                    if (running && title.startsWith("AI桌面 v")) {
+                        stale.add(c.getLong(idCol))
+                    }
+                }
+                if (stale.isNotEmpty()) dm.remove(*stale.toLongArray())
+            }
+        } catch (_: Exception) {
+        }
     }
 
     fun pendingDownloadId(context: Context): Long =
@@ -158,12 +189,37 @@ object OtaUpdater {
             downloadedApk(context) != null
 
     /** 下载已完成、是比当前更新的版本、且还没弹过安装提示 → 应该弹安装 */
-    fun shouldPromptInstall(context: Context): Boolean {
+    fun shouldPromptInstall(context: Context): Boolean =
+        shouldPromptInstall(context, pendingDownloadId(context))
+
+    /**
+     * v0.40.0：下载完成广播用，completedId 是刚完成的任务 id。
+     * 用"完成的是我们自己的更新包文件"来判定，不再死磕 id 等于记录值——
+     * 之前重复下载导致旧任务先完成时 id 对不上，安装提醒就永远没弹出来。
+     */
+    fun shouldPromptInstall(context: Context, completedId: Long): Boolean {
         if (prefs(context).getBoolean(KEY_INSTALL_PROMPTED, false)) return false
         // 只为新版本弹安装：已装过的版本的残留包不再提示
         if (prefs(context).getInt(KEY_TARGET_VERSION, 0) <= BuildConfig.VERSION_CODE) return false
-        val id = pendingDownloadId(context)
-        return isDownloadComplete(context, id) && downloadedApk(context) != null
+        if (!isOurDownload(context, completedId)) return false
+        if (!isDownloadComplete(context, completedId)) return false
+        return downloadedApk(context) != null
+    }
+
+    /** 完成的下载是否写的是我们的更新包文件（防串到别的下载任务） */
+    private fun isOurDownload(context: Context, downloadId: Long): Boolean {
+        if (downloadId < 0) return false
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        return try {
+            dm.query(DownloadManager.Query().setFilterById(downloadId)).use { c ->
+                if (!c.moveToFirst()) return false
+                val uriIdx = c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                val uri = if (uriIdx >= 0) c.getString(uriIdx) else null
+                uri != null && uri.endsWith(APK_FILE_NAME)
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun markInstallPrompted(context: Context) {
@@ -186,16 +242,20 @@ object OtaUpdater {
         }
     }
 
-    /** 弹安装：有"安装未知应用"权限走 FileProvider 安装，否则先引导去开权限 */
-    fun promptInstall(context: Context, apkFile: File) {
+    /**
+     * 弹安装：有"安装未知应用"权限走 FileProvider 安装，否则先引导去开权限。
+     * v0.40.0：返回是否真的拉起了安装器——没权限只跳了设置页时返回 false，
+     * 调用方此时不要 markInstallPrompted，用户开完权限回来 onResume 会再弹。
+     */
+    fun promptInstall(context: Context, apkFile: File): Boolean {
         if (!context.packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(context, "请允许安装未知应用，然后重新检查更新", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "请允许安装未知应用，开完回来会自动弹出安装", Toast.LENGTH_LONG).show()
             val intent = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:${context.packageName}")
             ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
             context.startActivity(intent)
-            return
+            return false
         }
         val uri = FileProvider.getUriForFile(
             context,
@@ -208,5 +268,6 @@ object OtaUpdater {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(intent)
+        return true
     }
 }

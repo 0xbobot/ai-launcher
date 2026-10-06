@@ -85,7 +85,9 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -124,16 +126,19 @@ fun AppCenterContent(
     onOpenSettings: () -> Unit,
     onPullDownToD2: () -> Unit,
     onHeaderSwipeRight: () -> Unit,
+    onBottomSwipeUp: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
     val onPullDownState = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
+    val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
     var refreshTick by remember { mutableIntStateOf(0) }
-    // v0.16：长按 → 常用操作 bottom sheet（安卓习惯）
-    var quickActionsApp by remember { mutableStateOf<AppInfo?>(null) }
+    // v0.40.0：长按 → 真弹窗快捷菜单（与 Dock 长按同一套 AppPopupMenu，替代 bottom sheet）
+    var popupApp by remember { mutableStateOf<AppInfo?>(null) }
     val handed = remember { UiPrefs.getHanded(context) }
 
     // 已隐藏应用版本号：变化时 A-Z 自动重算过滤
@@ -209,19 +214,6 @@ fun AppCenterContent(
     fun hideApp(app: AppInfo) {
         HiddenApps.hide(context, app.packageName)
         Toast.makeText(context, "已隐藏「${app.label}」，可在设置页恢复", Toast.LENGTH_SHORT).show()
-    }
-
-    // v0.16：长按 bottom sheet 里的"应用信息"
-    fun openAppDetails(app: AppInfo) {
-        try {
-            val intent = Intent(
-                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                android.net.Uri.parse("package:${app.packageName}")
-            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-            context.startActivity(intent)
-        } catch (_: Exception) {
-            Toast.makeText(context, "无法打开应用信息", Toast.LENGTH_SHORT).show()
-        }
     }
 
     // v0.16.1：A-Z 行左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
@@ -372,7 +364,9 @@ fun AppCenterContent(
                     .nestedScroll(nested)
                     // v0.25.9：右侧多缩进（避让 rail），更紧凑
                     .padding(start = 20.dp, end = 64.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                // v0.40.0：底部留出手势条高度，避免末行被手势条盖住
+                contentPadding = PaddingValues(bottom = 96.dp)
             ) {
                 val results = searchResults
                 if (results != null) {
@@ -388,19 +382,31 @@ fun AppCenterContent(
                         }
                     } else {
                         items(results, key = { "s:${it.packageName}" }) { app ->
-                            AppRow(
-                                app = app,
-                                onLaunch = { launchApp(app) },
-                                onLongClick = { quickActionsApp = app },
-                                onHide = ::hideApp,
-                                actionsVisible = expandedActionsPkg == app.packageName,
-                                onActionsVisibleChange = { expanded ->
-                                    expandedActionsPkg =
-                                        if (expanded) app.packageName
-                                        else if (expandedActionsPkg == app.packageName) null
-                                        else expandedActionsPkg
-                                }
-                            )
+                            // v0.40.0：每行自带弹窗锚点——长按弹出真菜单（与 Dock 同一套），
+                            // 位置跟图标走：行在上面时菜单弹到下方（DropdownMenu 自动翻转）
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                AppRow(
+                                    app = app,
+                                    onLaunch = { launchApp(app) },
+                                    onLongClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        popupApp = app
+                                    },
+                                    onHide = ::hideApp,
+                                    actionsVisible = expandedActionsPkg == app.packageName,
+                                    onActionsVisibleChange = { expanded ->
+                                        expandedActionsPkg =
+                                            if (expanded) app.packageName
+                                            else if (expandedActionsPkg == app.packageName) null
+                                            else expandedActionsPkg
+                                    }
+                                )
+                                AppPopupMenu(
+                                    app = app,
+                                    expanded = popupApp?.packageName == app.packageName,
+                                    onDismiss = { popupApp = null }
+                                )
+                            }
                         }
                     }
                     item { Spacer(modifier = Modifier.height(24.dp)) }
@@ -417,24 +423,61 @@ fun AppCenterContent(
                         )
                     }
                     items(apps, key = { "a:${it.packageName}" }) { app ->
-                        AppRow(
-                            app = app,
-                            onLaunch = { launchApp(app) },
-                            onLongClick = { quickActionsApp = app },
-                            onHide = ::hideApp,
-                            actionsVisible = expandedActionsPkg == app.packageName,
-                            onActionsVisibleChange = { expanded ->
-                                expandedActionsPkg =
-                                    if (expanded) app.packageName
-                                    else if (expandedActionsPkg == app.packageName) null
-                                    else expandedActionsPkg
-                            }
-                        )
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            AppRow(
+                                app = app,
+                                onLaunch = { launchApp(app) },
+                                onLongClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    popupApp = app
+                                },
+                                onHide = ::hideApp,
+                                actionsVisible = expandedActionsPkg == app.packageName,
+                                onActionsVisibleChange = { expanded ->
+                                    expandedActionsPkg =
+                                        if (expanded) app.packageName
+                                        else if (expandedActionsPkg == app.packageName) null
+                                        else expandedActionsPkg
+                                }
+                            )
+                            AppPopupMenu(
+                                app = app,
+                                expanded = popupApp?.packageName == app.packageName,
+                                onDismiss = { popupApp = null }
+                            )
+                        }
                     }
                 }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
+            // v0.40.0：底部上滑 → 回桌面（Bob）。
+            // 系统手势导航会吃掉最底部边缘的触摸，这里在系统手势区之上放一条
+            // 透明手势条：从底部向上滑过阈值就关闭应用中心，回到记住的 Dock 档。
+            // 放在 Rail 之前绘制，Rail 保持可交互。
+            val bottomStripPx = with(density) { 56.dp.toPx() }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(88.dp)
+                    .pointerInput(Unit) {
+                        var accumY = 0f
+                        var fired = false
+                        detectVerticalDragGestures(
+                            onDragStart = { accumY = 0f; fired = false },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                if (fired) return@detectVerticalDragGestures
+                                accumY += dragAmount
+                                if (accumY < -bottomStripPx) {
+                                    fired = true
+                                    onBottomSwipeUpState.value()
+                                }
+                            }
+                        )
+                    }
+            )
             // Rail：波浪字母导航（v0.24，学 Niagara/参考视频）——只做定位
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）
             // v0.21：搜索态隐藏 rail（定位无意义）
@@ -464,14 +507,7 @@ fun AppCenterContent(
         }
     }
 
-    // v0.16：长按常用操作 bottom sheet（系统快捷方式 + 应用信息）
-    quickActionsApp?.let { app ->
-        AppQuickActionsSheet(
-            app = app,
-            onDismiss = { quickActionsApp = null },
-            onAppInfo = { openAppDetails(app) }
-        )
-    }
+    // v0.40.0：长按 bottom sheet 已删除，改用每行自带的真弹窗菜单（AppPopupMenu）
 
     // v0.35.0：首次左滑新手引导——点任意处关闭，只出现一次
     if (showActionsGuide) {

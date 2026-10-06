@@ -54,10 +54,9 @@ class MainActivity : ComponentActivity() {
         CapabilityRegistry.load(this)
         // v0.15 宠物整理员：初始化（亲密度持久化等）
         PetRepository.init(this)
-        // v0.28.0：低电量守护（默认开启，温和提醒）
-        if (com.bobot.ailauncher.data.BatteryGuardPrefs.isEnabled(this)) {
-            com.bobot.ailauncher.service.BatteryGuardService.start(this)
-        }
+        // v0.40.0：低电量守护不再用前台服务（常驻通知打扰），BatteryGuard 跟随进程生命周期；
+        // LauncherApp.onCreate 已注册，这里幂等再保一次
+        com.bobot.ailauncher.data.BatteryGuard.ensureStarted(this)
         // OTA：版本变化后清理旧安装包，避免"直接安装"命中旧包
         OtaUpdater.onAppUpgraded(this)
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -67,12 +66,11 @@ class MainActivity : ComponentActivity() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
-                if (id != -1L && id == OtaUpdater.pendingDownloadId(ctx)
-                    && OtaUpdater.shouldPromptInstall(ctx)
-                ) {
+                if (id != -1L && OtaUpdater.shouldPromptInstall(ctx, id)) {
                     OtaUpdater.downloadedApk(ctx)?.let {
-                        OtaUpdater.promptInstall(ctx, it)
-                        OtaUpdater.markInstallPrompted(ctx)
+                        if (OtaUpdater.promptInstall(ctx, it)) {
+                            OtaUpdater.markInstallPrompted(ctx)
+                        }
                     }
                 }
             }
@@ -144,7 +142,7 @@ class MainActivity : ComponentActivity() {
                                         ) {
                                             notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                                         }
-                                        com.bobot.ailauncher.service.BatteryGuardService.start(this@MainActivity)
+                                        com.bobot.ailauncher.data.BatteryGuard.setEnabled(this@MainActivity, true)
                                         // v0.38.0：全屏 intent 被关掉会降级成普通通知，引导去开
                                         if (!com.bobot.ailauncher.data.BatteryFullScreen.canUse(this@MainActivity)) {
                                             showFullScreenGuide = true
@@ -198,8 +196,9 @@ class MainActivity : ComponentActivity() {
         // OTA：用户切出去等下载、回来时如果包已下好就弹安装（只弹一次）
         if (OtaUpdater.shouldPromptInstall(this)) {
             OtaUpdater.downloadedApk(this)?.let {
-                OtaUpdater.promptInstall(this, it)
-                OtaUpdater.markInstallPrompted(this)
+                if (OtaUpdater.promptInstall(this, it)) {
+                    OtaUpdater.markInstallPrompted(this)
+                }
             }
         }
     }

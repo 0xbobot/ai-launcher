@@ -33,10 +33,11 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
 
 /**
  * v0.39.0：Dock 长按 → 真弹窗快捷菜单（Material3 DropdownMenu）。
- * 锚定在图标所在的 Box 上：图标在屏幕下方时自动弹到图标上面，
- * 点外部/返回即关闭。不是半屏 bottom sheet。
+ * v0.40.0：应用中心长按也改用这一套（替代 bottom sheet），每行自带锚点。
+ * 锚定在图标/行所在的 Box 上：DropdownMenu 自动翻转——图标在屏幕下方时
+ * 弹到图标上面，图标靠上时弹到图标下方。点外部/返回即关闭。
  *
- * 内容与 AppQuickActionsSheet 一致：系统快捷方式 + 应用信息。
+ * 内容：应用提供的系统快捷方式 + 标题行右侧的应用信息图标。
  */
 @Composable
 fun AppPopupMenu(
