@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.ui.apps
 
-import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -29,8 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -77,30 +74,10 @@ internal fun AppRow(
     val density = LocalDensity.current
     var showHideConfirm by remember { mutableStateOf(false) }
     val swipePx = with(density) { 56.dp.toPx() }
+    // v0.41.11（Bob 选方案1）：左滑只留 ★（加到 Dock），滑满 120dp 直接触发，不用点
+    val fullSwipePx = with(density) { 120.dp.toPx() }
 
-    fun openAppDetails() {
-        try {
-            val intent = Intent(
-                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                android.net.Uri.parse("package:${app.packageName}")
-            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-            context.startActivity(intent)
-        } catch (_: Exception) {
-            Toast.makeText(context, "无法打开应用信息", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun uninstallApp() {
-        try {
-            val intent = Intent(
-                Intent.ACTION_DELETE,
-                android.net.Uri.parse("package:${app.packageName}")
-            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-            context.startActivity(intent)
-        } catch (_: Exception) {
-            Toast.makeText(context, "无法卸载", Toast.LENGTH_SHORT).show()
-        }
-    }
+    // v0.41.11：openAppDetails/uninstallApp 已移到长按菜单（AppPopupMenu），此处删除
 
     // v0.35.0：Dock 置顶切换——已置顶则移出，未置顶则追加到末尾（Dock 里按此顺序排最前）
     val dockTick by UiPrefs.dockTick.collectAsState()
@@ -136,8 +113,12 @@ internal fun AppRow(
                         onDragCancel = { fired = true },
                         onDragEnd = {
                             if (!fired) {
-                                if (accumX < -swipePx) {
-                                    // 左滑=多：展开操作（胶囊按钮已在行内）
+                                if (accumX < -fullSwipePx) {
+                                    // v0.41.11：左滑满 → 直接加到 Dock（或移出），不用点按钮
+                                    togglePin()
+                                    if (actionsVisible) onActionsVisibleChange(false)
+                                } else if (accumX < -swipePx) {
+                                    // 左滑=多：只展开 ★（加到 Dock）；ⓘ🗑 已移到长按菜单
                                     if (!actionsVisible) onActionsVisibleChange(true)
                                 } else if (accumX > swipePx) {
                                     // 右滑=少：展开态收起；收起态弹确认框再隐藏
@@ -184,7 +165,7 @@ internal fun AppRow(
                         )
                     }
                 } else {
-                    // 展开态：名字保留，右侧三个操作按钮（v0.35.0：新增"加到 Dock"放最前，间距统一 8dp）
+                    // 展开态：只留 ★（加到 Dock）；ⓘ🗑 已移到长按菜单（v0.41.11 Bob 选方案1）
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AppIconImage(
                             drawable = app.icon,
@@ -209,22 +190,6 @@ internal fun AppRow(
                             contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
                             delayMillis = 0
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        SlideInIconButton(
-                            onClick = ::openAppDetails,
-                            icon = Icons.Filled.Info,
-                            iconTint = Color(0xFF8A8478),
-                            contentDescription = "应用信息",
-                            delayMillis = 70
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        SlideInIconButton(
-                            onClick = ::uninstallApp,
-                            icon = Icons.Filled.Delete,
-                            iconTint = Color(0xFFD16A6A),
-                            contentDescription = "卸载",
-                            delayMillis = 140
-                        )
                     }
                 }
             }
@@ -238,7 +203,7 @@ internal fun AppRow(
             title = { Text("隐藏应用", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
             text = {
                 Text(
-                    text = "是否隐藏「${app.label}」？可在设置页恢复。",
+                    text = "是否隐藏「${app.label}」？点右下眼睛图标可恢复。",
                     fontSize = 14.sp,
                     color = AILauncherColors.Body
                 )

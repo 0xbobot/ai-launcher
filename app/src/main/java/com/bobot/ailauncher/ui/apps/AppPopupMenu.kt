@@ -1,5 +1,7 @@
 package com.bobot.ailauncher.ui.apps
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
@@ -15,6 +17,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -135,5 +138,43 @@ fun AppPopupMenu(
                 contentPadding = MenuDefaults.DropdownMenuItemContentPadding
             )
         }
+        // v0.41.11（Bob 选方案1）：卸载从左滑移到长按菜单；ⓘ 已在标题行
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 14.dp),
+            color = AILauncherColors.Divider
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "卸载",
+                    fontSize = 14.sp,
+                    color = Color(0xFFD16A6A),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = null,
+                    tint = Color(0xFFD16A6A),
+                    modifier = Modifier.size(22.dp)
+                )
+            },
+            onClick = {
+                try {
+                    val intent = Intent(
+                        Intent.ACTION_DELETE,
+                        android.net.Uri.parse("package:${app.packageName}")
+                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                    context.startActivity(intent)
+                } catch (_: Exception) {
+                    Toast.makeText(context, "无法卸载", Toast.LENGTH_SHORT).show()
+                }
+                onDismiss()
+            },
+            colors = MenuDefaults.itemColors(textColor = Color(0xFFD16A6A)),
+            contentPadding = MenuDefaults.DropdownMenuItemContentPadding
+        )
     }
 }
