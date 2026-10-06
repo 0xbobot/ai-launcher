@@ -1,9 +1,6 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.widget.Toast
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -14,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,7 +28,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,10 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
-import kotlin.math.roundToInt
-import kotlinx.coroutines.launch
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
@@ -95,27 +87,21 @@ internal fun AppRow(
         }
     }
 
-    // v0.41.12（Bob）：左滑跟手动画——行内容跟手指移动，★ 在底层露出；
-    // 滑满 120dp 时 ★ 放大提示"松手直接触发"，给明确的触觉反馈。
-    val offsetX = remember { Animatable(0f) }
-    val animScope = rememberCoroutineScope()
-    val buttonWidthPx = with(density) { 72.dp.toPx() }
+    // v0.41.16（Bob）：滑动后空白分不清——内容不再移动/淡出，始终完整可见；
+    // ★ 的出现/放大跟手指走（跟手反馈），松手后按阈值定。图标不再被裁。
+    var dragDist by remember { mutableStateOf(0f) } // 左滑为正
     val revealPx = with(density) { 56.dp.toPx() }
     val fullPx = with(density) { 120.dp.toPx() }
-    val maxLeftPx = with(density) { 160.dp.toPx() }
-    val maxRightPx = with(density) { 56.dp.toPx() }
-    val springSpec = spring<Float>(stiffness = Spring.StiffnessMedium, dampingRatio = 0.9f)
+    val maxDragPx = with(density) { 160.dp.toPx() }
 
-    fun hideActions() {
+    fun hideStar() {
+        dragDist = 0f
         onActionsVisibleChange(false)
-        animScope.launch { offsetX.animateTo(0f, springSpec) }
     }
 
-    // 外部收起（如另一行展开）时跟回
+    // 外部收起（如另一行展开）时
     LaunchedEffect(actionsVisible) {
-        if (!actionsVisible && offsetX.value != 0f) {
-            offsetX.animateTo(0f, springSpec)
-        }
+        if (!actionsVisible) dragDist = 0f
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -124,54 +110,44 @@ internal fun AppRow(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
         ) {
-            // 内容：跟手滑动，保持透明（B 方案呼吸感，不加白底）
-            // v0.41.15：左滑时内容整体淡出——图标先变透明，避免被生硬裁掉（Bob 反馈丑）
-            val contentAlpha = 1f - (-offsetX.value / buttonWidthPx).coerceIn(0f, 1f)
+            // 内容：完全静态，始终完整可见（B 方案呼吸感）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                    .graphicsLayer { alpha = contentAlpha }
                     .pointerInput(app.packageName) {
                         detectHorizontalDragGestures(
                             onDragEnd = {
-                                val v = offsetX.value
-                                animScope.launch {
-                                    when {
-                                        v < -fullPx -> {
-                                            // v0.41.11：左滑满 → 直接加到 Dock（或移出）
-                                            togglePin()
-                                            hideActions()
-                                        }
-                                        v < -revealPx -> {
-                                            // 左滑=多：★ 淡入，点按触发
-                                            offsetX.animateTo(-buttonWidthPx, springSpec)
-                                            onActionsVisibleChange(true)
-                                        }
-                                        v > revealPx -> {
-                                            // 右滑=少：弹确认框再隐藏
-                                            offsetX.animateTo(0f, springSpec)
-                                            showHideConfirm = true
-                                        }
-                                        else -> hideActions()
+                                when {
+                                    dragDist > fullPx -> {
+                                        // 左滑满 → 直接加到 Dock（或移出）
+                                        togglePin()
+                                        hideStar()
                                     }
+                                    dragDist > revealPx -> {
+                                        // 左滑=多：★ 保持显示，点按触发
+                                        dragDist = 0f
+                                        onActionsVisibleChange(true)
+                                    }
+                                    dragDist < -revealPx -> {
+                                        // 右滑=少：弹确认框再隐藏
+                                        dragDist = 0f
+                                        showHideConfirm = true
+                                    }
+                                    else -> dragDist = 0f
                                 }
                             },
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
-                                animScope.launch {
-                                    offsetX.snapTo(
-                                        (offsetX.value + dragAmount)
-                                            .coerceIn(-maxLeftPx, maxRightPx)
-                                    )
-                                }
+                                // 左滑 dragAmount 为负，转成正数距离
+                                dragDist = (dragDist - dragAmount)
+                                    .coerceIn(-maxDragPx, maxDragPx)
                             }
                         )
                     }
                     .combinedClickable(
                         onClick = {
                             // ★ 显示时点行 = 收起；否则启动应用
-                            if (offsetX.value != 0f) hideActions()
+                            if (actionsVisible) hideStar()
                             else onLaunch()
                         },
                         onLongClick = onLongClick
@@ -197,28 +173,28 @@ internal fun AppRow(
                 )
             }
 
-            // v0.41.13：★ 改为覆盖层（不占布局、不加白底）——随滑动淡入，
-            // 滑满时放大提示"松手直接触发"。透明设计不受影响。
-            val swipeProgress = (-offsetX.value / buttonWidthPx).coerceIn(0f, 1f)
-            if (swipeProgress > 0.01f) {
-                val overscroll = (-offsetX.value - buttonWidthPx).coerceAtLeast(0f)
+            // ★：跟手出现/放大。dragDist 驱动透明度和缩放，松手后由 actionsVisible 保持。
+            val starProgress = if (actionsVisible) 1f
+                else (dragDist / revealPx).coerceIn(0f, 1f)
+            if (starProgress > 0.01f) {
+                val overscroll = (dragDist - revealPx).coerceAtLeast(0f)
                 val starScale = 1f +
-                    (overscroll / (maxLeftPx - buttonWidthPx)).coerceIn(0f, 1f) * 0.35f
+                    (overscroll / (maxDragPx - revealPx)).coerceIn(0f, 1f) * 0.35f
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
                         .size(48.dp)
                         .graphicsLayer {
-                            alpha = swipeProgress
+                            alpha = starProgress
                             scaleX = starScale
                             scaleY = starScale
                         }
                         .clip(CircleShape)
                         .clickable(
-                            enabled = offsetX.value < -buttonWidthPx / 2,
+                            enabled = actionsVisible || dragDist > revealPx / 2,
                             onClick = {
                                 togglePin()
-                                hideActions()
+                                hideStar()
                             }
                         ),
                     contentAlignment = Alignment.Center

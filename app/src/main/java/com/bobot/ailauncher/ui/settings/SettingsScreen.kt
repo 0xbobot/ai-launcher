@@ -34,6 +34,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -65,6 +66,7 @@ import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.OtaCheckResult
+import com.bobot.ailauncher.data.OtaDownloader
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.UiPrefs
@@ -426,27 +428,81 @@ fun SettingsScreen(
         item { SectionTitle("通用") }
 
         // OTA：手动检查更新
+        // v0.41.16（Bob）：两段式——第一次点只检查，有新版本时在描述里显示版本号+说明；
+        // 第二次点直接下载；下载完显示"点击安装"。不弹对话框。
         item {
             var checking by remember { mutableStateOf(false) }
             var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
+            val dlState by OtaDownloader.state.collectAsState()
+
+            val downloading = dlState is OtaDownloader.State.Downloading
+            val dlProgress = (dlState as? OtaDownloader.State.Downloading)?.progress ?: 0f
+            val dlDone = dlState is OtaDownloader.State.Success
+            val dlFailed = dlState is OtaDownloader.State.Failed
+
+            // 下载成功后 OtaDownloader 已自动弹过安装；这里保留手动安装入口（兜底）
+            val onCardClick: (() -> Unit)? = when {
+                checking || downloading -> null
+                dlDone -> {
+                    {
+                        val apk = OtaUpdater.downloadedApk(context)
+                        if (apk != null) {
+                            if (OtaUpdater.promptInstall(context, apk)) {
+                                OtaUpdater.markInstallPrompted(context)
+                            }
+                        } else {
+                            Toast.makeText(context, "安装包不见了，重新下载", Toast.LENGTH_SHORT).show()
+                            OtaDownloader.resetIfNotDownloading()
+                            updateInfo?.let { OtaDownloader.start(context, it) }
+                        }
+                    }
+                }
+                dlFailed -> {
+                    {
+                        updateInfo?.let { OtaDownloader.start(context, it) }
+                            ?: run {
+                                // 没留住 updateInfo，重新检查
+                                checking = true
+                                scope.launch {
+                                    when (val r = OtaUpdater.checkForUpdateResult(context)) {
+                                        is OtaCheckResult.UpdateAvailable -> {
+                                            updateInfo = r.info
+                                            OtaDownloader.start(context, r.info)
+                                        }
+                                        else -> Toast.makeText(
+                                            context, "检查失败，请稍后再试", Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                    checking = false
+                                }
+                            }
+                    }
+                }
+                updateInfo != null -> {
+                    { OtaDownloader.start(context, updateInfo!!) }
+                }
+                else -> {
+                    {
+                        checking = true
+                        scope.launch {
+                            when (val r = OtaUpdater.checkForUpdateResult(context)) {
+                                is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
+                                OtaCheckResult.UpToDate ->
+                                    Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
+                                OtaCheckResult.Failed ->
+                                    Toast.makeText(context, "检查失败，请稍后再试", Toast.LENGTH_SHORT).show()
+                            }
+                            checking = false
+                        }
+                    }
+                }
+            }
+
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                onClick = {
-                    if (checking) return@Card
-                    checking = true
-                    scope.launch {
-                        when (val r = OtaUpdater.checkForUpdateResult(context)) {
-                            is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
-                            OtaCheckResult.UpToDate ->
-                                Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
-                            OtaCheckResult.Failed ->
-                                Toast.makeText(context, "检查失败，请稍后再试", Toast.LENGTH_SHORT).show()
-                        }
-                        checking = false
-                    }
-                }
+                onClick = { onCardClick?.invoke() }
             ) {
                 Row(
                     modifier = Modifier
@@ -456,24 +512,63 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "检查更新",
+                            text = when {
+                                checking -> "正在检查..."
+                                downloading -> "正在下载 v${updateInfo?.versionName ?: ""}"
+                                dlDone -> "下载完成"
+                                dlFailed -> "下载失败"
+                                updateInfo != null -> "发现新版本 v${updateInfo!!.versionName}"
+                                else -> "检查更新"
+                            },
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.Title
                         )
-                        Text(
-                            text = "当前版本 v${BuildConfig.VERSION_NAME}",
-                            fontSize = 13.sp,
-                            color = AILauncherColors.Hint
-                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        when {
+                            downloading -> {
+                                LinearProgressIndicator(
+                                    progress = { dlProgress },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "已下载 ${(dlProgress * 100).toInt()}%",
+                                    fontSize = 13.sp,
+                                    color = AILauncherColors.Hint
+                                )
+                            }
+                            dlDone -> Text(
+                                text = "点击安装 v${updateInfo?.versionName ?: ""}",
+                                fontSize = 13.sp,
+                                color = AILauncherColors.Accent
+                            )
+                            dlFailed -> Text(
+                                text = "点击重试",
+                                fontSize = 13.sp,
+                                color = Color(0xFFD16A6A)
+                            )
+                            updateInfo != null -> Text(
+                                text = updateInfo!!.changelog,
+                                fontSize = 13.sp,
+                                color = AILauncherColors.Hint,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            else -> Text(
+                                text = "当前版本 v${BuildConfig.VERSION_NAME}",
+                                fontSize = 13.sp,
+                                color = AILauncherColors.Hint
+                            )
+                        }
                     }
-                    if (checking) {
+                    if (checking || downloading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.dp,
                             color = AILauncherColors.Accent
                         )
-                    } else {
+                    } else if (onCardClick != null) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
@@ -482,9 +577,7 @@ fun SettingsScreen(
                     }
                 }
             }
-            updateInfo?.let { info ->
-                UpdateDialog(info = info, onDismiss = { updateInfo = null })
-            }
+            // v0.41.16：设置页不再弹 UpdateDialog，两段式卡片接管
         }
     }
 }
