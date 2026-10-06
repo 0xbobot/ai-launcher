@@ -17,6 +17,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -400,6 +401,7 @@ private fun DockGrid10(
  * v0.39.0：Dock 图标按钮——点击启动，长按弹出真弹窗快捷菜单。
  * 菜单锚定在图标所在的 Box 上（图标在屏幕下方时自动弹到图标上面）。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DockIconButton(
     app: AppInfo,
