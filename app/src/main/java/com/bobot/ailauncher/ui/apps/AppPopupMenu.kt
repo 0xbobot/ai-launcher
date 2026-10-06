@@ -10,8 +10,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -55,10 +59,10 @@ fun AppPopupMenu(
         tonalElevation = 0.dp,
         shadowElevation = 8.dp
     ) {
-        // 头：应用图标 + 名称
+        // 头：应用图标 + 名称 + 应用信息图标（v0.39.1：应用信息收到标题行，用图标表示）
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+            modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp)
         ) {
             AppIconImage(
                 drawable = app.icon,
@@ -74,8 +78,23 @@ fun AppPopupMenu(
                 fontWeight = FontWeight.SemiBold,
                 color = AILauncherColors.Title,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
+            IconButton(
+                onClick = {
+                    openAppDetailsPage(context, app.packageName)
+                    onDismiss()
+                },
+                modifier = Modifier.size(38.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Info,
+                    contentDescription = "应用信息",
+                    tint = AILauncherColors.Hint,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
         if (shortcuts.isNotEmpty()) {
             HorizontalDivider(
@@ -115,20 +134,5 @@ fun AppPopupMenu(
                 contentPadding = MenuDefaults.DropdownMenuItemContentPadding
             )
         }
-        DropdownMenuItem(
-            text = {
-                Text(
-                    text = "应用信息",
-                    fontSize = 14.sp,
-                    color = AILauncherColors.Title
-                )
-            },
-            onClick = {
-                openAppDetailsPage(context, app.packageName)
-                onDismiss()
-            },
-            colors = MenuDefaults.itemColors(textColor = AILauncherColors.Title),
-            contentPadding = MenuDefaults.DropdownMenuItemContentPadding
-        )
     }
 }
