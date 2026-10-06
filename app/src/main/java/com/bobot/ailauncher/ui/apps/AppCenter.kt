@@ -41,7 +41,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.stickyHeader
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -90,6 +90,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -186,14 +187,14 @@ fun AppCenterContent(
 
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
-    // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
-    // v0.41.0（B 方案）：组头字母已并入组首行的幽灵字母（AppRow ghostLetter），不再占 item
+    // 字母 → LazyColumn item index（每字母：1 吸顶头 + N 行 + 1 组间呼吸间距）
+    // v0.41.4：幽灵字母改为 stickyHeader 吸顶，每个字母组占 1 个 header item
     val letterAnchors = remember(azGroups) {
         val m = mutableMapOf<Char, Int>()
         var idx = 0
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
-            idx += apps.size + 1
+            idx += 1 + apps.size + 1
         }
         m
     }
@@ -402,9 +403,28 @@ fun AppCenterContent(
                     item { Spacer(modifier = Modifier.height(24.dp)) }
                 } else {
                 // v0.25.7：去掉"全部应用"标题（Bob）
-                // A-Z 列表（v0.41.0 B 方案：组头字母并入组首行幽灵字母，组间留呼吸间距）
+                // A-Z 列表（v0.41.0 B 方案）
+                // v0.41.4：幽灵字母改为吸顶 stickyHeader——滚动时悬停在左上留白，
+                // 下一个字母上来时把它顶走（Bob）
                 azGroups.forEach { (letter, apps) ->
-                    itemsIndexed(apps, key = { _, app -> "a:${app.packageName}" }) { index, app ->
+                    stickyHeader(key = "sh:$letter") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                        ) {
+                            Text(
+                                text = letter.toString(),
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 40.sp,
+                                color = AILauncherColors.Title.copy(alpha = 0.22f),
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .offset(x = (-52).dp)
+                            )
+                        }
+                    }
+                    items(apps, key = { "a:${it.packageName}" }) { app ->
                         Box(modifier = Modifier.fillMaxWidth()) {
                             AppRow(
                                 app = app,
@@ -420,8 +440,7 @@ fun AppCenterContent(
                                         if (expanded) app.packageName
                                         else if (expandedActionsPkg == app.packageName) null
                                         else expandedActionsPkg
-                                },
-                                ghostLetter = if (index == 0) letter else null
+                                }
                             )
                             AppPopupMenu(
                                 app = app,

@@ -50,7 +50,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,10 +71,7 @@ internal fun AppRow(
     onLongClick: () -> Unit,
     onHide: (AppInfo) -> Unit,
     actionsVisible: Boolean,
-    onActionsVisibleChange: (Boolean) -> Unit,
-    // v0.41.0（B 方案·呼吸感）：组首行在左侧 72dp 留白里画一枚幽灵衬线字母，
-    // 极淡（9%），不与行重叠；搜索态传 null
-    ghostLetter: Char? = null
+    onActionsVisibleChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -127,23 +123,6 @@ internal fun AppRow(
         }
     }
 
-    // v0.41.0（B 方案）：幽灵字母——衬线，收进左侧 72dp 留白（列表 start padding），
-    // 不与行重叠；那块留白同时是左侧隐形 rail 触发区，一举两用
-    // v0.41.2：9% 在真机上淡到像渲染残影 → 14%
-    // v0.41.3：14% 还是不够（Bob：H 只剩两竖像"["，字母形态显示不全）→ 22%，
-    // 往右挪到离边 20dp，彻底避开边缘裁剪嫌疑
-    Box(modifier = Modifier.fillMaxWidth()) {
-        if (ghostLetter != null) {
-            Text(
-                text = ghostLetter.toString(),
-                fontFamily = FontFamily.Serif,
-                fontSize = 40.sp,
-                color = AILauncherColors.Title.copy(alpha = 0.22f),
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .offset(x = (-52).dp)
-            )
-        }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -250,7 +229,6 @@ internal fun AppRow(
                 }
             }
         }
-    }
     }
 
     // 右滑隐藏确认框
