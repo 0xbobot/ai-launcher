@@ -62,7 +62,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.bobot.ailauncher.BuildConfig
-import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.OtaCheckResult
@@ -387,90 +386,7 @@ fun SettingsScreen(
             }
         }
         item { SectionTitle("应用") }
-        // 已隐藏应用：在应用中心右滑隐藏的应用，在这里恢复
-        item {
-            val hiddenVersion = HiddenApps.version.intValue
-            val hiddenPkgs = remember(hiddenVersion) { HiddenApps.getHidden(context) }
-            var expanded by remember { mutableStateOf(false) }
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { expanded = !expanded },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "已隐藏应用（${hiddenPkgs.size}）",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = AILauncherColors.Title
-                            )
-                            Text(
-                                text = "在应用中心右滑隐藏的应用，可在这里恢复显示",
-                                fontSize = 13.sp,
-                                color = AILauncherColors.Hint
-                            )
-                        }
-                        Text(
-                            text = if (expanded) "收起" else "展开",
-                            fontSize = 13.sp,
-                            color = AILauncherColors.Hint
-                        )
-                    }
-                    AnimatedVisibility(visible = expanded) {
-                        Column(modifier = Modifier.padding(top = 8.dp)) {
-                            if (hiddenPkgs.isEmpty()) {
-                                Text(
-                                    text = "暂无已隐藏应用",
-                                    fontSize = 13.sp,
-                                    color = AILauncherColors.Hint,
-                                    modifier = Modifier.padding(vertical = 8.dp)
-                                )
-                            } else {
-                                val pm = context.packageManager
-                                hiddenPkgs.sorted().forEach { pkg ->
-                                    val label = try {
-                                        pm.getApplicationLabel(
-                                            pm.getApplicationInfo(pkg, 0)
-                                        ).toString()
-                                    } catch (_: Exception) {
-                                        pkg
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = label,
-                                            fontSize = 14.sp,
-                                            color = AILauncherColors.Body,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        TextButton(onClick = {
-                                            HiddenApps.unhide(context, pkg)
-                                        }) {
-                                            Text(
-                                                text = "恢复",
-                                                fontSize = 13.sp,
-                                                color = AILauncherColors.Accent
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // v0.41.9：已隐藏应用入口已移到应用中心字母导航（眼睛图标+生物识别），设置页不再保留
         item { SectionTitle("通用") }
 
         // OTA：手动检查更新

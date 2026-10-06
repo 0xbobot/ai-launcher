@@ -50,8 +50,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.fragment.app.FragmentActivity
+import com.bobot.ailauncher.data.BiometricAuth
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -147,6 +152,17 @@ fun AppCenterContent(
     // 已隐藏应用版本号：变化时 A-Z 自动重算过滤
     val hiddenVersion = HiddenApps.version.intValue
     val hidden = remember(refreshTick, hiddenVersion) { HiddenApps.getHidden(context) }
+    // v0.41.9：已隐藏应用视图（字母导航入口 + 生物识别通过后显示）
+    var showHiddenApps by remember { mutableStateOf(false) }
+    val hiddenApps = remember(refreshTick, hiddenVersion) {
+        if (hidden.isEmpty()) emptyList()
+        else {
+            val collator = Collator.getInstance(Locale.CHINA)
+            listLaunchableApps(context)
+                .filter { it.packageName in hidden }
+                .sortedWith { a, b -> collator.compare(a.label.toString(), b.label.toString()) }
+        }
+    }
 
     // v0.22：分类区取消（等需要时再重新设计），只保留 A-Z
 
@@ -250,7 +266,7 @@ fun AppCenterContent(
     // 右滑隐藏（手势签名：右滑=少），HiddenApps.version +1 后列表自动重算
     fun hideApp(app: AppInfo) {
         HiddenApps.hide(context, app.packageName)
-        Toast.makeText(context, "已隐藏「${app.label}」，可在设置页恢复", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "已隐藏「${app.label}」", Toast.LENGTH_SHORT).show()
     }
 
     // v0.16.1：A-Z 行左滑操作同时只展开一个——列表级单态，新展开自动收起上一个
@@ -317,6 +333,7 @@ fun AppCenterContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // v0.21 搜索框：拼音/首字母/自然语言/模糊（PRD §三十三）
+                // v0.41.9（Bob 选 B）：细线搜索 + 左侧放大镜图标
                 val keyboardController =
                     androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
                 Column(modifier = Modifier.weight(1f)) {
@@ -330,6 +347,14 @@ fun AppCenterContent(
                                 color = AILauncherColors.Hint,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = "搜索",
+                                tint = AILauncherColors.Hint,
+                                modifier = Modifier.size(20.dp)
                             )
                         },
                         trailingIcon = {
@@ -365,11 +390,13 @@ fun AppCenterContent(
                         thickness = 1.dp
                     )
                 }
+                // v0.41.9（Bob 选 B）：设置齿轮缩小弱化，仍在右上
                 IconButton(onClick = onOpenSettings) {
                     Icon(
                         Icons.Filled.Settings,
                         contentDescription = "设置",
-                        tint = AILauncherColors.Hint
+                        tint = AILauncherColors.Hint.copy(alpha = 0.6f),
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -593,8 +620,60 @@ fun AppCenterContent(
                     onRelease = { mirrorIndex = null },
                     modifier = Modifier.align(Alignment.CenterStart)
                 )
+                // v0.41.9：已隐藏应用入口（Bob）——右下小眼睛图标，点按需生物识别
+                // （面部/指纹），通过后显示隐藏应用；不通过保持隐藏
+                if (!searching && !showHiddenApps) {
+                    IconButton(
+                        onClick = {
+                            val activity = context as? FragmentActivity
+                            if (activity == null) {
+                                Toast.makeText(context, "无法启动验证", Toast.LENGTH_SHORT).show()
+                                return@IconButton
+                            }
+                            if (!BiometricAuth.canAuthenticate(context)) {
+                                Toast.makeText(
+                                    context,
+                                    "请先在系统设置中录入指纹或面容",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                return@IconButton
+                            }
+                            BiometricAuth.authenticate(
+                                activity = activity,
+                                onSuccess = { showHiddenApps = true },
+                                onFail = {
+                                    Toast.makeText(context, "验证未通过", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(bottom = 100.dp, end = 10.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.VisibilityOff,
+                            contentDescription = "已隐藏应用",
+                            tint = AILauncherColors.Hint.copy(alpha = 0.7f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
             }
         }
+    }
+
+    // v0.41.9：已隐藏应用视图（生物识别通过后）
+    if (showHiddenApps) {
+        HiddenAppsView(
+            hiddenApps = hiddenApps,
+            onBack = { showHiddenApps = false },
+            onUnhide = { app ->
+                HiddenApps.unhide(context, app.packageName)
+                Toast.makeText(context, "「${app.label}」已恢复显示", Toast.LENGTH_SHORT).show()
+                // 全部恢复后自动返回列表
+                if (HiddenApps.getHidden(context).isEmpty()) showHiddenApps = false
+            }
+        )
     }
 
     // v0.40.0：长按 bottom sheet 已删除，改用每行自带的真弹窗菜单（AppPopupMenu）
@@ -736,3 +815,101 @@ private fun rememberPullDownConnection(
     }
 }
 
+
+/**
+ * v0.41.9：已隐藏应用视图（Bob）——字母导航的眼睛入口 + 生物识别通过后显示。
+ * 列表只显示已隐藏应用，每行可"恢复显示"；返回按钮回到正常列表。
+ */
+@Composable
+private fun HiddenAppsView(
+    hiddenApps: List<AppInfo>,
+    onBack: () -> Unit,
+    onUnhide: (AppInfo) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(AILauncherColors.Background)
+            .statusBarsPadding()
+    ) {
+        // 顶栏：返回 + 标题
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 20.dp, top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "返回",
+                    tint = AILauncherColors.Title
+                )
+            }
+            Text(
+                text = "已隐藏应用",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+                color = AILauncherColors.Title
+            )
+        }
+        HorizontalDivider(color = AILauncherColors.Divider, thickness = 1.dp)
+        if (hiddenApps.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "暂无已隐藏应用",
+                    fontSize = 14.sp,
+                    color = AILauncherColors.Hint
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 96.dp)
+            ) {
+                items(hiddenApps, key = { "h:${it.packageName}" }) { app ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 应用图标（AppInfo.icon 是 Drawable）
+                        Image(
+                            bitmap = app.icon.toBitmap().asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = app.label.toString(),
+                            fontSize = 16.sp,
+                            color = AILauncherColors.Title,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        TextButton(onClick = { onUnhide(app) }) {
+                            Text(
+                                text = "恢复显示",
+                                fontSize = 14.sp,
+                                color = AILauncherColors.Accent
+                            )
+                        }
+                    }
+                    HorizontalDivider(
+                        color = AILauncherColors.Divider,
+                        thickness = 0.5.dp,
+                        modifier = Modifier.padding(start = 72.dp, end = 20.dp)
+                    )
+                }
+            }
+        }
+    }
+}
