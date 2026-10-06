@@ -142,12 +142,6 @@ internal fun AppRow(
                                         onActionsVisibleChange(true)
                                     }
                                     dragDist < -revealPx -> {
-                                    dragDist > revealPx -> {
-                                        // 左滑=多：★ 保持显示，点按触发
-                                        dragDist = 0f
-                                        onActionsVisibleChange(true)
-                                    }
-                                    dragDist < -revealPx -> {
                                         // 右滑=少：眼睛保持显示，点按隐藏/取消隐藏
                                         dragDist = 0f
                                         onHideVisibleChange(true)
