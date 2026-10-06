@@ -47,7 +47,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -311,8 +310,10 @@ private fun FullAppsOverlay(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            // v0.25.7：玻璃半透明——壁纸透出， frosted glass 效果
-            .background(Color.White.copy(alpha = 0.72f))
+            // v0.25.7：玻璃半透明——壁纸透出，frosted glass 效果
+            // v0.41.2：72% 太透，壁纸把字都 wash out 了（Bob）→ 用主题的
+            // 全屏抽屉 token（白 88%，列表可读性），还留一点壁纸氛围
+            .background(AILauncherColors.GlassCardStrong)
     ) {
         AppCenterContent(
             onOpenSettings = onOpenSettings,

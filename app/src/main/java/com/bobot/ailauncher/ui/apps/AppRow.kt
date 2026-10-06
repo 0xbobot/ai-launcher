@@ -129,13 +129,14 @@ internal fun AppRow(
 
     // v0.41.0（B 方案）：幽灵字母——衬线、极淡，收进左侧 72dp 留白（列表 start padding），
     // 不与行重叠；那块留白同时是左侧隐形 rail 触发区，一举两用
+    // v0.41.2：9% 在真机上淡到像渲染残影（Bob）→ 提到 14%，能看出来是设计
     Box(modifier = Modifier.fillMaxWidth()) {
         if (ghostLetter != null) {
             Text(
                 text = ghostLetter.toString(),
                 fontFamily = FontFamily.Serif,
                 fontSize = 44.sp,
-                color = AILauncherColors.Title.copy(alpha = 0.09f),
+                color = AILauncherColors.Title.copy(alpha = 0.14f),
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .offset(x = (-58).dp)
