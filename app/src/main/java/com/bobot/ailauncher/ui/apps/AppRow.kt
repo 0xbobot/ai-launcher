@@ -105,12 +105,18 @@ internal fun AppRow(
         onHideVisibleChange(false)
     }
 
-    // 溶解进度：左滑或 ★ 保持时用左进度，右滑或眼睛保持时用右进度
-    val isLeft = actionsVisible || dragDist > 0
+    // 溶解进度：正在拖时按拖动方向（优先于保持状态），否则按保持状态
+    // v0.41.24（Bob）：修 bug——左滑保持 ★ 后再右滑，眼睛出不来
+    // （原来 actionsVisible 优先，导致拖右滑时仍显示 ★）
+    val isLeft = when {
+        dragDist != 0f -> dragDist > 0
+        actionsVisible -> true
+        hideVisible -> false
+        else -> true
+    }
     val dissolveProgress = when {
+        dragDist != 0f -> (kotlin.math.abs(dragDist) / revealPx).coerceIn(0f, 1f)
         actionsVisible || hideVisible -> 1f
-        dragDist > 0 -> (dragDist / revealPx).coerceIn(0f, 1f)
-        dragDist < 0 -> (-dragDist / revealPx).coerceIn(0f, 1f)
         else -> 0f
     }
 
@@ -185,7 +191,13 @@ internal fun AppRow(
                             .graphicsLayer { alpha = 1f - dissolveProgress }
                     )
                     if (dissolveProgress > 0.01f) {
-                        val actionBg = if (isLeft) Color(0xFFC9A227) else Color(0xFF8A8478)
+                        // v0.41.24（Bob）：★ 双状态——金底=点按加入 Dock，灰底=已在 Dock 点按移出；
+                        // 眼睛双状态——闭眼=隐藏，开眼=取消隐藏（图标区分）
+                        val actionBg = when {
+                            isLeft && isPinned -> Color(0xFF8A8478)
+                            isLeft -> Color(0xFFC9A227)
+                            else -> Color(0xFF8A8478)
+                        }
                         val actionIcon = when {
                             isLeft -> Icons.Filled.Star
                             onUnhide != null -> Icons.Filled.Visibility

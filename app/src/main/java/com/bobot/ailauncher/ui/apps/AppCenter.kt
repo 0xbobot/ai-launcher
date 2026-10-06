@@ -53,7 +53,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.fragment.app.FragmentActivity
@@ -576,7 +576,7 @@ fun AppCenterContent(
                         Box(modifier = Modifier.fillMaxWidth()) {
                             Icon(
                                 imageVector = if (hiddenUnlocked) Icons.Filled.VisibilityOff
-                                    else Icons.Filled.Lock,
+                                    else Icons.Outlined.Lock,
                                 contentDescription = null,
                                 tint = AILauncherColors.Title.copy(alpha = 0.14f),
                                 modifier = Modifier
@@ -608,7 +608,7 @@ fun AppCenterContent(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Filled.Lock,
+                                        imageVector = Icons.Outlined.Lock,
                                         contentDescription = null,
                                         tint = AILauncherColors.Hint,
                                         modifier = Modifier.size(22.dp)
