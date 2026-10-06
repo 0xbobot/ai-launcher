@@ -121,13 +121,10 @@ object OtaUpdater {
 
     /** 下载已完成、是比当前更新的版本、且还没弹过安装提示 → 应该弹安装 */
     fun shouldPromptInstall(context: Context): Boolean =
-        shouldPromptInstall(context, pendingDownloadId(context))
+        !prefs(context).getBoolean(KEY_INSTALL_PROMPTED, false) &&
+            prefs(context).getInt(KEY_TARGET_VERSION, 0) > BuildConfig.VERSION_CODE &&
+            downloadedApk(context) != null
 
-    /**
-     * v0.40.0：下载完成广播用，completedId 是刚完成的任务 id。
-     * 用"完成的是我们自己的更新包文件"来判定，不再死磕 id 等于记录值——
-     * 之前重复下载导致旧任务先完成时 id 对不上，安装提醒就永远没弹出来。
-     */
     // v0.41.12：shouldPromptInstall(context, completedId) 与 isOurDownload 已删除
     //（DownloadManager 废弃，下载走 OtaDownloader）。
 
