@@ -1,11 +1,6 @@
 package com.bobot.ailauncher.ui.apps
 
-import android.content.Context
-import android.content.pm.LauncherApps
-import android.content.pm.ShortcutInfo
 import android.graphics.drawable.Drawable
-import android.os.Process
-import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,7 +44,8 @@ fun AppQuickActionsSheet(
     onAppInfo: () -> Unit
 ) {
     val context = LocalContext.current
-    val shortcuts = remember(app.packageName) { loadShortcuts(context, app.packageName) }
+    // v0.39.0：快捷方式 helpers 已抽到 AppShortcuts.kt
+    val shortcuts = remember(app.packageName) { loadAppShortcuts(context, app.packageName) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -84,12 +80,12 @@ fun AppQuickActionsSheet(
             Spacer(modifier = Modifier.height(8.dp))
             // 系统快捷方式（有才显示）
             shortcuts.forEach { s ->
-                val icon = remember(s.id) { shortcutIcon(context, app.packageName, s.id) }
+                val icon = remember(s.id) { loadShortcutIcon(context, app.packageName, s.id) }
                 SheetRow(
                     label = s.shortLabel?.toString().orEmpty().ifBlank { "快捷方式" },
                     icon = icon,
                     onClick = {
-                        launchShortcut(context, app.packageName, s.id)
+                        launchAppShortcut(context, app.packageName, s.id)
                         onDismiss()
                     }
                 )
@@ -130,48 +126,4 @@ private fun SheetRow(
     }
 }
 
-/** 取系统快捷方式；非默认桌面/异常时返回空列表（优雅降级） */
-private fun loadShortcuts(context: Context, packageName: String): List<ShortcutInfo> {
-    return try {
-        val lm = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
-        val query = LauncherApps.ShortcutQuery().apply {
-            setPackage(packageName)
-            setQueryFlags(
-                LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
-            )
-        }
-        lm.getShortcuts(query, Process.myUserHandle()).orEmpty()
-    } catch (_: Exception) {
-        emptyList()
-    }
-}
-
-private fun shortcutIcon(context: Context, packageName: String, shortcutId: String): Drawable? {
-    return try {
-        val lm = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
-        val query = LauncherApps.ShortcutQuery().apply {
-            setPackage(packageName)
-            setShortcutIds(listOf(shortcutId))
-            setQueryFlags(
-                LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
-            )
-        }
-        val info = lm.getShortcuts(query, Process.myUserHandle())?.firstOrNull()
-        if (info != null) lm.getShortcutIconDrawable(info, 0) else null
-    } catch (_: Exception) {
-        null
-    }
-}
-
-private fun launchShortcut(context: Context, packageName: String, shortcutId: String) {
-    try {
-        val lm = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
-        lm.startShortcut(packageName, shortcutId, null, null, Process.myUserHandle())
-    } catch (_: Exception) {
-        Toast.makeText(context, "无法启动快捷方式", Toast.LENGTH_SHORT).show()
-    }
-}
+/* 快捷方式 helpers 已迁移至 AppShortcuts.kt（v0.39.0，供 sheet 与 Dock 弹窗共用） */

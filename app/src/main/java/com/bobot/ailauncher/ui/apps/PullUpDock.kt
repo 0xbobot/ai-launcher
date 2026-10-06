@@ -17,7 +17,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,6 +51,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.UiPrefs
@@ -126,6 +129,8 @@ fun PullUpDock(
     }
 
     val cardVisible = state == DockState.D1 || state == DockState.D2
+    // v0.39.0：Dock 长按 → 真弹窗快捷菜单（锚定在图标上）
+    var popupApp by remember { mutableStateOf<AppInfo?>(null) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
@@ -238,9 +243,21 @@ fun PullUpDock(
                         label = "dockContent"
                     ) { s ->
                         if (s == DockState.D2) {
-                            DockGrid10(apps = top10, onLaunch = ::launchApp)
+                            DockGrid10(
+                                apps = top10,
+                                onLaunch = ::launchApp,
+                                menuApp = popupApp,
+                                onLongPress = { popupApp = it },
+                                onDismissMenu = { popupApp = null }
+                            )
                         } else {
-                            DockRow4(apps = top4, onLaunch = ::launchApp)
+                            DockRow4(
+                                apps = top4,
+                                onLaunch = ::launchApp,
+                                menuApp = popupApp,
+                                onLongPress = { popupApp = it },
+                                onDismissMenu = { popupApp = null }
+                            )
                         }
                     }
                 }
@@ -309,7 +326,13 @@ private fun FullAppsOverlay(
 
 /** 第一档：4 个常用大图标（56dp），只留图标，卡内严格垂直居中 */
 @Composable
-private fun DockRow4(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
+private fun DockRow4(
+    apps: List<AppInfo>,
+    onLaunch: (AppInfo) -> Unit,
+    menuApp: AppInfo?,
+    onLongPress: (AppInfo) -> Unit,
+    onDismissMenu: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -319,13 +342,14 @@ private fun DockRow4(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         apps.forEach { app ->
-            AppIconImage(
-                drawable = app.icon,
-                contentDescription = app.label.toString(),
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable { onLaunch(app) }
+            DockIconButton(
+                app = app,
+                iconSize = 56.dp,
+                corner = 16.dp,
+                menuApp = menuApp,
+                onLaunch = onLaunch,
+                onLongPress = onLongPress,
+                onDismissMenu = onDismissMenu
             )
         }
     }
@@ -333,7 +357,13 @@ private fun DockRow4(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
 
 /** 第二档：同一批常用重排成 10 个小图标（2×5，46dp），只留图标 */
 @Composable
-private fun DockGrid10(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
+private fun DockGrid10(
+    apps: List<AppInfo>,
+    onLaunch: (AppInfo) -> Unit,
+    menuApp: AppInfo?,
+    onLongPress: (AppInfo) -> Unit,
+    onDismissMenu: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -350,17 +380,57 @@ private fun DockGrid10(apps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
                         modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        AppIconImage(
-                            drawable = app.icon,
-                            contentDescription = app.label.toString(),
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(13.dp))
-                                .clickable { onLaunch(app) }
+                        DockIconButton(
+                            app = app,
+                            iconSize = 46.dp,
+                            corner = 13.dp,
+                            menuApp = menuApp,
+                            onLaunch = onLaunch,
+                            onLongPress = onLongPress,
+                            onDismissMenu = onDismissMenu
                         )
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * v0.39.0：Dock 图标按钮——点击启动，长按弹出真弹窗快捷菜单。
+ * 菜单锚定在图标所在的 Box 上（图标在屏幕下方时自动弹到图标上面）。
+ */
+@Composable
+private fun DockIconButton(
+    app: AppInfo,
+    iconSize: Dp,
+    corner: Dp,
+    menuApp: AppInfo?,
+    onLaunch: (AppInfo) -> Unit,
+    onLongPress: (AppInfo) -> Unit,
+    onDismissMenu: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptics = LocalHapticFeedback.current
+    Box(modifier = modifier) {
+        AppIconImage(
+            drawable = app.icon,
+            contentDescription = app.label.toString(),
+            modifier = Modifier
+                .size(iconSize)
+                .clip(RoundedCornerShape(corner))
+                .combinedClickable(
+                    onClick = { onLaunch(app) },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongPress(app)
+                    }
+                )
+        )
+        AppPopupMenu(
+            app = app,
+            expanded = menuApp == app,
+            onDismiss = onDismissMenu
+        )
     }
 }
