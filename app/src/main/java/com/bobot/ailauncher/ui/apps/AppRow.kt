@@ -4,7 +4,6 @@ import android.widget.Toast
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -14,12 +13,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
@@ -125,44 +124,10 @@ internal fun AppRow(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
         ) {
-            // 底层：★ 按钮（右对齐，行左滑时露出）
-            // 超出按钮宽度继续左滑 → ★ 放大，提示"松手直接触发"
-            val overscroll = (-offsetX.value - buttonWidthPx).coerceAtLeast(0f)
-            val starScale = 1f +
-                (overscroll / (maxLeftPx - buttonWidthPx)).coerceIn(0f, 1f) * 0.35f
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .width(72.dp)
-                    .fillMaxHeight()
-                    .graphicsLayer {
-                        scaleX = starScale
-                        scaleY = starScale
-                        // 行没动时 ★ 完全透明，避免透出来
-                        alpha = if (offsetX.value < -4f) 1f else 0f
-                    }
-                    .clickable(
-                        enabled = offsetX.value < -buttonWidthPx / 2,
-                        onClick = {
-                            togglePin()
-                            hideActions()
-                        }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Star,
-                    contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
-                    tint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
-                    modifier = Modifier.size(26.dp)
-                )
-            }
-
-            // 前景：行内容，跟手偏移（不透明，盖住底层的 ★）
+            // 内容：跟手滑动，保持透明（B 方案呼吸感，不加白底）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(AILauncherColors.GlassCardStrong)
                     .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                     .pointerInput(app.packageName) {
                         detectHorizontalDragGestures(
@@ -176,7 +141,7 @@ internal fun AppRow(
                                             hideActions()
                                         }
                                         v < -revealPx -> {
-                                            // 左滑=多：★ 露出，点按触发
+                                            // 左滑=多：★ 淡入，点按触发
                                             offsetX.animateTo(-buttonWidthPx, springSpec)
                                             onActionsVisibleChange(true)
                                         }
@@ -202,7 +167,7 @@ internal fun AppRow(
                     }
                     .combinedClickable(
                         onClick = {
-                            // ★ 露出时点行 = 收起；否则启动应用
+                            // ★ 显示时点行 = 收起；否则启动应用
                             if (offsetX.value != 0f) hideActions()
                             else onLaunch()
                         },
@@ -227,6 +192,41 @@ internal fun AppRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // v0.41.13：★ 改为覆盖层（不占布局、不加白底）——随滑动淡入，
+            // 滑满时放大提示"松手直接触发"。透明设计不受影响。
+            val swipeProgress = (-offsetX.value / buttonWidthPx).coerceIn(0f, 1f)
+            if (swipeProgress > 0.01f) {
+                val overscroll = (-offsetX.value - buttonWidthPx).coerceAtLeast(0f)
+                val starScale = 1f +
+                    (overscroll / (maxLeftPx - buttonWidthPx)).coerceIn(0f, 1f) * 0.35f
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .size(48.dp)
+                        .graphicsLayer {
+                            alpha = swipeProgress
+                            scaleX = starScale
+                            scaleY = starScale
+                        }
+                        .clip(CircleShape)
+                        .clickable(
+                            enabled = offsetX.value < -buttonWidthPx / 2,
+                            onClick = {
+                                togglePin()
+                                hideActions()
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Star,
+                        contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
+                        tint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
             }
         }
     }
