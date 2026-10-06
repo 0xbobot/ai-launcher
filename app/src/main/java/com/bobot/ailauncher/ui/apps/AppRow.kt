@@ -111,7 +111,8 @@ internal fun AppRow(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                // v0.41.21（Bob）：去掉圆角裁剪——右滑眼睛图标移到左侧留白时
+                // 会被父容器 clip 掉一半，显示不完整
         ) {
             // 内容：左滑时完全静态（v0.41.16 Bob：不再位移）；
             // v0.41.20（Bob）：右滑时内容跟手往右滑动，露出左侧眼睛图标

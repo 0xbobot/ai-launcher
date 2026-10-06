@@ -573,30 +573,38 @@ fun AppCenterContent(
                     }
                     if (!hiddenUnlocked) {
                         // 锁定占位：点按触发面部/指纹
+                        // v0.41.21（Bob）：锁定占位按应用行样式——40dp 圆角锁图标 + 15sp 文字，
+                        // 与上方应用行视觉统一；点按整行触发面部/指纹解锁。
                         item(key = "hidden-locked") {
-                            Box(
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 72.dp, end = 64.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .clickable { unlockHiddenApps() }
-                                    .padding(vertical = 16.dp),
-                                contentAlignment = Alignment.Center
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(AILauncherColors.Divider),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Icon(
                                         imageVector = Icons.Filled.Lock,
                                         contentDescription = null,
                                         tint = AILauncherColors.Hint,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "点击解锁查看",
-                                        fontSize = 14.sp,
-                                        color = AILauncherColors.Hint
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "点击解锁查看",
+                                    fontSize = 15.sp,
+                                    color = AILauncherColors.Title
+                                )
                             }
                         }
                     } else {
