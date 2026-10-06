@@ -18,10 +18,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -37,7 +36,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,7 +60,6 @@ internal fun AppRow(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    var showHideConfirm by remember { mutableStateOf(false) }
 
     // v0.41.11：openAppDetails/uninstallApp 已移到长按菜单（AppPopupMenu），此处删除
 
@@ -90,6 +87,7 @@ internal fun AppRow(
     // v0.41.16（Bob）：滑动后空白分不清——内容不再移动/淡出，始终完整可见；
     // ★ 的出现/放大跟手指走（跟手反馈），松手后按阈值定。图标不再被裁。
     var dragDist by remember { mutableStateOf(0f) } // 左滑为正
+    var hideIconShown by remember { mutableStateOf(false) } // 右滑隐藏图标是否保持显示
     val revealPx = with(density) { 56.dp.toPx() }
     val fullPx = with(density) { 120.dp.toPx() }
     val maxDragPx = with(density) { 160.dp.toPx() }
@@ -97,6 +95,7 @@ internal fun AppRow(
     fun hideStar() {
         dragDist = 0f
         onActionsVisibleChange(false)
+        hideIconShown = false
     }
 
     // 外部收起（如另一行展开）时
@@ -129,9 +128,9 @@ internal fun AppRow(
                                         onActionsVisibleChange(true)
                                     }
                                     dragDist < -revealPx -> {
-                                        // 右滑=少：弹确认框再隐藏
+                                        // 右滑=少：隐藏图标保持显示，点按隐藏（v0.41.17 Bob：用图标表示）
                                         dragDist = 0f
-                                        showHideConfirm = true
+                                        hideIconShown = true
                                     }
                                     else -> dragDist = 0f
                                 }
@@ -146,8 +145,8 @@ internal fun AppRow(
                     }
                     .combinedClickable(
                         onClick = {
-                            // ★ 显示时点行 = 收起；否则启动应用
-                            if (actionsVisible) hideStar()
+                            // ★/隐藏图标显示时点行 = 收起；否则启动应用
+                            if (actionsVisible || hideIconShown) hideStar()
                             else onLaunch()
                         },
                         onLongClick = onLongClick
@@ -207,32 +206,38 @@ internal fun AppRow(
                     )
                 }
             }
+
+            // v0.41.17（Bob）：右滑隐藏也用图标表示——左侧眼睛图标，跟手出现，点按直接隐藏
+            val hideProgress = if (hideIconShown) 1f
+                else (-dragDist / revealPx).coerceIn(0f, 1f)
+            if (hideProgress > 0.01f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .size(48.dp)
+                        .graphicsLayer { alpha = hideProgress }
+                        .clip(CircleShape)
+                        .clickable(
+                            enabled = hideIconShown || dragDist < -revealPx / 2,
+                            onClick = {
+                                onHide(app)
+                                hideStar()
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.VisibilityOff,
+                        contentDescription = "隐藏",
+                        tint = Color(0xFF8A8478),
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
         }
     }
 
-    // 右滑隐藏确认框
-    if (showHideConfirm) {
-        AlertDialog(
-            onDismissRequest = { showHideConfirm = false },
-            title = { Text("隐藏应用", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
-            text = {
-                Text(
-                    text = "是否隐藏「${app.label}」？点右下眼睛图标可恢复。",
-                    fontSize = 14.sp,
-                    color = AILauncherColors.Body
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showHideConfirm = false
-                    onHide(app)
-                }) { Text("隐藏", color = AILauncherColors.Accent) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showHideConfirm = false }) { Text("取消") }
-            }
-        )
-    }
+    // v0.41.17：右滑隐藏确认框已删除，改用左侧隐藏图标点按直接隐藏
 }
 
 /** 分组 key：a-z/A-Z→大写；中文→拼音首字母大写（GB2312 区位边界法，无需第三方库）；数字及其他→'#' */

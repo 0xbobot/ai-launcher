@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.fragment.app.FragmentActivity
@@ -62,6 +63,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -155,6 +158,8 @@ fun AppCenterContent(
     val hidden = remember(refreshTick, hiddenVersion) { HiddenApps.getHidden(context) }
     // v0.41.9：已隐藏应用视图（字母导航入口 + 生物识别通过后显示）
     var showHiddenApps by remember { mutableStateOf(false) }
+    // v0.41.17：隐藏区解锁状态——未解锁时显示"已锁定"页，点"解锁查看"才触发面部/指纹
+    var hiddenUnlocked by remember { mutableStateOf(false) }
     val hiddenApps = remember(refreshTick, hiddenVersion) {
         if (hidden.isEmpty()) emptyList()
         else {
@@ -621,41 +626,21 @@ fun AppCenterContent(
                     onRelease = { mirrorIndex = null },
                     modifier = Modifier.align(Alignment.CenterStart)
                 )
-                // v0.41.9：已隐藏应用入口（Bob）——右下小眼睛图标，点按需生物识别
-                // （面部/指纹），通过后显示隐藏应用；不通过保持隐藏
+                // v0.41.17（Bob）：已隐藏应用入口移到字母导航最下方——
+                // 右下小眼睛图标，样式跟 rail 字母协调（不再是悬浮大按钮）。
+                // 点按后先显示"已锁定"状态页，再按"解锁查看"触发面部/指纹验证。
                 if (!searching && !showHiddenApps) {
                     IconButton(
-                        onClick = {
-                            val activity = context as? FragmentActivity
-                            if (activity == null) {
-                                Toast.makeText(context, "无法启动验证", Toast.LENGTH_SHORT).show()
-                                return@IconButton
-                            }
-                            if (!BiometricAuth.canAuthenticate(context)) {
-                                Toast.makeText(
-                                    context,
-                                    "请先在系统设置中录入指纹或面容",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                                return@IconButton
-                            }
-                            BiometricAuth.authenticate(
-                                activity = activity,
-                                onSuccess = { showHiddenApps = true },
-                                onFail = {
-                                    Toast.makeText(context, "验证未通过", Toast.LENGTH_SHORT).show()
-                                }
-                            )
-                        },
+                        onClick = { showHiddenApps = true },
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(bottom = 100.dp, end = 10.dp)
+                            .padding(bottom = 28.dp, end = 12.dp)
                     ) {
                         Icon(
                             Icons.Filled.VisibilityOff,
                             contentDescription = "已隐藏应用",
-                            tint = AILauncherColors.Hint.copy(alpha = 0.7f),
-                            modifier = Modifier.size(22.dp)
+                            tint = AILauncherColors.Hint,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -663,18 +648,45 @@ fun AppCenterContent(
         }
     }
 
-    // v0.41.9：已隐藏应用视图（生物识别通过后）
+    // v0.41.17：已隐藏应用——未解锁时先显示"已锁定"状态页（Bob 要求设计隐藏状态），
+    // 点"解锁查看"才触发面部/指纹；通过后显示列表。
     if (showHiddenApps) {
-        HiddenAppsView(
-            hiddenApps = hiddenApps,
-            onBack = { showHiddenApps = false },
-            onUnhide = { app ->
-                HiddenApps.unhide(context, app.packageName)
-                Toast.makeText(context, "「${app.label}」已恢复显示", Toast.LENGTH_SHORT).show()
-                // 全部恢复后自动返回列表
-                if (HiddenApps.getHidden(context).isEmpty()) showHiddenApps = false
-            }
-        )
+        if (!hiddenUnlocked) {
+            HiddenAppsLockedView(
+                onBack = {
+                    showHiddenApps = false
+                    hiddenUnlocked = false
+                },
+                onUnlock = { activity, onFailMsg ->
+                    if (!BiometricAuth.canAuthenticate(context)) {
+                        onFailMsg("请先在系统设置中录入指纹或面容")
+                        return@HiddenAppsLockedView
+                    }
+                    BiometricAuth.authenticate(
+                        activity = activity,
+                        onSuccess = { hiddenUnlocked = true },
+                        onFail = { onFailMsg("验证未通过") }
+                    )
+                }
+            )
+        } else {
+            HiddenAppsView(
+                hiddenApps = hiddenApps,
+                onBack = {
+                    showHiddenApps = false
+                    hiddenUnlocked = false
+                },
+                onUnhide = { app ->
+                    HiddenApps.unhide(context, app.packageName)
+                    Toast.makeText(context, "「${app.label}」已恢复显示", Toast.LENGTH_SHORT).show()
+                    // 全部恢复后自动返回列表
+                    if (HiddenApps.getHidden(context).isEmpty()) {
+                        showHiddenApps = false
+                        hiddenUnlocked = false
+                    }
+                }
+            )
+        }
     }
 
     // v0.40.0：长按 bottom sheet 已删除，改用每行自带的真弹窗菜单（AppPopupMenu）
@@ -822,6 +834,107 @@ private fun rememberPullDownConnection(
  * 列表只显示已隐藏应用，每行可"恢复显示"；返回按钮回到正常列表。
  */
 @Composable
+/**
+ * v0.41.17（Bob）：隐藏区"已锁定"状态页——解锁前显示，不直接弹验证。
+ * 中央锁图标 + "已隐藏应用" + "解锁查看"按钮；验证失败在页内显示错误，不 toast。
+ */
+@Composable
+private fun HiddenAppsLockedView(
+    onBack: () -> Unit,
+    onUnlock: (activity: FragmentActivity, onFailMsg: (String) -> Unit) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(AILauncherColors.Background)
+            .statusBarsPadding()
+    ) {
+        // 顶栏：返回
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 20.dp, top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "返回",
+                    tint = AILauncherColors.Title
+                )
+            }
+            Text(
+                text = "已隐藏应用",
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AILauncherColors.Title
+            )
+        }
+        // 中央锁定状态
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Lock,
+                contentDescription = null,
+                tint = AILauncherColors.Hint,
+                modifier = Modifier.size(56.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "应用已锁定",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = AILauncherColors.Title
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "验证身份后查看",
+                fontSize = 13.sp,
+                color = AILauncherColors.Hint
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = {
+                    errorMsg = null
+                    val activity = context as? FragmentActivity
+                    if (activity == null) {
+                        errorMsg = "无法启动验证"
+                        return@Button
+                    }
+                    onUnlock(activity) { msg -> errorMsg = msg }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AILauncherColors.Accent
+                ),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Text(
+                    text = "解锁查看",
+                    fontSize = 15.sp,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+            if (errorMsg != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = errorMsg!!,
+                    fontSize = 13.sp,
+                    color = Color(0xFFD16A6A)
+                )
+            }
+        }
+    }
+}
+
 private fun HiddenAppsView(
     hiddenApps: List<AppInfo>,
     onBack: () -> Unit,
