@@ -1,6 +1,9 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.widget.Toast
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -95,6 +98,20 @@ internal fun AppRow(
     // v0.41.23（Bob v4 统一版）：图标原地交叉溶解成动作图标，标题淡出，位置不动。
     // 左滑=★（金），右滑=眼睛（灰）。溶解进度跟手指走。
     var dragDist by remember { mutableStateOf(0f) } // 左滑为正
+    // v0.41.25（Bob）：过渡动画——拖动时 1:1 跟手，松手后弹簧动画到目标
+    var isDragging by remember { mutableStateOf(false) }
+    val dragProgress = (kotlin.math.abs(dragDist) / revealPx).coerceIn(0f, 1f)
+    val settleTarget = if (actionsVisible || hideVisible) 1f else 0f
+    val settleProgress by animateFloatAsState(
+        targetValue = settleTarget,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "dissolveSettle"
+    )
+    // 拖动中直接跟手；松手后用弹簧动画
+    val baseProgress = if (isDragging) dragProgress else settleProgress
     val revealPx = with(density) { 56.dp.toPx() }
     val fullPx = with(density) { 120.dp.toPx() }
     val maxDragPx = with(density) { 160.dp.toPx() }
@@ -108,17 +125,14 @@ internal fun AppRow(
     // 溶解进度：正在拖时按拖动方向（优先于保持状态），否则按保持状态
     // v0.41.24（Bob）：修 bug——左滑保持 ★ 后再右滑，眼睛出不来
     // （原来 actionsVisible 优先，导致拖右滑时仍显示 ★）
+    // v0.41.25：baseProgress 已包含拖动/弹簧动画
     val isLeft = when {
-        dragDist != 0f -> dragDist > 0
+        isDragging -> dragDist > 0
         actionsVisible -> true
         hideVisible -> false
         else -> true
     }
-    val dissolveProgress = when {
-        dragDist != 0f -> (kotlin.math.abs(dragDist) / revealPx).coerceIn(0f, 1f)
-        actionsVisible || hideVisible -> 1f
-        else -> 0f
-    }
+    val dissolveProgress = baseProgress
 
     // 外部收起（如另一行展开）时
     LaunchedEffect(actionsVisible, hideVisible) {
@@ -136,7 +150,13 @@ internal fun AppRow(
                     .fillMaxWidth()
                     .pointerInput(app.packageName) {
                         detectHorizontalDragGestures(
+                            onDragStart = { isDragging = true },
+                            onDragCancel = {
+                                isDragging = false
+                                dragDist = 0f
+                            },
                             onDragEnd = {
+                                isDragging = false
                                 when {
                                     dragDist > fullPx -> {
                                         // 左滑满 → 直接加到 Dock（或移出）
@@ -193,10 +213,12 @@ internal fun AppRow(
                     if (dissolveProgress > 0.01f) {
                         // v0.41.24（Bob）：★ 双状态——金底=点按加入 Dock，灰底=已在 Dock 点按移出；
                         // 眼睛双状态——闭眼=隐藏，开眼=取消隐藏（图标区分）
+                        // v0.41.25（Bob）：颜色更显眼——★ 用亮金，眼睛用深灰蓝；
+                        // 动作图标带缩放弹入动画
                         val actionBg = when {
                             isLeft && isPinned -> Color(0xFF8A8478)
-                            isLeft -> Color(0xFFC9A227)
-                            else -> Color(0xFF8A8478)
+                            isLeft -> Color(0xFFD4A017) // 更亮的金
+                            else -> Color(0xFF5A6C7D) // 深灰蓝，隐藏更显眼
                         }
                         val actionIcon = when {
                             isLeft -> Icons.Filled.Star
@@ -213,7 +235,13 @@ internal fun AppRow(
                                 .size(40.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(actionBg)
-                                .graphicsLayer { alpha = dissolveProgress }
+                                .graphicsLayer {
+                                    alpha = dissolveProgress
+                                    // v0.41.25：弹入缩放（0.7→1.0）
+                                    val s = 0.7f + dissolveProgress * 0.3f
+                                    scaleX = s
+                                    scaleY = s
+                                }
                                 .clickable(
                                     enabled = actionsVisible || hideVisible ||
                                         dissolveProgress > 0.5f,
