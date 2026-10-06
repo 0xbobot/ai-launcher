@@ -52,6 +52,7 @@ import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import kotlin.math.roundToInt
 
 /**
  * 应用行（从已删除的 AllAppsScreen.kt 迁移，v0.22 分类取消后去掉"移到分组"）。
