@@ -139,7 +139,7 @@ fun AppCenterContent(
     var refreshTick by remember { mutableIntStateOf(0) }
     // v0.40.0：长按 → 真弹窗快捷菜单（与 Dock 长按同一套 AppPopupMenu，替代 bottom sheet）
     var popupApp by remember { mutableStateOf<AppInfo?>(null) }
-    // v0.40.1：惯用手设置已删除，双 rail 常驻，左右手都可操作
+    // v0.40.2：惯用手设置已删除；右侧一条可见 rail + 左侧隐形触发区，左右手都可操作
     // 已隐藏应用版本号：变化时 A-Z 自动重算过滤
     val hiddenVersion = HiddenApps.version.intValue
     val hidden = remember(refreshTick, hiddenVersion) { HiddenApps.getHidden(context) }
@@ -362,7 +362,8 @@ fun AppCenterContent(
                     .fillMaxSize()
                     .nestedScroll(nested)
                     // v0.25.9：右侧多缩进（避让 rail），更紧凑
-                    .padding(start = 20.dp, end = 64.dp),
+                    // v0.40.2：左侧缩进 72dp（Bob）——给左侧隐形触发区留出手指空间，不与应用重叠
+                    .padding(start = 72.dp, end = 64.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 // v0.40.0：底部留出手势条高度，避免末行被手势条盖住
                 contentPadding = PaddingValues(bottom = 96.dp)
@@ -481,10 +482,13 @@ fun AppCenterContent(
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）
             // v0.21：搜索态隐藏 rail（定位无意义）
             // v0.24：点按跳字母（居中）；拖动时波浪跟手，列表跟手滚动切换字母
-            // v0.40.1：左右双 rail 常驻（Bob）——左右手都可操作，不再需要设置里选惯用手；
-            // 切换更轻盈：相邻字母平滑跟手（animateScrollToItem），跨度大时直接跳。
+            // v0.40.2：右侧一条可见 rail + 左侧隐形触发区（Bob）——
+            // 左边不摆 rail（摆两个很奇怪），但左侧滑动同样触发字母切换，
+            // 触发后是右侧 rail 亮起波浪跟随；应用列表左侧缩进给手指留空间。
             if (!searching && letters.isNotEmpty()) {
                 var glideJob by remember { mutableStateOf<Job?>(null) }
+                // 左侧隐形区触发时，右侧可见 rail 跟随显示波浪
+                var mirrorIndex by remember { mutableStateOf<Int?>(null) }
                 // Niagara 做法：直接滚完整列表，不做内容过滤；松手时列表本来就在位置上，零位移
                 val glideToLetter: (Char) -> Unit = { letter ->
                     val anchor = letterAnchors[letter] ?: 0
@@ -508,13 +512,19 @@ fun AppCenterContent(
                     side = RailSide.RIGHT,
                     onActiveLetter = glideToLetter,
                     onRelease = stopGlide,
+                    forcedActiveIndex = mirrorIndex,
                     modifier = Modifier.align(Alignment.CenterEnd)
                 )
                 WaveRail(
                     letters = letters,
                     side = RailSide.LEFT,
-                    onActiveLetter = glideToLetter,
-                    onRelease = stopGlide,
+                    visible = false,
+                    railWidth = 56.dp,
+                    onActiveLetter = { letter ->
+                        mirrorIndex = letters.indexOf(letter)
+                        glideToLetter(letter)
+                    },
+                    onRelease = { mirrorIndex = null },
                     modifier = Modifier.align(Alignment.CenterStart)
                 )
             }
