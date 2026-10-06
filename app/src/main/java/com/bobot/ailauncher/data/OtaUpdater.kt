@@ -175,6 +175,29 @@ object OtaUpdater {
         }
     }
 
+    /** 下载进度 0..1；下载完成返回 1f，查不到/失败返回 null */
+    fun downloadProgress(context: Context, downloadId: Long): Float? {
+        if (downloadId < 0) return null
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        return try {
+            dm.query(DownloadManager.Query().setFilterById(downloadId)).use { c ->
+                if (!c.moveToFirst()) return null
+                val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                if (status == DownloadManager.STATUS_SUCCESSFUL) return 1f
+                if (status == DownloadManager.STATUS_FAILED) return null
+                val soFar = c.getLong(
+                    c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                )
+                val total = c.getLong(
+                    c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                )
+                if (total <= 0) null else (soFar.toFloat() / total).coerceIn(0f, 1f)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     /** 已下载好的 APK 文件（不存在或为空返回 null） */
     fun downloadedApk(context: Context): File? {
         val f = File(

@@ -188,26 +188,47 @@ fun AppCenterContent(
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
     // 字母 → LazyColumn item index（每字母：1 吸顶头 + N 行 + 1 组间呼吸间距）
-    // v0.41.5：幽灵字母改用悬停 overlay，不再占列表项；每组占 N 行 + 1 组间间距
+    // v0.41.6：每组占 1 字母头 + N 行 + 1 组间间距。字母头是常规 item（56dp，
+    // 每组都显示自己的幽灵字母）；吸顶由悬停 overlay 手动实现——不用 stickyHeader，
+    // 那个 API 在此构建链编译不过（v0.41.4 教训）
     val letterAnchors = remember(azGroups) {
         val m = mutableMapOf<Char, Int>()
         var idx = 0
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
-            idx += apps.size + 1
+            idx += 1 + apps.size + 1
         }
         m
     }
 
-    // v0.41.5：当前可见 section 的字母——根据首个可见行反查 letterAnchors，
-    // 滚动时驱动左上角的悬停幽灵字母（替代 stickyHeader，不用实验性 API）
-    val currentSectionLetter by remember(azGroups) {
+    // v0.41.6：手动吸顶——当前 section 的字母头滚出顶部后，悬停 overlay 接管显示；
+    // 下一个字母头接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走，且每组字母都要显示）
+    val headerHeightPx = with(density) { 56.dp.toPx() }
+    val stuckLetter: Char? by remember(azGroups) {
         derivedStateOf {
             val firstIdx = listState.firstVisibleItemIndex
-            letterAnchors.entries
+            val current = letterAnchors.entries
                 .filter { it.value <= firstIdx }
                 .maxByOrNull { it.value }
-                ?.key
+                ?.key ?: return@derivedStateOf null
+            // 该组字母头还在视口内（首项就是字母头）时不悬停，直接用列表里的真头
+            if (firstIdx > (letterAnchors[current] ?: 0)) current else null
+        }
+    }
+    // 顶走位移：下一个字母头进入顶部 56dp 区域时，悬停字母被往上顶（负值）；
+    // 读 firstVisibleItemScrollOffset 订阅逐像素滚动，保证顶走动画跟手
+    val stuckPushPx: Float by remember(azGroups) {
+        derivedStateOf {
+            val cur = stuckLetter ?: return@derivedStateOf 0f
+            @Suppress("UNUSED_EXPRESSION")
+            listState.firstVisibleItemScrollOffset
+            val order = letters
+            val next = order.getOrNull(order.indexOf(cur) + 1) ?: return@derivedStateOf 0f
+            val nextAnchor = letterAnchors[next] ?: return@derivedStateOf 0f
+            val vis =
+                listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == nextAnchor }
+            val off = vis?.offset?.toFloat() ?: return@derivedStateOf 0f
+            if (off < headerHeightPx) off - headerHeightPx else 0f
         }
     }
 
@@ -416,9 +437,26 @@ fun AppCenterContent(
                 } else {
                 // v0.25.7：去掉"全部应用"标题（Bob）
                 // A-Z 列表（v0.41.0 B 方案）
-                // v0.41.5：幽灵字母改用悬停 overlay（替代 stickyHeader）——滚动时固定在左上留白，
-                // 显示当前 section，下一个 section 到来时切换（Bob：滚动悬停/顶走）
+                // v0.41.6：每组 = 字母头（56dp，每组都显示自己的幽灵字母）+ 应用行 + 组间间距。
+                // 字母头滚出顶部后由悬停 overlay 接管（手动吸顶，见 stuckLetter）
                 azGroups.forEach { (letter, apps) ->
+                    item(key = "sh:$letter") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                        ) {
+                            Text(
+                                text = letter.toString(),
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 40.sp,
+                                color = AILauncherColors.Title.copy(alpha = 0.22f),
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .offset(x = (-52).dp)
+                            )
+                        }
+                    }
                     items(apps, key = { "a:${it.packageName}" }) { app ->
                         Box(modifier = Modifier.fillMaxWidth()) {
                             AppRow(
@@ -449,19 +487,27 @@ fun AppCenterContent(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
-            // v0.41.5：幽灵字母悬停层——滚动时固定在左上留白，显示当前 section；
-            // 下一个 section 到来时字母切换（Bob：滚动悬停/顶走）。画在列表上层、
-            // 手势条和 Rail 下层，左上位置不挡右侧 rail。
-            if (!searching && currentSectionLetter != null) {
-                Text(
-                    text = currentSectionLetter.toString(),
-                    fontFamily = FontFamily.Serif,
-                    fontSize = 40.sp,
-                    color = AILauncherColors.Title.copy(alpha = 0.22f),
+            // v0.41.6：悬停幽灵字母——只在当前组字母头滚出顶部后显示，下一个字母头
+            // 接近时被顶走。56dp 高与列表内字母头像素对齐，交接时字母不跳动。
+            val sl = stuckLetter
+            if (!searching && sl != null) {
+                Box(
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .offset(x = 20.dp, y = 8.dp)
-                )
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .offset { IntOffset(0, stuckPushPx.roundToInt()) }
+                ) {
+                    Text(
+                        text = sl.toString(),
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 40.sp,
+                        color = AILauncherColors.Title.copy(alpha = 0.22f),
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .offset(x = 20.dp)
+                    )
+                }
             }
             // v0.40.0：底部上滑 → 回桌面（Bob）。
             // 系统手势导航会吃掉最底部边缘的触摸，这里在系统手势区之上放一条
