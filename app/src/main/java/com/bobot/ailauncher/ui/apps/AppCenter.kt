@@ -384,10 +384,10 @@ fun AppCenterContent(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(nested)
-                    // v0.25.9：右侧多缩进（避让 rail），更紧凑
-                    // v0.40.2：左侧缩进 72dp（Bob）——给左侧隐形触发区留出手指空间，不与应用重叠
-                    .padding(start = 72.dp, end = 64.dp),
+                    .nestedScroll(nested),
+                // v0.41.7：列表不再统一 padding（之前字母头用负 offset 伸进左留白，
+                // 在某些行渲染异常）；改为每项各自加正向 padding——应用行保持
+                // 72dp 左缩进 + 64dp 右缩进（左隐形触发区/右 rail 避让），字母头占满宽
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 // v0.40.0：底部留出手势条高度，避免末行被手势条盖住
                 contentPadding = PaddingValues(bottom = 96.dp)
@@ -401,14 +401,21 @@ fun AppCenterContent(
                                 text = "没有找到「${query.trim()}」相关的应用",
                                 fontSize = 14.sp,
                                 color = AILauncherColors.Hint,
-                                modifier = Modifier.padding(top = 32.dp, start = 4.dp)
+                                modifier = Modifier.padding(
+                                    top = 32.dp, start = 72.dp, end = 64.dp
+                                )
                             )
                         }
                     } else {
                         items(results, key = { "s:${it.packageName}" }) { app ->
                             // v0.40.0：每行自带弹窗锚点——长按弹出真菜单（与 Dock 同一套），
                             // 位置跟图标走：行在上面时菜单弹到下方（DropdownMenu 自动翻转）
-                            Box(modifier = Modifier.fillMaxWidth()) {
+                            // v0.41.7：行级 padding（列表不再统一 padding）
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 72.dp, end = 64.dp)
+                            ) {
                                 AppRow(
                                     app = app,
                                     onLaunch = { launchApp(app) },
@@ -439,26 +446,32 @@ fun AppCenterContent(
                 // A-Z 列表（v0.41.0 B 方案）
                 // v0.41.6：每组 = 字母头（56dp，每组都显示自己的幽灵字母）+ 应用行 + 组间间距。
                 // 字母头滚出顶部后由悬停 overlay 接管（手动吸顶，见 stuckLetter）
+                // v0.41.7：字母用正向 padding 定位（20dp），不用负 offset——负 offset
+                // 在某些行会导致字母渲染异常（只剩残缺笔画）
                 azGroups.forEach { (letter, apps) ->
                     item(key = "sh:$letter") {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp)
+                                .padding(start = 20.dp)
                         ) {
                             Text(
                                 text = letter.toString(),
                                 fontFamily = FontFamily.Serif,
                                 fontSize = 40.sp,
                                 color = AILauncherColors.Title.copy(alpha = 0.22f),
-                                modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .offset(x = (-52).dp)
+                                modifier = Modifier.align(Alignment.CenterStart)
                             )
                         }
                     }
                     items(apps, key = { "a:${it.packageName}" }) { app ->
-                        Box(modifier = Modifier.fillMaxWidth()) {
+                        // v0.41.7：行级 padding（列表不再统一 padding）
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 72.dp, end = 64.dp)
+                        ) {
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app) },
@@ -489,6 +502,7 @@ fun AppCenterContent(
             }
             // v0.41.6：悬停幽灵字母——只在当前组字母头滚出顶部后显示，下一个字母头
             // 接近时被顶走。56dp 高与列表内字母头像素对齐，交接时字母不跳动。
+            // v0.41.7：横向用 padding（不用 offset），与列表内字母头一致
             val sl = stuckLetter
             if (!searching && sl != null) {
                 Box(
@@ -496,6 +510,7 @@ fun AppCenterContent(
                         .align(Alignment.TopStart)
                         .fillMaxWidth()
                         .height(56.dp)
+                        .padding(start = 20.dp)
                         .offset { IntOffset(0, stuckPushPx.roundToInt()) }
                 ) {
                     Text(
@@ -503,9 +518,7 @@ fun AppCenterContent(
                         fontFamily = FontFamily.Serif,
                         fontSize = 40.sp,
                         color = AILauncherColors.Title.copy(alpha = 0.22f),
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .offset(x = 20.dp)
+                        modifier = Modifier.align(Alignment.CenterStart)
                     )
                 }
             }
