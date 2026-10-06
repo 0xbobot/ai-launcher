@@ -41,7 +41,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.stickyHeader
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,6 +63,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -188,15 +188,27 @@ fun AppCenterContent(
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
     // 字母 → LazyColumn item index（每字母：1 吸顶头 + N 行 + 1 组间呼吸间距）
-    // v0.41.4：幽灵字母改为 stickyHeader 吸顶，每个字母组占 1 个 header item
+    // v0.41.5：幽灵字母改用悬停 overlay，不再占列表项；每组占 N 行 + 1 组间间距
     val letterAnchors = remember(azGroups) {
         val m = mutableMapOf<Char, Int>()
         var idx = 0
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
-            idx += 1 + apps.size + 1
+            idx += apps.size + 1
         }
         m
+    }
+
+    // v0.41.5：当前可见 section 的字母——根据首个可见行反查 letterAnchors，
+    // 滚动时驱动左上角的悬停幽灵字母（替代 stickyHeader，不用实验性 API）
+    val currentSectionLetter by remember(azGroups) {
+        derivedStateOf {
+            val firstIdx = listState.firstVisibleItemIndex
+            letterAnchors.entries
+                .filter { it.value <= firstIdx }
+                .maxByOrNull { it.value }
+                ?.key
+        }
     }
 
     // v0.25.2：松手滚动——等列表恢复全量重组完成后再滚，避免打在旧内容上
@@ -404,26 +416,9 @@ fun AppCenterContent(
                 } else {
                 // v0.25.7：去掉"全部应用"标题（Bob）
                 // A-Z 列表（v0.41.0 B 方案）
-                // v0.41.4：幽灵字母改为吸顶 stickyHeader——滚动时悬停在左上留白，
-                // 下一个字母上来时把它顶走（Bob）
+                // v0.41.5：幽灵字母改用悬停 overlay（替代 stickyHeader）——滚动时固定在左上留白，
+                // 显示当前 section，下一个 section 到来时切换（Bob：滚动悬停/顶走）
                 azGroups.forEach { (letter, apps) ->
-                    stickyHeader(key = "sh:$letter") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                        ) {
-                            Text(
-                                text = letter.toString(),
-                                fontFamily = FontFamily.Serif,
-                                fontSize = 40.sp,
-                                color = AILauncherColors.Title.copy(alpha = 0.22f),
-                                modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .offset(x = (-52).dp)
-                            )
-                        }
-                    }
                     items(apps, key = { "a:${it.packageName}" }) { app ->
                         Box(modifier = Modifier.fillMaxWidth()) {
                             AppRow(
@@ -453,6 +448,20 @@ fun AppCenterContent(
                 }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
+            }
+            // v0.41.5：幽灵字母悬停层——滚动时固定在左上留白，显示当前 section；
+            // 下一个 section 到来时字母切换（Bob：滚动悬停/顶走）。画在列表上层、
+            // 手势条和 Rail 下层，左上位置不挡右侧 rail。
+            if (!searching && currentSectionLetter != null) {
+                Text(
+                    text = currentSectionLetter.toString(),
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 40.sp,
+                    color = AILauncherColors.Title.copy(alpha = 0.22f),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = 20.dp, y = 8.dp)
+                )
             }
             // v0.40.0：底部上滑 → 回桌面（Bob）。
             // 系统手势导航会吃掉最底部边缘的触摸，这里在系统手势区之上放一条
