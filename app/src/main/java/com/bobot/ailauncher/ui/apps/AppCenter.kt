@@ -36,11 +36,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -187,23 +189,21 @@ fun AppCenterContent(
 
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
-    // 字母 → LazyColumn item index（每字母：1 吸顶头 + N 行 + 1 组间呼吸间距）
-    // v0.41.6：每组占 1 字母头 + N 行 + 1 组间间距。字母头是常规 item（56dp，
-    // 每组都显示自己的幽灵字母）；吸顶由悬停 overlay 手动实现——不用 stickyHeader，
-    // 那个 API 在此构建链编译不过（v0.41.4 教训）
+    // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
+    // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；
+    // 吸顶仍由悬停 overlay 实现
     val letterAnchors = remember(azGroups) {
         val m = mutableMapOf<Char, Int>()
         var idx = 0
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
-            idx += 1 + apps.size + 1
+            idx += apps.size + 1
         }
         m
     }
 
-    // v0.41.6：手动吸顶——当前 section 的字母头滚出顶部后，悬停 overlay 接管显示；
-    // 下一个字母头接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走，且每组字母都要显示）
-    val headerHeightPx = with(density) { 56.dp.toPx() }
+    // v0.41.8：手动吸顶——当前组首行滚出顶部后，悬停 overlay 接管显示；
+    // 下一组首行接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走）
     val stuckLetter: Char? by remember(azGroups) {
         derivedStateOf {
             val firstIdx = listState.firstVisibleItemIndex
@@ -211,12 +211,13 @@ fun AppCenterContent(
                 .filter { it.value <= firstIdx }
                 .maxByOrNull { it.value }
                 ?.key ?: return@derivedStateOf null
-            // 该组字母头还在视口内（首项就是字母头）时不悬停，直接用列表里的真头
+            // 该组首行还在视口内时不悬停，直接用行内的真字母
             if (firstIdx > (letterAnchors[current] ?: 0)) current else null
         }
     }
-    // 顶走位移：下一个字母头进入顶部 56dp 区域时，悬停字母被往上顶（负值）；
-    // 读 firstVisibleItemScrollOffset 订阅逐像素滚动，保证顶走动画跟手
+    // 顶走位移：下一组首行进入顶部区域时，悬停字母被往上顶（负值）；
+    // 读 firstVisibleItemScrollOffset 订阅逐像素滚动，保证顶走动画跟手。
+    // 外层 Box 有 clipToBounds，顶出去的部分会被裁掉，不会跑到搜索栏上面（Bob）
     val stuckPushPx: Float by remember(azGroups) {
         derivedStateOf {
             val cur = stuckLetter ?: return@derivedStateOf 0f
@@ -228,7 +229,8 @@ fun AppCenterContent(
             val vis =
                 listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == nextAnchor }
             val off = vis?.offset?.toFloat() ?: return@derivedStateOf 0f
-            if (off < headerHeightPx) off - headerHeightPx else 0f
+            val pushZonePx = with(density) { 48.dp.toPx() }
+            if (off < pushZonePx) off - pushZonePx else 0f
         }
     }
 
@@ -375,10 +377,12 @@ fun AppCenterContent(
         }
 
         // ---- 单列表：分类区在上，A-Z 列表直接在下 ----
+        // v0.41.8：clipToBounds——悬停字母被顶走时不画出列表区域，不会跑到搜索栏上面（Bob）
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .clipToBounds()
         ) {
             LazyColumn(
                 state = listState,
@@ -444,34 +448,30 @@ fun AppCenterContent(
                 } else {
                 // v0.25.7：去掉"全部应用"标题（Bob）
                 // A-Z 列表（v0.41.0 B 方案）
-                // v0.41.6：每组 = 字母头（56dp，每组都显示自己的幽灵字母）+ 应用行 + 组间间距。
-                // 字母头滚出顶部后由悬停 overlay 接管（手动吸顶，见 stuckLetter）
-                // v0.41.7：字母用正向 padding 定位（20dp），不用负 offset——负 offset
-                // 在某些行会导致字母渲染异常（只剩残缺笔画）
+                // v0.41.8：每组 = 应用行 + 组间间距（字母不再独占一行，Bob）。
+                // 每组首行左侧留白放幽灵字母（正向 padding，不用负 offset）；
+                // 首行滚出顶部后由悬停 overlay 接管（手动吸顶，见 stuckLetter）
                 azGroups.forEach { (letter, apps) ->
-                    item(key = "sh:$letter") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                                .padding(start = 20.dp)
-                        ) {
-                            Text(
-                                text = letter.toString(),
-                                fontFamily = FontFamily.Serif,
-                                fontSize = 40.sp,
-                                color = AILauncherColors.Title.copy(alpha = 0.22f),
-                                modifier = Modifier.align(Alignment.CenterStart)
-                            )
-                        }
-                    }
-                    items(apps, key = { "a:${it.packageName}" }) { app ->
+                    itemsIndexed(apps, key = { _, app -> "a:${app.packageName}" }) { index, app ->
                         // v0.41.7：行级 padding（列表不再统一 padding）
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 72.dp, end = 64.dp)
-                        ) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            if (index == 0) {
+                                Text(
+                                    text = letter.toString(),
+                                    fontFamily = FontFamily.Serif,
+                                    fontSize = 40.sp,
+                                    // v0.41.8：弱化（Bob：太显眼），22% → 14%
+                                    color = AILauncherColors.Title.copy(alpha = 0.14f),
+                                    modifier = Modifier
+                                        .align(Alignment.CenterStart)
+                                        .padding(start = 20.dp)
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 72.dp, end = 64.dp)
+                            ) {
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app) },
@@ -494,33 +494,28 @@ fun AppCenterContent(
                                 onDismiss = { popupApp = null }
                             )
                         }
+                        }
                     }
                     item(key = "sp:$letter") { Spacer(modifier = Modifier.height(24.dp)) }
                 }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
-            // v0.41.6：悬停幽灵字母——只在当前组字母头滚出顶部后显示，下一个字母头
-            // 接近时被顶走。56dp 高与列表内字母头像素对齐，交接时字母不跳动。
-            // v0.41.7：横向用 padding（不用 offset），与列表内字母头一致
+            // v0.41.8：悬停幽灵字母——只在当前组首行滚出顶部后显示，下一组首行
+            // 接近时被顶走；外层 clipToBounds 保证不会顶到搜索栏上面（Bob）。
+            // 字母弱化到 14%（Bob：太显眼），与行内字母一致。
             val sl = stuckLetter
             if (!searching && sl != null) {
-                Box(
+                Text(
+                    text = sl.toString(),
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 40.sp,
+                    color = AILauncherColors.Title.copy(alpha = 0.14f),
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .padding(start = 20.dp)
+                        .padding(start = 20.dp, top = 12.dp)
                         .offset { IntOffset(0, stuckPushPx.roundToInt()) }
-                ) {
-                    Text(
-                        text = sl.toString(),
-                        fontFamily = FontFamily.Serif,
-                        fontSize = 40.sp,
-                        color = AILauncherColors.Title.copy(alpha = 0.22f),
-                        modifier = Modifier.align(Alignment.CenterStart)
-                    )
-                }
+                )
             }
             // v0.40.0：底部上滑 → 回桌面（Bob）。
             // 系统手势导航会吃掉最底部边缘的触摸，这里在系统手势区之上放一条
