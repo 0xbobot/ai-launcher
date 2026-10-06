@@ -628,7 +628,8 @@ fun AppCenterContent(
                                         popupApp = app
                                     },
                                     onHide = {}, // 已隐藏：右滑不再隐藏
-                                    isHidden = true, // 禁用右滑隐藏手势
+                                    isHidden = true, // 禁用右滑隐藏手势；左滑=恢复显示
+                                    onUnhide = ::unhideApp,
                                     actionsVisible = expandedActionsPkg == app.packageName,
                                     onActionsVisibleChange = { expanded ->
                                         expandedActionsPkg =
@@ -640,8 +641,7 @@ fun AppCenterContent(
                                 AppPopupMenu(
                                     app = app,
                                     expanded = popupApp?.packageName == app.packageName,
-                                    onDismiss = { popupApp = null },
-                                    onUnhide = { unhideApp(it) }
+                                    onDismiss = { popupApp = null }
                                 )
                             }
                         }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -58,7 +59,9 @@ internal fun AppRow(
     actionsVisible: Boolean,
     onActionsVisibleChange: (Boolean) -> Unit,
     // v0.41.18：已隐藏分组内的应用——禁用右滑隐藏手势（已经是隐藏的）
-    isHidden: Boolean = false
+    isHidden: Boolean = false,
+    // v0.41.19（Bob）：隐藏分组内左滑=恢复显示（长按菜单与其他应用一致，不再放恢复）
+    onUnhide: ((AppInfo) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -177,6 +180,7 @@ internal fun AppRow(
             }
 
             // ★：跟手出现/放大。dragDist 驱动透明度和缩放，松手后由 actionsVisible 保持。
+            // v0.41.19（Bob）：隐藏分组内左滑显示"恢复显示"（眼睛图标），不再是 ★
             val starProgress = if (actionsVisible) 1f
                 else (dragDist / revealPx).coerceIn(0f, 1f)
             if (starProgress > 0.01f) {
@@ -196,18 +200,31 @@ internal fun AppRow(
                         .clickable(
                             enabled = actionsVisible || dragDist > revealPx / 2,
                             onClick = {
-                                togglePin()
+                                if (isHidden) {
+                                    onUnhide?.invoke(app)
+                                } else {
+                                    togglePin()
+                                }
                                 hideStar()
                             }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Star,
-                        contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
-                        tint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
-                        modifier = Modifier.size(26.dp)
-                    )
+                    if (isHidden) {
+                        Icon(
+                            imageVector = Icons.Filled.Visibility,
+                            contentDescription = "恢复显示",
+                            tint = Color(0xFF8A8478),
+                            modifier = Modifier.size(26.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Star,
+                            contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
+                            tint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
                 }
             }
 

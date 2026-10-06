@@ -17,7 +17,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.runtime.Composable
@@ -48,9 +47,7 @@ fun AppPopupMenu(
     app: AppInfo,
     expanded: Boolean,
     onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-    // v0.41.18：隐藏分组内的应用长按菜单显示"恢复显示"（不传则不显示）
-    onUnhide: ((AppInfo) -> Unit)? = null
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val shortcuts = remember(app.packageName, expanded) {
@@ -146,38 +143,6 @@ fun AppPopupMenu(
             modifier = Modifier.padding(horizontal = 14.dp),
             color = AILauncherColors.Divider
         )
-        // v0.41.18：隐藏分组内的应用可"恢复显示"
-        if (onUnhide != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = "恢复显示",
-                        fontSize = 14.sp,
-                        color = AILauncherColors.Title,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.Visibility,
-                        contentDescription = null,
-                        tint = AILauncherColors.Title,
-                        modifier = Modifier.size(22.dp)
-                    )
-                },
-                onClick = {
-                    onUnhide(app)
-                    onDismiss()
-                },
-                colors = MenuDefaults.itemColors(textColor = AILauncherColors.Title),
-                contentPadding = MenuDefaults.DropdownMenuItemContentPadding
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 14.dp),
-                color = AILauncherColors.Divider
-            )
-        }
         DropdownMenuItem(
             text = {
                 Text(
