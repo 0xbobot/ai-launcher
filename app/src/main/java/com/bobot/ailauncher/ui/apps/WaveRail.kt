@@ -21,7 +21,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +41,9 @@ import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlin.math.exp
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** v0.40.1：rail 所在的一侧（左右双 rail 常驻，不再需要设置里选惯用手） */
 internal enum class RailSide { LEFT, RIGHT }
@@ -53,6 +58,9 @@ internal enum class RailSide { LEFT, RIGHT }
  * - 字母切换时给一记震动（v0.40.2：用 LongPress，TextHandleMove 在部分机型上无感）
  * - v0.41.0（B 方案·呼吸感）：rail 字母更细更淡（10sp/Normal/提示灰），
  *   当前字母气泡从实心金圆改为金环（描边 2dp + 深色字母），更轻
+ * - v0.41.1：修点按 bug——点按后不能立刻 onRelease，否则右侧 rail 的
+ *   stopGlide 会把刚启动的 animateScrollToItem 掐掉（列表不动、波浪卡住）；
+ *   改为等 500ms 滚动落定再收波浪（左侧 rail 的 onRelease 不掐任务，本来就正常）
  * - 只做定位，不承载其他功能
  */
 @Composable
@@ -70,9 +78,17 @@ internal fun WaveRail(
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
     // 右侧 rail：波浪/气泡往左（向内）；左侧 rail：往右（向内）
     val dirSign = if (side == RailSide.RIGHT) -1f else 1f
     var activeIndex by remember { mutableIntStateOf(-1) }
+    // v0.41.1：点按后的延迟收波浪任务——点按不能立刻 onRelease，
+    // 否则右侧 rail 的 stopGlide 会把刚启动的 animateScrollToItem 直接掐掉
+    var tapReleaseJob by remember { mutableStateOf<Job?>(null) }
+    fun cancelPendingTapRelease() {
+        tapReleaseJob?.cancel()
+        tapReleaseJob = null
+    }
     // 外部驱动优先（左侧隐形区触发时），否则用内部触摸状态
     val displayIndex = forcedActiveIndex ?: activeIndex
 
@@ -126,14 +142,25 @@ internal fun WaveRail(
                     detectTapGestures(onTap = { offset ->
                         // 点按：直接跳转
                         val i = indexAt(offset.y)
+                        cancelPendingTapRelease()
                         activeIndex = -1 // 允许点按重复触发同一字母
                         emitLetter(i)
-                        onRelease()
+                        // v0.41.1：等滚动落定再收波浪——立刻 onRelease 的话，
+                        // 右侧 rail 的 stopGlide 会把刚启动的 animateScrollToItem
+                        // （近距离字母）直接掐掉，导致列表不动、波浪卡住；
+                        // 左侧 rail 的 onRelease 只清 mirrorIndex 不掐任务，所以左侧正常
+                        tapReleaseJob = scope.launch {
+                            delay(500)
+                            activeIndex = -1
+                            onRelease()
+                        }
                     })
                 }
                 .pointerInput(letters, hPx) {
                     detectVerticalDragGestures(
                         onDragStart = { offset ->
+                            // 点按后立刻转拖动：掐掉点按的延迟收波浪，拖动接管
+                            cancelPendingTapRelease()
                             emitLetter(indexAt(offset.y))
                         },
                         onDragEnd = {
