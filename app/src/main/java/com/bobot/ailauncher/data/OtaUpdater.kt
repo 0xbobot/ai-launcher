@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.data
 
-import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -44,12 +43,11 @@ object OtaUpdater {
     private const val MANIFEST_URL = "https://bobot.is-a.dev/ai-launcher/update.json"
     private const val PREFS = "ota"
     private const val KEY_LAST_CHECK = "last_check"
-    private const val KEY_DOWNLOAD_ID = "download_id"
     private const val KEY_INSTALL_PROMPTED = "install_prompted"
     private const val KEY_TARGET_VERSION = "target_version"
     private const val KEY_LAST_RUN_VERSION = "last_run_version"
     private const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
-    private const val APK_FILE_NAME = "ai-launcher-update.apk"
+    const val APK_FILE_NAME = "ai-launcher-update.apk"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -104,99 +102,9 @@ object OtaUpdater {
         prefs(context).edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
     }
 
-    /** 用系统 DownloadManager 下载 APK，返回 downloadId */
-    fun startDownload(context: Context, info: OtaInfo): Long {
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        // v0.40.0：先清掉我们之前发起、还没跑完的下载任务——之前"等待下载 2 个文件"
-        // 一直卡住，就是"立即更新"被点了两次（或自动检查+手动检查各弹一次），
-        // 两个任务抢同一个目标文件互相打架。按标题前缀只清我们自己的任务。
-        sweepStaleDownloads(dm)
-        // 先删掉旧残留包，避免 DownloadManager 目标文件冲突
-        downloadedApk(context)?.delete()
-        val req = DownloadManager.Request(Uri.parse(info.apkUrl)).apply {
-            setTitle("AI桌面 v${info.versionName} 更新")
-            setDescription("正在下载新版本安装包")
-            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-            setDestinationInExternalFilesDir(
-                context, Environment.DIRECTORY_DOWNLOADS, APK_FILE_NAME
-            )
-            setMimeType("application/vnd.android.package-archive")
-        }
-        val id = dm.enqueue(req)
-        prefs(context).edit()
-            .putLong(KEY_DOWNLOAD_ID, id)
-            .putInt(KEY_TARGET_VERSION, info.versionCode)
-            .putBoolean(KEY_INSTALL_PROMPTED, false)
-            .apply()
-        return id
-    }
-
-    /**
-     * v0.40.0：清掉我们之前发起、还没结束的下载任务（标题前缀"AI桌面 v"）。
-     * 只动我们自己的任务，不碰用户别的下载。
-     */
-    private fun sweepStaleDownloads(dm: DownloadManager) {
-        try {
-            dm.query(DownloadManager.Query()).use { c ->
-                val idCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
-                val titleCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)
-                val statusCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
-                val stale = mutableListOf<Long>()
-                while (c.moveToNext()) {
-                    val title = c.getString(titleCol) ?: ""
-                    val status = c.getInt(statusCol)
-                    val running = status == DownloadManager.STATUS_PENDING ||
-                            status == DownloadManager.STATUS_PAUSED ||
-                            status == DownloadManager.STATUS_RUNNING
-                    if (running && title.startsWith("AI桌面 v")) {
-                        stale.add(c.getLong(idCol))
-                    }
-                }
-                if (stale.isNotEmpty()) dm.remove(*stale.toLongArray())
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    fun pendingDownloadId(context: Context): Long =
-        prefs(context).getLong(KEY_DOWNLOAD_ID, -1L)
-
-    fun isDownloadComplete(context: Context, downloadId: Long): Boolean {
-        if (downloadId < 0) return false
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        return try {
-            dm.query(DownloadManager.Query().setFilterById(downloadId)).use { c ->
-                c.moveToFirst() &&
-                    c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) ==
-                    DownloadManager.STATUS_SUCCESSFUL
-            }
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    /** 下载进度 0..1；下载完成返回 1f，查不到/失败返回 null */
-    fun downloadProgress(context: Context, downloadId: Long): Float? {
-        if (downloadId < 0) return null
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        return try {
-            dm.query(DownloadManager.Query().setFilterById(downloadId)).use { c ->
-                if (!c.moveToFirst()) return null
-                val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                if (status == DownloadManager.STATUS_SUCCESSFUL) return 1f
-                if (status == DownloadManager.STATUS_FAILED) return null
-                val soFar = c.getLong(
-                    c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-                )
-                val total = c.getLong(
-                    c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-                )
-                if (total <= 0) null else (soFar.toFloat() / total).coerceIn(0f, 1f)
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
+    // v0.41.12：DownloadManager 已废弃，下载走 OtaDownloader（App 内 OkHttp）。
+    // 旧方法 startDownload/downloadProgress/isDownloadComplete/sweepStaleDownloads
+    // 及 KEY_DOWNLOAD_ID 已删除。
 
     /** 已下载好的 APK 文件（不存在或为空返回 null） */
     fun downloadedApk(context: Context): File? {
@@ -220,33 +128,27 @@ object OtaUpdater {
      * 用"完成的是我们自己的更新包文件"来判定，不再死磕 id 等于记录值——
      * 之前重复下载导致旧任务先完成时 id 对不上，安装提醒就永远没弹出来。
      */
-    fun shouldPromptInstall(context: Context, completedId: Long): Boolean {
-        if (prefs(context).getBoolean(KEY_INSTALL_PROMPTED, false)) return false
-        // 只为新版本弹安装：已装过的版本的残留包不再提示
-        if (prefs(context).getInt(KEY_TARGET_VERSION, 0) <= BuildConfig.VERSION_CODE) return false
-        if (!isOurDownload(context, completedId)) return false
-        if (!isDownloadComplete(context, completedId)) return false
-        return downloadedApk(context) != null
-    }
-
-    /** 完成的下载是否写的是我们的更新包文件（防串到别的下载任务） */
-    private fun isOurDownload(context: Context, downloadId: Long): Boolean {
-        if (downloadId < 0) return false
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        return try {
-            dm.query(DownloadManager.Query().setFilterById(downloadId)).use { c ->
-                if (!c.moveToFirst()) return false
-                val uriIdx = c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
-                val uri = if (uriIdx >= 0) c.getString(uriIdx) else null
-                uri != null && uri.endsWith(APK_FILE_NAME)
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
+    // v0.41.12：shouldPromptInstall(context, completedId) 与 isOurDownload 已删除
+    //（DownloadManager 废弃，下载走 OtaDownloader）。
 
     fun markInstallPrompted(context: Context) {
         prefs(context).edit().putBoolean(KEY_INSTALL_PROMPTED, true).apply()
+    }
+
+    /**
+     * v0.41.12：OkHttp 下载器用——标记开始下载某版本（供 isDownloadedVersion 校验）。
+     * 下载完成无需单独标记：文件存在 + 版本号对上即视为已下载。
+     */
+    fun markDownloadStart(context: Context, versionCode: Int) {
+        prefs(context).edit()
+            .putInt(KEY_TARGET_VERSION, versionCode)
+            .putBoolean(KEY_INSTALL_PROMPTED, false)
+            .apply()
+    }
+
+    /** v0.41.12：兼容 OtaDownloader 的完成标记（实际与 markDownloadStart 同效）。 */
+    fun markDownloadComplete(context: Context, versionCode: Int) {
+        markDownloadStart(context, versionCode)
     }
 
     /**
@@ -259,7 +161,6 @@ object OtaUpdater {
             downloadedApk(context)?.delete()
             p.edit()
                 .putInt(KEY_LAST_RUN_VERSION, BuildConfig.VERSION_CODE)
-                .putLong(KEY_DOWNLOAD_ID, -1L)
                 .putBoolean(KEY_INSTALL_PROMPTED, false)
                 .apply()
         }

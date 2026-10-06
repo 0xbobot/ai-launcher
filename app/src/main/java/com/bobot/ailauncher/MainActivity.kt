@@ -1,10 +1,7 @@
 package com.bobot.ailauncher
 
-import android.app.DownloadManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -32,7 +29,6 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private var downloadReceiver: BroadcastReceiver? = null
 
     // v0.36.1：低电量守护的通知权限申请
     private val notifPermissionLauncher = registerForActivityResult(
@@ -61,26 +57,8 @@ class MainActivity : ComponentActivity() {
         OtaUpdater.onAppUpgraded(this)
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
 
-        // OTA：下载完成广播 → 下载的是我们的更新包则弹安装
-        downloadReceiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context, intent: Intent) {
-                if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
-                val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
-                if (id != -1L && OtaUpdater.shouldPromptInstall(ctx, id)) {
-                    OtaUpdater.downloadedApk(ctx)?.let {
-                        if (OtaUpdater.promptInstall(ctx, it)) {
-                            OtaUpdater.markInstallPrompted(ctx)
-                        }
-                    }
-                }
-            }
-        }
-        ContextCompat.registerReceiver(
-            this,
-            downloadReceiver,
-            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
+        // v0.41.12：DownloadManager 已换成 App 内 OkHttp（OtaDownloader），下载完成由
+        // OtaDownloader 直接弹安装，不再需要系统下载广播。onResume 保留兜底。
 
         // v0.26.5：去掉窗口背景模糊——现在壁纸由 Compose 内绘制，
         // window blur 只模糊窗口后的内容，对内绘壁纸无效，反而可能导致切换闪烁
@@ -239,7 +217,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        downloadReceiver?.let { unregisterReceiver(it) }
         super.onDestroy()
     }
 

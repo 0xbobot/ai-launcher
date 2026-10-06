@@ -9,7 +9,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,67 +17,49 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.bobot.ailauncher.data.OtaDownloader
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
-import kotlinx.coroutines.delay
 
 /**
  * OTA 更新对话框：首页自动检查与设置页手动检查共用。
  * v0.41.6（Bob）：点"立即更新"后进度条直接在对话框里显示，下载完成自动弹安装。
+ * v0.41.12：下载器从系统 DownloadManager 换成 App 内 OkHttp（OtaDownloader）——
+ *   DownloadManager 在 Bob 手机开 VPN 时直接失败（0% 报错），OkHttp 走 App 网络栈正常。
  * - 安装包已下载好 → 直接弹安装
- * - 下载中 → 对话框内进度条；可"后台下载"收起（通知栏继续显示进度，
- *   完成后由下载广播/onResume 兜底弹安装）
+ * - 下载中 → 对话框内进度条（StateFlow 实时）；可"后台下载"收起（下载在 application
+ *   作用域继续，完成后直接弹安装；onResume 兜底）
  * - 下载失败 → 显示重试
  * forceUpdate=true 时不提供"稍后"/"后台下载"按钮。
  */
 @Composable
 fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    // v0.40.0：防双击——连点"立即更新"之前会产生两个下载任务抢同一个文件
+    // v0.40.0：防双击
     var busy by remember { mutableStateOf(false) }
-    // -1 = 还没开始下载；>=0 = 下载任务 id，对话框内显示进度
-    var downloadId by remember { mutableStateOf(-1L) }
-    var progress by remember { mutableStateOf(0f) }
-    var failed by remember { mutableStateOf(false) }
+    val dlState by OtaDownloader.state.collectAsState()
+
+    val downloading = dlState is OtaDownloader.State.Downloading
+    val failed = dlState is OtaDownloader.State.Failed
+    val progress = (dlState as? OtaDownloader.State.Downloading)?.progress ?: 0f
+
+    // 下载成功 → OtaDownloader 已直接弹安装，对话框收起
+    if (dlState is OtaDownloader.State.Success) {
+        onDismiss()
+    }
 
     fun startDownload() {
         busy = true
-        failed = false
-        progress = 0f
-        downloadId = OtaUpdater.startDownload(context, info)
+        OtaDownloader.start(context, info)
     }
 
-    // 下载中：轮询进度；完成 → 直接弹安装（Bob），失败 → 显示重试
-    if (downloadId >= 0 && !failed) {
-        LaunchedEffect(downloadId) {
-            while (true) {
-                delay(500)
-                if (OtaUpdater.isDownloadComplete(context, downloadId)) {
-                    val apk = OtaUpdater.downloadedApk(context)
-                    // 下载广播可能已先弹过安装，shouldPromptInstall 防重复
-                    if (apk != null && OtaUpdater.shouldPromptInstall(context)) {
-                        if (OtaUpdater.promptInstall(context, apk)) {
-                            OtaUpdater.markInstallPrompted(context)
-                        }
-                    }
-                    onDismiss()
-                    break
-                }
-                val p = OtaUpdater.downloadProgress(context, downloadId)
-                if (p == null) {
-                    failed = true
-                    break
-                }
-                progress = p
-            }
-        }
-    }
-
-    val downloading = downloadId >= 0 && !failed
     AlertDialog(
         onDismissRequest = {
-            // 下载中非强制更新时允许收起（后台继续下，完成后兜底弹安装）
-            if (!downloading && !info.forceUpdate) onDismiss()
+            // 下载中非强制更新时允许收起（后台继续下，完成后直接弹安装）
+            if (!downloading && !info.forceUpdate) {
+                OtaDownloader.resetIfNotDownloading()
+                onDismiss()
+            }
         },
         title = {
             Text(
@@ -113,9 +95,7 @@ fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
                     if (busy) return@TextButton
                     // 只有已下载的包正是这个新版本时才直接安装，否则重新下载
                     //（旧版本残留包不能复用，否则会"升级"成旧版）
-                    if (OtaUpdater.isDownloadedVersion(context, info.versionCode) &&
-                        OtaUpdater.isDownloadComplete(context, OtaUpdater.pendingDownloadId(context))
-                    ) {
+                    if (OtaUpdater.isDownloadedVersion(context, info.versionCode)) {
                         busy = true
                         OtaUpdater.downloadedApk(context)?.let {
                             if (OtaUpdater.promptInstall(context, it)) {
@@ -133,7 +113,10 @@ fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
         },
         dismissButton = {
             if (!info.forceUpdate) {
-                TextButton(onClick = onDismiss) {
+                TextButton(onClick = {
+                    OtaDownloader.resetIfNotDownloading()
+                    onDismiss()
+                }) {
                     Text(if (downloading) "后台下载" else "稍后")
                 }
             }

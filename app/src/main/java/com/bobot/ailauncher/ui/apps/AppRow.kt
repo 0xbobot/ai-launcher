@@ -1,32 +1,26 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.widget.Toast
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -34,10 +28,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,7 +46,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
@@ -73,9 +72,6 @@ internal fun AppRow(
     val context = LocalContext.current
     val density = LocalDensity.current
     var showHideConfirm by remember { mutableStateOf(false) }
-    val swipePx = with(density) { 56.dp.toPx() }
-    // v0.41.11（Bob 选方案1）：左滑只留 ★（加到 Dock），滑满 120dp 直接触发，不用点
-    val fullSwipePx = with(density) { 120.dp.toPx() }
 
     // v0.41.11：openAppDetails/uninstallApp 已移到长按菜单（AppPopupMenu），此处删除
 
@@ -100,98 +96,137 @@ internal fun AppRow(
         }
     }
 
+    // v0.41.12（Bob）：左滑跟手动画——行内容跟手指移动，★ 在底层露出；
+    // 滑满 120dp 时 ★ 放大提示"松手直接触发"，给明确的触觉反馈。
+    val offsetX = remember { Animatable(0f) }
+    val animScope = rememberCoroutineScope()
+    val buttonWidthPx = with(density) { 72.dp.toPx() }
+    val revealPx = with(density) { 56.dp.toPx() }
+    val fullPx = with(density) { 120.dp.toPx() }
+    val maxLeftPx = with(density) { 160.dp.toPx() }
+    val maxRightPx = with(density) { 56.dp.toPx() }
+    val springSpec = spring<Float>(stiffness = Spring.StiffnessMedium, dampingRatio = 0.9f)
+
+    fun hideActions() {
+        onActionsVisibleChange(false)
+        animScope.launch { offsetX.animateTo(0f, springSpec) }
+    }
+
+    // 外部收起（如另一行展开）时跟回
+    LaunchedEffect(actionsVisible) {
+        if (!actionsVisible && offsetX.value != 0f) {
+            offsetX.animateTo(0f, springSpec)
+        }
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .pointerInput(app.packageName) {
-                    var accumX = 0f
-                    var fired = false
-                    detectHorizontalDragGestures(
-                        onDragStart = { accumX = 0f; fired = false },
-                        onDragCancel = { fired = true },
-                        onDragEnd = {
-                            if (!fired) {
-                                if (accumX < -fullSwipePx) {
-                                    // v0.41.11：左滑满 → 直接加到 Dock（或移出），不用点按钮
-                                    togglePin()
-                                    if (actionsVisible) onActionsVisibleChange(false)
-                                } else if (accumX < -swipePx) {
-                                    // 左滑=多：只展开 ★（加到 Dock）；ⓘ🗑 已移到长按菜单
-                                    if (!actionsVisible) onActionsVisibleChange(true)
-                                } else if (accumX > swipePx) {
-                                    // 右滑=少：展开态收起；收起态弹确认框再隐藏
-                                    if (actionsVisible) onActionsVisibleChange(false)
-                                    else showHideConfirm = true
+        ) {
+            // 底层：★ 按钮（右对齐，行左滑时露出）
+            // 超出按钮宽度继续左滑 → ★ 放大，提示"松手直接触发"
+            val overscroll = (-offsetX.value - buttonWidthPx).coerceAtLeast(0f)
+            val starScale = 1f +
+                (overscroll / (maxLeftPx - buttonWidthPx)).coerceIn(0f, 1f) * 0.35f
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(72.dp)
+                    .fillMaxHeight()
+                    .graphicsLayer {
+                        scaleX = starScale
+                        scaleY = starScale
+                        // 行没动时 ★ 完全透明，避免透出来
+                        alpha = if (offsetX.value < -4f) 1f else 0f
+                    }
+                    .clickable(
+                        enabled = offsetX.value < -buttonWidthPx / 2,
+                        onClick = {
+                            togglePin()
+                            hideActions()
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Star,
+                    contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
+                    tint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            // 前景：行内容，跟手偏移（不透明，盖住底层的 ★）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(AILauncherColors.GlassCardStrong)
+                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                    .pointerInput(app.packageName) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                val v = offsetX.value
+                                animScope.launch {
+                                    when {
+                                        v < -fullPx -> {
+                                            // v0.41.11：左滑满 → 直接加到 Dock（或移出）
+                                            togglePin()
+                                            hideActions()
+                                        }
+                                        v < -revealPx -> {
+                                            // 左滑=多：★ 露出，点按触发
+                                            offsetX.animateTo(-buttonWidthPx, springSpec)
+                                            onActionsVisibleChange(true)
+                                        }
+                                        v > revealPx -> {
+                                            // 右滑=少：弹确认框再隐藏
+                                            offsetX.animateTo(0f, springSpec)
+                                            showHideConfirm = true
+                                        }
+                                        else -> hideActions()
+                                    }
+                                }
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                animScope.launch {
+                                    offsetX.snapTo(
+                                        (offsetX.value + dragAmount)
+                                            .coerceIn(-maxLeftPx, maxRightPx)
+                                    )
                                 }
                             }
+                        )
+                    }
+                    .combinedClickable(
+                        onClick = {
+                            // ★ 露出时点行 = 收起；否则启动应用
+                            if (offsetX.value != 0f) hideActions()
+                            else onLaunch()
                         },
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            if (!fired) accumX += dragAmount
-                        }
+                        onLongClick = onLongClick
                     )
-                }
-                .combinedClickable(onClick = onLaunch, onLongClick = onLongClick)
-                // v0.41.0（B 方案）：行距拉大——纵向 padding 12dp，图标 40dp，呼吸感
-                .padding(horizontal = 12.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Crossfade(
-                targetState = actionsVisible,
-                animationSpec = spring(
-                    stiffness = Spring.StiffnessMedium,
-                    dampingRatio = 0.9f
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) { expanded ->
-                if (!expanded) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        AppIconImage(
-                            drawable = app.icon,
-                            contentDescription = app.label.toString(),
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = app.label.toString(),
-                            fontSize = 15.sp,
-                            color = AILauncherColors.Title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                } else {
-                    // 展开态：只留 ★（加到 Dock）；ⓘ🗑 已移到长按菜单（v0.41.11 Bob 选方案1）
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        AppIconImage(
-                            drawable = app.icon,
-                            contentDescription = app.label.toString(),
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = app.label.toString(),
-                            fontSize = 15.sp,
-                            color = AILauncherColors.Title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        SlideInIconButton(
-                            onClick = ::togglePin,
-                            icon = Icons.Filled.Star,
-                            iconTint = if (isPinned) Color(0xFFC9A227) else Color(0xFF8A8478),
-                            contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
-                            delayMillis = 0
-                        )
-                    }
-                }
+                    // v0.41.0（B 方案）：行距拉大——纵向 padding 12dp，图标 40dp，呼吸感
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AppIconImage(
+                    drawable = app.icon,
+                    contentDescription = app.label.toString(),
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = app.label.toString(),
+                    fontSize = 15.sp,
+                    color = AILauncherColors.Title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -217,46 +252,6 @@ internal fun AppRow(
             dismissButton = {
                 TextButton(onClick = { showHideConfirm = false }) { Text("取消") }
             }
-        )
-    }
-}
-
-/** 右侧图标按钮：无底，从右侧滑入 + 淡入，delay 形成先后效果 */
-@Composable
-private fun SlideInIconButton(
-    onClick: () -> Unit,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    iconTint: Color,
-    contentDescription: String,
-    delayMillis: Int
-) {
-    val density = LocalDensity.current
-    val slidePx = with(density) { 24.dp.toPx() }
-    val progress by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(
-            durationMillis = 220,
-            delayMillis = delayMillis,
-            easing = FastOutSlowInEasing
-        ),
-        label = "circleBtnIn"
-    )
-    Box(
-        modifier = Modifier
-            .size(44.dp)
-            .graphicsLayer {
-                alpha = progress
-                translationX = (1f - progress) * slidePx
-            }
-            .clip(CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = iconTint,
-            modifier = Modifier.size(22.dp)
         )
     }
 }
