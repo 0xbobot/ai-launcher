@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.data
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.os.Environment
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -11,9 +12,16 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.net.Inet4Address
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.URI
 import java.util.concurrent.TimeUnit
 
 /**
@@ -43,14 +51,59 @@ object OtaDownloader {
     private var job: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
+    // v0.41.22：client 需要 Context 来读系统代理，改为按需构建（缓存）
+    private var cachedClient: OkHttpClient? = null
+    private fun getClient(context: Context): OkHttpClient {
+        cachedClient?.let { return it }
+        val proxy = getSystemProxy(context)
+        val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
+            // v0.41.22（Bob：下载比 Chrome 慢百倍）——显式走系统代理。
+            // 部分代理 App（VPN 模式）不走系统 ProxySelector，导致 App 直连
+            // GitHub（国内慢），而 Chrome 走代理快。这里用 ConnectivityManager
+            // 显式读取当前网络的代理。
+            .apply {
+                if (proxy != null) proxy(proxy)
+            }
+            // 国内 IPv6 到 GitHub 常绕路，优先 IPv4
+            .dns(PreferIPv4Dns())
             .build()
+        cachedClient = client
+        return client
+    }
+
+    /**
+     * 读取系统代理：优先 ConnectivityManager.defaultProxy（API 23+，
+     * 反映当前默认网络的代理设置），兜底 ProxySelector。
+     */
+    private fun getSystemProxy(context: Context): Proxy? {
+        // 方法1：ConnectivityManager（最可靠，反映当前网络）
+        try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val proxyInfo = cm.defaultProxy
+            if (proxyInfo != null && proxyInfo.host != null) {
+                return Proxy(Proxy.Type.HTTP, InetSocketAddress(proxyInfo.host, proxyInfo.port))
+            }
+        } catch (_: Exception) {}
+        // 方法2：系统 ProxySelector
+        try {
+            val proxies = ProxySelector.getDefault()?.select(URI("https://github.com"))
+            return proxies?.firstOrNull { it.type() != Proxy.Type.DIRECT }
+        } catch (_: Exception) {}
+        return null
+    }
+
+    /** 优先 IPv4 的 DNS（国内 IPv6 到 GitHub 慢） */
+    private class PreferIPv4Dns : Dns {
+        override fun lookup(hostname: String): List<InetAddress> {
+            val all = Dns.SYSTEM.lookup(hostname)
+            val v4 = all.filterIsInstance<Inet4Address>()
+            return if (v4.isNotEmpty()) v4 else all
+        }
     }
 
     /** 开始下载。已在下载中则忽略（防双击）。 */
@@ -67,7 +120,7 @@ object OtaDownloader {
                     .url(info.apkUrl)
                     .header("User-Agent", "AI-Launcher-OTA")
                     .build()
-                client.newCall(req).execute().use { resp ->
+                getClient(appContext).newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) {
                         _state.value = State.Failed
                         return@launch
