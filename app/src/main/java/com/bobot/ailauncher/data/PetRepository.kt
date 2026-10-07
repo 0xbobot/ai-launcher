@@ -77,6 +77,19 @@ object PetRepository {
     // v0.29.0：会议临近——15 分钟内有会，七仔戴手表
     private val _meetingSoon = MutableStateFlow<String?>(null)
     val meetingSoon: StateFlow<String?> get() = _meetingSoon.asStateFlow()
+    // v0.47.0：七仔说话——统一信息区（Mii 风游戏化气泡），七仔有什么话都走这里
+    data class SpeechMsg(val id: Long, val text: String)
+    private val _speech = MutableStateFlow<SpeechMsg?>(null)
+    val speech: StateFlow<SpeechMsg?> get() = _speech.asStateFlow()
+
+    /** 七仔说话：新消息直接替换当前（最新优先） */
+    fun say(text: String) {
+        _speech.value = SpeechMsg(System.currentTimeMillis(), text)
+    }
+
+    fun clearSpeech() {
+        _speech.value = null
+    }
     private var lastInteractMs = System.currentTimeMillis()
 
     private var busy = false

@@ -8,6 +8,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -50,6 +53,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -163,10 +167,12 @@ fun PetZone(
         when {
             old != null && !wasBad && isBad -> {
                 demoScene = QizaiScene.WEATHER_RAIN // 转坏：下雨了
+                PetRepository.say("下雨啦，出门记得带伞！")
                 weatherTriggersToday++
             }
             old != null && wasBad && isGood -> {
                 demoScene = QizaiScene.WEATHER_SUN // 转好：雨停天晴
+                PetRepository.say("雨停啦，太阳出来了！")
                 weatherTriggersToday++
             }
         }
@@ -198,7 +204,25 @@ fun PetZone(
                 WeatherState.update(w.desc)
                 demoScene = if (isBadWeather(w.desc)) QizaiScene.WEATHER_RAIN
                 else QizaiScene.WEATHER_SUN
+                PetRepository.say("早上好！今天${w.desc}，${w.temp}°")
             }
+        }
+    }
+    // v0.47.0：七仔说话——统一信息区，自动消失
+    val speech by PetRepository.speech.collectAsState()
+    var speechVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(speech?.id) {
+        val s = speech
+        if (s != null) {
+            speechVisible = true
+            delay(s.text.length * 40L + 2600L) // 打字机 + 停留
+            speechVisible = false
+            delay(350) // 淡出
+            if (PetRepository.speech.value?.id == s.id) {
+                PetRepository.clearSpeech()
+            }
+        } else {
+            speechVisible = false
         }
     }
     var blinking by remember { mutableStateOf(false) }
@@ -307,6 +331,16 @@ fun PetZone(
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
+            // v0.47.0：七仔说话气泡——统一信息区（Mii 风+游戏化），有话就弹出来
+            if (speech != null) {
+                SpeechBubble(
+                    text = speech!!.text,
+                    visible = speechVisible,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 2.dp)
+                )
+            }
             // 宠物本体
             PetView(
                 mood = mood,
@@ -355,6 +389,7 @@ fun PetZone(
                                         QizaiScene.WEATHER_RAIN
                                     else
                                         QizaiScene.WEATHER_SUN
+                                    PetRepository.say("${w.city}${w.desc}，${w.temp}°")
                                 } else {
                                     jellyTick++ // 拉取失败，给个果冻反馈
                                 }
@@ -752,6 +787,65 @@ fun PetTabsOverlay(dockHidden: Boolean) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * v0.47.0：七仔说话气泡——Mii 风（干净圆润白气泡+小尾巴）+ 游戏化（弹性弹出+打字机）。
+ * 七仔有什么话要说，都走这里统一呈现。
+ */
+@Composable
+private fun SpeechBubble(
+    text: String,
+    visible: Boolean,
+    modifier: Modifier = Modifier
+) {
+    // 打字机：一字一字蹦出来（RPG 对话感）
+    var shownChars by remember(text) { mutableIntStateOf(0) }
+    LaunchedEffect(text) {
+        shownChars = 0
+        for (i in 1..text.length) {
+            delay(40)
+            shownChars = i
+        }
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = scaleIn(
+            initialScale = 0.6f,
+            animationSpec = spring(dampingRatio = 0.55f, stiffness = 500f)
+        ) + fadeIn(),
+        exit = fadeOut() + scaleOut(targetScale = 0.85f),
+        modifier = modifier
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                modifier = Modifier.widthIn(max = 240.dp)
+            ) {
+                Text(
+                    text = text.take(shownChars),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    color = Color(0xFF3A3A3A),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                )
+            }
+            // 小尾巴指向七仔
+            androidx.compose.foundation.Canvas(
+                modifier = Modifier.size(18.dp, 10.dp)
+            ) {
+                val tailPath = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(size.width, 0f)
+                    lineTo(size.width / 2f, size.height)
+                    close()
+                }
+                drawPath(tailPath, Color.White)
             }
         }
     }
