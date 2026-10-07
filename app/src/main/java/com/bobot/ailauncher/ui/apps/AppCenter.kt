@@ -74,6 +74,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -167,6 +168,19 @@ fun AppCenterContent(
                 .sortedWith { a, b -> collator.compare(a.label.toString(), b.label.toString()) }
         }
     }
+    // v0.41.31（Bob）：Dock 分区——A 之前，像隐藏分区一样；
+    // UiPrefs.getDockPinned 转 AppInfo（按置顶顺序，去隐藏）
+    val dockTick by UiPrefs.dockTick.collectAsState()
+    val dockApps = remember(refreshTick, dockTick, hiddenVersion) {
+        val pinned = UiPrefs.getDockPinned(context)
+        if (pinned.isEmpty()) emptyList()
+        else {
+            val all = listLaunchableApps(context).associateBy { it.packageName }
+            pinned.mapNotNull { all[it] }.filter { it.packageName !in hidden }
+        }
+    }
+    // Dock 分区占位：header(1) + 行(N) + 间距(1)；为空时不显示
+    val dockSectionSize = if (dockApps.isNotEmpty()) dockApps.size + 2 else 0
 
     // v0.22：分类区取消（等需要时再重新设计），只保留 A-Z
 
@@ -212,15 +226,18 @@ fun AppCenterContent(
     // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
     // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；
     // 吸顶仍由悬停 overlay 实现
-    val letterAnchors = remember(azGroups) {
+    val letterAnchors = remember(azGroups, dockSectionSize) {
         val m = mutableMapOf<Char, Int>()
-        var idx = 0
+        var idx = dockSectionSize // v0.41.31：Dock 分区在前，字母锚点后移
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
             idx += apps.size + 1
         }
         m
     }
+    // v0.41.31：隐藏头绝对 index（供 rail 眼睛按钮跳转）
+    val azTotalItems = remember(azGroups) { azGroups.sumOf { it.second.size + 1 } }
+    val hiddenHeaderIndex = dockSectionSize + azTotalItems
 
     // v0.41.8：手动吸顶——当前组首行滚出顶部后，悬停 overlay 接管显示；
     // 下一组首行接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走）
@@ -284,6 +301,52 @@ fun AppCenterContent(
                 (it.key is String && (it.key as String).startsWith("h:"))
             }
             headerGone && hiddenVisible
+        }
+    }
+    // v0.41.31（Bob）：Dock 分区幽灵 ★ 悬停——dock-header 滚出顶部后接管，
+    // 直到滚出 Dock 分区；与 stuckHidden 同理
+    val stuckDock: Boolean by remember(dockApps) {
+        derivedStateOf {
+            if (dockApps.isEmpty()) return@derivedStateOf false
+            val vis = listState.layoutInfo.visibleItemsInfo
+            val header = vis.firstOrNull { it.key == "dock-header" }
+            val headerGone = header == null || header.offset + header.size < 0
+            val dockVisible = vis.any {
+                it.key is String && (it.key as String).startsWith("d:")
+            }
+            headerGone && dockVisible
+        }
+    }
+    // v0.41.31：Dock 悬停被 A 顶走（与字母顶走逻辑一致）
+    val dockPushPx: Float by remember(dockApps, azGroups) {
+        derivedStateOf {
+            if (!stuckDock) return@derivedStateOf 0f
+            @Suppress("UNUSED_EXPRESSION")
+            listState.firstVisibleItemScrollOffset
+            val firstLetter = letters.firstOrNull() ?: return@derivedStateOf 0f
+            val anchor = letterAnchors[firstLetter] ?: return@derivedStateOf 0f
+            val vis = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == anchor }
+            val off = vis?.offset?.toFloat() ?: return@derivedStateOf 0f
+            val pushZonePx = with(density) { 48.dp.toPx() }
+            if (off < pushZonePx) off - pushZonePx else 0f
+        }
+    }
+    val animatedDockPushPx by animateFloatAsState(
+        targetValue = dockPushPx,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "dockPush"
+    )
+    // v0.41.31（Bob）：打开应用中心默认从 A（首个字母组）开始，不显示 Dock 分区；
+    // 除非用户点 rail ★ 才去看 Dock
+    var dockInitialScrollDone by remember { mutableStateOf(false) }
+    LaunchedEffect(letterAnchors) {
+        if (!dockInitialScrollDone) {
+            dockInitialScrollDone = true
+            val firstAnchor = letterAnchors[letters.firstOrNull()] ?: 0
+            if (firstAnchor > 0) listState.scrollToItem(firstAnchor)
         }
     }
 
@@ -550,6 +613,64 @@ fun AppCenterContent(
                     item { Spacer(modifier = Modifier.height(24.dp)) }
                 } else {
                 // v0.25.7：去掉"全部应用"标题（Bob）
+                // v0.41.31（Bob）：Dock 分区——A 之前，像隐藏分区一样；
+                // 为空时不显示；幽灵 ★ 头（与隐藏头眼图标样式一致）
+                if (dockApps.isNotEmpty()) {
+                    item(key = "dock-header") {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = null,
+                                tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .padding(start = 20.dp)
+                                    .size(36.dp)
+                            )
+                        }
+                    }
+                    itemsIndexed(dockApps, key = { _, app -> "d:${app.packageName}" }) { _, app ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 72.dp, end = 64.dp)
+                        ) {
+                            AppRow(
+                                app = app,
+                                onLaunch = { launchApp(app) },
+                                onLongClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    popupApp = app
+                                },
+                                onHide = ::hideApp,
+                                actionsVisible = expandedActionsPkg == app.packageName,
+                                onActionsVisibleChange = { expanded ->
+                                    if (expanded) {
+                                        expandedActionsPkg = app.packageName
+                                        revealedHidePkg = null
+                                    } else if (expandedActionsPkg == app.packageName) {
+                                        expandedActionsPkg = null
+                                    }
+                                },
+                                hideVisible = revealedHidePkg == app.packageName,
+                                onHideVisibleChange = { visible ->
+                                    if (visible) {
+                                        revealedHidePkg = app.packageName
+                                        expandedActionsPkg = null
+                                    } else if (revealedHidePkg == app.packageName) {
+                                        revealedHidePkg = null
+                                    }
+                                }
+                            )
+                            AppPopupMenu(
+                                app = app,
+                                expanded = popupApp?.packageName == app.packageName,
+                                onDismiss = { popupApp = null }
+                            )
+                        }
+                    }
+                    item(key = "sp:dock") { Spacer(modifier = Modifier.height(24.dp)) }
+                }
                 // A-Z 列表（v0.41.0 B 方案）
                 // v0.41.8：每组 = 应用行 + 组间间距（字母不再独占一行，Bob）。
                 // 每组首行左侧留白放幽灵字母（正向 padding，不用负 offset）；
@@ -710,7 +831,19 @@ fun AppCenterContent(
             // 字母弱化到 14%（Bob：太显眼），与行内字母一致。
             val sl = stuckLetter
             if (!searching) {
-                if (stuckHidden) {
+                if (stuckDock) {
+                    // v0.41.31：Dock 分区悬停——幽灵 ★（与 dock-header 一致）
+                    Icon(
+                        imageVector = Icons.Filled.Star,
+                        contentDescription = null,
+                        tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 20.dp, top = 12.dp)
+                            .size(36.dp)
+                            .offset { IntOffset(0, animatedDockPushPx.roundToInt()) }
+                    )
+                } else if (stuckHidden) {
                     // 隐藏分组悬停：幽灵眼（与隐藏头里的图标一致）
                     Icon(
                         imageVector = if (hiddenUnlocked) Icons.Filled.VisibilityOff
@@ -791,14 +924,64 @@ fun AppCenterContent(
                     glideJob = null
                     // 列表已在拖动中滚到位，松手无需任何操作
                 }
-                WaveRail(
-                    letters = letters,
-                    side = RailSide.RIGHT,
-                    onActiveLetter = glideToLetter,
-                    onRelease = stopGlide,
-                    forcedActiveIndex = mirrorIndex,
-                    modifier = Modifier.align(Alignment.CenterEnd)
-                )
+                // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区；
+                // 分区空时不显示按钮（占位保持 rail 居中）
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier.height(64.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (dockApps.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    scope.launch { listState.animateScrollToItem(0) }
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.Star,
+                                    contentDescription = "Dock 收藏",
+                                    tint = AILauncherColors.Hint,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        WaveRail(
+                            letters = letters,
+                            side = RailSide.RIGHT,
+                            onActiveLetter = glideToLetter,
+                            onRelease = stopGlide,
+                            forcedActiveIndex = mirrorIndex
+                        )
+                    }
+                    Box(
+                        modifier = Modifier.height(64.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (hiddenApps.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.VisibilityOff,
+                                    contentDescription = "隐藏应用",
+                                    tint = AILauncherColors.Hint,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
                 WaveRail(
                     letters = letters,
                     side = RailSide.LEFT,

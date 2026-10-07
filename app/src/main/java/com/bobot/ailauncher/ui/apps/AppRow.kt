@@ -2,12 +2,18 @@ package com.bobot.ailauncher.ui.apps
 
 import android.widget.Toast
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -38,14 +44,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,6 +86,7 @@ internal fun AppRow(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
 
     // v0.41.11：openAppDetails/uninstallApp 已移到长按菜单（AppPopupMenu），此处删除
 
@@ -121,21 +132,77 @@ internal fun AppRow(
     val dimProgress = if (isDragging) dragDim else dimAnim.value
     val contentAlpha = 1f - dimProgress * 0.7f // 最低 30%
 
-    // 第二段武装：左滑到底=★，右滑到底=眼睛；主按钮放大脉冲
+    // 第二段武装：左滑到底=★，右滑到底=眼睛；主按钮循环 pulse
     val armedPrimary: String? = when {
         !isDragging -> null
         dragDist > fullPx -> "star"
         dragDist < -fullPx -> "eye"
         else -> null
     }
-    val starScale by animateFloatAsState(
-        targetValue = if (armedPrimary == "star") 1.3f else 1f,
-        animationSpec = settleSpring, label = "starPulse"
+    // v0.41.31（Bob）：armed pulse——1.0↔1.2 循环，不再是静态 1.3
+    val pulseTransition = rememberInfiniteTransition(label = "armedPulse")
+    val pulseScale by pulseTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
     )
-    val eyeScale by animateFloatAsState(
-        targetValue = if (armedPrimary == "eye") 1.3f else 1f,
-        animationSpec = settleSpring, label = "eyePulse"
+    val starArmedScale = if (armedPrimary == "star") pulseScale else 1f
+    val eyeArmedScale = if (armedPrimary == "eye") pulseScale else 1f
+
+    // v0.41.31（Bob）：双图标 staggered spring 进入——眼睛先（0ms），★ 晚 60ms；
+    // scale 0.6→1.0 + alpha 0→1，MediumBouncy
+    val eyeEntry = remember { Animatable(0f) }
+    val starEntry = remember { Animatable(0f) }
+    val entrySpring = spring<Float>(
+        dampingRatio = Spring.DampingRatioMediumBouncy,
+        stiffness = Spring.StiffnessMedium
     )
+    LaunchedEffect(actionsVisible) {
+        if (actionsVisible && !isDragging) {
+            // 从当前弱化进度开始，避免跳变
+            val from = dimProgress
+            launch {
+                eyeEntry.snapTo(from)
+                eyeEntry.animateTo(1f, entrySpring)
+            }
+            launch {
+                delay(60)
+                starEntry.snapTo(from)
+                starEntry.animateTo(1f, entrySpring)
+            }
+        } else if (!actionsVisible) {
+            eyeEntry.snapTo(0f)
+            starEntry.snapTo(0f)
+        }
+    }
+    // 图标显示进度：保持态用 entry 动画，拖动中跟手
+    val eyeP = if (actionsVisible && !isDragging) eyeEntry.value else dimProgress
+    val starP = if (actionsVisible && !isDragging) starEntry.value else dimProgress
+
+    // v0.41.31（Bob）：点按反馈——scale 1.0→0.75→1.0 快速回弹 + 震动；
+    // 图标做完回弹后，蒙层再淡出，内容恢复
+    var tappedIcon by remember { mutableStateOf<String?>(null) }
+    val tapScale = remember { Animatable(1f) }
+    fun onIconTap(which: String, action: () -> Unit) {
+        if (tappedIcon != null) return
+        tappedIcon = which
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        scope.launch {
+            tapScale.snapTo(1f)
+            tapScale.animateTo(0.75f, tween(80))
+            tapScale.animateTo(
+                1f,
+                spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh)
+            )
+            tappedIcon = null
+            action()
+            hideAll()
+        }
+    }
 
     fun hideAll() {
         dragDist = 0f
@@ -258,56 +325,84 @@ internal fun AppRow(
                         horizontalArrangement = Arrangement.spacedBy(32.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 眼睛：隐藏/取消隐藏（简洁线条，无底色）
+                        // 眼睛：隐藏/取消隐藏（简洁线条，无底色；32dp + 图标形投影）
+                        // v0.41.31：scale = entry(0.6→1.0) * tap回弹 * armed pulse；alpha 跟 entry
+                        val eyeBase = 0.6f + 0.4f * eyeP
+                        val eyeTap = if (tappedIcon == "eye") tapScale.value else 1f
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
                                 .graphicsLayer {
-                                    scaleX = eyeScale
-                                    scaleY = eyeScale
+                                    val s = eyeBase * eyeTap * eyeArmedScale
+                                    scaleX = s
+                                    scaleY = s
+                                    alpha = eyeP
                                 }
                                 .clickable(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
-                                        if (onUnhide != null) onUnhide(app) else onHide(app)
-                                        hideAll()
+                                        onIconTap("eye") {
+                                            if (onUnhide != null) onUnhide(app) else onHide(app)
+                                        }
                                     }
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = if (onUnhide != null) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                                contentDescription = if (onUnhide != null) "取消隐藏" else "隐藏",
-                                tint = Color(0xFF5A6C7D),
-                                modifier = Modifier.size(28.dp)
-                            )
+                            // 图标形投影：深色副本下移 2dp
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (onUnhide != null) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                    contentDescription = null,
+                                    tint = Color.Black.copy(alpha = 0.16f),
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .offset { IntOffset(0, with(density) { 2.dp.toPx().toInt() }) }
+                                )
+                                Icon(
+                                    imageVector = if (onUnhide != null) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                    contentDescription = if (onUnhide != null) "取消隐藏" else "隐藏",
+                                    tint = Color(0xFF5A6C7D),
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
                         }
-                        // ★：收藏/取消收藏（简洁线条无底色；已在 Dock 用实心金）
+                        // ★：收藏/取消收藏（简洁线条无底色；已在 Dock 用实心金；32dp + 投影）
+                        val starBase = 0.6f + 0.4f * starP
+                        val starTap = if (tappedIcon == "star") tapScale.value else 1f
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
                                 .graphicsLayer {
-                                    scaleX = starScale
-                                    scaleY = starScale
+                                    val s = starBase * starTap * starArmedScale
+                                    scaleX = s
+                                    scaleY = s
+                                    alpha = starP
                                 }
                                 .clickable(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
-                                    onClick = {
-                                        togglePin()
-                                        hideAll()
-                                    }
+                                    onClick = { onIconTap("star") { togglePin() } }
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Filled.Star,
-                                contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
-                                // 未收藏用半透明金（线条感），已收藏用实金
-                                tint = Color(0xFFC9A227).copy(alpha = if (isPinned) 1f else 0.45f),
-                                modifier = Modifier.size(28.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Filled.Star,
+                                    contentDescription = null,
+                                    tint = Color.Black.copy(alpha = 0.16f),
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .offset { IntOffset(0, with(density) { 2.dp.toPx().toInt() }) }
+                                )
+                                Icon(
+                                    imageVector = Icons.Filled.Star,
+                                    contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
+                                    // 未收藏用半透明金（线条感），已收藏用实金
+                                    tint = Color(0xFFC9A227).copy(alpha = if (isPinned) 1f else 0.45f),
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
                         }
                     }
                 }
