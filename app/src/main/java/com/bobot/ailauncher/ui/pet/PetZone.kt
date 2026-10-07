@@ -108,10 +108,13 @@ fun PetZone(
     val deliverApp by PetRepository.deliverApp.collectAsState()
     val meetingSoon by PetRepository.meetingSoon.collectAsState()
     var showDeliver by remember { mutableStateOf(false) }
+    // v0.43.0：七仔场景演示——点按循环 WAVE→READING→WORKING；新通知到达自动进 READING
+    var demoScene by remember { mutableStateOf(QizaiScene.NONE) }
     // 送达徽标显示 3 秒
     LaunchedEffect(deliverTick) {
         if (deliverTick > 0) {
             showDeliver = true
+            demoScene = QizaiScene.READING // 新通知 → 七仔拿起手机看
             delay(3000)
             showDeliver = false
         }
@@ -231,30 +234,46 @@ fun PetZone(
                 blinking = blinking,
                 sleepy = petState == PetState.SLEEPY,
                 jellyTick = jellyTick,
+                scene = demoScene,
+                onSceneDone = { demoScene = QizaiScene.NONE },
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(100.dp)
+                    // 场景播放时给宽舞台（同中心，宠物视觉大小不变）；常态保持 100dp
+                    .then(
+                        if (demoScene == QizaiScene.NONE) Modifier.size(100.dp)
+                        else Modifier.fillMaxWidth().height(134.dp)
+                    )
                     .weatherMotion(weatherDesc)
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }
                     ) {
-                        // v0.29.0：有升级时点按 → 弹更新对话框；否则果冻
+                        // v0.29.0：有升级时点按 → 弹更新对话框；否则果冻 + 场景循环演示
                         if (hasUpgrade) onUpgradeTap()
-                        else jellyTick++
+                        else {
+                            jellyTick++
+                            demoScene = when (demoScene) {
+                                QizaiScene.NONE -> QizaiScene.WAVE
+                                QizaiScene.WAVE -> QizaiScene.READING
+                                QizaiScene.READING -> QizaiScene.WORKING
+                                QizaiScene.WORKING -> QizaiScene.NONE
+                            }
+                        }
                     }
             )
-            // P0：落地阴影（奶油白在暖灰底上加对比）
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(top = 92.dp)
-                    .size(width = 64.dp, height = 12.dp)
-                    .background(
-                        Color.Black.copy(alpha = 0.12f),
-                        CircleShape
-                    )
-            )
+            // P0：落地阴影（奶油白在暖灰底上加对比）；场景播放时隐藏（场景自带舞台）
+            if (demoScene == QizaiScene.NONE) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(top = 92.dp)
+                        .size(width = 64.dp, height = 12.dp)
+                        .background(
+                            Color.Black.copy(alpha = 0.12f),
+                            CircleShape
+                        )
+                )
+            }
             // carry 小纸条
             val carryAlpha by animateFloatAsState(
                 targetValue = if (carryText != null) 1f else 0f,
