@@ -19,6 +19,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -54,6 +55,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.fragment.app.FragmentActivity
@@ -72,6 +74,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
@@ -121,6 +124,8 @@ import kotlinx.coroutines.launch
 import java.text.Collator
 import java.util.Locale
 import kotlin.math.exp
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.ui.zIndex.zIndex
 import kotlin.math.roundToInt
 
 /**
@@ -182,6 +187,16 @@ fun AppCenterContent(
     // Dock 分区占位：行(N) + 间距(1)；为空时不显示
     // v0.41.32（Bob）：幽灵 ★ 与第一行同行，不再单独占一行
     val dockSectionSize = if (dockApps.isNotEmpty()) dockApps.size + 1 else 0
+    // v0.41.34（Bob）：Dock 分区拖动排序——本地顺序状态，拖动时实时更新，松手保存
+    val dockOrder = remember { mutableStateListOf<AppInfo>().apply { addAll(dockApps) } }
+    var draggingDockPkg by remember { mutableStateOf<String?>(null) }
+    var dockDragOffsetY by remember { mutableStateOf(0f) }
+    LaunchedEffect(dockApps) {
+        if (draggingDockPkg == null) {
+            dockOrder.clear()
+            dockOrder.addAll(dockApps)
+        }
+    }
 
     // v0.22：分类区取消（等需要时再重新设计），只保留 A-Z
 
@@ -628,8 +643,15 @@ fun AppCenterContent(
                 // 为空时不显示；幽灵 ★ 头（与隐藏头眼图标样式一致）
                 if (dockApps.isNotEmpty()) {
                     // v0.41.32（Bob）：幽灵 ★ 与第一行同行（像字母那样），不单独占行
-                    itemsIndexed(dockApps, key = { _, app -> "d:${app.packageName}" }) { index, app ->
-                        Box(modifier = Modifier.fillMaxWidth()) {
+                    itemsIndexed(dockOrder, key = { _, app -> "d:${app.packageName}" }) { index, app ->
+                        // v0.41.34（Bob）：拖动中的行跟随手指，其他行自动让位
+                        val isDockDragging = draggingDockPkg == app.packageName
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .zIndex(if (isDockDragging) 1f else 0f)
+                                .offset { IntOffset(0, if (isDockDragging) dockDragOffsetY.roundToInt() else 0) }
+                        ) {
                             if (index == 0) {
                                 Icon(
                                     imageVector = Icons.Filled.Star,
@@ -679,6 +701,58 @@ fun AppCenterContent(
                                 onDismiss = { popupApp = null }
                             )
                             }
+                            // v0.41.34（Bob）：拖动手柄——简洁三横线，Hint 色 18dp，无背景；
+                            // 按住上下拖动排序，松手保存（不再去设置里调）
+                            Icon(
+                                imageVector = Icons.Filled.DragHandle,
+                                contentDescription = "拖动排序",
+                                tint = AILauncherColors.Hint,
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(end = 22.dp)
+                                    .size(18.dp)
+                                    .pointerInput(app.packageName) {
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                draggingDockPkg = app.packageName
+                                                dockDragOffsetY = 0f
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDragEnd = {
+                                                UiPrefs.setDockPinned(
+                                                    context,
+                                                    dockOrder.map { it.packageName }
+                                                )
+                                                draggingDockPkg = null
+                                                dockDragOffsetY = 0f
+                                            },
+                                            onDragCancel = {
+                                                dockOrder.clear()
+                                                dockOrder.addAll(dockApps)
+                                                draggingDockPkg = null
+                                                dockDragOffsetY = 0f
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                dockDragOffsetY += dragAmount.y
+                                                val rowH = with(density) { 64.dp.toPx() }
+                                                val curIdx = dockOrder.indexOfFirst {
+                                                    it.packageName == app.packageName
+                                                }
+                                                if (curIdx >= 0) {
+                                                    val targetIdx = (
+                                                        curIdx + (dockDragOffsetY / rowH).toInt()
+                                                    ).coerceIn(0, dockOrder.size - 1)
+                                                    if (targetIdx != curIdx) {
+                                                        val item = dockOrder.removeAt(curIdx)
+                                                        dockOrder.add(targetIdx, item)
+                                                        dockDragOffsetY -= (targetIdx - curIdx) * rowH
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
+                            )
                         }
                     }
                     item(key = "sp:dock") { Spacer(modifier = Modifier.height(24.dp)) }
@@ -771,7 +845,7 @@ fun AppCenterContent(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Outlined.Lock,
+                                        imageVector = Icons.Filled.Fingerprint,
                                         contentDescription = null,
                                         tint = AILauncherColors.Hint,
                                         modifier = Modifier.size(22.dp)
@@ -871,7 +945,7 @@ fun AppCenterContent(
                     // 隐藏分组悬停：幽灵眼（与隐藏头里的图标一致）
                     Icon(
                         imageVector = if (hiddenUnlocked) Icons.Filled.VisibilityOff
-                            else Icons.Outlined.Lock,
+                            else Icons.Filled.VisibilityOff,
                         contentDescription = null,
                         tint = AILauncherColors.Title.copy(alpha = 0.14f),
                         modifier = Modifier
@@ -956,7 +1030,7 @@ fun AppCenterContent(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // v0.41.32（Bob）：★/眼贴紧字母，不再隔 64dp；加细分隔线区分功能区
+                    // v0.41.34（Bob）：★/眼是字母导航的一部分，不隔开、不加线
                     if (dockApps.isNotEmpty()) {
                         IconButton(
                             onClick = {
@@ -971,13 +1045,6 @@ fun AppCenterContent(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Box(
-                            modifier = Modifier
-                                .padding(vertical = 6.dp)
-                                .width(16.dp)
-                                .height(1.dp)
-                                .background(AILauncherColors.Hint.copy(alpha = 0.3f))
-                        )
                     }
                     Box(modifier = Modifier.weight(1f)) {
                         WaveRail(
@@ -989,13 +1056,6 @@ fun AppCenterContent(
                         )
                     }
                     if (hiddenApps.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .padding(vertical = 6.dp)
-                                .width(16.dp)
-                                .height(1.dp)
-                                .background(AILauncherColors.Hint.copy(alpha = 0.3f))
-                        )
                         IconButton(
                             onClick = {
                                 scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }

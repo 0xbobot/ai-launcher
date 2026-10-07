@@ -317,6 +317,7 @@ internal fun AppRow(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .background(Color.White.copy(alpha = 0.8f))
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() },
@@ -324,16 +325,9 @@ internal fun AppRow(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    // v0.41.32（Bob）：蒙版 pill——白 85% 圆角底，让双钮更清晰突出
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color.White.copy(alpha = 0.85f))
-                            .padding(horizontal = 28.dp, vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    // v0.41.34（Bob）：蒙版和应用行一样大——整行白 80%，双钮居中
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(28.dp),
+                        horizontalArrangement = Arrangement.spacedBy(36.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // 眼睛：隐藏/取消隐藏（简洁线条，无底色；32dp + 图标形投影）
@@ -414,7 +408,6 @@ internal fun AppRow(
                             }
                         }
                     }
-                    } // 蒙版 pill Box 结束
                 }
             }
         }
