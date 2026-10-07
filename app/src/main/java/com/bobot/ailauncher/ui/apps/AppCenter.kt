@@ -709,7 +709,7 @@ fun AppCenterContent(
                                 tint = AILauncherColors.Hint,
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
-                                    .padding(end = 22.dp)
+                                    .padding(end = 86.dp)
                                     .size(18.dp)
                                     .pointerInput(app.packageName) {
                                         detectDragGestures(
@@ -1046,15 +1046,14 @@ fun AppCenterContent(
                             )
                         }
                     }
-                    Box(modifier = Modifier.weight(1f)) {
-                        WaveRail(
-                            letters = letters,
-                            side = RailSide.RIGHT,
-                            onActiveLetter = glideToLetter,
-                            onRelease = stopGlide,
-                            forcedActiveIndex = mirrorIndex
-                        )
-                    }
+                    WaveRail(
+                        letters = letters,
+                        side = RailSide.RIGHT,
+                        onActiveLetter = glideToLetter,
+                        onRelease = stopGlide,
+                        forcedActiveIndex = mirrorIndex,
+                        modifier = Modifier.height(480.dp)
+                    )
                     if (hiddenApps.isNotEmpty()) {
                         IconButton(
                             onClick = {

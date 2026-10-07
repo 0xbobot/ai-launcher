@@ -65,8 +65,14 @@ fun PetView(
     sleepy: Boolean = false,
     /** 点按果冻：每次 +1 触发一次果冻回弹（纯视觉反馈） */
     jellyTick: Int = 0,
+    /** v0.42.0：场景动画（Mii 式程序化）。非 NONE 时接管本体渲染，mood 动画暂停 */
+    scene: QizaiScene = QizaiScene.NONE,
+    onSceneDone: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val inScene = scene != QizaiScene.NONE
+    // 场景播放时 mood 驱动的位移动作归零（场景自带动作），拖拽/果冻保留
+    val moodM = if (inScene) 0f else 1f
     val density = LocalDensity.current
     // v0.28.1：低电量省电模式——七仔变困、动画降频
     val lowPower by com.bobot.ailauncher.data.BatteryState.isLowPower
@@ -253,23 +259,32 @@ fun PetView(
             .then(modifier)
             .graphicsLayer {
                 translationX = with(density) { offX.dp.toPx() } + dragX
-                translationY = with(density) { (offY + bob + loopYdp).dp.toPx() } + dragY
-                rotationZ = tilt + loopRot
-                val s = scale * breathe * jelly * posePop
+                translationY = with(density) { (offY + bob * moodM + loopYdp * moodM).dp.toPx() } + dragY
+                rotationZ = (tilt + loopRot) * moodM
+                val s = if (inScene) jelly else scale * breathe * jelly * posePop
                 scaleX = s
                 scaleY = s
             }
     ) {
-        // v0.26.0：图片切换 Crossfade；v0.29.1：150ms 快溶（慢溶接像幻灯片）+ 姿势顿一下，不再拖沓
-        Crossfade(
-            targetState = resId,
-            animationSpec = tween(150),
-            label = "petImage"
-        ) { id ->
-            Image(
-                painter = painterResource(id),
-                contentDescription = "七仔",
-                contentScale = ContentScale.Fit,
+        if (!inScene) {
+            // v0.26.0：图片切换 Crossfade；v0.29.1：150ms 快溶（慢溶接像幻灯片）+ 姿势顿一下，不再拖沓
+            Crossfade(
+                targetState = resId,
+                animationSpec = tween(150),
+                label = "petImage"
+            ) { id ->
+                Image(
+                    painter = painterResource(id),
+                    contentDescription = "七仔",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        } else {
+            // v0.42.0：场景动画接管本体渲染
+            QizaiScenePlayer(
+                scene = scene,
+                onDone = onSceneDone,
                 modifier = Modifier.fillMaxSize()
             )
         }

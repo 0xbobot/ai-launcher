@@ -317,6 +317,7 @@ internal fun AppRow(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .clip(RoundedCornerShape(16.dp))
                         .background(Color.White.copy(alpha = 0.8f))
                         .clickable(
                             indication = null,
