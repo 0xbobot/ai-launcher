@@ -952,29 +952,32 @@ fun AppCenterContent(
                 // 分区空时不显示按钮（占位保持 rail 居中）
                 Column(
                     modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .fillMaxHeight(),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .align(Alignment.CenterEnd),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Box(
-                        modifier = Modifier.height(64.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (dockApps.isNotEmpty()) {
-                            IconButton(
-                                onClick = {
-                                    scope.launch { listState.animateScrollToItem(0) }
-                                },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    Icons.Filled.Star,
-                                    contentDescription = "Dock 收藏",
-                                    tint = AILauncherColors.Hint,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                    // v0.41.32（Bob）：★/眼贴紧字母，不再隔 64dp；加细分隔线区分功能区
+                    if (dockApps.isNotEmpty()) {
+                        IconButton(
+                            onClick = {
+                                scope.launch { listState.animateScrollToItem(0) }
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Star,
+                                contentDescription = "Dock 收藏",
+                                tint = AILauncherColors.Hint,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
+                        Box(
+                            modifier = Modifier
+                                .padding(vertical = 6.dp)
+                                .width(16.dp)
+                                .height(1.dp)
+                                .background(AILauncherColors.Hint.copy(alpha = 0.3f))
+                        )
                     }
                     Box(modifier = Modifier.weight(1f)) {
                         WaveRail(
@@ -985,24 +988,26 @@ fun AppCenterContent(
                             forcedActiveIndex = mirrorIndex
                         )
                     }
-                    Box(
-                        modifier = Modifier.height(64.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (hiddenApps.isNotEmpty()) {
-                            IconButton(
-                                onClick = {
-                                    scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
-                                },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    Icons.Filled.VisibilityOff,
-                                    contentDescription = "隐藏应用",
-                                    tint = AILauncherColors.Hint,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                    if (hiddenApps.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .padding(vertical = 6.dp)
+                                .width(16.dp)
+                                .height(1.dp)
+                                .background(AILauncherColors.Hint.copy(alpha = 0.3f))
+                        )
+                        IconButton(
+                            onClick = {
+                                scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.VisibilityOff,
+                                contentDescription = "隐藏应用",
+                                tint = AILauncherColors.Hint,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
