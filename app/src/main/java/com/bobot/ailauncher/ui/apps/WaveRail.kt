@@ -105,7 +105,6 @@ internal fun WaveRail(
 
     BoxWithConstraints(
         modifier = modifier
-            .fillMaxHeight()
             .width(railWidth)
     ) {
         val hPx = constraints.maxHeight.toFloat()

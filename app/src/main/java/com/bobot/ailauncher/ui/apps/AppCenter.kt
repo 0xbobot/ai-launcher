@@ -1080,7 +1080,7 @@ fun AppCenterContent(
                         glideToLetter(letter)
                     },
                     onRelease = { mirrorIndex = null },
-                    modifier = Modifier.align(Alignment.CenterStart)
+                    modifier = Modifier.align(Alignment.CenterStart).fillMaxHeight()
                 )
                 // v0.41.20（Bob）：右下角眼睛按钮已删除——隐藏分组在主列表末尾，
                 // 直接滚动到底就能看到（未解锁显示锁定占位）。

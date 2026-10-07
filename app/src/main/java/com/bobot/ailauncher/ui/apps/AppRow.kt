@@ -316,7 +316,7 @@ internal fun AppRow(
             if (dimProgress > 0.01f) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .matchParentSize()
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color.White.copy(alpha = 0.8f))
                         .clickable(
