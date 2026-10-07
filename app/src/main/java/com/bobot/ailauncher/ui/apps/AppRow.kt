@@ -103,9 +103,12 @@ internal fun AppRow(
     // v0.41.27（Bob 方案 B）：iOS 式——内容整体滑动，下面露出动作按钮。
     // 左滑内容左移露出右侧 ★，右滑内容右移露出左侧眼睛。按钮在下层，无透明度变化。
     val scope = rememberCoroutineScope()
-    val offsetX = remember { Animatable(0f) } // 内容 X 偏移（px），左移为负
+    val offsetX = remember { Animatable(0f) } // 松手后动画用（px），左移为负
+    var dragOffsetX by remember { mutableStateOf(0f) } // 拖动时直接设置，无协程竞态
     var dragDist by remember { mutableStateOf(0f) } // 左滑为正
     var isDragging by remember { mutableStateOf(false) }
+    // 显示用偏移：拖动时直接跟手，否则用动画值
+    val displayOffset = if (isDragging) dragOffsetX else offsetX.value
     val revealPx = with(density) { 56.dp.toPx() }
     val fullPx = with(density) { 120.dp.toPx() }
     val maxDragPx = with(density) { 160.dp.toPx() }
@@ -116,9 +119,10 @@ internal fun AppRow(
 
     fun hideAll() {
         dragDist = 0f
+        dragOffsetX = 0f
         onActionsVisibleChange(false)
         onHideVisibleChange(false)
-        scope.launch { offsetX.animateTo(0f, settleSpring) }
+        scope.launch { offsetX.snapTo(0f) }
     }
 
     // 按钮方向：拖动时按手指方向，否则按保持状态（两者互斥，AppCenter 保证）
@@ -129,11 +133,12 @@ internal fun AppRow(
         else -> true
     }
 
-    // 外部收起（如另一行展开）时，内容滑回
+    // 外部收起（如另一行展开）时，内容直接回位（不用动画，避免与按钮消失的时机错位）
     LaunchedEffect(actionsVisible, hideVisible) {
         if (!actionsVisible && !hideVisible) {
             dragDist = 0f
-            offsetX.animateTo(0f, settleSpring)
+            dragOffsetX = 0f
+            offsetX.snapTo(0f)
         }
     }
 
@@ -147,10 +152,11 @@ internal fun AppRow(
             if (dragDist != 0f || actionsVisible || hideVisible) {
                 // ★ 双状态：亮金=加入 Dock，灰=已在 Dock（点按移出）
                 // 眼睛双状态：闭眼=隐藏，开眼=取消隐藏
+                // v0.41.28（Bob）：对比度提高——深金/深灰/深 slate，白色图标更醒目
                 val btnBg = when {
-                    buttonIsLeft && isPinned -> Color(0xFF8A8478)
-                    buttonIsLeft -> Color(0xFFD4A017)
-                    else -> Color(0xFF5A6C7D)
+                    buttonIsLeft && isPinned -> Color(0xFF5A564E)
+                    buttonIsLeft -> Color(0xFF8C6D1F)
+                    else -> Color(0xFF2F3A4A)
                 }
                 val btnIcon = when {
                     buttonIsLeft -> Icons.Filled.Star
@@ -198,14 +204,14 @@ internal fun AppRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                    .background(AILauncherColors.GlassCardStrong)
+                    .offset { IntOffset(displayOffset.roundToInt(), 0) }
                     .pointerInput(app.packageName) {
                         detectHorizontalDragGestures(
                             onDragStart = { isDragging = true },
                             onDragCancel = {
                                 isDragging = false
                                 dragDist = 0f
+                                dragOffsetX = 0f
                                 scope.launch { offsetX.animateTo(0f, settleSpring) }
                             },
                             onDragEnd = {
@@ -223,19 +229,35 @@ internal fun AppRow(
                                     }
                                     dragDist > revealPx -> {
                                         // 左滑=多：内容停在 -revealPx，★ 保持露出
-                                        scope.launch { offsetX.animateTo(-revealPx, settleSpring) }
+                                        val start = dragOffsetX
                                         dragDist = 0f
+                                        dragOffsetX = 0f
                                         onActionsVisibleChange(true)
+                                        scope.launch {
+                                            offsetX.snapTo(start)
+                                            offsetX.animateTo(-revealPx, settleSpring)
+                                        }
                                     }
                                     dragDist < -revealPx -> {
                                         // 右滑=少：内容停在 +revealPx，眼睛保持露出
-                                        scope.launch { offsetX.animateTo(revealPx, settleSpring) }
+                                        val start = dragOffsetX
                                         dragDist = 0f
+                                        dragOffsetX = 0f
+                                        onActionsVisibleChange(false)
                                         onHideVisibleChange(true)
+                                        scope.launch {
+                                            offsetX.snapTo(start)
+                                            offsetX.animateTo(revealPx, settleSpring)
+                                        }
                                     }
                                     else -> {
+                                        val start = dragOffsetX
                                         dragDist = 0f
-                                        scope.launch { offsetX.animateTo(0f, settleSpring) }
+                                        dragOffsetX = 0f
+                                        scope.launch {
+                                            offsetX.snapTo(start)
+                                            offsetX.animateTo(0f, settleSpring)
+                                        }
                                     }
                                 }
                             },
@@ -244,7 +266,7 @@ internal fun AppRow(
                                 // 左滑 dragAmount 为负，转成正数距离；内容向左移（offset 为负）
                                 dragDist = (dragDist - dragAmount)
                                     .coerceIn(-maxDragPx, maxDragPx)
-                                scope.launch { offsetX.snapTo(-dragDist) }
+                                dragOffsetX = -dragDist // 直接设置 state，无协程竞态
                             }
                         )
                     }

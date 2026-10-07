@@ -238,17 +238,26 @@ fun AppCenterContent(
     // 顶走位移：下一组首行进入顶部区域时，悬停字母被往上顶（负值）；
     // 读 firstVisibleItemScrollOffset 订阅逐像素滚动，保证顶走动画跟手。
     // 外层 Box 有 clipToBounds，顶出去的部分会被裁掉，不会跑到搜索栏上面（Bob）
-    val stuckPushPx: Float by remember(azGroups) {
+    val stuckPushPx: Float by remember(azGroups, hiddenApps) {
         derivedStateOf {
             val cur = stuckLetter ?: return@derivedStateOf 0f
             @Suppress("UNUSED_EXPRESSION")
             listState.firstVisibleItemScrollOffset
             val order = letters
-            val next = order.getOrNull(order.indexOf(cur) + 1) ?: return@derivedStateOf 0f
-            val nextAnchor = letterAnchors[next] ?: return@derivedStateOf 0f
-            val vis =
-                listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == nextAnchor }
-            val off = vis?.offset?.toFloat() ?: return@derivedStateOf 0f
+            val next = order.getOrNull(order.indexOf(cur) + 1)
+            // v0.41.28（Bob）：隐藏分组头也要顶走悬停字母——最后一个字母后面是隐藏头，
+            // 用 key 找隐藏头 item，否则幽灵眼睛会和 Z 重叠
+            val off = if (next != null) {
+                val nextAnchor = letterAnchors[next] ?: return@derivedStateOf 0f
+                listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.index == nextAnchor }
+                    ?.offset?.toFloat() ?: return@derivedStateOf 0f
+            } else {
+                if (hiddenApps.isEmpty()) return@derivedStateOf 0f
+                listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.key == "hidden-header" }
+                    ?.offset?.toFloat() ?: return@derivedStateOf 0f
+            }
             val pushZonePx = with(density) { 48.dp.toPx() }
             if (off < pushZonePx) off - pushZonePx else 0f
         }
