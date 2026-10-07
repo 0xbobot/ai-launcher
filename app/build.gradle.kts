@@ -12,7 +12,7 @@ android {
         applicationId = "com.bobot.ailauncher"
         minSdk = 29
         targetSdk = 34
-        versionCode = 133
+        versionCode = 134
         versionName = "0.43.2"
     }
 

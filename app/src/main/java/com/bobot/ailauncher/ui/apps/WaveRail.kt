@@ -100,11 +100,12 @@ internal fun WaveRail(
         onActiveLetter(letters[i])
     }
 
-    // 字母列占容器高度的比例（紧凑）
-    val railFraction = 0.62f
+    // v0.43.3（Bob）：字母被截断——行高 < 字高，比例提到 0.85
+    val railFraction = 0.85f
 
     BoxWithConstraints(
         modifier = modifier
+            .fillMaxHeight()
             .width(railWidth)
     ) {
         val hPx = constraints.maxHeight.toFloat()
