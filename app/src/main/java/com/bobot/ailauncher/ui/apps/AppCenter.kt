@@ -262,6 +262,21 @@ fun AppCenterContent(
             if (off < pushZonePx) off - pushZonePx else 0f
         }
     }
+    // v0.41.28（Bob）：隐藏分组的幽灵眼也要悬停——隐藏头滚出顶部后，
+    // 幽灵眼接管悬停，直到滚出隐藏分组
+    val stuckHidden: Boolean by remember(hiddenApps) {
+        derivedStateOf {
+            if (hiddenApps.isEmpty()) return@derivedStateOf false
+            val vis = listState.layoutInfo.visibleItemsInfo
+            val header = vis.firstOrNull { it.key == "hidden-header" }
+            val headerGone = header == null || header.offset + header.size < 0
+            val hiddenVisible = vis.any {
+                it.key == "hidden-locked" ||
+                (it.key is String && (it.key as String).startsWith("h:"))
+            }
+            headerGone && hiddenVisible
+        }
+    }
 
     // v0.25.2：松手滚动——等列表恢复全量重组完成后再滚，避免打在旧内容上
     fun launchApp(app: AppInfo) {
@@ -685,17 +700,31 @@ fun AppCenterContent(
             // 接近时被顶走；外层 clipToBounds 保证不会顶到搜索栏上面（Bob）。
             // 字母弱化到 14%（Bob：太显眼），与行内字母一致。
             val sl = stuckLetter
-            if (!searching && sl != null) {
-                Text(
-                    text = sl.toString(),
-                    fontFamily = FontFamily.Serif,
-                    fontSize = 40.sp,
-                    color = AILauncherColors.Title.copy(alpha = 0.14f),
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(start = 20.dp, top = 12.dp)
-                        .offset { IntOffset(0, stuckPushPx.roundToInt()) }
-                )
+            if (!searching) {
+                if (stuckHidden) {
+                    // 隐藏分组悬停：幽灵眼（与隐藏头里的图标一致）
+                    Icon(
+                        imageVector = if (hiddenUnlocked) Icons.Filled.VisibilityOff
+                            else Icons.Outlined.Lock,
+                        contentDescription = null,
+                        tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 20.dp, top = 12.dp)
+                            .size(36.dp)
+                    )
+                } else if (sl != null) {
+                    Text(
+                        text = sl.toString(),
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 40.sp,
+                        color = AILauncherColors.Title.copy(alpha = 0.14f),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 20.dp, top = 12.dp)
+                            .offset { IntOffset(0, stuckPushPx.roundToInt()) }
+                    )
+                }
             }
             // v0.40.0：底部上滑 → 回桌面（Bob）。
             // 系统手势导航会吃掉最底部边缘的触摸，这里在系统手势区之上放一条
