@@ -7,11 +7,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.matchParentSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.outlined.Star as OutlinedStar
 import androidx.compose.material.icons.outlined.Visibility as OutlinedVisibility
 import androidx.compose.material.icons.outlined.VisibilityOff as OutlinedVisibilityOff
-import androidx.compose.ui.draw.graphicsLayer
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -247,7 +247,7 @@ internal fun AppRow(
             if (dimProgress > 0.01f) {
                 Box(
                     modifier = Modifier
-                        .matchParentSize()
+                        .fillMaxSize()
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() },
