@@ -202,37 +202,6 @@ fun PetZone(
         }
     }
 
-    // v0.48.0：日程轮询——15 分钟一次，30 分钟内有会就让七仔说
-    val notifiedCalendarKeys = remember { mutableSetOf<String>() }
-    LaunchedEffect(Unit) {
-        suspend fun checkCalendar() {
-            if (!hasCalendarPermission(context)) return
-            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
-            val now = System.currentTimeMillis()
-            val upcoming = events.firstOrNull {
-                !it.allDay && it.begin in (now + 1)..(now + 30 * 60 * 1000)
-            } ?: return
-            val key = "${upcoming.title}|${upcoming.begin}"
-            if (!notifiedCalendarKeys.add(key)) return // 同一场只提醒一次
-            val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
-                .format(Date(upcoming.begin))
-            val title = upcoming.title.ifBlank { "（无标题）" }
-            // 七仔开口 + 看日程场景
-            PetRepository.say("$timeStr 有日程：$title")
-            demoScene = QizaiScene.READING
-            // 走整理员流程 + 15 分钟内进会议临近
-            PetRepository.handleIncomingCalendar(upcoming.title, upcoming.begin, upcoming.location)
-            if (upcoming.begin in (now + 1)..(now + 15 * 60 * 1000)) {
-                PetRepository.setMeetingSoon(title)
-            }
-        }
-        checkCalendar() // 首次立即查一次
-        while (true) {
-            delay(15 * 60 * 1000L)
-            checkCalendar()
-        }
-    }
-
     // 早晨简报：6-10 点首次进入播一次今日天气
     LaunchedEffect(Unit) {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -268,6 +237,36 @@ fun PetZone(
     }
     var blinking by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    // v0.48.0：日程轮询——15 分钟一次，30 分钟内有会就让七仔说
+    val notifiedCalendarKeys = remember { mutableSetOf<String>() }
+    LaunchedEffect(Unit) {
+        suspend fun checkCalendar() {
+            if (!hasCalendarPermission(context)) return
+            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
+            val now = System.currentTimeMillis()
+            val upcoming = events.firstOrNull {
+                !it.allDay && it.begin in (now + 1)..(now + 30 * 60 * 1000)
+            } ?: return
+            val key = "${upcoming.title}|${upcoming.begin}"
+            if (!notifiedCalendarKeys.add(key)) return // 同一场只提醒一次
+            val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
+                .format(Date(upcoming.begin))
+            val title = upcoming.title.ifBlank { "（无标题）" }
+            // 七仔开口 + 看日程场景
+            PetRepository.say("$timeStr 有日程：$title")
+            demoScene = QizaiScene.READING
+            // 走整理员流程 + 15 分钟内进会议临近
+            PetRepository.handleIncomingCalendar(upcoming.title, upcoming.begin, upcoming.location)
+            if (upcoming.begin in (now + 1)..(now + 15 * 60 * 1000)) {
+                PetRepository.setMeetingSoon(title)
+            }
+        }
+        checkCalendar() // 首次立即查一次
+        while (true) {
+            delay(15 * 60 * 1000L)
+            checkCalendar()
+        }
+    }
     // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
     var jellyTick by remember { mutableIntStateOf(0) }
 
