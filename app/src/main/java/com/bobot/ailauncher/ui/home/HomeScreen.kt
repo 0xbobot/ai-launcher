@@ -41,6 +41,7 @@ import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.PanelAccessibilityService
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
+import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.util.rebindListener
 
@@ -164,6 +165,16 @@ fun HomeScreen(
                 )
             }
     ) {
+        // v0.43.1：宠物回首页——v0.31.0 按"只留 Dock"把 PetZone 从首页移除后，
+        // v0.43.0 的七仔场景改的是一段从未被调用的代码，所以真机上看不到。
+        // 居中摆放（沿用 v0.27.5 的位置结论），点按循环播放场景动画。
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            PetZone()
+        }
         // v0.36.0：无障碍权限引导卡
         panelGuideMode?.let { mode ->
             PanelPermissionGuide(
