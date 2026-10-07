@@ -90,6 +90,26 @@ object PetRepository {
     fun clearSpeech() {
         _speech.value = null
     }
+    // v0.49.0：AI Capsule——首页宠物下方的信息卡，一次只说一件最重要的事
+    data class AiCapsule(
+        val id: String,
+        val timeLabel: String, // "17:23" 或 "下午"
+        val title: String, // "下午有一件事情值得关注"
+        val body: String, // 多行正文
+        val primaryAction: String = "看看重点",
+        val secondaryAction: String = "稍后"
+    )
+    private val _capsule = MutableStateFlow<AiCapsule?>(null)
+    val capsule: StateFlow<AiCapsule?> get() = _capsule.asStateFlow()
+
+    /** 显示胶囊：一次只显示一个，新的替换旧的（最重要的赢） */
+    fun showCapsule(capsule: AiCapsule) {
+        _capsule.value = capsule
+    }
+
+    fun dismissCapsule() {
+        _capsule.value = null
+    }
     private var lastInteractMs = System.currentTimeMillis()
 
     private var busy = false
@@ -188,6 +208,31 @@ object PetRepository {
         // v0.29.0：新通知送达动画
         _deliverApp.value = n.appName
         _deliverTick.value += 1
+        // v0.49.0：重要通知 → AI Capsule（一次只说一件）
+        if (cat == PetCat.IMP) {
+            val timeStr = java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA)
+                .format(java.util.Date(n.time))
+            val bodyText = buildString {
+                if (n.title.isNotBlank()) append(n.title)
+                if (n.text.isNotBlank()) {
+                    if (isNotEmpty()) append("\n")
+                    // 正文截断，避免太长
+                    append(if (n.text.length > 60) n.text.take(60) + "…" else n.text)
+                }
+            }
+            showCapsule(
+                AiCapsule(
+                    id = "notif_${n.time}_${n.packageName.hashCode()}",
+                    timeLabel = timeStr,
+                    title = "${n.appName}有重要消息",
+                    body = bodyText.ifBlank { desc },
+                    primaryAction = "看看重点",
+                    secondaryAction = "稍后"
+                )
+            )
+            // 重要消息七仔也开口
+            say("${n.appName}有重要消息")
+        }
         handleIncoming(
             PetItem(
                 id = "n${n.time}_${n.packageName.hashCode()}",

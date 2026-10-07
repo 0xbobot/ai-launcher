@@ -40,6 +40,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
@@ -76,6 +80,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -222,6 +227,10 @@ fun PetZone(
     }
     // v0.47.0：七仔说话——统一信息区，自动消失
     val speech by PetRepository.speech.collectAsState()
+    // v0.49.0：AI Capsule——一次只说一件最重要的事
+    val capsule by PetRepository.capsule.collectAsState()
+    // v0.49.0：Today Bottom Sheet——点按宠物或"看看重点"打开
+    var showTodaySheet by remember { mutableStateOf(false) }
     var speechVisible by remember { mutableStateOf(false) }
     LaunchedEffect(speech?.id) {
         val s = speech
@@ -268,6 +277,18 @@ fun PetZone(
             // 七仔开口 + 看日程场景
             PetRepository.say("$timeStr 有日程：$title")
             demoScene = QizaiScene.READING
+            // v0.49.0：AI Capsule——会议是"最值得关注"的事
+            val loc = if (upcoming.location.isNotBlank()) "\n地点：${upcoming.location}" else ""
+            PetRepository.showCapsule(
+                PetRepository.AiCapsule(
+                    id = "cal_${upcoming.begin}",
+                    timeLabel = timeStr,
+                    title = "有一场会议值得关注",
+                    body = "$timeStr $title$loc",
+                    primaryAction = "看看重点",
+                    secondaryAction = "稍后"
+                )
+            )
             // 走整理员流程 + 15 分钟内进会议临近
             PetRepository.handleIncomingCalendar(upcoming.title, upcoming.begin, upcoming.location)
             if (upcoming.begin in (now + 1)..(now + 15 * 60 * 1000)) {
@@ -415,18 +436,12 @@ fun PetZone(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
                         onClick = {
-                            // v0.29.0：有升级时点按 → 弹更新对话框；否则果冻 + 场景循环演示
+                            // v0.49.0：按 AI Pet 文档——点按宠物 → Bottom Sheet（Today），不再循环演示场景
+                            // 场景改由真实事件触发（天气/通知/日程）
                             if (hasUpgrade) onUpgradeTap()
                             else {
                                 jellyTick++
-                                demoScene = when (demoScene) {
-                                    QizaiScene.NONE -> QizaiScene.WAVE
-                                    QizaiScene.WAVE -> QizaiScene.READING
-                                    QizaiScene.READING -> QizaiScene.WORKING
-                                    QizaiScene.WORKING -> QizaiScene.WEATHER_RAIN
-                                    QizaiScene.WEATHER_RAIN -> QizaiScene.WEATHER_SUN
-                                    QizaiScene.WEATHER_SUN -> QizaiScene.NONE
-                                }
+                                showTodaySheet = true
                             }
                         },
                         onLongClick = {
@@ -496,6 +511,33 @@ fun PetZone(
                 )
             }
         }
+        // v0.49.0：AI Capsule——宠物下方的信息卡
+        AnimatedVisibility(
+            visible = capsule != null,
+            enter = slideInVertically(
+                initialOffsetY = { it / 2 },
+                animationSpec = spring(dampingRatio = 0.8f)
+            ) + fadeIn(),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
+        ) {
+            capsule?.let { c ->
+                AiCapsuleCard(
+                    capsule = c,
+                    onPrimary = {
+                        // 看看重点 → 打开 Bottom Sheet（Today 详情）
+                        showTodaySheet = true
+                    },
+                    onSecondary = {
+                        // 稍后 → 关闭
+                        PetRepository.dismissCapsule()
+                    }
+                )
+            }
+        }
+    }
+    // v0.49.0：Today Bottom Sheet
+    if (showTodaySheet) {
+        TodaySheet(onDismiss = { showTodaySheet = false })
     }
 }
 
@@ -900,6 +942,176 @@ private fun SpeechBubble(
                 }
                 drawPath(tailPath, Color.White)
             }
+        }
+    }
+}
+
+/**
+ * v0.49.0：AI Capsule——宠物下方的信息卡，一次只说一件最重要的事。
+ * Mii 风：白卡圆角，柔和阴影；游戏化：滑入+弹性。
+ * 宠物负责"表达"，Capsule 负责"信息"。
+ */
+@Composable
+private fun AiCapsuleCard(
+    capsule: PetRepository.AiCapsule,
+    onPrimary: () -> Unit,
+    onSecondary: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        modifier = modifier
+            .fillMaxWidth(0.88f)
+            .padding(top = 8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 时间标签
+            Text(
+                text = capsule.timeLabel,
+                fontSize = 11.sp,
+                color = Color(0xFF999999)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            // 标题
+            Text(
+                text = capsule.title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF333333),
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            // 正文
+            Text(
+                text = capsule.body,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                color = Color(0xFF666666),
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            // 操作按钮
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // 主按钮：实心
+                Button(
+                    onClick = onPrimary,
+                    shape = RoundedCornerShape(99.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF5B8DEF),
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
+                ) {
+                    Text(text = capsule.primaryAction, fontSize = 13.sp)
+                }
+                // 次按钮：描边
+                OutlinedButton(
+                    onClick = onSecondary,
+                    shape = RoundedCornerShape(99.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
+                ) {
+                    Text(text = capsule.secondaryAction, fontSize = 13.sp)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * v0.49.0：Today Bottom Sheet——AI 对今天的理解（不是 Todo List）。
+ * 按文档：点按宠物 → Bottom Sheet，而不是全屏 Chat。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TodaySheet(
+    onDismiss: () -> Unit
+) {
+    val weatherDesc by WeatherState.desc.collectAsState()
+    val capsule by PetRepository.capsule.collectAsState()
+    val context = LocalContext.current
+    var nextEvent by remember { mutableStateOf<CalEvent?>(null) }
+
+    LaunchedEffect(Unit) {
+        if (hasCalendarPermission(context)) {
+            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
+            val now = System.currentTimeMillis()
+            nextEvent = events.firstOrNull { !it.allDay && it.begin > now }
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // 标题
+            Text(
+                text = "Today",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF333333)
+            )
+            // 最重要的事（来自 Capsule）
+            capsule?.let { c ->
+                Text(
+                    text = "现在最值得关注",
+                    fontSize = 12.sp,
+                    color = Color(0xFF999999)
+                )
+                Text(
+                    text = c.title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF333333)
+                )
+                Text(
+                    text = c.body,
+                    fontSize = 13.sp,
+                    color = Color(0xFF666666),
+                    lineHeight = 19.sp
+                )
+            }
+            // 下一场日程
+            nextEvent?.let { e ->
+                val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
+                    .format(Date(e.begin))
+                Text(
+                    text = "接下来",
+                    fontSize = 12.sp,
+                    color = Color(0xFF999999)
+                )
+                Text(
+                    text = "$timeStr ${e.title.ifBlank { "（无标题）" }}",
+                    fontSize = 15.sp,
+                    color = Color(0xFF333333)
+                )
+            }
+            // 天气
+            weatherDesc?.let { w ->
+                Text(
+                    text = "环境",
+                    fontSize = 12.sp,
+                    color = Color(0xFF999999)
+                )
+                Text(
+                    text = w,
+                    fontSize = 15.sp,
+                    color = Color(0xFF333333)
+                )
+            }
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
