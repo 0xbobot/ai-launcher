@@ -8,9 +8,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material.icons.outlined.Star as OutlinedStar
-import androidx.compose.material.icons.outlined.Visibility as OutlinedVisibility
-import androidx.compose.material.icons.outlined.VisibilityOff as OutlinedVisibilityOff
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -278,7 +275,7 @@ internal fun AppRow(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (onUnhide != null) OutlinedVisibility else OutlinedVisibilityOff,
+                                imageVector = if (onUnhide != null) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
                                 contentDescription = if (onUnhide != null) "取消隐藏" else "隐藏",
                                 tint = Color(0xFF5A6C7D),
                                 modifier = Modifier.size(28.dp)
@@ -303,7 +300,7 @@ internal fun AppRow(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (isPinned) Icons.Filled.Star else OutlinedStar,
+                                imageVector = if (isPinned) Icons.Filled.Star else Icons.Outlined.Star,
                                 contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
                                 tint = Color(0xFFC9A227),
                                 modifier = Modifier.size(28.dp)
