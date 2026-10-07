@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
@@ -323,8 +324,16 @@ internal fun AppRow(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
+                    // v0.41.32（Bob）：蒙版 pill——白 85% 圆角底，让双钮更清晰突出
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.White.copy(alpha = 0.85f))
+                            .padding(horizontal = 28.dp, vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(32.dp),
+                        horizontalArrangement = Arrangement.spacedBy(28.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // 眼睛：隐藏/取消隐藏（简洁线条，无底色；32dp + 图标形投影）
@@ -358,14 +367,13 @@ internal fun AppRow(
                                     contentDescription = null,
                                     tint = Color.Black.copy(alpha = 0.16f),
                                     modifier = Modifier
-                                        .size(32.dp)
-                                        .offset { IntOffset(0, with(density) { 2.dp.toPx().toInt() }) }
+                                        .size(26.dp)
                                 )
                                 Icon(
                                     imageVector = if (onUnhide != null) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
                                     contentDescription = if (onUnhide != null) "取消隐藏" else "隐藏",
                                     tint = Color(0xFF5A6C7D),
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(26.dp)
                                 )
                             }
                         }
@@ -394,19 +402,19 @@ internal fun AppRow(
                                     contentDescription = null,
                                     tint = Color.Black.copy(alpha = 0.16f),
                                     modifier = Modifier
-                                        .size(32.dp)
-                                        .offset { IntOffset(0, with(density) { 2.dp.toPx().toInt() }) }
+                                        .size(26.dp)
                                 )
                                 Icon(
                                     imageVector = Icons.Filled.Star,
                                     contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
                                     // 未收藏用半透明金（线条感），已收藏用实金
                                     tint = Color(0xFFC9A227).copy(alpha = if (isPinned) 1f else 0.45f),
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(26.dp)
                                 )
                             }
                         }
                     }
+                    } // 蒙版 pill Box 结束
                 }
             }
         }

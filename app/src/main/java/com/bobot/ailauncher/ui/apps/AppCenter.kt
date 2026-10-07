@@ -179,8 +179,9 @@ fun AppCenterContent(
             pinned.mapNotNull { all[it] }.filter { it.packageName !in hidden }
         }
     }
-    // Dock 分区占位：header(1) + 行(N) + 间距(1)；为空时不显示
-    val dockSectionSize = if (dockApps.isNotEmpty()) dockApps.size + 2 else 0
+    // Dock 分区占位：行(N) + 间距(1)；为空时不显示
+    // v0.41.32（Bob）：幽灵 ★ 与第一行同行，不再单独占一行
+    val dockSectionSize = if (dockApps.isNotEmpty()) dockApps.size + 1 else 0
 
     // v0.22：分类区取消（等需要时再重新设计），只保留 A-Z
 
@@ -235,7 +236,8 @@ fun AppCenterContent(
         }
         m
     }
-    // v0.41.31：隐藏头绝对 index（供 rail 眼睛按钮跳转）
+    // v0.41.31：隐藏分区第一个 item 的绝对 index（供 rail 眼睛按钮跳转）
+    // v0.41.32：隐藏头已并入第一行，index 不变
     val azTotalItems = remember(azGroups) { azGroups.sumOf { it.second.size + 1 } }
     val hiddenHeaderIndex = dockSectionSize + azTotalItems
 
@@ -255,7 +257,7 @@ fun AppCenterContent(
     // 顶走位移：下一组首行进入顶部区域时，悬停字母被往上顶（负值）；
     // 读 firstVisibleItemScrollOffset 订阅逐像素滚动，保证顶走动画跟手。
     // 外层 Box 有 clipToBounds，顶出去的部分会被裁掉，不会跑到搜索栏上面（Bob）
-    val stuckPushPx: Float by remember(azGroups, hiddenApps) {
+    val stuckPushPx: Float by remember(azGroups, hiddenApps, hiddenUnlocked) {
         derivedStateOf {
             val cur = stuckLetter ?: return@derivedStateOf 0f
             @Suppress("UNUSED_EXPRESSION")
@@ -271,8 +273,11 @@ fun AppCenterContent(
                     ?.offset?.toFloat() ?: return@derivedStateOf 0f
             } else {
                 if (hiddenApps.isEmpty()) return@derivedStateOf 0f
+                // v0.41.32：隐藏头已并入第一行，找第一个隐藏 item
+                val firstHiddenKey = if (hiddenUnlocked) "h:${hiddenApps.first().packageName}"
+                    else "hidden-locked"
                 listState.layoutInfo.visibleItemsInfo
-                    .firstOrNull { it.key == "hidden-header" }
+                    .firstOrNull { it.key == firstHiddenKey }
                     ?.offset?.toFloat() ?: return@derivedStateOf 0f
             }
             val pushZonePx = with(density) { 48.dp.toPx() }
@@ -290,31 +295,37 @@ fun AppCenterContent(
     )
     // v0.41.28（Bob）：隐藏分组的幽灵眼也要悬停——隐藏头滚出顶部后，
     // 幽灵眼接管悬停，直到滚出隐藏分组
-    val stuckHidden: Boolean by remember(hiddenApps) {
+    val stuckHidden: Boolean by remember(hiddenApps, hiddenUnlocked) {
         derivedStateOf {
             if (hiddenApps.isEmpty()) return@derivedStateOf false
             val vis = listState.layoutInfo.visibleItemsInfo
-            val header = vis.firstOrNull { it.key == "hidden-header" }
-            val headerGone = header == null || header.offset + header.size < 0
+            // v0.41.32：隐藏头已并入第一行
+            val firstKey = if (hiddenUnlocked) "h:${hiddenApps.first().packageName}"
+                else "hidden-locked"
+            val first = vis.firstOrNull { it.key == firstKey }
+            val firstGone = first == null || first.offset + first.size < 0
             val hiddenVisible = vis.any {
                 it.key == "hidden-locked" ||
                 (it.key is String && (it.key as String).startsWith("h:"))
             }
-            headerGone && hiddenVisible
+            firstGone && hiddenVisible
         }
     }
-    // v0.41.31（Bob）：Dock 分区幽灵 ★ 悬停——dock-header 滚出顶部后接管，
+    // v0.41.31（Bob）：Dock 分区幽灵 ★ 悬停——第一行滚出顶部后接管，
     // 直到滚出 Dock 分区；与 stuckHidden 同理
+    // v0.41.32：dock 头已并入第一行
     val stuckDock: Boolean by remember(dockApps) {
         derivedStateOf {
             if (dockApps.isEmpty()) return@derivedStateOf false
             val vis = listState.layoutInfo.visibleItemsInfo
-            val header = vis.firstOrNull { it.key == "dock-header" }
-            val headerGone = header == null || header.offset + header.size < 0
+            // v0.41.32：dock 头已并入第一行
+            val firstKey = "d:${dockApps.first().packageName}"
+            val first = vis.firstOrNull { it.key == firstKey }
+            val firstGone = first == null || first.offset + first.size < 0
             val dockVisible = vis.any {
                 it.key is String && (it.key as String).startsWith("d:")
             }
-            headerGone && dockVisible
+            firstGone && dockVisible
         }
     }
     // v0.41.31：Dock 悬停被 A 顶走（与字母顶走逻辑一致）
@@ -616,25 +627,25 @@ fun AppCenterContent(
                 // v0.41.31（Bob）：Dock 分区——A 之前，像隐藏分区一样；
                 // 为空时不显示；幽灵 ★ 头（与隐藏头眼图标样式一致）
                 if (dockApps.isNotEmpty()) {
-                    item(key = "dock-header") {
+                    // v0.41.32（Bob）：幽灵 ★ 与第一行同行（像字母那样），不单独占行
+                    itemsIndexed(dockApps, key = { _, app -> "d:${app.packageName}" }) { index, app ->
                         Box(modifier = Modifier.fillMaxWidth()) {
-                            Icon(
-                                imageVector = Icons.Filled.Star,
-                                contentDescription = null,
-                                tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                            if (index == 0) {
+                                Icon(
+                                    imageVector = Icons.Filled.Star,
+                                    contentDescription = null,
+                                    tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                                    modifier = Modifier
+                                        .align(Alignment.CenterStart)
+                                        .padding(start = 20.dp)
+                                        .size(36.dp)
+                                )
+                            }
+                            Box(
                                 modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .padding(start = 20.dp)
-                                    .size(36.dp)
-                            )
-                        }
-                    }
-                    itemsIndexed(dockApps, key = { _, app -> "d:${app.packageName}" }) { _, app ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 72.dp, end = 64.dp)
-                        ) {
+                                    .fillMaxWidth()
+                                    .padding(start = 72.dp, end = 64.dp)
+                            ) {
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app) },
@@ -667,6 +678,7 @@ fun AppCenterContent(
                                 expanded = popupApp?.packageName == app.packageName,
                                 onDismiss = { popupApp = null }
                             )
+                            }
                         }
                     }
                     item(key = "sp:dock") { Spacer(modifier = Modifier.height(24.dp)) }
@@ -726,34 +738,31 @@ fun AppCenterContent(
                 // v0.41.20（Bob）：不显示"已隐藏"标题文字，只留幽灵图标。
                 // 未解锁显示锁定占位，解锁后应用可直接打开（不用先恢复）。
                 if (hiddenApps.isNotEmpty()) {
-                    item(key = "hidden-header") {
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            Icon(
-                                imageVector = if (hiddenUnlocked) Icons.Filled.VisibilityOff
-                                    else Icons.Outlined.Lock,
-                                contentDescription = null,
-                                tint = AILauncherColors.Title.copy(alpha = 0.14f),
-                                modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .padding(start = 20.dp)
-                                    .size(36.dp)
-                            )
-                        }
-                    }
+                    // v0.41.32（Bob）：幽灵眼与第一行同行，不单独占行
                     if (!hiddenUnlocked) {
                         // 锁定占位：点按触发面部/指纹
                         // v0.41.21（Bob）：锁定占位按应用行样式——40dp 圆角锁图标 + 15sp 文字，
                         // 与上方应用行视觉统一；点按整行触发面部/指纹解锁。
                         item(key = "hidden-locked") {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 72.dp, end = 64.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable { unlockHiddenApps() }
-                                    .padding(horizontal = 12.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Lock,
+                                    contentDescription = null,
+                                    tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                                    modifier = Modifier
+                                        .align(Alignment.CenterStart)
+                                        .padding(start = 20.dp)
+                                        .size(36.dp)
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 72.dp, end = 64.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { unlockHiddenApps() }
+                                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                 Box(
                                     modifier = Modifier
                                         .size(40.dp)
@@ -774,16 +783,30 @@ fun AppCenterContent(
                                     fontSize = 15.sp,
                                     color = AILauncherColors.Title
                                 )
+                                }
                             }
                         }
                     } else {
                         // 解锁后：隐藏应用像正常应用一样直接打开
-                        itemsIndexed(hiddenApps, key = { _, app -> "h:${app.packageName}" }) { _, app ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 72.dp, end = 64.dp)
-                            ) {
+                        // v0.41.32：幽灵眼与第一行同行
+                        itemsIndexed(hiddenApps, key = { _, app -> "h:${app.packageName}" }) { index, app ->
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                if (index == 0) {
+                                    Icon(
+                                        imageVector = Icons.Filled.VisibilityOff,
+                                        contentDescription = null,
+                                        tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                                        modifier = Modifier
+                                            .align(Alignment.CenterStart)
+                                            .padding(start = 20.dp)
+                                            .size(36.dp)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 72.dp, end = 64.dp)
+                                ) {
                                 AppRow(
                                     app = app,
                                     onLaunch = { launchApp(app) },
@@ -818,6 +841,7 @@ fun AppCenterContent(
                                     expanded = popupApp?.packageName == app.packageName,
                                     onDismiss = { popupApp = null }
                                 )
+                                }
                             }
                         }
                     }
@@ -832,7 +856,7 @@ fun AppCenterContent(
             val sl = stuckLetter
             if (!searching) {
                 if (stuckDock) {
-                    // v0.41.31：Dock 分区悬停——幽灵 ★（与 dock-header 一致）
+                    // v0.41.31：Dock 分区悬停——幽灵 ★（与第一行幽灵一致）
                     Icon(
                         imageVector = Icons.Filled.Star,
                         contentDescription = null,
