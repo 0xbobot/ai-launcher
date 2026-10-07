@@ -92,8 +92,14 @@ import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
 import com.bobot.ailauncher.data.WeatherRepository
 import com.bobot.ailauncher.data.WeatherState
+import android.Manifest
+import android.content.ContentUris
+import android.content.pm.PackageManager
+import android.provider.CalendarContract
+import androidx.core.content.ContextCompat
 import java.util.Calendar
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -129,6 +135,10 @@ fun PetZone(
         if (deliverTick > 0) {
             showDeliver = true
             demoScene = QizaiScene.READING // 新通知 → 七仔拿起手机看
+            // v0.48.0：七仔开口——只报应用名，不念内容（守门人分寸）
+            deliverApp?.let { app ->
+                PetRepository.say("$app 有新消息")
+            }
             delay(3000)
             showDeliver = false
         }
@@ -189,6 +199,37 @@ fun PetZone(
         while (true) {
             delay(30 * 60 * 1000L)
             fetchWeather(allowTrigger = true)
+        }
+    }
+
+    // v0.48.0：日程轮询——15 分钟一次，30 分钟内有会就让七仔说
+    val notifiedCalendarKeys = remember { mutableSetOf<String>() }
+    LaunchedEffect(Unit) {
+        suspend fun checkCalendar() {
+            if (!hasCalendarPermission(context)) return
+            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
+            val now = System.currentTimeMillis()
+            val upcoming = events.firstOrNull {
+                !it.allDay && it.begin in (now + 1)..(now + 30 * 60 * 1000)
+            } ?: return
+            val key = "${upcoming.title}|${upcoming.begin}"
+            if (!notifiedCalendarKeys.add(key)) return // 同一场只提醒一次
+            val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
+                .format(Date(upcoming.begin))
+            val title = upcoming.title.ifBlank { "（无标题）" }
+            // 七仔开口 + 看日程场景
+            PetRepository.say("$timeStr 有日程：$title")
+            demoScene = QizaiScene.READING
+            // 走整理员流程 + 15 分钟内进会议临近
+            PetRepository.handleIncomingCalendar(upcoming.title, upcoming.begin, upcoming.location)
+            if (upcoming.begin in (now + 1)..(now + 15 * 60 * 1000)) {
+                PetRepository.setMeetingSoon(title)
+            }
+        }
+        checkCalendar() // 首次立即查一次
+        while (true) {
+            delay(15 * 60 * 1000L)
+            checkCalendar()
         }
     }
 
@@ -913,6 +954,69 @@ private fun isBadWeather(desc: String?): Boolean =
 
 private fun isGoodWeather(desc: String?): Boolean =
     desc == "晴" || desc == "多云"
+
+// v0.48.0：日程——从 v0.31.0 移除的 HomeScreen 日历逻辑迁回，由七仔统一呈现
+private data class CalEvent(
+    val title: String,
+    val begin: Long,
+    val end: Long,
+    val location: String,
+    val allDay: Boolean
+)
+
+private fun hasCalendarPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(
+        context, Manifest.permission.READ_CALENDAR
+    ) == PackageManager.PERMISSION_GRANTED
+
+private fun loadTodayEvents(context: Context): List<CalEvent> {
+    return try {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val start = cal.timeInMillis
+        cal.add(Calendar.DAY_OF_YEAR, 1)
+        val end = cal.timeInMillis
+        val builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
+        ContentUris.appendId(builder, start)
+        ContentUris.appendId(builder, end)
+        val cursor = context.contentResolver.query(
+            builder.build(),
+            arrayOf(
+                CalendarContract.Instances.TITLE,
+                CalendarContract.Instances.BEGIN,
+                CalendarContract.Instances.END,
+                CalendarContract.Instances.EVENT_LOCATION,
+                CalendarContract.Instances.ALL_DAY
+            ),
+            null, null,
+            CalendarContract.Instances.BEGIN + " ASC"
+        )
+        val list = mutableListOf<CalEvent>()
+        cursor?.use {
+            val ti = it.getColumnIndex(CalendarContract.Instances.TITLE)
+            val bi = it.getColumnIndex(CalendarContract.Instances.BEGIN)
+            val ei = it.getColumnIndex(CalendarContract.Instances.END)
+            val li = it.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
+            val ai = it.getColumnIndex(CalendarContract.Instances.ALL_DAY)
+            while (it.moveToNext() && list.size < 20) {
+                list += CalEvent(
+                    title = if (ti >= 0) it.getString(ti).orEmpty() else "",
+                    begin = if (bi >= 0) it.getLong(bi) else 0L,
+                    end = if (ei >= 0) it.getLong(ei) else 0L,
+                    location = if (li >= 0) it.getString(li).orEmpty() else "",
+                    allDay = if (ai >= 0) it.getInt(ai) == 1 else false
+                )
+            }
+        }
+        list
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
 
 /**
  * v0.30.0：天气微动作——按天气给宠物加极小的身体语言。
