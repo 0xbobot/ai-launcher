@@ -332,8 +332,9 @@ object PetRepository {
             // 逐条（同应用同类合并为"微信×2 → 工作"）简短展示分类决策
             items.groupBy { it.appName to it.cat }.forEach { (key, group) ->
                 val (appName, cat) = key
-                _sortText.value = if (group.size > 1) "$appName×${group.size} → ${cat.cnName}"
-                else "${group.first().sortDesc} → 归到「${cat.cnName}」"
+                // v0.51.1：不再按分类归档，统一进 Today
+                _sortText.value = if (group.size > 1) "$appName×${group.size}"
+                else group.first().sortDesc
                 delay(700)
             }
             _sortText.value = null
@@ -392,13 +393,11 @@ object PetRepository {
             _showDots.value = true
             _mouth.value = PetMouth.BUSY
             delay(1300)
-            // 3. 展示分类决策
+            // 3. 展示已记入（v0.51.1：不再按分类归档，统一进 Today）
             _showDots.value = false
-            _sortText.value = "${item.sortDesc} → 归到「${item.cat.cnName}」"
+            _sortText.value = item.sortDesc
             delay(1100)
-            // 4. 叼向右侧
             _sortText.value = null
-            _carryToRight.value = true
             _mood.value = PetMood.FILE
             delay(600)
             // 5. 呈现一次
@@ -446,35 +445,15 @@ object PetRepository {
         _mouth.value = PetMouth.BUSY
         _mood.value = PetMood.FILE
         scope.launch {
+            // v0.51.1：右侧标签已删，消息统一进 Today
             _toast.emit(
-                if (item.isBatchSummary) "${toFile.size} 条已分别收到右侧 · 左滑标签展开"
-                else "已收到右侧「${item.cat.cnName}」· 左滑标签展开"
+                if (item.isBatchSummary) "${toFile.size} 条已记入 Today"
+                else "已记入 Today"
             )
             delay(700)
             _mood.value = PetMood.IDLE
             _mouth.value = PetMouth.IDLE
             busy = false
-        }
-    }
-
-    /** 标签左滑：拉进屏幕展开卡片（取该分类最新一件） */
-    fun expandFromTab(cat: PetCat) {
-        val list = _filed.value[cat] ?: emptyList()
-        if (list.isEmpty()) return
-        autoFileJob?.cancel()
-        val item = list.last()
-        val map = _filed.value.toMutableMap()
-        map[cat] = list.dropLast(1)
-        _filed.value = map
-        busy = true
-        _mouth.value = PetMouth.HAPPY
-        _mood.value = PetMood.HAPPY
-        _presented.value = item
-        _cardArmed.value = false
-        scope.launch {
-            _toast.emit("左滑卡片出操作，右滑收回去")
-            delay(450)
-            if (_mood.value == PetMood.HAPPY) _mood.value = PetMood.IDLE
         }
     }
 

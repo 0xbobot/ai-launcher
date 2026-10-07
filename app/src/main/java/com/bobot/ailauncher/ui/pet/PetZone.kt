@@ -642,7 +642,7 @@ fun PetPresentedCard() {
                     PetCardActions(item = cur)
                 }
                 Text(
-                    text = if (armed) "选一个操作，或右滑收回" else "左滑 → 更多操作 · 右滑 → 收到右侧",
+                    text = if (armed) "选一个操作，或右滑收回" else "左滑 → 更多操作 · 右滑 → 记入 Today",
                     fontSize = 10.5.sp,
                     color = Color(0xFFA0A0AD),
                     modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
