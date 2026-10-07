@@ -250,21 +250,12 @@ fun PetZone(
     var blinking by remember { mutableStateOf(false) }
     val context = LocalContext.current
     // v0.48.0：日程轮询——15 分钟一次，30 分钟内有会就让七仔说
+    // v0.49.1：修闪屏——开机自动弹权限导致 Activity 闪黑，改为 TodaySheet 里手动申请
     val notifiedCalendarKeys = remember { mutableSetOf<String>() }
-    var calendarPermissionAsked by remember { mutableStateOf(false) }
-    val calendarPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* 拒绝就安静失败，下次轮询再看 */ }
     LaunchedEffect(Unit) {
         suspend fun checkCalendar() {
-            if (!hasCalendarPermission(context)) {
-                // 没权限就申请一次（v0.48.1：之前从没申请过，导致日程一直不显示）
-                if (!calendarPermissionAsked) {
-                    calendarPermissionAsked = true
-                    calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
-                }
-                return
-            }
+            // 没权限就静默跳过，用户在 TodaySheet 里手动授权
+            if (!hasCalendarPermission(context)) return
             val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
             val now = System.currentTimeMillis()
             val upcoming = events.firstOrNull {
@@ -1038,9 +1029,16 @@ private fun TodaySheet(
     val capsule by PetRepository.capsule.collectAsState()
     val context = LocalContext.current
     var nextEvent by remember { mutableStateOf<CalEvent?>(null) }
+    var hasCalPermission by remember { mutableStateOf(hasCalendarPermission(context)) }
+    // v0.49.1：日历权限手动申请（修开机自动弹导致的闪屏）
+    val calPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCalPermission = granted
+    }
 
-    LaunchedEffect(Unit) {
-        if (hasCalendarPermission(context)) {
+    LaunchedEffect(hasCalPermission) {
+        if (hasCalPermission) {
             val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
             val now = System.currentTimeMillis()
             nextEvent = events.firstOrNull { !it.allDay && it.begin > now }
@@ -1085,19 +1083,31 @@ private fun TodaySheet(
                 )
             }
             // 下一场日程
-            nextEvent?.let { e ->
-                val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
-                    .format(Date(e.begin))
-                Text(
-                    text = "接下来",
-                    fontSize = 12.sp,
-                    color = Color(0xFF999999)
-                )
-                Text(
-                    text = "$timeStr ${e.title.ifBlank { "（无标题）" }}",
-                    fontSize = 15.sp,
-                    color = Color(0xFF333333)
-                )
+            if (!hasCalPermission) {
+                // 没权限 → 手动申请按钮
+                OutlinedButton(
+                    onClick = {
+                        calPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                    },
+                    shape = RoundedCornerShape(99.dp)
+                ) {
+                    Text(text = "授权日历，七仔帮你盯日程", fontSize = 13.sp)
+                }
+            } else {
+                nextEvent?.let { e ->
+                    val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
+                        .format(Date(e.begin))
+                    Text(
+                        text = "接下来",
+                        fontSize = 12.sp,
+                        color = Color(0xFF999999)
+                    )
+                    Text(
+                        text = "$timeStr ${e.title.ifBlank { "（无标题）" }}",
+                        fontSize = 15.sp,
+                        color = Color(0xFF333333)
+                    )
+                }
             }
             // 天气
             weatherDesc?.let { w ->
