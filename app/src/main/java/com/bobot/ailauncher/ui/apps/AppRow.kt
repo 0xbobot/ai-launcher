@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -187,6 +188,13 @@ internal fun AppRow(
     // 图标做完回弹后，蒙层再淡出，内容恢复
     var tappedIcon by remember { mutableStateOf<String?>(null) }
     val tapScale = remember { Animatable(1f) }
+    fun hideAll() {
+        dragDist = 0f
+        onActionsVisibleChange(false)
+        onHideVisibleChange(false)
+        scope.launch { dimAnim.animateTo(0f, settleSpring) }
+    }
+
     fun onIconTap(which: String, action: () -> Unit) {
         if (tappedIcon != null) return
         tappedIcon = which
@@ -204,12 +212,6 @@ internal fun AppRow(
         }
     }
 
-    fun hideAll() {
-        dragDist = 0f
-        onActionsVisibleChange(false)
-        onHideVisibleChange(false)
-        scope.launch { dimAnim.animateTo(0f, settleSpring) }
-    }
 
     fun settleDim(from: Float, to: Float) {
         scope.launch {
