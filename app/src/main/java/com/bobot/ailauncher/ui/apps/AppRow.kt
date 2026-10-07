@@ -335,8 +335,8 @@ internal fun AppRow(
                         // v0.41.31：scale = entry(0.6→1.0) * tap回弹 * armed pulse；alpha 跟 entry
                         val eyeBase = 0.6f + 0.4f * eyeP
                         val eyeTap = if (tappedIcon == "eye") tapScale.value else 1f
-                        // v0.43.3：右滑时眼睛跟手（dragDist*0.5），左滑时隐藏
-                        val eyeFollowX = if (isDragging && dragDist < 0) dragDist * 0.5f else 0f
+                        // v0.44.2（Bob）：方向反了——手指右滑（dragDist<0，手指往右），眼睛往右跟（translationX 为正）
+                        val eyeFollowX = if (isDragging && dragDist < 0) -dragDist * 0.5f else 0f
                         val eyeDirAlpha = if (isDragging) { if (dragDist < 0) 1f else 0f } else 1f
                         Box(
                             modifier = Modifier
@@ -379,8 +379,8 @@ internal fun AppRow(
                         // ★：收藏/取消收藏（简洁线条无底色；已在 Dock 用实心金；32dp + 投影）
                         val starBase = 0.6f + 0.4f * starP
                         val starTap = if (tappedIcon == "star") tapScale.value else 1f
-                        // v0.43.3：左滑时 ★ 跟手（dragDist*0.5），右滑时隐藏
-                        val starFollowX = if (isDragging && dragDist > 0) dragDist * 0.5f else 0f
+                        // v0.44.2（Bob）：手指左滑（dragDist>0，手指往左），★ 往左跟（translationX 为负）
+                        val starFollowX = if (isDragging && dragDist > 0) -dragDist * 0.5f else 0f
                         val starDirAlpha = if (isDragging) { if (dragDist > 0) 1f else 0f } else 1f
                         Box(
                             modifier = Modifier
