@@ -728,8 +728,11 @@ fun AppCenterContent(
                                                 dockDragOffsetY = 0f
                                             },
                                             onDragCancel = {
-                                                dockOrder.clear()
-                                                dockOrder.addAll(dockApps)
+                                                // v0.44.3：取消也保存当前顺序，不重置（拖到首位时手势易被取消）
+                                                UiPrefs.setDockPinned(
+                                                    context,
+                                                    dockOrder.map { it.packageName }
+                                                )
                                                 draggingDockPkg = null
                                                 dockDragOffsetY = 0f
                                             },
