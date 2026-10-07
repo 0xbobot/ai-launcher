@@ -132,20 +132,16 @@ fun PetZone(
     val deliverTick by PetRepository.deliverTick.collectAsState()
     val deliverApp by PetRepository.deliverApp.collectAsState()
     val meetingSoon by PetRepository.meetingSoon.collectAsState()
-    var showDeliver by remember { mutableStateOf(false) }
     // v0.43.0：七仔场景演示——点按循环 WAVE→READING→WORKING；新通知到达自动进 READING
     var demoScene by remember { mutableStateOf(QizaiScene.NONE) }
-    // 送达徽标显示 3 秒
+    // v0.51.0：新通知 → 七仔看手机 + 开口（徽标已删，消息统一进 Today）
     LaunchedEffect(deliverTick) {
         if (deliverTick > 0) {
-            showDeliver = true
             demoScene = QizaiScene.READING // 新通知 → 七仔拿起手机看
-            // v0.48.0：七仔开口——只报应用名，不念内容（守门人分寸）
+            // 七仔开口——只报应用名，不念内容（守门人分寸）
             deliverApp?.let { app ->
                 PetRepository.say("$app 有新消息")
             }
-            delay(3000)
-            showDeliver = false
         }
     }
     // v0.30.0：天气微动作
@@ -366,19 +362,6 @@ fun PetZone(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 8.dp)
-                )
-            }
-            // v0.29.0：新通知送达——头顶冒出应用名小徽标（3 秒）
-            if (showDeliver && deliverApp != null) {
-                Text(
-                    text = deliverApp!!,
-                    fontSize = 11.sp,
-                    color = Color.White,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 52.dp)
-                        .background(Color(0xFF5C8DEF), RoundedCornerShape(99.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
             // v0.29.0：会议临近——七仔头顶会议提醒
@@ -748,132 +731,6 @@ private fun openAppForPet(context: Context, packageName: String, appName: String
     }
 }
 
-/**
- * 右侧标签栏：四个文件夹从右边缘露出一点。
- * 手势：标签左滑 = 拉进屏幕展开卡片；标签右滑 = 推出屏幕完成清空。
- * D3 打开时隐藏（避免和 A-Z rail 冲突），由调用方传 dockHidden 控制。
- */
-@Composable
-fun PetTabsOverlay(dockHidden: Boolean) {
-    val filed by PetRepository.filed.collectAsState()
-    val density = LocalDensity.current
-    val view = LocalView.current
-
-    AnimatedVisibility(
-        visible = dockHidden,
-        enter = fadeIn(),
-        exit = fadeOut()
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier.align(Alignment.CenterEnd),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                PetCat.values().forEach { cat ->
-                    val count = filed[cat]?.size ?: 0
-                    var dragX by remember { mutableStateOf(0f) }
-                    val empty = count == 0
-                    // v0.16：系统返回手势冲突——手指按下标签时把该标签 rect 设为
-                    // 系统手势排除区（小而一定被系统接受），抬起/取消后清除。
-                    // rect 取 view 本地坐标（exclusionRects 要求 view 坐标系）。
-                    var tabRect by remember { mutableStateOf<android.graphics.Rect?>(null) }
-                    Box(
-                        modifier = Modifier
-                            .size(width = 52.dp, height = 56.dp)
-                            .offset {
-                                IntOffset(
-                                    with(density) { (36.dp.toPx() + dragX).roundToInt() },
-                                    0
-                                )
-                            }
-                            .alpha(if (empty) 0.35f else 1f)
-                            .background(
-                                cat.color,
-                                RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
-                            )
-                            .onGloballyPositioned { coords ->
-                                val winPos = coords.localToWindow(Offset.Zero)
-                                val loc = IntArray(2)
-                                view.getLocationInWindow(loc)
-                                val l = (winPos.x - loc[0]).roundToInt()
-                                val t = (winPos.y - loc[1]).roundToInt()
-                                tabRect = android.graphics.Rect(
-                                    l, t,
-                                    l + coords.size.width, t + coords.size.height
-                                )
-                            }
-                            .pointerInput(cat, empty) {
-                                // 排除区管理：按下即设，抬起/取消即清（与拖拽检测并行）
-                                if (empty) return@pointerInput
-                                awaitEachGesture {
-                                    awaitFirstDown()
-                                    tabRect?.let {
-                                        view.systemGestureExclusionRects = listOf(it)
-                                    }
-                                    try {
-                                        waitForUpOrCancellation()
-                                    } finally {
-                                        view.systemGestureExclusionRects = emptyList()
-                                    }
-                                }
-                            }
-                            .pointerInput(cat, empty) {
-                                // 点按展开（备用入口，不与左滑冲突）
-                                if (empty) return@pointerInput
-                                detectTapGestures(onTap = { PetRepository.expandFromTab(cat) })
-                            }
-                            .pointerInput(cat, empty) {
-                                if (empty) return@pointerInput
-                                var accumX = 0f
-                                detectHorizontalDragGestures(
-                                    onDragStart = { accumX = 0f; dragX = 0f },
-                                    onDragCancel = { dragX = 0f },
-                                    onHorizontalDrag = { change, dragAmount ->
-                                        change.consume()
-                                        accumX += dragAmount
-                                        dragX = (dragX + dragAmount).coerceIn(-120f, 80f)
-                                    },
-                                    onDragEnd = {
-                                        val dxDp = dragX / density.density
-                                        dragX = 0f
-                                        if (dxDp < -48) PetRepository.expandFromTab(cat)  // 左滑=多
-                                        else if (dxDp > 48) PetRepository.completeTab(cat) // 右滑=少
-                                    }
-                                )
-                            },
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(start = 6.dp)
-                        ) {
-                            Text(text = cat.tabEmoji, fontSize = 15.sp)
-                            Text(
-                                text = cat.tabLabel,
-                                fontSize = 8.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
-                            )
-                        }
-                        if (!empty) {
-                            Text(
-                                text = "$count",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = (-16).dp, y = (-7).dp)
-                                    .background(Color(0xFFFF4D4F), RoundedCornerShape(99.dp))
-                                    .padding(horizontal = 5.dp, vertical = 1.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 /**
  * v0.47.0：七仔说话气泡——Mii 风（干净圆润白气泡+小尾巴）+ 游戏化（弹性弹出+打字机）。
@@ -1089,6 +946,71 @@ private fun TodaySection(
             Column {
                 Text(text = "环境", fontSize = 12.sp, color = Color(0xFF999999))
                 Text(text = w, fontSize = 14.sp, color = Color(0xFF333333))
+            }
+        }
+        // v0.51.0：消息——AI 组织（不再用右侧标签）
+        // 逻辑：只取 3 小时内的，按重要度排序，重要优先，最多显示 3 条
+        // 价值：用户不用一条条翻通知，AI 已经筛好了
+        val filed by PetRepository.filed.collectAsState()
+        val now = System.currentTimeMillis()
+        val recentMsgs = remember(filed) {
+            filed.values.flatten()
+                .filter { !it.isCalendar } // 日历已在"接下来"显示，这里只显示消息
+                .filter { now - it.time < 3 * 60 * 60 * 1000 } // 3 小时内
+                .sortedWith(
+                    compareByDescending<PetItem> {
+                        // 重要优先
+                        when (it.cat) {
+                            PetCat.IMP -> 3
+                            PetCat.WORK -> 2
+                            else -> 1
+                        }
+                    }.thenByDescending { it.time }
+                )
+        }
+        if (recentMsgs.isNotEmpty()) {
+            val impCount = recentMsgs.count { it.cat == PetCat.IMP }
+            Column {
+                Text(text = "消息", fontSize = 12.sp, color = Color(0xFF999999))
+                // AI 摘要行：总数 + 重要数
+                Text(
+                    text = buildString {
+                        append("${recentMsgs.size} 条新消息")
+                        if (impCount > 0) append("，$impCount 条重要")
+                    },
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF333333)
+                )
+                // 列出最重要的 3 条：应用 · 标题/摘要
+                recentMsgs.take(3).forEach { item ->
+                    val snippet = when {
+                        item.title.isNotBlank() && item.text.isNotBlank() ->
+                            "${item.title}：${item.text.take(30)}"
+                        item.title.isNotBlank() -> item.title
+                        item.text.isNotBlank() -> item.text.take(30)
+                        else -> item.sortDesc
+                    }
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 重要标记
+                        if (item.cat == PetCat.IMP) {
+                            Text(
+                                text = "● ",
+                                fontSize = 10.sp,
+                                color = Color(0xFFE03131)
+                            )
+                        }
+                        Text(
+                            text = "${item.appName} · $snippet",
+                            fontSize = 13.sp,
+                            color = Color(0xFF666666),
+                            maxLines = 1
+                        )
+                    }
+                }
             }
         }
     }
