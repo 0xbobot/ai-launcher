@@ -2,6 +2,8 @@ package com.bobot.ailauncher.ui.pet
 
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -239,9 +241,20 @@ fun PetZone(
     val context = LocalContext.current
     // v0.48.0：日程轮询——15 分钟一次，30 分钟内有会就让七仔说
     val notifiedCalendarKeys = remember { mutableSetOf<String>() }
+    var calendarPermissionAsked by remember { mutableStateOf(false) }
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* 拒绝就安静失败，下次轮询再看 */ }
     LaunchedEffect(Unit) {
         suspend fun checkCalendar() {
-            if (!hasCalendarPermission(context)) return
+            if (!hasCalendarPermission(context)) {
+                // 没权限就申请一次（v0.48.1：之前从没申请过，导致日程一直不显示）
+                if (!calendarPermissionAsked) {
+                    calendarPermissionAsked = true
+                    calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                }
+                return
+            }
             val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
             val now = System.currentTimeMillis()
             val upcoming = events.firstOrNull {
