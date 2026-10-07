@@ -125,7 +125,7 @@ import java.text.Collator
 import java.util.Locale
 import kotlin.math.exp
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.ui.zIndex.zIndex
+import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 
 /**
