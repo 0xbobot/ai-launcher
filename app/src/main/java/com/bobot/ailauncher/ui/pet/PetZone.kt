@@ -27,7 +27,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -82,12 +83,21 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.GlassTextShadow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
+import com.bobot.ailauncher.data.WeatherRepository
+import com.bobot.ailauncher.data.WeatherState
+import java.util.Calendar
+import java.text.SimpleDateFormat
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
  * 宠物区：桌台（宠物本体/ding/思考点/sort-tag/carry）。
  * 放在首页顶栏下方。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PetZone(
     // v0.29.0：升级提醒宠物化
@@ -121,6 +131,76 @@ fun PetZone(
     }
     // v0.30.0：天气微动作
     val weatherDesc by com.bobot.ailauncher.data.WeatherState.desc.collectAsState()
+    // v0.46.0：天气自动触发——突变才播场景，不打扰
+    val scope = rememberCoroutineScope()
+    var lastWeatherDesc by remember { mutableStateOf<String?>(null) }
+    var weatherTriggersToday by remember { mutableIntStateOf(0) }
+    var weatherTriggerDate by remember { mutableStateOf("") }
+    var morningBriefedDate by remember { mutableStateOf("") }
+
+    fun todayStr(): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Calendar.getInstance().time)
+
+    fun canTriggerWeatherScene(): Boolean {
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        if (hour < 7 || hour >= 22) return false // 深夜不打扰
+        val today = todayStr()
+        if (weatherTriggerDate != today) {
+            weatherTriggerDate = today
+            weatherTriggersToday = 0
+        }
+        return weatherTriggersToday < 3 // 每天最多 3 次
+    }
+
+    fun onWeatherFetched(desc: String?, allowTrigger: Boolean) {
+        val old = lastWeatherDesc
+        lastWeatherDesc = desc
+        WeatherState.update(desc)
+        if (desc == null || !allowTrigger || !canTriggerWeatherScene()) return
+        val wasBad = old != null && isBadWeather(old)
+        val isBad = isBadWeather(desc)
+        val isGood = isGoodWeather(desc)
+        when {
+            old != null && !wasBad && isBad -> {
+                demoScene = QizaiScene.WEATHER_RAIN // 转坏：下雨了
+                weatherTriggersToday++
+            }
+            old != null && wasBad && isGood -> {
+                demoScene = QizaiScene.WEATHER_SUN // 转好：雨停天晴
+                weatherTriggersToday++
+            }
+        }
+    }
+
+    suspend fun fetchWeather(allowTrigger: Boolean) {
+        val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
+        if (w != null) onWeatherFetched(w.desc, allowTrigger)
+    }
+
+    // 天气轮询：30 分钟一次，突变才触发场景
+    LaunchedEffect(Unit) {
+        fetchWeather(allowTrigger = false) // 首次只更新状态，不播
+        while (true) {
+            delay(30 * 60 * 1000L)
+            fetchWeather(allowTrigger = true)
+        }
+    }
+
+    // 早晨简报：6-10 点首次进入播一次今日天气
+    LaunchedEffect(Unit) {
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val today = todayStr()
+        if (hour in 6..10 && morningBriefedDate != today) {
+            morningBriefedDate = today
+            val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
+            if (w != null) {
+                lastWeatherDesc = w.desc
+                WeatherState.update(w.desc)
+                demoScene = if (isBadWeather(w.desc)) QizaiScene.WEATHER_RAIN
+                else QizaiScene.WEATHER_SUN
+            }
+        }
+    }
     var blinking by remember { mutableStateOf(false) }
     val context = LocalContext.current
     // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
@@ -244,23 +324,43 @@ fun PetZone(
                         else Modifier.fillMaxWidth().height(134.dp)
                     )
                     .weatherMotion(weatherDesc)
-                    .clickable(
+                    .combinedClickable(
                         indication = null,
-                        interactionSource = remember { MutableInteractionSource() }
-                    ) {
-                        // v0.29.0：有升级时点按 → 弹更新对话框；否则果冻 + 场景循环演示
-                        if (hasUpgrade) onUpgradeTap()
-                        else {
-                            jellyTick++
-                            demoScene = when (demoScene) {
-                                QizaiScene.NONE -> QizaiScene.WAVE
-                                QizaiScene.WAVE -> QizaiScene.READING
-                                QizaiScene.READING -> QizaiScene.WORKING
-                                QizaiScene.WORKING -> QizaiScene.WEATHER
-                                QizaiScene.WEATHER -> QizaiScene.NONE
+                        interactionSource = remember { MutableInteractionSource() },
+                        onClick = {
+                            // v0.29.0：有升级时点按 → 弹更新对话框；否则果冻 + 场景循环演示
+                            if (hasUpgrade) onUpgradeTap()
+                            else {
+                                jellyTick++
+                                demoScene = when (demoScene) {
+                                    QizaiScene.NONE -> QizaiScene.WAVE
+                                    QizaiScene.WAVE -> QizaiScene.READING
+                                    QizaiScene.READING -> QizaiScene.WORKING
+                                    QizaiScene.WORKING -> QizaiScene.WEATHER_RAIN
+                                    QizaiScene.WEATHER_RAIN -> QizaiScene.WEATHER_SUN
+                                    QizaiScene.WEATHER_SUN -> QizaiScene.NONE
+                                }
+                            }
+                        },
+                        onLongClick = {
+                            // v0.46.0：长按手动刷新天气——拉最新数据并播对应场景
+                            scope.launch {
+                                val w = withContext(Dispatchers.IO) {
+                                    WeatherRepository.fetchSync()
+                                }
+                                if (w != null) {
+                                    lastWeatherDesc = w.desc
+                                    WeatherState.update(w.desc)
+                                    demoScene = if (isBadWeather(w.desc))
+                                        QizaiScene.WEATHER_RAIN
+                                    else
+                                        QizaiScene.WEATHER_SUN
+                                } else {
+                                    jellyTick++ // 拉取失败，给个果冻反馈
+                                }
                             }
                         }
-                    }
+                    )
             )
             // P0：落地阴影（奶油白在暖灰底上加对比）；场景播放时隐藏（场景自带舞台）
             if (demoScene == QizaiScene.NONE) {
@@ -709,6 +809,16 @@ private fun GiftBox(modifier: Modifier = Modifier) {
         )
     }
 }
+
+/**
+ * v0.46.0：天气好坏分类（用于自动触发场景）。
+ * 坏=降水类；好=晴/多云；阴/雾为中性（转好时播晴，转坏时不触发）。
+ */
+private fun isBadWeather(desc: String?): Boolean =
+    desc == "小雨" || desc == "雨" || desc == "雪" || desc == "雷阵雨"
+
+private fun isGoodWeather(desc: String?): Boolean =
+    desc == "晴" || desc == "多云"
 
 /**
  * v0.30.0：天气微动作——按天气给宠物加极小的身体语言。

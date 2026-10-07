@@ -41,13 +41,14 @@ import kotlin.math.tan
  *
  * 点按七仔可在场景间循环演示；新通知到达自动进 READING。
  */
-enum class QizaiScene { NONE, WAVE, READING, WORKING, WEATHER }
+enum class QizaiScene { NONE, WAVE, READING, WORKING, WEATHER_RAIN, WEATHER_SUN }
 
 fun QizaiScene.durationSec(): Float = when (this) {
     QizaiScene.WAVE -> 2.6f
     QizaiScene.READING -> 4.8f
     QizaiScene.WORKING -> 6.4f
-    QizaiScene.WEATHER -> 8.0f
+    QizaiScene.WEATHER_RAIN -> 4.5f
+    QizaiScene.WEATHER_SUN -> 5.0f
     QizaiScene.NONE -> 0f
 }
 
@@ -106,7 +107,6 @@ private val SHAKE_DROPS: List<ShakeDrop> = run {
 }
 
 private const val RAIN_ANGLE_DEG = 12f
-private const val SHAKE_T0 = 4.2f
 private const val SHAKE_DUR = 0.8f
 
 private data class Placed(
@@ -220,26 +220,30 @@ private fun DrawScope.drawQizaiScene(
             val dt = (t - 2.0f) / 0.06f
             blink = 1f - 0.92f * exp(-dt * dt)
         }
-        QizaiScene.WEATHER -> {
+        QizaiScene.WEATHER_RAIN -> {
             poses = listOf("main" to 1f)
-            rain = ss(1.0f, 1.8f, t) * (1f - ss(3.9f, 4.5f, t))
-            cool = ss(1.0f, 2.0f, t) * (1f - ss(3.9f, 4.9f, t))
-            val look = ss(1.2f, 2.0f, t) * (1f - ss(3.9f, 4.4f, t))
+            rain = ss(0.5f, 1.3f, t) * (1f - ss(3.8f, 4.5f, t))
+            cool = ss(0.5f, 1.5f, t) * (1f - ss(3.8f, 4.5f, t))
+            val look = ss(0.7f, 1.5f, t) * (1f - ss(3.8f, 4.5f, t))
             yFrac = -0.028f * look // 抬头看雨
-            if (t in SHAKE_T0..SHAKE_T0 + SHAKE_DUR) {
-                val p = (t - SHAKE_T0) / SHAKE_DUR
-                val osc = abs(sin(2f * Math.PI.toFloat() * 11f * (t - SHAKE_T0)))
-                xPx = sin(2f * Math.PI.toFloat() * 11f * (t - SHAKE_T0)) * w * 0.02f * (1f - p)
+            val dt = (t - 0.6f) / 0.06f
+            blink = 1f - 0.92f * exp(-dt * dt)
+        }
+        QizaiScene.WEATHER_SUN -> {
+            poses = listOf("main" to 1f)
+            // 开场抖水（雨刚停，甩掉身上的水）
+            if (t in 0.3f..1.1f) {
+                val p = (t - 0.3f) / 0.8f
+                val osc = abs(sin(2f * Math.PI.toFloat() * 11f * (t - 0.3f)))
+                xPx = sin(2f * Math.PI.toFloat() * 11f * (t - 0.3f)) * w * 0.02f * (1f - p)
                 sx += 0.035f * osc * (1f - p)
                 sy -= 0.025f * osc * (1f - p)
-                shakeT = t - SHAKE_T0
+                shakeT = t - 0.3f
             }
-            sun = ss(4.6f, 5.6f, t)
-            if (t in 5.9f..6.5f) yFrac += -0.07f * sin(Math.PI.toFloat() * (t - 5.9f) / 0.6f)
-            for (tb in listOf(0.6f, 6.9f)) {
-                val dt = (t - tb) / 0.06f
-                blink = minOf(blink, 1f - 0.92f * exp(-dt * dt))
-            }
+            sun = ss(0.8f, 1.8f, t)
+            if (t in 2.4f..3.0f) yFrac += -0.07f * sin(Math.PI.toFloat() * (t - 2.4f) / 0.6f)
+            val dt = (t - 3.4f) / 0.06f
+            blink = 1f - 0.92f * exp(-dt * dt)
         }
         QizaiScene.NONE -> {
             poses = listOf("main" to 1f)
@@ -250,7 +254,7 @@ private fun DrawScope.drawQizaiScene(
     sy *= 1f + 0.012f * br
 
     // ---- 雨丝（背景层，在七仔身后） ----
-    if (scene == QizaiScene.WEATHER && rain > 0.01f) {
+    if (scene == QizaiScene.WEATHER_RAIN && rain > 0.01f) {
         val dx = tan(Math.toRadians(RAIN_ANGLE_DEG.toDouble())).toFloat()
         val alpha = (130f * rain).toInt().coerceIn(0, 255)
         for (d in RAIN_DROPS) {
@@ -469,8 +473,8 @@ private fun DrawScope.drawQizaiScene(
     }
 
     // ---- 天气：抖水珠（前景）+ 冷/暖色调 ----
-    if (scene == QizaiScene.WEATHER) {
-        if (shakeT >= 0f) {
+    if (scene == QizaiScene.WEATHER_RAIN || scene == QizaiScene.WEATHER_SUN) {
+        if (scene == QizaiScene.WEATHER_SUN && shakeT >= 0f) {
             val main = placed.find { it.name == "main" }
             if (main != null) {
                 val qcx = main.left + main.dw / 2f
@@ -488,10 +492,10 @@ private fun DrawScope.drawQizaiScene(
                 }
             }
         }
-        if (cool > 0.01f) {
+        if (scene == QizaiScene.WEATHER_RAIN && cool > 0.01f) {
             drawRect(Color(150, 180, 210, (34f * cool).toInt().coerceIn(0, 255)))
         }
-        if (sun > 0.01f) {
+        if (scene == QizaiScene.WEATHER_SUN && sun > 0.01f) {
             val sAlpha = sun
             // 左上阳光束
             val rayLen = maxOf(w, h) * 1.6f
