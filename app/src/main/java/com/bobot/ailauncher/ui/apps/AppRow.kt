@@ -3,11 +3,18 @@ package com.bobot.ailauncher.ui.apps
 import android.widget.Toast
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.matchParentSize
+import androidx.compose.material.icons.outlined.Star as OutlinedStar
+import androidx.compose.material.icons.outlined.Visibility as OutlinedVisibility
+import androidx.compose.material.icons.outlined.VisibilityOff as OutlinedVisibilityOff
+import androidx.compose.ui.draw.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +22,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,8 +29,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,20 +43,17 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
-import kotlin.math.roundToInt
 
 /**
  * 应用行（从已删除的 AllAppsScreen.kt 迁移，v0.22 分类取消后去掉"移到分组"）。
@@ -100,15 +101,14 @@ internal fun AppRow(
         }
     }
 
-    // v0.41.27（Bob 方案 B）：iOS 式——内容整体滑动，下面露出动作按钮。
-    // 左滑内容左移露出右侧 ★，右滑内容右移露出左侧眼睛。按钮在下层，无透明度变化。
+    // v0.41.30（Bob 统一双钮版）：左右滑同一效果——内容（图标+标题）弱化到 30%，位置不动；
+    // 蒙层中央并排双钮：眼睛（隐藏/取消隐藏）+ ★（收藏/取消收藏），简洁线条图标无底色，居中。
+    // 第一段（>56dp 松手）保持蒙层可点；第二段（>120dp）主按钮脉冲，松手直接触发。
+    // 左滑到底=★，右滑到底=眼睛。
     val scope = rememberCoroutineScope()
-    val offsetX = remember { Animatable(0f) } // 松手后动画用（px），左移为负
-    var dragOffsetX by remember { mutableStateOf(0f) } // 拖动时直接设置，无协程竞态
-    var dragDist by remember { mutableStateOf(0f) } // 左滑为正
+    val dimAnim = remember { Animatable(0f) } // 弱化进度 0→1
+    var dragDist by remember { mutableStateOf(0f) } // 左滑为正，右滑为负
     var isDragging by remember { mutableStateOf(false) }
-    // 显示用偏移：拖动时直接跟手，否则用动画值
-    val displayOffset = if (isDragging) dragOffsetX else offsetX.value
     val revealPx = with(density) { 56.dp.toPx() }
     val fullPx = with(density) { 120.dp.toPx() }
     val maxDragPx = with(density) { 160.dp.toPx() }
@@ -117,28 +117,46 @@ internal fun AppRow(
         stiffness = Spring.StiffnessLow
     )
 
+    // 弱化进度：拖动时跟手，松手后弹簧动画到目标
+    val dragDim = (kotlin.math.abs(dragDist) / revealPx).coerceIn(0f, 1f)
+    val dimProgress = if (isDragging) dragDim else dimAnim.value
+    val contentAlpha = 1f - dimProgress * 0.7f // 最低 30%
+
+    // 第二段武装：左滑到底=★，右滑到底=眼睛；主按钮放大脉冲
+    val armedPrimary: String? = when {
+        !isDragging -> null
+        dragDist > fullPx -> "star"
+        dragDist < -fullPx -> "eye"
+        else -> null
+    }
+    val starScale by animateFloatAsState(
+        targetValue = if (armedPrimary == "star") 1.3f else 1f,
+        animationSpec = settleSpring, label = "starPulse"
+    )
+    val eyeScale by animateFloatAsState(
+        targetValue = if (armedPrimary == "eye") 1.3f else 1f,
+        animationSpec = settleSpring, label = "eyePulse"
+    )
+
     fun hideAll() {
         dragDist = 0f
-        dragOffsetX = 0f
         onActionsVisibleChange(false)
         onHideVisibleChange(false)
-        scope.launch { offsetX.snapTo(0f) }
+        scope.launch { dimAnim.animateTo(0f, settleSpring) }
     }
 
-    // 按钮方向：拖动时按手指方向，否则按保持状态（两者互斥，AppCenter 保证）
-    val buttonIsLeft = when {
-        isDragging -> dragDist > 0
-        actionsVisible -> true
-        hideVisible -> false
-        else -> true
+    fun settleDim(from: Float, to: Float) {
+        scope.launch {
+            dimAnim.snapTo(from)
+            dimAnim.animateTo(to, settleSpring)
+        }
     }
 
-    // 外部收起（如另一行展开）时，内容直接回位（不用动画，避免与按钮消失的时机错位）
+    // 外部收起（如另一行展开）时直接复原
     LaunchedEffect(actionsVisible, hideVisible) {
         if (!actionsVisible && !hideVisible) {
             dragDist = 0f
-            dragOffsetX = 0f
-            offsetX.snapTo(0f)
+            dimAnim.snapTo(0f)
         }
     }
 
@@ -146,133 +164,58 @@ internal fun AppRow(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-        ) {
-            // v0.41.27（Bob 方案 B）：底层动作按钮——位置固定，无透明度变化。
-            // 左滑 ★ 在右侧，右滑眼睛在左侧；内容滑开后露出。
-            if (dragDist != 0f || actionsVisible || hideVisible) {
-                // ★ 双状态：亮金=加入 Dock，灰=已在 Dock（点按移出）
-                // 眼睛双状态：闭眼=隐藏，开眼=取消隐藏
-                // v0.41.28（Bob）：对比度提高——深金/深灰/深 slate，白色图标更醒目
-                val btnBg = when {
-                    buttonIsLeft && isPinned -> Color(0xFF5A564E)
-                    buttonIsLeft -> Color(0xFF8C6D1F)
-                    else -> Color(0xFF2F3A4A)
-                }
-                val btnIcon = when {
-                    buttonIsLeft -> Icons.Filled.Star
-                    onUnhide != null -> Icons.Filled.Visibility
-                    else -> Icons.Filled.VisibilityOff
-                }
-                val btnDesc = when {
-                    buttonIsLeft -> if (isPinned) "移出 Dock" else "加到 Dock"
-                    onUnhide != null -> "取消隐藏"
-                    else -> "隐藏"
-                }
-                Box(
-                    modifier = Modifier
-                        .align(if (buttonIsLeft) Alignment.CenterEnd else Alignment.CenterStart)
-                        .padding(
-                            end = if (buttonIsLeft) 8.dp else 0.dp,
-                            start = if (buttonIsLeft) 0.dp else 8.dp
-                        )
-                        .size(48.dp)
-                        .shadow(8.dp, CircleShape)
-                        .background(btnBg, CircleShape)
-                        .clickable(
-                            onClick = {
-                                when {
-                                    buttonIsLeft -> togglePin()
-                                    onUnhide != null -> onUnhide(app)
-                                    else -> onHide(app)
+                .pointerInput(app.packageName) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { isDragging = true },
+                        onDragCancel = {
+                            isDragging = false
+                            val from = dragDim
+                            dragDist = 0f
+                            settleDim(from, 0f)
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            val from = dragDim
+                            when {
+                                dragDist > fullPx -> {
+                                    // 左滑到底 → ★（收藏/取消收藏）
+                                    togglePin()
+                                    dragDist = 0f
+                                    settleDim(from, 0f)
                                 }
-                                hideAll()
+                                dragDist < -fullPx -> {
+                                    // 右滑到底 → 眼睛（隐藏/取消隐藏）
+                                    if (onUnhide != null) onUnhide(app) else onHide(app)
+                                    dragDist = 0f
+                                    settleDim(from, 0f)
+                                }
+                                dragDist > revealPx || dragDist < -revealPx -> {
+                                    // 第一段 → 保持蒙层+双钮（方向无关，保持标记互斥由 AppCenter 保证）
+                                    dragDist = 0f
+                                    onActionsVisibleChange(true)
+                                    settleDim(from, 1f)
+                                }
+                                else -> {
+                                    dragDist = 0f
+                                    settleDim(from, 0f)
+                                }
                             }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = btnIcon,
-                        contentDescription = btnDesc,
-                        tint = Color.White,
-                        modifier = Modifier.size(26.dp)
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            // 左滑 dragAmount 为负，转成正数距离
+                            dragDist = (dragDist - dragAmount)
+                                .coerceIn(-maxDragPx, maxDragPx)
+                        }
                     )
                 }
-            }
-
-            // 上层：内容 Row——跟手指整体滑动（左滑左移露出右侧 ★，右滑右移露出左侧眼睛）。
-            // 不透明背景盖住底层按钮，无透明度变化。
+        ) {
+            // 内容：静态不位移，弱化到 30%
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .offset { IntOffset(displayOffset.roundToInt(), 0) }
-                    .pointerInput(app.packageName) {
-                        detectHorizontalDragGestures(
-                            onDragStart = { isDragging = true },
-                            onDragCancel = {
-                                isDragging = false
-                                dragDist = 0f
-                                dragOffsetX = 0f
-                                scope.launch { offsetX.animateTo(0f, settleSpring) }
-                            },
-                            onDragEnd = {
-                                isDragging = false
-                                when {
-                                    dragDist > fullPx -> {
-                                        // 左滑满 → 直接加到 Dock（或移出）
-                                        togglePin()
-                                        hideAll()
-                                    }
-                                    dragDist < -fullPx -> {
-                                        // 右滑满 → 直接隐藏（或取消隐藏）
-                                        if (onUnhide != null) onUnhide(app) else onHide(app)
-                                        hideAll()
-                                    }
-                                    dragDist > revealPx -> {
-                                        // 左滑=多：内容停在 -revealPx，★ 保持露出
-                                        val start = dragOffsetX
-                                        dragDist = 0f
-                                        dragOffsetX = 0f
-                                        onActionsVisibleChange(true)
-                                        scope.launch {
-                                            offsetX.snapTo(start)
-                                            offsetX.animateTo(-revealPx, settleSpring)
-                                        }
-                                    }
-                                    dragDist < -revealPx -> {
-                                        // 右滑=少：内容停在 +revealPx，眼睛保持露出
-                                        val start = dragOffsetX
-                                        dragDist = 0f
-                                        dragOffsetX = 0f
-                                        onActionsVisibleChange(false)
-                                        onHideVisibleChange(true)
-                                        scope.launch {
-                                            offsetX.snapTo(start)
-                                            offsetX.animateTo(revealPx, settleSpring)
-                                        }
-                                    }
-                                    else -> {
-                                        val start = dragOffsetX
-                                        dragDist = 0f
-                                        dragOffsetX = 0f
-                                        scope.launch {
-                                            offsetX.snapTo(start)
-                                            offsetX.animateTo(0f, settleSpring)
-                                        }
-                                    }
-                                }
-                            },
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                // 左滑 dragAmount 为负，转成正数距离；内容向左移（offset 为负）
-                                dragDist = (dragDist - dragAmount)
-                                    .coerceIn(-maxDragPx, maxDragPx)
-                                dragOffsetX = -dragDist // 直接设置 state，无协程竞态
-                            }
-                        )
-                    }
                     .combinedClickable(
                         onClick = {
-                            // 动作按钮露出时点行 = 收起复原；否则启动应用
                             if (actionsVisible || hideVisible) hideAll()
                             else onLaunch()
                         },
@@ -288,15 +231,86 @@ internal fun AppRow(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(RoundedCornerShape(10.dp))
+                        .graphicsLayer { alpha = contentAlpha }
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = app.label.toString(),
                     fontSize = 15.sp,
-                    color = AILauncherColors.Title,
+                    color = AILauncherColors.Title.copy(alpha = contentAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // 蒙层：透明全行覆盖，中央并排双钮；点空白处复原
+            if (dimProgress > 0.01f) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                            onClick = { hideAll() }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(32.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 眼睛：隐藏/取消隐藏（简洁线条，无底色）
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .graphicsLayer {
+                                    scaleX = eyeScale
+                                    scaleY = eyeScale
+                                }
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    onClick = {
+                                        if (onUnhide != null) onUnhide(app) else onHide(app)
+                                        hideAll()
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (onUnhide != null) OutlinedVisibility else OutlinedVisibilityOff,
+                                contentDescription = if (onUnhide != null) "取消隐藏" else "隐藏",
+                                tint = Color(0xFF5A6C7D),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        // ★：收藏/取消收藏（简洁线条无底色；已在 Dock 用实心金）
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .graphicsLayer {
+                                    scaleX = starScale
+                                    scaleY = starScale
+                                }
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    onClick = {
+                                        togglePin()
+                                        hideAll()
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isPinned) Icons.Filled.Star else OutlinedStar,
+                                contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
+                                tint = Color(0xFFC9A227),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
