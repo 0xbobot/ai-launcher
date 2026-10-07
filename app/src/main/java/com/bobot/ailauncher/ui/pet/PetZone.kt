@@ -41,10 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
@@ -230,8 +227,8 @@ fun PetZone(
     val speech by PetRepository.speech.collectAsState()
     // v0.49.0：AI Capsule——一次只说一件最重要的事
     val capsule by PetRepository.capsule.collectAsState()
-    // v0.49.0：Today Bottom Sheet——点按宠物或"看看重点"打开
-    var showTodaySheet by remember { mutableStateOf(false) }
+    // v0.50.0：Today 直接放首屏（不再用 Bottom Sheet）
+    var capsuleExpanded by remember { mutableStateOf(false) }
     var speechVisible by remember { mutableStateOf(false) }
     LaunchedEffect(speech?.id) {
         val s = speech
@@ -428,12 +425,11 @@ fun PetZone(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
                         onClick = {
-                            // v0.49.0：按 AI Pet 文档——点按宠物 → Bottom Sheet（Today），不再循环演示场景
+                            // v0.50.0：Today 已在首屏，点按宠物只做果冻反馈
                             // 场景改由真实事件触发（天气/通知/日程）
                             if (hasUpgrade) onUpgradeTap()
                             else {
                                 jellyTick++
-                                showTodaySheet = true
                             }
                         },
                         onLongClick = {
@@ -516,20 +512,20 @@ fun PetZone(
                 AiCapsuleCard(
                     capsule = c,
                     onPrimary = {
-                        // 看看重点 → 打开 Bottom Sheet（Today 详情）
-                        showTodaySheet = true
+                        // v0.50.0：看看重点 → 展开看详情（Today 已在首屏）
+                        capsuleExpanded = !capsuleExpanded
                     },
                     onSecondary = {
                         // 稍后 → 关闭
                         PetRepository.dismissCapsule()
-                    }
+                        capsuleExpanded = false
+                    },
+                    expanded = capsuleExpanded
                 )
             }
         }
-    }
-    // v0.49.0：Today Bottom Sheet
-    if (showTodaySheet) {
-        TodaySheet(onDismiss = { showTodaySheet = false })
+        // v0.50.0：TODAY 直接放首屏
+        TodaySection()
     }
 }
 
@@ -948,7 +944,8 @@ private fun AiCapsuleCard(
     capsule: PetRepository.AiCapsule,
     onPrimary: () -> Unit,
     onSecondary: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    expanded: Boolean = false
 ) {
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -1001,7 +998,10 @@ private fun AiCapsuleCard(
                     ),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
                 ) {
-                    Text(text = capsule.primaryAction, fontSize = 13.sp)
+                    Text(
+                        text = if (expanded) "收起" else capsule.primaryAction,
+                        fontSize = 13.sp
+                    )
                 }
                 // 次按钮：描边
                 OutlinedButton(
@@ -1018,19 +1018,19 @@ private fun AiCapsuleCard(
 
 /**
  * v0.49.0：Today Bottom Sheet——AI 对今天的理解（不是 Todo List）。
- * 按文档：点按宠物 → Bottom Sheet，而不是全屏 Chat。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * v0.50.0：TODAY——直接放首屏（不再用 Bottom Sheet）。
+ * AI 对今天的理解：接下来、环境。极简，不抢 Capsule 的戏。
+ */
 @Composable
-private fun TodaySheet(
-    onDismiss: () -> Unit
+private fun TodaySection(
+    modifier: Modifier = Modifier
 ) {
     val weatherDesc by WeatherState.desc.collectAsState()
-    val capsule by PetRepository.capsule.collectAsState()
     val context = LocalContext.current
     var nextEvent by remember { mutableStateOf<CalEvent?>(null) }
     var hasCalPermission by remember { mutableStateOf(hasCalendarPermission(context)) }
-    // v0.49.1：日历权限手动申请（修开机自动弹导致的闪屏）
     val calPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -1045,84 +1045,51 @@ private fun TodaySheet(
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState()
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 40.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // 标题
-            Text(
-                text = "Today",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF333333)
-            )
-            // 最重要的事（来自 Capsule）
-            capsule?.let { c ->
-                Text(
-                    text = "现在最值得关注",
-                    fontSize = 12.sp,
-                    color = Color(0xFF999999)
-                )
-                Text(
-                    text = c.title,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF333333)
-                )
-                Text(
-                    text = c.body,
-                    fontSize = 13.sp,
-                    color = Color(0xFF666666),
-                    lineHeight = 19.sp
-                )
+        // 分割线 + TODAY 标题
+        Text(
+            text = "TODAY",
+            fontSize = 11.sp,
+            color = Color(0xFFAAAAAA),
+            letterSpacing = 2.sp
+        )
+        // 接下来
+        if (!hasCalPermission) {
+            OutlinedButton(
+                onClick = {
+                    calPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                },
+                shape = RoundedCornerShape(99.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+                Text(text = "授权日历，七仔帮你盯日程", fontSize = 12.sp)
             }
-            // 下一场日程
-            if (!hasCalPermission) {
-                // 没权限 → 手动申请按钮
-                OutlinedButton(
-                    onClick = {
-                        calPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
-                    },
-                    shape = RoundedCornerShape(99.dp)
-                ) {
-                    Text(text = "授权日历，七仔帮你盯日程", fontSize = 13.sp)
-                }
-            } else {
-                nextEvent?.let { e ->
-                    val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
-                        .format(Date(e.begin))
+        } else {
+            nextEvent?.let { e ->
+                val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
+                    .format(Date(e.begin))
+                val mins = ((e.begin - System.currentTimeMillis()) / 60000).toInt()
+                Column {
+                    Text(text = "接下来", fontSize = 12.sp, color = Color(0xFF999999))
                     Text(
-                        text = "接下来",
-                        fontSize = 12.sp,
-                        color = Color(0xFF999999)
-                    )
-                    Text(
-                        text = "$timeStr ${e.title.ifBlank { "（无标题）" }}",
-                        fontSize = 15.sp,
+                        text = "$timeStr ${e.title.ifBlank { "（无标题）" }}，还有 $mins 分钟",
+                        fontSize = 14.sp,
                         color = Color(0xFF333333)
                     )
                 }
             }
-            // 天气
-            weatherDesc?.let { w ->
-                Text(
-                    text = "环境",
-                    fontSize = 12.sp,
-                    color = Color(0xFF999999)
-                )
-                Text(
-                    text = w,
-                    fontSize = 15.sp,
-                    color = Color(0xFF333333)
-                )
+        }
+        // 环境
+        weatherDesc?.let { w ->
+            Column {
+                Text(text = "环境", fontSize = 12.sp, color = Color(0xFF999999))
+                Text(text = w, fontSize = 14.sp, color = Color(0xFF333333))
             }
-            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
