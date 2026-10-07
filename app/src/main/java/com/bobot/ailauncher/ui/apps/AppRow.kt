@@ -275,7 +275,7 @@ internal fun AppRow(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (onUnhide != null) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+                                imageVector = if (onUnhide != null) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
                                 contentDescription = if (onUnhide != null) "取消隐藏" else "隐藏",
                                 tint = Color(0xFF5A6C7D),
                                 modifier = Modifier.size(28.dp)
@@ -300,9 +300,10 @@ internal fun AppRow(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (isPinned) Icons.Filled.Star else Icons.Outlined.Star,
+                                imageVector = Icons.Filled.Star,
                                 contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
-                                tint = Color(0xFFC9A227),
+                                // 未收藏用半透明金（线条感），已收藏用实金
+                                tint = Color(0xFFC9A227).copy(alpha = if (isPinned) 1f else 0.45f),
                                 modifier = Modifier.size(28.dp)
                             )
                         }

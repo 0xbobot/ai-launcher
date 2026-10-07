@@ -262,6 +262,15 @@ fun AppCenterContent(
             if (off < pushZonePx) off - pushZonePx else 0f
         }
     }
+    // v0.41.30（Bob）：顶走位移动画化——字母切换时不跳变，推到位置停住不弹回
+    val animatedPushPx by animateFloatAsState(
+        targetValue = stuckPushPx,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "stuckPush"
+    )
     // v0.41.28（Bob）：隐藏分组的幽灵眼也要悬停——隐藏头滚出顶部后，
     // 幽灵眼接管悬停，直到滚出隐藏分组
     val stuckHidden: Boolean by remember(hiddenApps) {
@@ -722,7 +731,7 @@ fun AppCenterContent(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 20.dp, top = 12.dp)
-                            .offset { IntOffset(0, stuckPushPx.roundToInt()) }
+                            .offset { IntOffset(0, animatedPushPx.roundToInt()) }
                     )
                 }
             }
