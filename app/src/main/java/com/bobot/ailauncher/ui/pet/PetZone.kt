@@ -256,7 +256,8 @@ fun PetZone(
                                 QizaiScene.NONE -> QizaiScene.WAVE
                                 QizaiScene.WAVE -> QizaiScene.READING
                                 QizaiScene.READING -> QizaiScene.WORKING
-                                QizaiScene.WORKING -> QizaiScene.NONE
+                                QizaiScene.WORKING -> QizaiScene.WEATHER
+                                QizaiScene.WEATHER -> QizaiScene.NONE
                             }
                         }
                     }

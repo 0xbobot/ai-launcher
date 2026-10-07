@@ -27,6 +27,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.sin
+import kotlin.math.tan
 
 /**
  * 首页七仔场景动画：Mii 式程序化（canvas-demo v4 小样移植）。
@@ -40,12 +41,13 @@ import kotlin.math.sin
  *
  * 点按七仔可在场景间循环演示；新通知到达自动进 READING。
  */
-enum class QizaiScene { NONE, WAVE, READING, WORKING }
+enum class QizaiScene { NONE, WAVE, READING, WORKING, WEATHER }
 
 fun QizaiScene.durationSec(): Float = when (this) {
     QizaiScene.WAVE -> 2.6f
     QizaiScene.READING -> 4.8f
     QizaiScene.WORKING -> 6.4f
+    QizaiScene.WEATHER -> 8.0f
     QizaiScene.NONE -> 0f
 }
 
@@ -69,6 +71,43 @@ private val EYE_BOXES = mapOf(
 
 /** hold 姿态卡片区域（相对坐标，Python 测量） */
 private val CARD_RECT = FRect(0.3812f, 0.6875f, 0.5188f, 0.8062f)
+
+/** 雨丝（v6 小样）：相对坐标，绘制时乘画布尺寸 */
+private data class RainDrop(val x0: Float, val y0: Float, val speed: Float, val len: Float)
+
+private val RAIN_DROPS: List<RainDrop> = run {
+    val rnd = kotlin.random.Random(7)
+    List(70) {
+        RainDrop(
+            x0 = rnd.nextFloat(),
+            y0 = rnd.nextFloat(),
+            speed = rnd.nextFloat() * 0.25f + 0.5f, // 每秒走画布高的比例
+            len = rnd.nextFloat() * 16f + 18f
+        )
+    }
+}
+
+/** 抖水珠（v6 小样）：相对七仔中心的位置 + 相对画布高的初速度 */
+private data class ShakeDrop(val nx: Float, val ny: Float, val vx: Float, val vy: Float, val rad: Float)
+
+private val SHAKE_DROPS: List<ShakeDrop> = run {
+    val rnd = kotlin.random.Random(21)
+    List(12) {
+        val ang = rnd.nextFloat() * (Math.PI.toFloat() + 0.8f) - 0.4f
+        val spd = rnd.nextFloat() * 0.19f + 0.15f
+        ShakeDrop(
+            nx = rnd.nextFloat() * 0.7f - 0.35f,
+            ny = rnd.nextFloat() * 0.65f - 0.3f,
+            vx = cos(ang) * spd,
+            vy = -abs(sin(ang)) * spd - 0.06f,
+            rad = rnd.nextFloat() * 4f + 5f
+        )
+    }
+}
+
+private const val RAIN_ANGLE_DEG = 12f
+private const val SHAKE_T0 = 4.2f
+private const val SHAKE_DUR = 0.8f
 
 private data class Placed(
     val name: String,
@@ -145,6 +184,12 @@ private fun DrawScope.drawQizaiScene(
     var prog = 0f
     var working = 0f
     var check = 0f
+    // v0.44.0 天气场景（v6 小样）
+    var rain = 0f
+    var cool = 0f
+    var sun = 0f
+    var xPx = 0f // 抖身时的像素级水平位移
+    var shakeT = -1f // 抖身起始后的秒数，<0 表示未激活
     val br = sin(2f * Math.PI.toFloat() * t / 2.4f)
     when (scene) {
         QizaiScene.WAVE -> {
@@ -175,6 +220,27 @@ private fun DrawScope.drawQizaiScene(
             val dt = (t - 2.0f) / 0.06f
             blink = 1f - 0.92f * exp(-dt * dt)
         }
+        QizaiScene.WEATHER -> {
+            poses = listOf("main" to 1f)
+            rain = ss(1.0f, 1.8f, t) * (1f - ss(3.9f, 4.5f, t))
+            cool = ss(1.0f, 2.0f, t) * (1f - ss(3.9f, 4.9f, t))
+            val look = ss(1.2f, 2.0f, t) * (1f - ss(3.9f, 4.4f, t))
+            yFrac = -0.028f * look // 抬头看雨
+            if (t in SHAKE_T0..SHAKE_T0 + SHAKE_DUR) {
+                val p = (t - SHAKE_T0) / SHAKE_DUR
+                val osc = abs(sin(2f * Math.PI.toFloat() * 11f * (t - SHAKE_T0)))
+                xPx = sin(2f * Math.PI.toFloat() * 11f * (t - SHAKE_T0)) * w * 0.02f * (1f - p)
+                sx += 0.035f * osc * (1f - p)
+                sy -= 0.025f * osc * (1f - p)
+                shakeT = t - SHAKE_T0
+            }
+            sun = ss(4.6f, 5.6f, t)
+            if (t in 5.9f..6.5f) yFrac += -0.07f * sin(Math.PI.toFloat() * (t - 5.9f) / 0.6f)
+            for (tb in listOf(0.6f, 6.9f)) {
+                val dt = (t - tb) / 0.06f
+                blink = minOf(blink, 1f - 0.92f * exp(-dt * dt))
+            }
+        }
         QizaiScene.NONE -> {
             poses = listOf("main" to 1f)
         }
@@ -183,6 +249,22 @@ private fun DrawScope.drawQizaiScene(
     sx *= 1f - 0.008f * br
     sy *= 1f + 0.012f * br
 
+    // ---- 雨丝（背景层，在七仔身后） ----
+    if (scene == QizaiScene.WEATHER && rain > 0.01f) {
+        val dx = tan(Math.toRadians(RAIN_ANGLE_DEG.toDouble())).toFloat()
+        val alpha = (130f * rain).toInt().coerceIn(0, 255)
+        for (d in RAIN_DROPS) {
+            val y = (d.y0 * h + d.speed * h * t) % (h + 80f) - 40f
+            val x = d.x0 * w + dx * (y - d.y0 * h) * 0.3f
+            drawLine(
+                color = Color(170, 195, 215, alpha),
+                start = Offset(x, y),
+                end = Offset(x - dx * d.len, y - d.len),
+                strokeWidth = 2f
+            )
+        }
+    }
+
     // ---- 画姿态 ----
     val placed = mutableListOf<Placed>()
     for ((name, wt) in poses) {
@@ -190,7 +272,7 @@ private fun DrawScope.drawQizaiScene(
         val bm = bitmaps.getValue(name)
         val dw = bm.width.toFloat() * fit * sx
         val dh = bm.height.toFloat() * fit * sy
-        val left = xFrac * w - dw / 2f
+        val left = xFrac * w - dw / 2f + xPx
         val top = (h - dh) / 2f + yFrac * dh
         drawImage(
             image = bm,
@@ -383,6 +465,61 @@ private fun DrawScope.drawQizaiScene(
                 end = Offset(ccx + cr, ccy - cr * 0.8f),
                 strokeWidth = 0.027f * rs
             )
+        }
+    }
+}
+
+    // ---- 天气：抖水珠（前景）+ 冷/暖色调 ----
+    if (scene == QizaiScene.WEATHER) {
+        if (shakeT >= 0f) {
+            val main = placed.find { it.name == "main" }
+            if (main != null) {
+                val qcx = main.left + main.dw / 2f
+                val qcy = main.top + main.dh / 2f
+                val fade = (1f - shakeT / SHAKE_DUR).coerceIn(0f, 1f)
+                for (d in SHAKE_DROPS) {
+                    val x = qcx + d.nx * main.dw + d.vx * h * shakeT
+                    val y = qcy + d.ny * main.dh + d.vy * h * shakeT +
+                            0.52f * h * shakeT * shakeT
+                    drawCircle(
+                        color = Color(175, 200, 225, (200f * fade).toInt().coerceIn(0, 255)),
+                        radius = d.rad,
+                        center = Offset(x, y)
+                    )
+                }
+            }
+        }
+        if (cool > 0.01f) {
+            drawRect(Color(150, 180, 210, (34f * cool).toInt().coerceIn(0, 255)))
+        }
+        if (sun > 0.01f) {
+            val sAlpha = sun
+            // 左上阳光束
+            val rayLen = maxOf(w, h) * 1.6f
+            for (i in 0 until 6) {
+                val a0 = Math.toRadians((18 + i * 14).toDouble())
+                val a1 = Math.toRadians((18 + i * 14 + 6).toDouble())
+                val rayPath = Path().apply {
+                    moveTo(-60f, -60f)
+                    lineTo(
+                        (-60f + rayLen * cos(a0)).toFloat(),
+                        (-60f + rayLen * sin(a0)).toFloat()
+                    )
+                    lineTo(
+                        (-60f + rayLen * cos(a1)).toFloat(),
+                        (-60f + rayLen * sin(a1)).toFloat()
+                    )
+                    close()
+                }
+                drawPath(rayPath, Color(255, 225, 160, (22f * sAlpha).toInt().coerceIn(0, 255)))
+            }
+            // 左上柔光 + 暖色罩
+            drawCircle(
+                color = Color(255, 230, 170, (90f * sAlpha).toInt().coerceIn(0, 255)),
+                radius = w * 0.45f,
+                center = Offset(0f, 0f)
+            )
+            drawRect(Color(255, 210, 130, (26f * sAlpha).toInt().coerceIn(0, 255)))
         }
     }
 }
