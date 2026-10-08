@@ -8,6 +8,11 @@ android {
     namespace = "com.bobot.ailauncher"
     compileSdk = 34
 
+    // v0.52.0 瘦身：全局排除 Material2（material-icons 传递引入，12000+ 类）
+    configurations.all {
+        exclude(group = "androidx.compose.material", module = "material")
+    }
+
     defaultConfig {
         applicationId = "com.bobot.ailauncher"
         minSdk = 29
@@ -89,13 +94,8 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    // v0.52.0 瘦身：material-icons 会传递引入 Material2（12000+ 类），排除之
-    implementation(libs.androidx.compose.material.icons.core) {
-        exclude(group = "androidx.compose.material", module = "material")
-    }
-    implementation(libs.androidx.compose.material.icons.extended) {
-        exclude(group = "androidx.compose.material", module = "material")
-    }
+    implementation(libs.androidx.compose.material.icons.core)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.squareup.okhttp)
     // v0.41.9：隐藏应用入口的生物识别（面部/指纹）
     implementation("androidx.biometric:biometric:1.1.0")
