@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.data.PetMouth
+import com.bobot.ailauncher.data.PetRepository
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
