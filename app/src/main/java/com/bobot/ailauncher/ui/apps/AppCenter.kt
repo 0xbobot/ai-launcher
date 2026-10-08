@@ -1030,7 +1030,8 @@ fun AppCenterContent(
                 // 分区空时不显示按钮（占位保持 rail 居中）
                 Column(
                     modifier = Modifier
-                        .align(Alignment.CenterEnd),
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 70.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -1063,7 +1064,7 @@ fun AppCenterContent(
                         onActiveLetter = glideToLetter,
                         onRelease = stopGlide,
                         forcedActiveIndex = mirrorIndex,
-                        modifier = Modifier.height(480.dp)
+                        modifier = Modifier.height(400.dp)
                     )
                     if (hiddenApps.isNotEmpty()) {
                         Box(
