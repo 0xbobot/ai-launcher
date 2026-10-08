@@ -66,7 +66,7 @@ jobs:
         run: |
           mkdir -p ota
           gh run download "${{ steps.build_run.outputs.run_id }}" \
-            -n ai-launcher-debug-apk -D ota/
+            -n ai-launcher-release-apk -D ota/
           ls -la ota/
 
       - name: Generate update.json from APK metadata
@@ -76,14 +76,14 @@ jobs:
         run: |
           # 版本号从 APK 本体解析（aapt），避免与 build.gradle.kts 不一致导致"假更新"
           BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
-          BADGING=$("$ANDROID_HOME/build-tools/$BT/aapt" dump badging ota/app-debug.apk)
+          BADGING=$("$ANDROID_HOME/build-tools/$BT/aapt" dump badging ota/app-release.apk)
           CODE=$(echo "$BADGING" | grep -oP "versionCode='\K[0-9]+")
           NAME=$(echo "$BADGING" | grep -oP "versionName='\K[^']+")
           echo "APK versionCode=$CODE versionName=$NAME"
           if [ -z "$CODE" ] || [ -z "$NAME" ]; then echo "failed to parse APK version" >&2; exit 1; fi
           # 文件名带版本号：每个版本 URL 唯一，彻底避开各层缓存拿到旧包
           APK_FILE="ai-launcher-v${NAME}.apk"
-          mv ota/app-debug.apk "ota/$APK_FILE"
+          mv ota/app-release.apk "ota/$APK_FILE"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "apk_file=$APK_FILE" >> "$GITHUB_OUTPUT"

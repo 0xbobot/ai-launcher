@@ -37,6 +37,8 @@ android {
             // v0.52.0 瘦身：开混淆+资源压缩
             isMinifyEnabled = true
             isShrinkResources = true
+            // 用项目 debug.keystore 签名，保证与旧版签名一致可覆盖安装
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
