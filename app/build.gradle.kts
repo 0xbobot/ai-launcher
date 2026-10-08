@@ -12,8 +12,10 @@ android {
         applicationId = "com.bobot.ailauncher"
         minSdk = 29
         targetSdk = 34
-        versionCode = 147
-        versionName = "0.51.1"
+        versionCode = 148
+        versionName = "0.52.0"
+        // v0.52.0 瘦身：只保留 arm64-v8a（2026 年 99%+ 手机）
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     // 固定 debug 签名：所有 CI 构建共用 app/debug.keystore（个人实验项目，
@@ -32,7 +34,9 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
-            isMinifyEnabled = false
+            // v0.52.0 瘦身：开混淆+资源压缩
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
