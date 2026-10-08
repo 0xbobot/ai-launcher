@@ -23,19 +23,19 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Build release APK (v0.52.0 瘦身：开混淆)
-        run: gradle :app:assembleRelease --no-daemon
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --no-daemon
 
       - name: Verify APK signature and manifest
         run: |
           BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
           echo "build-tools: $BT"
-          "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
-          "$ANDROID_HOME/build-tools/$BT/aapt" dump badging app/build/outputs/apk/release/app-release.apk | head -8
+          "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/$BT/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | head -8
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ai-launcher-release-apk
-          path: app/build/outputs/apk/release/app-release.apk
+          name: ai-launcher-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
 
