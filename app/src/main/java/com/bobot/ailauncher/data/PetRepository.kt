@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /** 宠物身体状态：对应原型 .pet 的 class */
-enum class PetMood { IDLE, FETCH, SORTING, FILE, HAPPY }
+enum class PetMood { IDLE, FETCH, SORTING, FILE, HAPPY, SHY, DIZZY, SURPRISED }
 
 /** 宠物嘴型：idle 微笑 / happy 大笑 / busy 一字 / o 惊讶 */
 enum class PetMouth { IDLE, HAPPY, BUSY, O }
@@ -89,6 +89,107 @@ object PetRepository {
 
     fun clearSpeech() {
         _speech.value = null
+    }
+
+    // ============ v0.56.0 M2/M3/M4：播报链与时段 ============
+
+    /** M3：同一应用 30 秒内合并——普通消息气泡 */
+    private val lastSayPerApp = mutableMapOf<String, Long>()
+    fun sayApp(appName: String) {
+        val now = System.currentTimeMillis()
+        val last = lastSayPerApp[appName] ?: 0L
+        if (now - last < 30_000L) return // 30 秒内同一应用合并，不重复说
+        lastSayPerApp[appName] = now
+        // M4 深夜：普通消息零播报
+        if (isNight()) return
+        // M3：用户手势中只做 L1（由调用方控制 mood），不抢气泡
+        if (userInteracting.value) {
+            _mood.value = PetMood.FETCH // L1：表情变化即可
+            return
+        }
+        say("$appName 有新消息")
+    }
+
+    /** M3：用户是否正在手势交互（拖拽/抚摸中） */
+    private val _userInteracting = MutableStateFlow(false)
+    val userInteracting: StateFlow<Boolean> get() = _userInteracting.asStateFlow()
+    fun setUserInteracting(v: Boolean) { _userInteracting.value = v }
+
+    /** M4：深夜模式 23:00–06:00 */
+    fun isNight(): Boolean {
+        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return h >= 23 || h < 6
+    }
+
+    /** M4：早晨 6–10 点 */
+    fun isMorning(): Boolean {
+        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return h in 6..10
+    }
+
+    /** M2 抚摸：害羞 + 15% 概率说"舒服"，同会话最多 1 次 */
+    private var pettedSaidComfy = false
+    fun onPetted() {
+        _mood.value = PetMood.SHY
+        _mouth.value = PetMouth.O
+        if (!pettedSaidComfy && kotlin.random.Random.nextFloat() < 0.15f) {
+            pettedSaidComfy = true
+            say("舒服~")
+        }
+        scope.launch {
+            delay(1500)
+            if (_mood.value == PetMood.SHY) {
+                _mood.value = PetMood.IDLE
+                _mouth.value = PetMouth.IDLE
+            }
+        }
+    }
+
+    /** M2 拖拽：提起惊讶 */
+    fun onDragStart() {
+        setUserInteracting(true)
+        _mood.value = PetMood.SURPRISED
+        _mouth.value = PetMouth.O
+    }
+
+    /** M2 拖拽：松手弹跳 + 晕眩 1 秒 */
+    fun onDragEnd() {
+        setUserInteracting(false)
+        _mood.value = PetMood.DIZZY
+        scope.launch {
+            delay(1000)
+            if (_mood.value == PetMood.DIZZY) {
+                _mood.value = PetMood.IDLE
+                _mouth.value = PetMouth.IDLE
+            }
+        }
+    }
+
+    /** M2 点击：开心表情 1.2 秒（不说话） */
+    fun setMoodHappyBrief() {
+        _mood.value = PetMood.HAPPY
+        _mouth.value = PetMouth.HAPPY
+        scope.launch {
+            delay(1200)
+            if (_mood.value == PetMood.HAPPY) {
+                _mood.value = PetMood.IDLE
+                _mouth.value = PetMouth.IDLE
+            }
+        }
+    }
+
+    /** M3 重要消息：惊讶 → 弹跳 → 呈现（Capsule 由调用方 show） */
+    fun onImportantArrived(appName: String) {
+        _mood.value = PetMood.SURPRISED
+        _mouth.value = PetMouth.O
+        scope.launch {
+            delay(400)
+            _mood.value = PetMood.HAPPY // 弹跳
+            delay(600)
+            _mood.value = PetMood.IDLE
+            // 深夜也报重要
+            say("$appName 有重要消息")
+        }
     }
     // v0.49.0：AI Capsule——首页宠物下方的信息卡，一次只说一件最重要的事
     data class AiCapsule(

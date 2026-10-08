@@ -79,6 +79,8 @@ fun PetView(
         .collectAsState()
     // 低电量时强制闭眼（像没电犯困）
     val effectiveSleepy = sleepy || lowPower
+    // v0.56.0 M4 深夜：动作减速 30%（幅度 × 0.7）
+    val nightSlow = if (PetRepository.isNight()) 0.7f else 1f
     // idle 轻微浮动
     val bob by rememberInfiniteTransition(label = "petBob").animateFloat(
         initialValue = 0f,
@@ -104,34 +106,76 @@ fun PetView(
             label = "breathe"
         ).value
     }
-    // P0：眨眼——每 4s 一次，140ms 图片快切（睁眼→闭眼→睁眼）
-    // v0.28.1：低电量时 12s 眨一次（本来就闭眼，少折腾）
+    // P0：眨眼——0.15 秒快闪
+    // v0.56.0 M1：间隔 8 秒 ± 随机 3 秒（5~11 秒），静置不觉得死了也不吵
     var blinkTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(lowPower) {
         while (true) {
-            delay(if (lowPower) 12000 else 4000)
+            val interval = if (lowPower) 12000L
+            else 8000L + (kotlin.random.Random.nextFloat() * 6000L - 3000L).toLong()
+            delay(interval.coerceAtLeast(3000L))
             blinkTick++
-            delay(140)
+            delay(150)
             blinkTick++
         }
     }
     val isBlinking = blinkTick % 2 == 1
+    // v0.56.0 M1 巡看：瞳孔先行、头部延迟 80ms 跟随——用整体轻微左右摆模拟
+    // 瞳孔（快，200ms）→ 头部（慢，延迟 80ms 后 280ms 跟上）
+    var lookDir by remember { mutableStateOf(0f) } // -1 左 / 0 中 / 1 右
+    LaunchedEffect(lowPower) {
+        while (true) {
+            delay(9000 + kotlin.random.Random.nextLong(8000)) // 9~17 秒看一次
+            if (lowPower) continue
+            lookDir = if (kotlin.random.Random.nextBoolean()) 1f else -1f
+            delay(1200) // 停留看 1.2 秒
+            lookDir = 0f
+        }
+    }
+    // 瞳孔先行：快速 200ms 到位
+    val pupilX by animateFloatAsState(
+        targetValue = lookDir * 6f,
+        animationSpec = tween(200, easing = FastOutSlowInEasing),
+        label = "pupilX"
+    )
+    // 头部延迟 80ms 跟随：280ms 到位
+    var headLookDir by remember { mutableStateOf(0f) }
+    LaunchedEffect(lookDir) {
+        delay(80)
+        headLookDir = lookDir
+    }
+    val headX by animateFloatAsState(
+        targetValue = headLookDir * 10f,
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        label = "headX"
+    )
     // P0：点按果冻——按压 120ms 后 spring 回弹（纯视觉反馈）
+    // v0.56.0 M2：非对称果冻 scaleX 1.2 / scaleY 0.8，0.3 秒回弹 + 开心表情，不说话
     var jellyPress by remember { mutableStateOf(false) }
     LaunchedEffect(jellyTick) {
         if (jellyTick > 0) {
             jellyPress = true
+            PetRepository.setUserInteracting(true)
             delay(120)
             jellyPress = false
+            PetRepository.setUserInteracting(false)
         }
     }
-    val jelly by animateFloatAsState(
-        targetValue = if (jellyPress) 0.88f else 1f,
+    val jellyX by animateFloatAsState(
+        targetValue = if (jellyPress) 1.2f else 1f,
         animationSpec = spring(
-            dampingRatio = 0.35f,
+            dampingRatio = 0.4f,
             stiffness = Spring.StiffnessMedium
         ),
-        label = "jelly"
+        label = "jellyX"
+    )
+    val jellyY by animateFloatAsState(
+        targetValue = if (jellyPress) 0.8f else 1f,
+        animationSpec = spring(
+            dampingRatio = 0.4f,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "jellyY"
     )
 
     val targetX = if (mood == PetMood.FILE) 104f else 0f
@@ -156,10 +200,14 @@ fun PetView(
         label = "petScale"
     )
 
+    // v0.56.0 M2：SHY 害羞 / DIZZY 晕眩 / SURPRISED 惊讶（用现有图近似，表情靠说话+动作传达）
     val baseResId = when {
         effectiveSleepy || mood == PetMood.IDLE -> R.drawable.meteor_main
         mood == PetMood.HAPPY -> R.drawable.meteor_jump
         mood == PetMood.FILE -> R.drawable.meteor_hold
+        mood == PetMood.SHY -> R.drawable.meteor_main // 害羞：站立 + 腮红 overlay
+        mood == PetMood.DIZZY -> R.drawable.meteor_main // 晕眩：站立 + 旋转
+        mood == PetMood.SURPRISED -> R.drawable.meteor_wave // 惊讶：挥手（手举起）
         else -> R.drawable.meteor_wave // SORTING / FETCH
     }
     // 眨眼时切主图闪一下（140ms）；低电量时本来就待机态，不眨了
@@ -203,18 +251,43 @@ fun PetView(
     val loopRot = when {
         lowPower -> 0f
         mood == PetMood.HAPPY -> 0f // 开心用小跳，不转
-        mood == PetMood.IDLE || effectiveSleepy -> sin(loopTheta) * 2.5f
-        mood == PetMood.FILE -> sin(loopTheta) * 3f
-        else -> sin(loopTheta) * 5f // SORTING / FETCH 挥手摆动
+        mood == PetMood.IDLE || effectiveSleepy -> sin(loopTheta) * 2.5f * nightSlow
+        mood == PetMood.FILE -> sin(loopTheta) * 3f * nightSlow
+        else -> sin(loopTheta) * 5f * nightSlow // SORTING / FETCH 挥手摆动
     }
     val loopYdp = when {
         lowPower -> 0f
-        mood == PetMood.HAPPY -> -abs(sin(loopTheta)) * 8f // 开心小跳，只往上，落点回 0
+        mood == PetMood.HAPPY -> -abs(sin(loopTheta)) * 8f * nightSlow // 开心小跳，只往上，落点回 0
         else -> 0f
     }
 
-    // v0.26.0：拖拽——<40dp 范围内跟手，松手 spring 回弹（纯玩）
+    // v0.56.0 M2 晕眩：松手后转 2 圈（1 秒）
+    var dizzySpin by remember { mutableStateOf(false) }
+    LaunchedEffect(mood) {
+        if (mood == PetMood.DIZZY) {
+            dizzySpin = true
+            delay(1000)
+            dizzySpin = false
+        }
+    }
+    val dizzyRot by animateFloatAsState(
+        targetValue = if (dizzySpin) 720f else 0f,
+        animationSpec = tween(1000, easing = FastOutSlowInEasing),
+        label = "dizzyRot"
+    )
+    // v0.56.0 M2 害羞轻颤：高频小幅抖动
+    val shyTremble by rememberInfiniteTransition(label = "shyTremble").animateFloat(
+        initialValue = -2f,
+        targetValue = 2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(90, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shyTrembleVal"
+    )
     var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    // v0.56.0 M2：拖拽状态
+    var isDragging by remember { mutableStateOf(false) }
     val dragX by animateFloatAsState(
         targetValue = dragOffset.x,
         animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
@@ -232,6 +305,12 @@ fun PetView(
         modifier = Modifier
             .pointerInput(Unit) {
                 detectDragGestures(
+                    onDragStart = {
+                        // v0.56.0 M2：提起惊讶 + 播报让行
+                        isDragging = true
+                        PetRepository.onDragStart()
+                        PetRepository.say("借过借过~")
+                    },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         val newX = dragOffset.x + dragAmount.x
@@ -248,22 +327,33 @@ fun PetView(
                         }
                     },
                     onDragEnd = {
-                        // 松手回弹
+                        // v0.56.0 M2：松手弹跳 + 晕眩 1 秒
+                        isDragging = false
                         dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                        PetRepository.onDragEnd()
                     },
                     onDragCancel = {
+                        isDragging = false
                         dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                        PetRepository.onDragEnd()
                     }
                 )
             }
             .then(modifier)
             .graphicsLayer {
-                translationX = with(density) { offX.dp.toPx() } + dragX
+                // v0.56.0 M1 巡看：瞳孔 6px 先行 + 头部 10px 延迟跟随
+                // v0.56.0 M2 害羞轻颤
+                val tremble = if (mood == PetMood.SHY) shyTremble else 0f
+                translationX = with(density) { offX.dp.toPx() } + dragX + pupilX + headX + tremble
                 translationY = with(density) { (offY + bob * moodM + loopYdp * moodM).dp.toPx() } + dragY
-                rotationZ = (tilt + loopRot) * moodM
-                val s = if (inScene) jelly else scale * breathe * jelly * posePop
-                scaleX = s
-                scaleY = s
+                // v0.56.0 M2 晕眩旋转
+                rotationZ = (tilt + loopRot) * moodM + dizzyRot
+                // v0.56.0 M2：非对称果冻
+                val jx = if (inScene) 1f else jellyX
+                val jy = if (inScene) 1f else jellyY
+                val s = scale * breathe * posePop
+                scaleX = s * jx
+                scaleY = s * jy
             }
     ) {
         if (!inScene) {
@@ -279,6 +369,25 @@ fun PetView(
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize()
                 )
+            }
+            // v0.56.0 M2 害羞腮红：两坨粉色椭圆
+            if (mood == PetMood.SHY) {
+                androidx.compose.foundation.Canvas(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    val w = size.width
+                    val h = size.height
+                    drawOval(
+                        color = androidx.compose.ui.graphics.Color(255, 150, 150, 180),
+                        topLeft = androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.42f),
+                        size = androidx.compose.ui.geometry.Size(w * 0.12f, h * 0.07f)
+                    )
+                    drawOval(
+                        color = androidx.compose.ui.graphics.Color(255, 150, 150, 180),
+                        topLeft = androidx.compose.ui.geometry.Offset(w * 0.70f, h * 0.42f),
+                        size = androidx.compose.ui.geometry.Size(w * 0.12f, h * 0.07f)
+                    )
+                }
             }
         } else {
             // v0.43.0：场景动画接管本体渲染

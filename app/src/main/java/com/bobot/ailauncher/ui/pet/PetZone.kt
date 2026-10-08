@@ -20,6 +20,9 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.awaitPointerEvent
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
@@ -135,12 +138,13 @@ fun PetZone(
     // v0.43.0：七仔场景演示——点按循环 WAVE→READING→WORKING；新通知到达自动进 READING
     var demoScene by remember { mutableStateOf(QizaiScene.NONE) }
     // v0.51.0：新通知 → 七仔看手机 + 开口（徽标已删，消息统一进 Today）
+    // v0.56.0 M3：改用 sayApp（同一应用 30 秒合并 + 深夜/手势中降级）
     LaunchedEffect(deliverTick) {
         if (deliverTick > 0) {
             demoScene = QizaiScene.READING // 新通知 → 七仔拿起手机看
             // 七仔开口——只报应用名，不念内容（守门人分寸）
             deliverApp?.let { app ->
-                PetRepository.say("$app 有新消息")
+                PetRepository.sayApp(app)
             }
         }
     }
@@ -204,11 +208,14 @@ fun PetZone(
     }
 
     // 早晨简报：6-10 点首次进入播一次今日天气
+    // v0.56.0 M4：先挥手打招呼（WAVE），再播天气
     LaunchedEffect(Unit) {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val today = todayStr()
         if (hour in 6..10 && morningBriefedDate != today) {
             morningBriefedDate = today
+            demoScene = QizaiScene.WAVE // 伸懒腰+挥手打招呼
+            delay(2600) // 等挥手播完
             val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
             if (w != null) {
                 lastWeatherDesc = w.desc
@@ -286,15 +293,7 @@ fun PetZone(
     // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
     var jellyTick by remember { mutableIntStateOf(0) }
 
-    // 定时眨眼
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(4100)
-            blinking = true
-            delay(150)
-            blinking = false
-        }
-    }
+    // v0.56.0 M1：眨眼已移入 PetView（8 秒 ± 3 秒随机），此处删除旧定时器
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -372,8 +371,9 @@ fun PetZone(
                         .padding(top = 2.dp)
                 )
             }
-            // 宠物本体
-            PetView(
+    // v0.56.0 M2 抚摸：长按 + 滑动 = 抚摸（害羞+腮红+轻颤）
+    var pettedThisGesture by remember { mutableStateOf(false) }
+    PetView(
                 mood = mood,
                 mouth = mouth,
                 blinking = blinking,
@@ -389,18 +389,64 @@ fun PetZone(
                         else Modifier.fillMaxWidth().height(134.dp)
                     )
                     .weatherMotion(weatherDesc)
+                    // v0.56.0 M2：抚摸检测（长按后滑动）
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            var isLongPress = false
+                            var petted = false
+                            try {
+                                withTimeout(500) {
+                                    waitForUpOrCancellation()
+                                }
+                            } catch (e: TimeoutCancellationException) {
+                                isLongPress = true
+                            }
+                            if (isLongPress) {
+                                // 长按后等待滑动
+                                var totalMoved = 0f
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull() ?: break
+                                    if (change.pressed) {
+                                        totalMoved += change.positionChange().getDistance()
+                                        change.consume()
+                                        // 滑动超过 30px = 抚摸
+                                        if (totalMoved > 30f && !petted) {
+                                            petted = true
+                                            pettedThisGesture = true
+                                            PetRepository.setUserInteracting(true)
+                                            PetRepository.onPetted()
+                                        }
+                                    } else {
+                                        break
+                                    }
+                                }
+                                if (petted) {
+                                    PetRepository.setUserInteracting(false)
+                                }
+                            }
+                        }
+                    }
                     .combinedClickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
                         onClick = {
                             // v0.50.0：Today 已在首屏，点按宠物只做果冻反馈
                             // 场景改由真实事件触发（天气/通知/日程）
+                            // v0.56.0 M2：开心表情，不说话
                             if (hasUpgrade) onUpgradeTap()
                             else {
                                 jellyTick++
+                                PetRepository.setMoodHappyBrief()
                             }
                         },
                         onLongClick = {
+                            // v0.56.0 M2：抚摸过的手势不触发天气刷新
+                            if (pettedThisGesture) {
+                                pettedThisGesture = false
+                                return@combinedClickable
+                            }
                             // v0.46.0：长按手动刷新天气——拉最新数据并播对应场景
                             scope.launch {
                                 val w = withContext(Dispatchers.IO) {
@@ -493,7 +539,22 @@ fun PetZone(
             }
         }
         // v0.50.0：TODAY 直接放首屏
-        TodaySection()
+        // v0.56.0 M5：坐卡关联——TODAY 包成磨砂卡，七仔"坐"在上面（卡片上移 30dp 压住宠物底部）
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .offset(y = (-30).dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = Color.White.copy(alpha = 0.72f)
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        ) {
+            // 顶部留出七仔坐的位置
+            Box(modifier = Modifier.height(20.dp))
+            TodaySection()
+        }
     }
 }
 
