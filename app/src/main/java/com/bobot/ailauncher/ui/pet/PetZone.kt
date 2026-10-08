@@ -388,8 +388,8 @@ fun PetZone(
                         else Modifier.fillMaxWidth().height(134.dp)
                     )
                     .weatherMotion(weatherDesc)
-                    // v0.56.0 M2：抚摸检测（长按后滑动）
-                    .pointerInput(Unit) {
+                    // v0.56.0 M2：抚摸检测暂时禁用（排查编译问题）
+                    /*.pointerInput(Unit) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             var isLongPress = false
@@ -402,7 +402,6 @@ fun PetZone(
                                 isLongPress = true
                             }
                             if (isLongPress) {
-                                // 长按后等待滑动
                                 var totalMoved = 0f
                                 while (true) {
                                     val event = awaitPointerEvent()
@@ -410,7 +409,6 @@ fun PetZone(
                                     if (change.pressed) {
                                         totalMoved += change.positionChange().getDistance()
                                         change.consume()
-                                        // 滑动超过 30px = 抚摸
                                         if (totalMoved > 30f && !petted) {
                                             petted = true
                                             pettedThisGesture = true
@@ -426,7 +424,7 @@ fun PetZone(
                                 }
                             }
                         }
-                    }
+                    }*/
                     .combinedClickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
