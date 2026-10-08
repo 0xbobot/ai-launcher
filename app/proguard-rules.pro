@@ -15,8 +15,9 @@
 -keep class okio.** { *; }
 
 # Compose：按包精确保留，排除 Material2（androidx.compose.material）
-# icons 子包保留（17 个图标），父包 Material2 组件剥离
--keep class androidx.compose.material.icons.** { *; }
+# icons 由 R8 按引用自动保留（17 个），不整包 keep
+-keep class androidx.compose.material.icons.Icons { *; }
+-keep class androidx.compose.material.icons.Icons$* { *; }
 -keep class androidx.compose.material3.** { *; }
 -keep class androidx.compose.foundation.** { *; }
 -keep class androidx.compose.ui.** { *; }
