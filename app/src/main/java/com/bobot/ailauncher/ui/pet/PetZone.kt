@@ -388,7 +388,7 @@ fun PetZone(
                     .weatherMotion(weatherDesc)
                     // v0.56.0 M2：抚摸检测（长按 500ms 后滑动 30px）
                     .pointerInput(Unit) {
-                        while (true) {
+                        awaitEachGesture {
                             val down = awaitFirstDown()
                             val downTime = System.currentTimeMillis()
                             var petted = false
