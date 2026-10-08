@@ -375,7 +375,7 @@ object PetRepository {
 
     private suspend fun runSequence(item: PetItem) {
         if (busy) {
-            _toast.emit("等它忙完手头这件…")
+            // v0.51.3：Toast 已删除：_toast.emit("等它忙完手头这件…")
             return
         }
         busy = true
@@ -416,10 +416,10 @@ object PetRepository {
         _mouth.value = PetMouth.HAPPY
         _presented.value = item
         _cardArmed.value = false
+        // v0.51.3：Toast 已删除
+        // 小弹跳
+        _mood.value = PetMood.HAPPY
         scope.launch {
-            _toast.emit("呈现一次 · 8 秒没理它会被收走")
-            // 小弹跳
-            _mood.value = PetMood.HAPPY
             delay(400)
             if (_mood.value == PetMood.HAPPY && _presented.value?.id == item.id) {
                 _mood.value = PetMood.IDLE
@@ -445,11 +445,7 @@ object PetRepository {
         _mouth.value = PetMouth.BUSY
         _mood.value = PetMood.FILE
         scope.launch {
-            // v0.51.1：右侧标签已删，消息统一进 Today
-            _toast.emit(
-                if (item.isBatchSummary) "${toFile.size} 条已记入 Today"
-                else "已记入 Today"
-            )
+            // v0.51.3：Toast 已全部删除
             delay(700)
             _mood.value = PetMood.IDLE
             _mouth.value = PetMouth.IDLE
@@ -462,7 +458,7 @@ object PetRepository {
         if (_presented.value == null) return
         autoFileJob?.cancel()
         _cardArmed.value = true
-        scope.launch { _toast.emit("下一步操作出现了") }
+        // v0.51.3：Toast 已全部删除，改用七仔说话
     }
 
     /** 标签右滑：推出屏幕，直接完成清空整个分类 */
@@ -501,9 +497,10 @@ object PetRepository {
         _mood.value = PetMood.HAPPY
         _mouth.value = PetMouth.HAPPY
         addAffection(1)
+        // v0.51.3：Toast 改用七仔说话
+        say(if (how != null) "已${how}" else "搞定")
         scope.launch {
-            _toast.emit(if (how != null) "已${how} ✓" else "搞定！亲密度 +1 ♥")
-            delay(550)
+            delay(1200)
             _mood.value = PetMood.IDLE
             _mouth.value = PetMouth.IDLE
             busy = false
