@@ -155,6 +155,22 @@ fun AppCenterContent(
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
     var refreshTick by remember { mutableIntStateOf(0) }
+    // v0.55.2（Bob）：监听应用安装/卸载，刷新列表
+    DisposableEffect(context) {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
+                refreshTick++
+            }
+        }
+        val filter = android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_PACKAGE_ADDED)
+            addAction(android.content.Intent.ACTION_PACKAGE_REMOVED)
+            addAction(android.content.Intent.ACTION_PACKAGE_REPLACED)
+            addDataScheme("package")
+        }
+        context.registerReceiver(receiver, filter)
+        onDispose { context.unregisterReceiver(receiver) }
+    }
     // v0.40.0：长按 → 真弹窗快捷菜单（与 Dock 长按同一套 AppPopupMenu，替代 bottom sheet）
     var popupApp by remember { mutableStateOf<AppInfo?>(null) }
     // v0.40.2：惯用手设置已删除；右侧一条可见 rail + 左侧隐形触发区，左右手都可操作
@@ -739,7 +755,8 @@ fun AppCenterContent(
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dockDragOffsetY += dragAmount.y
-                                                val rowH = with(density) { 64.dp.toPx() }
+                                                // v0.55.2：行高 64dp + 2dp 间距 = 66dp
+                                                val rowH = with(density) { 66.dp.toPx() }
                                                 val curIdx = dockOrder.indexOfFirst {
                                                     it.packageName == app.packageName
                                                 }
@@ -1036,6 +1053,7 @@ fun AppCenterContent(
                     verticalArrangement = Arrangement.Center
                 ) {
                     // v0.43.3（Bob）：★/眼是字母导航的一部分——同宽(44dp)、同节奏(24dp 高)，不隔开
+                    // v0.55.2（Bob）：点击加震动，和字母导航一致
                     if (dockApps.isNotEmpty()) {
                         Box(
                             modifier = Modifier
@@ -1045,6 +1063,7 @@ fun AppCenterContent(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                         scope.launch { listState.animateScrollToItem(0) }
                                     }
                                 ),
@@ -1075,6 +1094,7 @@ fun AppCenterContent(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                         scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
                                     }
                                 ),
