@@ -34,9 +34,9 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
-            // v0.52.0 瘦身：开混淆+资源压缩
+            // v0.52.0 瘦身：开混淆（资源压缩暂关，先验证代码混淆）
             isMinifyEnabled = true
-            isShrinkResources = true
+            isShrinkResources = false
             // 用项目 debug.keystore 签名，保证与旧版签名一致可覆盖安装
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
