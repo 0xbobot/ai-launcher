@@ -30,9 +30,17 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("debug")
+            // v0.53.0 瘦身验证：debug 上开 R8 测试（lint 已修），确认能过再切 release
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
         release {
-            isMinifyEnabled = false
+            // v0.53.0 瘦身重试：lint 已修，验证 R8 是否能过（资源压缩暂关）
+            isMinifyEnabled = true
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -84,6 +92,8 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    // lint 误报 Fragment 版本（MainActivity 通知权限）：显式声明压住
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
