@@ -20,8 +20,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.withTimeout
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
@@ -388,43 +386,29 @@ fun PetZone(
                         else Modifier.fillMaxWidth().height(134.dp)
                     )
                     .weatherMotion(weatherDesc)
-                    // v0.56.0 M2：抚摸检测暂时禁用（排查编译问题）
-                    /*.pointerInput(Unit) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            var isLongPress = false
+                    // v0.56.0 M2：抚摸检测（长按 500ms 后滑动 30px）
+                    .pointerInput(Unit) {
+                        while (true) {
+                            val down = awaitFirstDown()
+                            val downTime = System.currentTimeMillis()
                             var petted = false
-                            try {
-                                withTimeout(500) {
-                                    waitForUpOrCancellation()
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                if (!change.pressed) break
+                                val elapsed = System.currentTimeMillis() - downTime
+                                val moved = (change.position - down.position).getDistance()
+                                if (elapsed > 500 && moved > 30f && !petted) {
+                                    petted = true
+                                    pettedThisGesture = true
+                                    PetRepository.setUserInteracting(true)
+                                    PetRepository.onPetted()
                                 }
-                            } catch (e: TimeoutCancellationException) {
-                                isLongPress = true
+                                if (petted) change.consume()
                             }
-                            if (isLongPress) {
-                                var totalMoved = 0f
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull() ?: break
-                                    if (change.pressed) {
-                                        totalMoved += change.positionChange().getDistance()
-                                        change.consume()
-                                        if (totalMoved > 30f && !petted) {
-                                            petted = true
-                                            pettedThisGesture = true
-                                            PetRepository.setUserInteracting(true)
-                                            PetRepository.onPetted()
-                                        }
-                                    } else {
-                                        break
-                                    }
-                                }
-                                if (petted) {
-                                    PetRepository.setUserInteracting(false)
-                                }
-                            }
+                            if (petted) PetRepository.setUserInteracting(false)
                         }
-                    }*/
+                    }
                     .combinedClickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
