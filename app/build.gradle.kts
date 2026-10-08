@@ -8,17 +8,12 @@ android {
     namespace = "com.bobot.ailauncher"
     compileSdk = 34
 
-    // v0.52.0 瘦身：全局排除 Material2（material-icons 传递引入，12000+ 类）
-    configurations.all {
-        exclude(group = "androidx.compose.material", module = "material")
-    }
-
     defaultConfig {
         applicationId = "com.bobot.ailauncher"
         minSdk = 29
         targetSdk = 34
         versionCode = 148
-        versionName = "0.52.0"
+        versionName = "0.51.2"
     }
 
     // 固定 debug 签名：所有 CI 构建共用 app/debug.keystore（个人实验项目，

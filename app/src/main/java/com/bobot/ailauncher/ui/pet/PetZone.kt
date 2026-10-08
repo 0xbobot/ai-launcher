@@ -274,11 +274,8 @@ fun PetZone(
                     secondaryAction = "稍后"
                 )
             )
-            // 走整理员流程 + 15 分钟内进会议临近
-            PetRepository.handleIncomingCalendar(upcoming.title, upcoming.begin, upcoming.location)
-            if (upcoming.begin in (now + 1)..(now + 15 * 60 * 1000)) {
-                PetRepository.setMeetingSoon(title)
-            }
+            // v0.51.2：日历只走 Capsule + TODAY，不再走整理员（避免 5 重重复）
+            // 15 分钟内的会议临近黄条也删掉，Capsule 已覆盖
         }
         checkCalendar() // 首次立即查一次
         while (true) {
@@ -364,19 +361,7 @@ fun PetZone(
                         .padding(top = 8.dp)
                 )
             }
-            // v0.29.0：会议临近——七仔头顶会议提醒
-            if (meetingSoon != null) {
-                Text(
-                    text = "15 分钟后：$meetingSoon",
-                    fontSize = 11.sp,
-                    color = AILauncherColors.Title,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 52.dp)
-                        .background(Color(0xFFFFE9A8), RoundedCornerShape(99.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                )
-            }
+            // v0.51.2：会议临近黄条已删（Capsule 已覆盖，避免重复）
             // v0.47.0：七仔说话气泡——统一信息区（Mii 风+游戏化），有话就弹出来
             if (speech != null) {
                 SpeechBubble(
