@@ -207,7 +207,9 @@ internal fun WaveRail(
                         // v0.41.0（B 方案）：更细更淡
                         // v0.41.2：提示灰在透壁纸上对比度不够（Bob：看不清）→
                         // 深色 60%，字重保持常规，波浪交互不变
+                        // v0.55.3（Bob）：G/S 底部被截断——显式 lineHeight 给足字高
                         fontSize = 11.sp,
+                        lineHeight = 14.sp,
                         color = AILauncherColors.Title.copy(alpha = 0.6f),
                         fontWeight = FontWeight.Normal,
                         maxLines = 1,

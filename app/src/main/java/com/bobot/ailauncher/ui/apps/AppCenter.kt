@@ -169,7 +169,12 @@ fun AppCenterContent(
             addAction(android.content.Intent.ACTION_PACKAGE_REPLACED)
             addDataScheme("package")
         }
-        context.registerReceiver(receiver, filter)
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            context.registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            context.registerReceiver(receiver, filter)
+        }
         onDispose { context.unregisterReceiver(receiver) }
     }
     // v0.40.0：长按 → 真弹窗快捷菜单（与 Dock 长按同一套 AppPopupMenu，替代 bottom sheet）
@@ -670,17 +675,17 @@ fun AppCenterContent(
                                 .zIndex(if (isDockDragging) 1f else 0f)
                                 .offset { IntOffset(0, if (isDockDragging) dockDragOffsetY.roundToInt() else 0) }
                         ) {
-                            if (index == 0) {
-                                Icon(
-                                    imageVector = Icons.Filled.Star,
-                                    contentDescription = null,
-                                    tint = AILauncherColors.Title.copy(alpha = 0.14f),
-                                    modifier = Modifier
-                                        .align(Alignment.CenterStart)
-                                        .padding(start = 20.dp)
-                                        .size(36.dp)
-                                )
-                            }
+                            // v0.55.3（Bob）：幽灵常驻（alpha=0 占位），避免 index 变化时子项增减
+                            // 导致拖动手柄的 pointerInput 重建、手势取消、顺序没保存
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = null,
+                                tint = AILauncherColors.Title.copy(alpha = if (index == 0) 0.14f else 0f),
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .padding(start = 20.dp)
+                                    .size(36.dp)
+                            )
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -887,17 +892,15 @@ fun AppCenterContent(
                         // v0.41.32：幽灵眼与第一行同行
                         itemsIndexed(hiddenApps, key = { _, app -> "h:${app.packageName}" }) { index, app ->
                             Box(modifier = Modifier.fillMaxWidth()) {
-                                if (index == 0) {
-                                    Icon(
-                                        imageVector = Icons.Filled.VisibilityOff,
-                                        contentDescription = null,
-                                        tint = AILauncherColors.Title.copy(alpha = 0.14f),
-                                        modifier = Modifier
-                                            .align(Alignment.CenterStart)
-                                            .padding(start = 20.dp)
-                                            .size(36.dp)
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Filled.VisibilityOff,
+                                    contentDescription = null,
+                                    tint = AILauncherColors.Title.copy(alpha = if (index == 0) 0.14f else 0f),
+                                    modifier = Modifier
+                                        .align(Alignment.CenterStart)
+                                        .padding(start = 20.dp)
+                                        .size(36.dp)
+                                )
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
