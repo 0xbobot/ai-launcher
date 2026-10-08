@@ -84,6 +84,8 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    // lint 误报 Fragment 版本（MainActivity 通知权限）：显式声明压住
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
