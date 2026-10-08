@@ -30,9 +30,17 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("debug")
+            // v0.53.0 瘦身验证：debug 上开 R8 测试（lint 已修），确认能过再切 release
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
         release {
-            isMinifyEnabled = false
+            // v0.53.0 瘦身重试：lint 已修，验证 R8 是否能过（资源压缩暂关）
+            isMinifyEnabled = true
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
