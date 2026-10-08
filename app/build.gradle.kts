@@ -32,10 +32,7 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
-            // v0.52.0 瘦身：CI 上 R8 失败，回退到不混淆（靠 ABI 过滤+图标瘦身）
             isMinifyEnabled = false
-            // 用项目 debug.keystore 签名，保证与旧版签名一致可覆盖安装
-            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -92,8 +89,13 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons.core)
-    implementation(libs.androidx.compose.material.icons.extended)
+    // v0.52.0 瘦身：material-icons 会传递引入 Material2（12000+ 类），排除之
+    implementation(libs.androidx.compose.material.icons.core) {
+        exclude(group = "androidx.compose.material", module = "material")
+    }
+    implementation(libs.androidx.compose.material.icons.extended) {
+        exclude(group = "androidx.compose.material", module = "material")
+    }
     implementation(libs.squareup.okhttp)
     // v0.41.9：隐藏应用入口的生物识别（面部/指纹）
     implementation("androidx.biometric:biometric:1.1.0")
