@@ -47,6 +47,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -1216,7 +1220,13 @@ private fun TodaySection(
                     },
                     contentPadding = PaddingValues(4.dp)
                 ) {
-                    Text(text = if (weatherVisible) "👁" else "🚫", fontSize = 16.sp)
+                    // v0.62.2：统一用 Material Icons
+                    Icon(
+                        imageVector = if (weatherVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        contentDescription = if (weatherVisible) "隐藏天气" else "显示天气",
+                        tint = if (weatherVisible) Color(0xFF57534E) else Color(0xFFD6D3D1),
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
                 TextButton(onClick = { editMode = false }) {
                     Text(text = "完成", fontSize = 14.sp, color = Color(0xFF3B82F6))
@@ -1504,11 +1514,19 @@ private fun SectionFrame(
             .zIndex(if (isDragging) 1f else 0f)
             .alpha(if (visible) 1f else 0.4f)
     ) {
+        Column {
+            // v0.62.2：编辑模式加区块标题（知道在排什么）
+            Text(
+                text = section.label,
+                fontSize = 13.sp,
+                color = Color(0xFF8E8E93),
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
         Row(verticalAlignment = Alignment.Top) {
             // 拖拽手柄
             Box(
                 modifier = Modifier
-                    .padding(top = 10.dp, end = 2.dp)
+                    .padding(top = 2.dp, end = 2.dp)
                     .pointerInput(section) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { onDragStart() },
@@ -1524,14 +1542,20 @@ private fun SectionFrame(
                 Text(text = "⋮⋮", fontSize = 16.sp, color = Color(0xFFA8A29E))
             }
             Box(modifier = Modifier.weight(1f)) { content() }
-            // 显隐开关
+            // 显隐开关——v0.62.2：统一用 Material Icons（Visibility/VisibilityOff）
             TextButton(
                 onClick = { onToggleVisible(!visible) },
                 contentPadding = PaddingValues(4.dp),
-                modifier = Modifier.padding(top = 4.dp)
+                modifier = Modifier.padding(top = 0.dp)
             ) {
-                Text(text = if (visible) "👁" else "🚫", fontSize = 18.sp)
+                Icon(
+                    imageVector = if (visible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = if (visible) "隐藏" else "显示",
+                    tint = if (visible) Color(0xFF57534E) else Color(0xFFD6D3D1),
+                    modifier = Modifier.size(20.dp)
+                )
             }
+        }
         }
     }
 }
