@@ -25,6 +25,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -548,7 +549,8 @@ fun PetZone(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .offset(y = (-30).dp),
+                .offset(y = (-30).dp)
+                .heightIn(min = 120.dp), // v0.62.1：空态时不缩成一条线
             shape = RoundedCornerShape(28.dp),
             colors = CardDefaults.cardColors(
                 containerColor = Color.White.copy(alpha = 0.65f)
@@ -1128,7 +1130,7 @@ private fun TodaySection(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 40.dp, vertical = 12.dp),
+            .padding(horizontal = 40.dp, vertical = 20.dp), // v0.62.1：纵向呼吸感 12→20dp
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         // 分割线 + TODAY 标题 + 天气小 pill（右上角）
@@ -1223,6 +1225,14 @@ private fun TodaySection(
                 }
             }
         }
+        // v0.62.1：空态判断——任一可见区块有内容即非空
+        // NEXT 有内容 = 未授权（显示授权按钮）或有下一个事件
+        val nextHasContent = !hasCalPermission || nextEvent != null
+        val msgHasContent = recentMsgs.isNotEmpty()
+        val todoHasContent = todos.isNotEmpty()
+        val anyVisibleContent = (TodaySection.NEXT in visibleSections && nextHasContent) ||
+            (TodaySection.MSG in visibleSections && msgHasContent) ||
+            (TodaySection.TODO in visibleSections && todoHasContent)
         // v0.62.0：区块排序 + 编辑模式（长按标题栏进入）
         val toShowSections = if (editMode) sectionOrder else sectionOrder.filter { it in visibleSections }
         toShowSections.forEach { section ->
@@ -1443,6 +1453,24 @@ private fun TodaySection(
                         }
                     }
                 }
+            }
+        }
+        // v0.62.1：空态——可见区块都无内容时显示（编辑模式不显示）
+        if (!editMode && !anyVisibleContent) {
+            val hour = java.util.Calendar.getInstance()
+                .get(java.util.Calendar.HOUR_OF_DAY)
+            val isNight = hour >= 22 || hour < 6
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (isNight) "今晚无事，好好休息 🌙" else "今日暂无安排",
+                    fontSize = 13.sp,
+                    color = Color(0xFFA8A29E)
+                )
             }
         }
     }
