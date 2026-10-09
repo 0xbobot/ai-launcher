@@ -83,6 +83,7 @@ fun PullUpDock(
     state: DockState,
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
+    onD3SwipeUpToHome: () -> Unit,
     onHideDockRequest: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
@@ -91,6 +92,7 @@ fun PullUpDock(
     val density = LocalDensity.current
     val onStateChangeState = rememberUpdatedState(onStateChange)
     val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
+    val onD3SwipeUpToHomeState = rememberUpdatedState(onD3SwipeUpToHome)
     val onHideDockRequestState = rememberUpdatedState(onHideDockRequest)
 
     val allApps = remember {
@@ -164,10 +166,15 @@ fun PullUpDock(
                 val sysGestureBottomPx = WindowInsets.systemGestures.getBottom(density)
                 val dockBottomPadPx = with(density) { 16.dp.toPx() }
                 // v0.27.1：去底（Bob 选一）——图标直接浮在壁纸上，无卡片无阴影
+                // v0.57.0：长按 Dock → 隐藏（与 D1 右滑并存）
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { onHideDockRequestState.value() }
+                        )
                         .pointerInput(state, sysGestureBottomPx, dockBottomPadPx) {
                             var accumX = 0f
                             var accumY = 0f
@@ -193,11 +200,12 @@ fun PullUpDock(
                                     val ax = abs(accumX)
                                     val ay = abs(accumY)
                                     val go = onStateChangeState.value
-                                    // v0.27.3：上滑优先（Bob：不管什么状态，上滑都开 D3）
-                                    // 斜向上滑不再被误判为右滑（D2→D1）
+                                    // v0.57.0：上滑 → D3 开应用中心；已在 D3 时上滑 → 回桌面主页
+                                    //（Bob：任何时候从底部上滑都要能回桌面主页）
                                     if (ay > vThreshPx && accumY < 0) {
                                         fired = true
-                                        go(DockState.D3) // 上滑 → 全屏应用中心
+                                        if (state == DockState.D3) onD3SwipeUpToHomeState.value()
+                                        else go(DockState.D3)
                                     } else if (ax > hThreshPx && ax >= ay) {
                                         fired = true
                                         if (accumX < 0) {

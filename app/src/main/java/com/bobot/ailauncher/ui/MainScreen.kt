@@ -112,9 +112,23 @@ fun MainScreen() {
         composable("home") {
             HomeHost(
                 dockState = effectiveDockState,
-                onOpenAppDrawer = { goDock(DockState.D3) },
+                // v0.57.0：Dock 隐藏时上滑 → 先叫回 Dock；否则上滑开 D3
+                onOpenAppDrawer = {
+                    if (!dockVisible) setDockVisibleAndRestore(true)
+                    else goDock(DockState.D3)
+                },
                 onStateChange = { goDock(it) },
                 onD3SwipeRight = { goDock(DockState.D2, fromD3SwipeRight = true) },
+                // v0.57.0：D3 上滑回主页——Dock 没隐藏时回记住的行数，隐藏时保持隐藏
+                onD3SwipeUpToHome = {
+                    if (dockVisible) {
+                        val remembered =
+                            if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1
+                        goDock(remembered)
+                    } else {
+                        dockState = DockState.Hidden
+                    }
+                },
                 onHideDockRequest = { requestHideDock() },
                 onOpenSettings = { navController.navigate("settings") },
                 showHideDockDialog = showHideDockDialog,
@@ -128,9 +142,7 @@ fun MainScreen() {
         }
         composable("settings") {
             SettingsScreen(
-                onBack = { navController.popBackStack() },
-                dockVisible = dockVisible,
-                onDockVisibleChange = { setDockVisibleAndRestore(it) }
+                onBack = { navController.popBackStack() }
             )
         }
     }
@@ -142,6 +154,7 @@ private fun HomeHost(
     onOpenAppDrawer: () -> Unit,
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
+    onD3SwipeUpToHome: () -> Unit,
     onHideDockRequest: () -> Unit,
     onOpenSettings: () -> Unit,
     showHideDockDialog: Boolean,
@@ -177,6 +190,7 @@ private fun HomeHost(
             state = dockState,
             onStateChange = onStateChange,
             onD3SwipeRight = onD3SwipeRight,
+            onD3SwipeUpToHome = onD3SwipeUpToHome,
             onHideDockRequest = onHideDockRequest,
             onOpenSettings = onOpenSettings
         )
@@ -200,7 +214,7 @@ private fun HomeHost(
                 text = {
                     Column {
                         Text(
-                            text = "隐藏后可在「设置」中重新打开。",
+                            text = "隐藏后，在首页上滑就能把它叫回来。",
                             fontSize = 14.sp,
                             color = AILauncherColors.Body
                         )

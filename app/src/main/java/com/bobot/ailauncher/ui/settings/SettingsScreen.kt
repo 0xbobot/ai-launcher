@@ -1,13 +1,7 @@
 package com.bobot.ailauncher.ui.settings
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,14 +13,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
@@ -38,20 +29,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
@@ -61,9 +47,10 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
@@ -71,26 +58,18 @@ import com.bobot.ailauncher.data.OtaCheckResult
 import com.bobot.ailauncher.data.OtaDownloader
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
-import com.bobot.ailauncher.data.UiPrefs
-import com.bobot.ailauncher.data.listLaunchableApps
-import com.bobot.ailauncher.ui.components.AppIconImage
-import com.bobot.ailauncher.data.BatteryFullScreen
-import com.bobot.ailauncher.data.BatteryGuard
-import com.bobot.ailauncher.data.BatteryGuardPrefs
-import com.bobot.ailauncher.data.BatteryInterrupt
-import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
 
 /**
- * 大模型设置：API Key / Base URL / 模型名，存 SharedPreferences "llm"。
- * 「测试连接」发一个极简请求验证连通性。
+ * 设置页（v0.57.0 重构）：
+ * - 只剩两项：让七仔更聪明（收起）/ 关于
+ * - 电量守护默认开启，不设开关；Dock 显示纯手势；排序默认智能
+ * - 文案全部用户视角
  */
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    dockVisible: Boolean = true,
-    onDockVisibleChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -98,19 +77,32 @@ fun SettingsScreen(
     var baseUrl by remember { mutableStateOf(LlmConfig.getBaseUrl(context)) }
     var model by remember { mutableStateOf(LlmConfig.getModel(context)) }
     var testing by remember { mutableStateOf(false) }
+    var llmExpanded by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val hideOnBlur = Modifier.onFocusChanged { if (!it.isFocused) keyboardController?.hide() }
 
     fun persist() = LlmConfig.save(context, apiKey, baseUrl, model)
 
-    // v0.36.0：打开低电量守护时，一并申请通知权限（Android 13+）——
-    // 之前只开了开关但没申请权限，提醒发不出来，用户会觉得功能没了
-    val notifPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* 拒绝也不强求：服务照常跑，只是弹窗出不来 */ }
+    // v0.57.0：从屏幕底部上滑 → 回桌面主页（Bob：任何时候从底部上滑都要能回主页）
+    // 只响应起始点在屏幕底部 1/4 区域内的上滑，避免与列表滚动冲突
+    val swipeUpToHome = Modifier.pointerInput(onBack) {
+        var totalY = 0f
+        var startY = 0f
+        detectDragGestures(
+            onDragStart = { offset -> totalY = 0f; startY = offset.y },
+            onDragEnd = {
+                val fromBottom = startY > size.height * 0.75f
+                if (fromBottom && totalY < -120) onBack()
+            },
+            onDrag = { _, dragAmount ->
+                // 不消费，让 LazyColumn 照常滚动
+                totalY += dragAmount.y
+            }
+        )
+    }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().then(swipeUpToHome),
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -131,303 +123,118 @@ fun SettingsScreen(
                 )
             }
         }
-        // v0.36.0：按主题分 section
-        item { SectionTitle("大模型") }
+
+        // 让七仔更聪明（收起一层）
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.clickable { llmExpanded = !llmExpanded }
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "意图理解由大模型驱动（OpenAI 兼容接口）。不填 Key 时，意图框退化为关键词匹配演示版。",
-                        fontSize = 13.sp,
-                        color = AILauncherColors.Hint
-                    )
-                    OutlinedTextField(
-                        value = apiKey,
-                        onValueChange = { apiKey = it; persist() },
-                        label = { Text("API Key") },
-                        placeholder = { Text("sk-…", color = AILauncherColors.Hint) },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth().then(hideOnBlur)
-                    )
-                    OutlinedTextField(
-                        value = baseUrl,
-                        onValueChange = { baseUrl = it; persist() },
-                        label = { Text("Base URL") },
-                        placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.Hint) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().then(hideOnBlur)
-                    )
-                    OutlinedTextField(
-                        value = model,
-                        onValueChange = { model = it; persist() },
-                        label = { Text("模型") },
-                        placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.Hint) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().then(hideOnBlur)
-                    )
-                    Text(
-                        text = "如 deepseek-flash / deepseek-v4-pro",
-                        fontSize = 12.sp,
-                        color = AILauncherColors.Hint
-                    )
-                    Button(
-                        onClick = {
-                            if (testing) return@Button
-                            persist()
-                            if (apiKey.isBlank()) {
-                                Toast.makeText(context, "请先填写 API Key", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            testing = true
-                            scope.launch {
-                                // testConnection 返回 null=成功，否则为可直接展示的错误文案
-                                //（如 "400: The model 'deepseek-flash' does not exist"）
-                                val err = LlmRouter.testConnection(
-                                    baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
-                                    apiKey,
-                                    model.ifBlank { LlmConfig.DEFAULT_MODEL }
-                                )
-                                testing = false
-                                Toast.makeText(
-                                    context,
-                                    err ?: "连接成功",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.Accent)
-                    ) {
-                        Text(if (testing) "测试中…" else "测试连接")
-                    }
-                }
-            }
-        }
-        item { SectionTitle("桌面与 Dock") }
-
-        // v0.16：Dock 显示开关（D1 右滑隐藏后，在这里重新打开）
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "显示 Dock",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.Title
-                        )
-                        Text(
-                            text = "关闭后首页不再显示应用 Dock",
-                            fontSize = 13.sp,
-                            color = AILauncherColors.Hint
-                        )
-                    }
-                    Switch(
-                        checked = dockVisible,
-                        onCheckedChange = onDockVisibleChange
-                    )
-                }
-            }
-        }
-
-        // v0.20：Dock 智能排序开关（PRD §九：AI 可以推荐，不能强行改变）
-        item {
-            var smartSort by remember { mutableStateOf(UiPrefs.getDockSmartSort(context)) }
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Dock 智能排序",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.Title
-                        )
-                        Text(
-                            text = "按使用频次和当前时段排列常用应用；关闭后按名称排列",
-                            fontSize = 13.sp,
-                            color = AILauncherColors.Hint
-                        )
-                    }
-                    Switch(
-                        checked = smartSort,
-                        onCheckedChange = {
-                            smartSort = it
-                            UiPrefs.setDockSmartSort(context, it)
-                        }
-                    )
-                }
-            }
-        }
-
-        // v0.42.1（Bob）：Dock 排序统一移到应用中心收藏分区拖动手柄，设置页不再放排序器
-
-        item { SectionTitle("手势") }
-        // v0.40.1：惯用手选项删除（Bob）——A-Z 导航改为左右双 rail 常驻，左右手都可操作
-        item { SectionTitle("通知与电量") }
-        // v0.28.0：低电量守护——只做温和提醒，零干预
-        item {
-            var guardOn by remember { mutableStateOf(BatteryGuardPrefs.isEnabled(context)) }
-            // v0.38.0：全屏 intent 权限状态——从设置页返回时刷新
-            var fullScreenOk by remember { mutableStateOf(BatteryFullScreen.canUse(context)) }
-            val guardLifecycle = LocalLifecycleOwner.current
-            DisposableEffect(guardLifecycle) {
-                val obs = LifecycleEventObserver { _, e ->
-                    if (e == Lifecycle.Event.ON_RESUME)
-                        fullScreenOk = BatteryFullScreen.canUse(context)
-                }
-                guardLifecycle.lifecycle.addObserver(obs)
-                onDispose { guardLifecycle.lifecycle.removeObserver(obs) }
-            }
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "低电量守护",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.Title
-                        )
-                        Switch(
-                            checked = guardOn,
-                            onCheckedChange = {
-                                guardOn = it
-                                if (it) {
-                                    // v0.36.0：Android 13+ 先申请通知权限，否则提醒发不出
-                                    if (Build.VERSION.SDK_INT >= 33 &&
-                                        ContextCompat.checkSelfPermission(
-                                            context,
-                                            Manifest.permission.POST_NOTIFICATIONS
-                                        ) != PackageManager.PERMISSION_GRANTED
-                                    ) {
-                                        notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    }
-                                }
-                                // v0.40.0：不再用前台服务（常驻通知打扰），跟随进程生命周期的动态监听
-                                BatteryGuard.setEnabled(context, it)
-                            }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "让七仔更聪明",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = AILauncherColors.Title
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "填上大模型 Key，七仔能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
+                                fontSize = 13.sp,
+                                color = AILauncherColors.Hint,
+                                lineHeight = 18.sp
+                            )
+                        }
+                        Icon(
+                            if (llmExpanded) Icons.Filled.KeyboardArrowUp
+                            else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (llmExpanded) "收起" else "展开",
+                            tint = AILauncherColors.Hint
                         )
                     }
-                    Text(
-                        text = "七仔的能量=手机电量。能量过低时温和提醒你（10% 和 5% 各一次），只提醒、不做任何自动操作。",
-                        fontSize = 13.sp,
-                        color = AILauncherColors.Hint
-                    )
-                    if (guardOn) {
-                        Text(
-                            text = "需要通知权限才能在看视频、玩游戏时弹出提醒。",
-                            fontSize = 12.sp,
-                            color = AILauncherColors.Hint
+                    if (llmExpanded) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = apiKey,
+                            onValueChange = { apiKey = it; persist() },
+                            label = { Text("大模型 Key") },
+                            placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.Hint) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur)
                         )
-                        // v0.38.0：全屏 intent 被关掉会降级成普通通知，在这里引导打开
-                        if (!fullScreenOk) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "全屏弹出未开启：低电量时只会先收到通知",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFFB7791F),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                TextButton(onClick = { BatteryFullScreen.openSettings(context) }) {
-                                    Text(
-                                        text = "去开启",
-                                        fontSize = 13.sp,
-                                        color = AILauncherColors.Accent
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = baseUrl,
+                            onValueChange = { baseUrl = it; persist() },
+                            label = { Text("接口地址") },
+                            placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.Hint) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur)
+                        )
+                        Text(
+                            text = "一般不用改。用别的服务商才需要换",
+                            fontSize = 12.sp,
+                            color = AILauncherColors.Hint,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = model,
+                            onValueChange = { model = it; persist() },
+                            label = { Text("用哪个模型") },
+                            placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.Hint) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur)
+                        )
+                        Text(
+                            text = "填你 Key 对应的模型名，比如 deepseek-flash",
+                            fontSize = 12.sp,
+                            color = AILauncherColors.Hint,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                if (testing) return@Button
+                                persist()
+                                if (apiKey.isBlank()) {
+                                    Toast.makeText(context, "请先填写大模型 Key", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                testing = true
+                                scope.launch {
+                                    val err = LlmRouter.testConnection(
+                                        baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
+                                        apiKey,
+                                        model.ifBlank { LlmConfig.DEFAULT_MODEL }
                                     )
+                                    testing = false
+                                    Toast.makeText(
+                                        context,
+                                        err ?: "连接成功，七仔变聪明了",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 }
-                            }
-                            Text(
-                                text = "小米/华为/OPPO/vivo 还需在系统设置里给 AI桌面 开启「后台弹出界面」",
-                                fontSize = 12.sp,
-                                color = AILauncherColors.Hint
-                            )
-                            // v0.41.14：悬浮窗权限——开了才能在看视频/玩游戏时强制弹出并暂停播放
-                            var overlayOk by remember {
-                                mutableStateOf(BatteryInterrupt.canDrawOverlays(context))
-                            }
-                            DisposableEffect(guardLifecycle) {
-                                val obs2 = LifecycleEventObserver { _, e ->
-                                    if (e == Lifecycle.Event.ON_RESUME)
-                                        overlayOk = BatteryInterrupt.canDrawOverlays(context)
-                                }
-                                guardLifecycle.lifecycle.addObserver(obs2)
-                                onDispose { guardLifecycle.lifecycle.removeObserver(obs2) }
-                            }
-                            if (!overlayOk) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "强制打断未开启：低电时不能盖住视频并暂停播放",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFFB7791F),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    TextButton(onClick = {
-                                        BatteryInterrupt.openOverlaySettings(context)
-                                    }) {
-                                        Text(
-                                            text = "去开启",
-                                            fontSize = 13.sp,
-                                            color = AILauncherColors.Accent
-                                        )
-                                    }
-                                }
-                            }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.Accent)
+                        ) {
+                            Text(if (testing) "测试中…" else "测试连接")
                         }
                     }
                 }
             }
         }
-        item { SectionTitle("应用") }
-        // v0.41.9：已隐藏应用入口已移到应用中心字母导航（眼睛图标+生物识别），设置页不再保留
-        item { SectionTitle("通用") }
 
-        // OTA：手动检查更新
-        // v0.41.16（Bob）：两段式——第一次点只检查，有新版本时在描述里显示版本号+说明；
-        // 第二次点直接下载；下载完显示"点击安装"。不弹对话框。
+        // 关于
         item {
             var checking by remember { mutableStateOf(false) }
             var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
@@ -438,7 +245,6 @@ fun SettingsScreen(
             val dlDone = dlState is OtaDownloader.State.Success
             val dlFailed = dlState is OtaDownloader.State.Failed
 
-            // 下载成功后 OtaDownloader 已自动弹过安装；这里保留手动安装入口（兜底）
             val onCardClick: (() -> Unit)? = when {
                 checking || downloading -> null
                 dlDone -> {
@@ -459,7 +265,6 @@ fun SettingsScreen(
                     {
                         updateInfo?.let { OtaDownloader.start(context, it) }
                             ?: run {
-                                // 没留住 updateInfo，重新检查
                                 checking = true
                                 scope.launch {
                                     when (val r = OtaUpdater.checkForUpdateResult(context)) {
@@ -486,7 +291,7 @@ fun SettingsScreen(
                             when (val r = OtaUpdater.checkForUpdateResult(context)) {
                                 is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
                                 OtaCheckResult.UpToDate ->
-                                    Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "已经是最新版本了", Toast.LENGTH_SHORT).show()
                                 OtaCheckResult.Failed ->
                                     Toast.makeText(context, "检查失败，请稍后再试", Toast.LENGTH_SHORT).show()
                             }
@@ -547,7 +352,6 @@ fun SettingsScreen(
                                     fontSize = 13.sp,
                                     color = Color(0xFFD16A6A)
                                 )
-                                // v0.41.18（Bob）：下载失败后提供手动下载链接，跳转浏览器
                                 val apkUrl = updateInfo?.apkUrl
                                 if (!apkUrl.isNullOrBlank()) {
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -602,22 +406,6 @@ fun SettingsScreen(
                     }
                 }
             }
-            // v0.41.16：设置页不再弹 UpdateDialog，两段式卡片接管
         }
     }
 }
-
-/**
- * v0.36.0：设置页分 section 小标题
- */
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        color = AILauncherColors.Hint,
-        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-    )
-}
-

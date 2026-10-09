@@ -12,9 +12,10 @@ object BatteryGuardPrefs {
     private const val KEY_WARN_PCT = "warn_pct"
     private const val KEY_CRITICAL_PCT = "critical_pct"
 
-    fun isEnabled(context: Context): Boolean =
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .getBoolean(KEY_ENABLED, true)
+    /**
+     * v0.57.0：电量守护默认开启，不再提供开关。恒为 true。
+     */
+    fun isEnabled(context: Context): Boolean = true
 
     fun setEnabled(context: Context, v: Boolean) {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)

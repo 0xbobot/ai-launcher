@@ -55,13 +55,9 @@ object UiPrefs {
     }
 
     /**
-     * Dock 智能排序（PRD §八/§九）：按总频次 + 当前时段亲和度排列；
-     * 关闭后按名称排列。默认开，用户可关（AI 推荐，不能强行改变）。
+     * Dock 智能排序（v0.57.0：默认开启，不再提供开关）。恒为 true。
      */
-    fun getDockSmartSort(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_DOCK_SMART_SORT, true)
-    }
+    fun getDockSmartSort(context: Context): Boolean = true
 
     fun setDockSmartSort(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
