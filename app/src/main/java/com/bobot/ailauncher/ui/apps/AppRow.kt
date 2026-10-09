@@ -109,6 +109,7 @@ internal fun AppRow(
             }
             cur.add(app.packageName)
             UiPrefs.setDockPinned(context, cur)
+            UiPrefs.flashRail("star")
             Toast.makeText(context, "已加到 Dock", Toast.LENGTH_SHORT).show()
         }
     }

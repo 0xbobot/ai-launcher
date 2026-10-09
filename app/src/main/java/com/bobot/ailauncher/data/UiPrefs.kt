@@ -17,6 +17,12 @@ object UiPrefs {
 
     /** Dock 数据变化通知：置顶增删/排序后 bump，Dock 侧重算 */
     val dockTick = MutableStateFlow(0)
+    // v0.56.2（Bob）：Rail 图标闪烁——收藏/隐藏时提示目标位置；Pair(计数, "star"/"eye")
+    private val _railFlash = MutableStateFlow(0 to "")
+    val railFlash = _railFlash
+    fun flashRail(target: String) {
+        _railFlash.value = (_railFlash.value.first + 1) to target
+    }
     fun bumpDock() {
         dockTick.value++
     }

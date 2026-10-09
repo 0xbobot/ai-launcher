@@ -4,6 +4,7 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -199,6 +200,8 @@ fun AppCenterContent(
     // v0.41.31（Bob）：Dock 分区——A 之前，像隐藏分区一样；
     // UiPrefs.getDockPinned 转 AppInfo（按置顶顺序，去隐藏）
     val dockTick by UiPrefs.dockTick.collectAsState()
+    // v0.56.2（Bob）：Rail 图标闪烁
+    val (flashTick, flashTarget) by UiPrefs.railFlash.collectAsState()
     val dockApps = remember(refreshTick, dockTick, hiddenVersion) {
         val pinned = UiPrefs.getDockPinned(context)
         if (pinned.isEmpty()) emptyList()
@@ -415,6 +418,7 @@ fun AppCenterContent(
     // 右滑隐藏（手势签名：右滑=少），HiddenApps.version +1 后列表自动重算
     fun hideApp(app: AppInfo) {
         HiddenApps.hide(context, app.packageName)
+        UiPrefs.flashRail("eye")
         Toast.makeText(context, "已隐藏「${app.label}」", Toast.LENGTH_SHORT).show()
     }
     // v0.41.18：从隐藏分组恢复显示
@@ -1069,6 +1073,14 @@ fun AppCenterContent(
                     // v0.43.3（Bob）：★/眼是字母导航的一部分——同宽(44dp)、同节奏(24dp 高)，不隔开
                     // v0.55.2（Bob）：点击加震动，和字母导航一致
                     if (dockApps.isNotEmpty()) {
+                        // v0.56.2（Bob）：收藏时 ★ 脉冲闪烁
+                        val starScale = remember { Animatable(1f) }
+                        LaunchedEffect(flashTick) {
+                            if (flashTarget == "star" && flashTick > 0) {
+                                starScale.animateTo(1.7f, tween(180))
+                                starScale.animateTo(1f, tween(220))
+                            }
+                        }
                         Box(
                             modifier = Modifier
                                 .width(44.dp)
@@ -1087,7 +1099,12 @@ fun AppCenterContent(
                                 Icons.Filled.Star,
                                 contentDescription = "Dock 收藏",
                                 tint = AILauncherColors.Hint,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .graphicsLayer {
+                                        scaleX = starScale.value
+                                        scaleY = starScale.value
+                                    }
                             )
                         }
                     }
@@ -1100,6 +1117,14 @@ fun AppCenterContent(
                         modifier = Modifier.height(400.dp)
                     )
                     if (hiddenApps.isNotEmpty()) {
+                        // v0.56.2（Bob）：隐藏时眼睛脉冲闪烁
+                        val eyeScale = remember { Animatable(1f) }
+                        LaunchedEffect(flashTick) {
+                            if (flashTarget == "eye" && flashTick > 0) {
+                                eyeScale.animateTo(1.7f, tween(180))
+                                eyeScale.animateTo(1f, tween(220))
+                            }
+                        }
                         Box(
                             modifier = Modifier
                                 .width(44.dp)
@@ -1118,7 +1143,12 @@ fun AppCenterContent(
                                 Icons.Filled.VisibilityOff,
                                 contentDescription = "隐藏应用",
                                 tint = AILauncherColors.Hint,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .graphicsLayer {
+                                        scaleX = eyeScale.value
+                                        scaleY = eyeScale.value
+                                    }
                             )
                         }
                     }
