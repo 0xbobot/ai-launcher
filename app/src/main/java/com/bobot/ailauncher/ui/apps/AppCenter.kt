@@ -1213,8 +1213,9 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // v0.57.2（Bob）：更新为新手势说明
                 Text(
-                    text = "左滑打开快捷操作",
+                    text = "滑动快捷操作",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = AILauncherColors.Title
@@ -1222,20 +1223,14 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
                 GuideRow(
                     icon = Icons.Filled.Star,
                     tint = Color(0xFFC9A227),
-                    title = "加到 Dock",
-                    desc = "把应用固定到底部 Dock，再点一次可移出"
+                    title = "左滑：收藏",
+                    desc = "把应用加到 Dock 收藏区，再滑一次取消"
                 )
                 GuideRow(
-                    icon = Icons.Filled.Info,
+                    icon = Icons.Filled.VisibilityOff,
                     tint = Color(0xFF8A8478),
-                    title = "应用信息",
-                    desc = "打开系统应用信息页"
-                )
-                GuideRow(
-                    icon = Icons.Filled.Delete,
-                    tint = Color(0xFFD16A6A),
-                    title = "卸载",
-                    desc = "卸载这个应用"
+                    title = "右滑：隐藏",
+                    desc = "把应用藏到隐藏区，再滑一次恢复"
                 )
                 Text(
                     text = "点任意处关闭",
