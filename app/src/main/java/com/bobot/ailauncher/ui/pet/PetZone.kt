@@ -15,6 +15,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -85,6 +86,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.AiInsight
 import com.bobot.ailauncher.data.PetCat
 import com.bobot.ailauncher.data.PetItem
 import com.bobot.ailauncher.data.PetMood
@@ -526,7 +528,7 @@ fun PetZone(
         }
         // v0.50.0：TODAY 直接放首屏
         // v0.56.0 M5：坐卡关联——TODAY 包成磨砂卡，七仔"坐"在上面（卡片上移 30dp 压住宠物底部）
-        // v0.58.0（需求1）：暖米白 #FDF8F0 alpha 235，圆角 28dp
+        // v0.58.0（需求1）：暖米白 #FDF8F0，圆角 28dp
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -937,12 +939,7 @@ private fun AiCapsuleCard(
  */
 /**
  * v0.50.0：TODAY——直接放首屏（不再用 Bottom Sheet）。
- * v0.58.0（需求1+3）：TODAY v5 新设计——暖米白卡片 + 独立可点击行 + 分类色条。
- * - 卡片：#FDF8F0，圆角 28dp（外层 Card）
- * - 每行：白色小卡片，圆角 12dp，右侧 › 箭头
- * - 消息行：左侧分类色条（重要红 #EF4444 / 工作蓝 #3B82F6 / 娱乐绿 #22C55E / 隐私灰 #9CA3AF）
- * - 点击：消息→打开 App，日历→打开日历，天气→反馈
- * - 日历行：识别到在线会议链接时显示绿色"加入会议"按钮
+ * AI 对今天的理解：接下来、环境。极简，不抢 Capsule 的戏。
  */
 @Composable
 private fun TodaySection(
@@ -951,6 +948,8 @@ private fun TodaySection(
     val weatherDesc by WeatherState.desc.collectAsState()
     val context = LocalContext.current
     var nextEvent by remember { mutableStateOf<CalEvent?>(null) }
+    // v0.59.0 AI-2：保留今日所有事件，用于消息关联日历
+    var allEvents by remember { mutableStateOf<List<CalEvent>>(emptyList()) }
     var hasCalPermission by remember { mutableStateOf(hasCalendarPermission(context)) }
     val calPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -962,30 +961,26 @@ private fun TodaySection(
         if (hasCalPermission) {
             val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
             val now = System.currentTimeMillis()
-            nextEvent = events.firstOrNull { !it.allDay && it.begin > now }
+            // v0.59.0 AI-2：保留所有今日事件用于关联
+            allEvents = events.filter { !it.allDay }
+            nextEvent = allEvents.firstOrNull { it.begin > now }
         }
     }
-
-    // v5 配色
-    val labelColor = Color(0xFFA8A29E)   // 标签 13sp
-    val titleColor = Color(0xFF1C1917)   // 标题 16sp Bold
-    val subColor = Color(0xFF78716C)     // 副标题 13sp
-    val arrowColor = Color(0xFFD6D3D1)   // › 箭头
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 40.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // 分割线 + TODAY 标题
         Text(
             text = "TODAY",
             fontSize = 11.sp,
-            color = labelColor,
+            color = Color(0xFFAAAAAA),
             letterSpacing = 2.sp
         )
-
-        // ============ 接下来（日历）============
+        // 接下来
         if (!hasCalPermission) {
             OutlinedButton(
                 onClick = {
@@ -1001,11 +996,12 @@ private fun TodaySection(
                 val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
                     .format(Date(e.begin))
                 val mins = ((e.begin - System.currentTimeMillis()) / 60000).toInt()
+                // v0.59.0 AI-2：会议链接（用于"加入会议"按钮）
                 val meetingUrl = remember(e) { extractMeetingUrl(e) }
                 Column {
-                    Text(text = "接下来", fontSize = 13.sp, color = labelColor)
+                    Text(text = "接下来", fontSize = 13.sp, color = Color(0xFFA8A29E))
                     Spacer(modifier = Modifier.height(6.dp))
-                    // 可点击白卡
+                    // v0.58.0 需求3：可点击白卡（打开系统日历）
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = Color.White,
@@ -1013,7 +1009,6 @@ private fun TodaySection(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                // 需求3：打开系统日历
                                 try {
                                     context.startActivity(
                                         android.content.Intent(
@@ -1033,20 +1028,20 @@ private fun TodaySection(
                                     text = "$timeStr ${e.title.ifBlank { "（无标题）" }}",
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = titleColor
+                                    color = Color(0xFF1C1917)
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "还有 $mins 分钟" +
                                         (if (e.location.isNotBlank()) " · ${e.location}" else ""),
                                     fontSize = 13.sp,
-                                    color = subColor
+                                    color = Color(0xFF78716C)
                                 )
                             }
-                            Text(text = "›", fontSize = 20.sp, color = arrowColor)
+                            Text(text = "›", fontSize = 20.sp, color = Color(0xFFD6D3D1))
                         }
                     }
-                    // 需求4：在线会议"加入会议"按钮
+                    // v0.58.0 需求4：在线会议"加入会议"按钮
                     meetingUrl?.let { url ->
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
@@ -1074,22 +1069,19 @@ private fun TodaySection(
                 }
             }
         }
-
-        // ============ 环境（天气）============
+        // 环境
         weatherDesc?.let { w ->
             Column {
-                Text(text = "环境", fontSize = 13.sp, color = labelColor)
+                Text(text = "环境", fontSize = 13.sp, color = Color(0xFFA8A29E))
                 Spacer(modifier = Modifier.height(6.dp))
+                // v0.58.0 需求3：可点击（七仔播天气）
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = Color.White,
                     shadowElevation = 1.dp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            // 需求3：天气行点击反馈（七仔说话）
-                            PetRepository.say("今天$w")
-                        }
+                        .clickable { PetRepository.say("今天$w") }
                 ) {
                     Row(
                         modifier = Modifier.padding(14.dp),
@@ -1099,17 +1091,18 @@ private fun TodaySection(
                             text = w,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = titleColor,
+                            color = Color(0xFF1C1917),
                             modifier = Modifier.weight(1f)
                         )
-                        Text(text = "›", fontSize = 20.sp, color = arrowColor)
+                        Text(text = "›", fontSize = 20.sp, color = Color(0xFFD6D3D1))
                     }
                 }
             }
         }
-
-        // ============ 消息 ============
+        // v0.59.0：消息——AI 组织 + 4 个 AI 附加价值
+        // AI-1 要不要回 / AI-2 关联日历 / AI-3 待办提取 / AI-4 群聊折叠
         val filed by PetRepository.filed.collectAsState()
+        val doneTodos by PetRepository.doneTodos.collectAsState()
         val now = System.currentTimeMillis()
         val recentMsgs = remember(filed) {
             filed.values.flatten()
@@ -1125,11 +1118,30 @@ private fun TodaySection(
                     }.thenByDescending { it.time }
                 )
         }
+        // AI-4：按 (appName+title) 分组，判断折叠
+        var expandedGroups by remember { mutableStateOf<Set<String>>(emptySet()) }
+        val groupedMsgs = remember(recentMsgs) {
+            recentMsgs.groupBy { "${it.appName}|${it.title}" }
+        }
+        // AI-3：待办提取（最多 2 条，排除已完成）
+        val todos = remember(recentMsgs, doneTodos) {
+            recentMsgs.mapNotNull { item ->
+                AiInsight.extractTodo(
+                    id = item.id,
+                    appName = item.appName,
+                    title = item.title,
+                    text = item.text,
+                    time = item.time
+                )
+            }.filter { it.id !in doneTodos }
+                .sortedByDescending { it.time }
+                .take(2)
+        }
         if (recentMsgs.isNotEmpty()) {
             val impCount = recentMsgs.count { it.cat == PetCat.IMP }
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "消息", fontSize = 13.sp, color = labelColor)
+                    Text(text = "消息", fontSize = 13.sp, color = Color(0xFFA8A29E))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = buildString {
@@ -1137,25 +1149,87 @@ private fun TodaySection(
                             if (impCount > 0) append("，$impCount 条重要")
                         },
                         fontSize = 13.sp,
-                        color = subColor
+                        color = Color(0xFF78716C)
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
-                recentMsgs.take(3).forEach { item ->
-                    val snippet = when {
-                        item.title.isNotBlank() && item.text.isNotBlank() ->
-                            "${item.title}：${item.text.take(30)}"
-                        item.title.isNotBlank() -> item.title
-                        item.text.isNotBlank() -> item.text.take(30)
-                        else -> item.sortDesc
+                // AI-4：分组显示，折叠水聊
+                groupedMsgs.entries.take(5).forEach { (groupKey, items) ->
+                    val first = items.first()
+                    val shouldFold = remember(items) {
+                        AiInsight.shouldFoldGroup(
+                            items.map { AiInsight.FoldCandidate(it.title, it.text) }
+                        )
                     }
-                    // 分类色条颜色
-                    val barColor = when (item.cat) {
-                        PetCat.IMP -> Color(0xFFEF4444)   // 重要红
-                        PetCat.WORK -> Color(0xFF3B82F6)  // 工作蓝
-                        PetCat.FUN -> Color(0xFF22C55E)   // 娱乐绿
-                        PetCat.PRIV -> Color(0xFF9CA3AF)  // 隐私灰
+                    val isExpanded = groupKey in expandedGroups
+                    if (shouldFold && !isExpanded) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.White,
+                            shadowElevation = 1.dp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedGroups = expandedGroups + groupKey }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${first.appName} · ${first.title}",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFF1C1917),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "${items.size} 条已折叠",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF78716C)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(text = "›", fontSize = 20.sp, color = Color(0xFFD6D3D1))
+                            }
+                        }
+                    } else {
+                        val displayItems = if (shouldFold) items else listOf(first)
+                        displayItems.forEach { item ->
+                            AiMessageRow(
+                                item = item,
+                                allEvents = allEvents,
+                                context = context
+                            )
+                        }
+                        if (shouldFold && isExpanded) {
+                            Text(
+                                text = "收起",
+                                fontSize = 12.sp,
+                                color = Color(0xFF78716C),
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .clickable { expandedGroups = expandedGroups - groupKey }
+                            )
+                        }
                     }
+                }
+            }
+        }
+        // AI-3：待办小节
+        if (todos.isNotEmpty()) {
+            Column {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "待办", fontSize = 13.sp, color = Color(0xFFA8A29E))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${todos.size} 项",
+                        fontSize = 13.sp,
+                        color = Color(0xFF78716C)
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                todos.forEach { todo ->
                     Spacer(modifier = Modifier.height(6.dp))
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -1163,53 +1237,39 @@ private fun TodaySection(
                         shadowElevation = 1.dp,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                // 需求3：打开对应 App
-                                val pkg = item.packageName
-                                if (pkg.isNotBlank()) {
-                                    try {
-                                        val intent = context.packageManager
-                                            .getLaunchIntentForPackage(pkg)
-                                        intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            ?.let { context.startActivity(it) }
-                                    } catch (_: Exception) { }
-                                }
-                            }
+                            .clickable { PetRepository.markTodoDone(todo.id) }
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // 左侧分类色条
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .width(4.dp)
-                                    .height(56.dp)
-                                    .background(
-                                        barColor,
-                                        RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
+                                    .size(20.dp)
+                                    .border(
+                                        2.dp,
+                                        Color(0xFFD6D3D1),
+                                        RoundedCornerShape(99.dp)
                                     )
                             )
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = item.appName,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = titleColor
+                                    text = todo.action,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFF1C1917)
                                 )
                                 Text(
-                                    text = snippet,
-                                    fontSize = 13.sp,
-                                    color = subColor,
-                                    maxLines = 1
+                                    text = "${todo.source} · ${todo.deadline}",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF78716C)
                                 )
                             }
                             Text(
-                                text = "›",
-                                fontSize = 20.sp,
-                                color = arrowColor,
-                                modifier = Modifier.padding(end = 14.dp)
+                                text = "完成",
+                                fontSize = 12.sp,
+                                color = Color(0xFF22C55E)
                             )
                         }
                     }
@@ -1219,6 +1279,126 @@ private fun TodaySection(
     }
 }
 
+/**
+ * v0.59.0：AI 消息行（含 AI-1 需回复标签 + AI-2 日历关联）。
+ * v5 设计语言：白色小卡片 + 左侧分类色条 + 右侧 › 箭头，点击打开 App。
+ */
+@Composable
+private fun AiMessageRow(
+    item: PetItem,
+    allEvents: List<CalEvent>,
+    context: Context
+) {
+    val titleColor = Color(0xFF1C1917)
+    val subColor = Color(0xFF78716C)
+    val arrowColor = Color(0xFFD6D3D1)
+    val snippet = when {
+        item.title.isNotBlank() && item.text.isNotBlank() ->
+            "${item.title}：${item.text.take(30)}"
+        item.title.isNotBlank() -> item.title
+        item.text.isNotBlank() -> item.text.take(30)
+        else -> item.sortDesc
+    }
+    // 分类色条
+    val barColor = when (item.cat) {
+        PetCat.IMP -> Color(0xFFEF4444)
+        PetCat.WORK -> Color(0xFF3B82F6)
+        PetCat.FUN -> Color(0xFF22C55E)
+        PetCat.PRIV -> Color(0xFF9CA3AF)
+    }
+    // AI-1：要不要回
+    val replyAnalysis = remember(item.id) {
+        AiInsight.analyzeReplyNeed(item.title, item.text)
+    }
+    // AI-2：关联日历
+    val calLinkTime = remember(item.id, allEvents) {
+        allEvents.firstNotNullOfOrNull { event ->
+            val kw = AiInsight.findCalendarLink(item.title, item.text, event.title)
+            if (kw != null) {
+                SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(event.begin))
+            } else null
+        }
+    }
+
+    Spacer(modifier = Modifier.height(6.dp))
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color.White,
+        shadowElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                val pkg = item.packageName
+                if (pkg.isNotBlank()) {
+                    try {
+                        context.packageManager.getLaunchIntentForPackage(pkg)
+                            ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            ?.let { context.startActivity(it) }
+                    } catch (_: Exception) { }
+                }
+            }
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(64.dp)
+                    .background(
+                        barColor,
+                        RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
+                    )
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.appName,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = titleColor,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (replyAnalysis.needsReply) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(99.dp),
+                            color = Color(0xFFFFF7ED)
+                        ) {
+                            Text(
+                                text = "需回复",
+                                fontSize = 11.sp,
+                                color = Color(0xFFEA580C),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = snippet,
+                    fontSize = 13.sp,
+                    color = subColor,
+                    maxLines = 1
+                )
+                calLinkTime?.let {
+                    Text(
+                        text = "和 $it 的会议相关",
+                        fontSize = 12.sp,
+                        color = Color(0xFF9CA3AF)
+                    )
+                }
+            }
+            Text(
+                text = "›",
+                fontSize = 20.sp,
+                color = arrowColor,
+                modifier = Modifier.padding(end = 14.dp)
+            )
+        }
+    }
+}
 
 /**
  * v0.29.0：升级礼物盒——Canvas 手绘，七仔头顶。

@@ -492,6 +492,17 @@ object PetRepository {
         if (changed) _filed.value = map
     }
 
+    // ============ v0.59.0 AI-3：待办 ============
+
+    /** 已完成的待办 id（用户点击标记完成） */
+    private val _doneTodos = MutableStateFlow<Set<String>>(emptySet())
+    val doneTodos: StateFlow<Set<String>> get() = _doneTodos.asStateFlow()
+
+    /** 标记待办完成 */
+    fun markTodoDone(id: String) {
+        _doneTodos.value = _doneTodos.value + id
+    }
+
     private suspend fun runSequence(item: PetItem) {
         if (busy) {
             // v0.51.3：Toast 已删除：_toast.emit("等它忙完手头这件…")
