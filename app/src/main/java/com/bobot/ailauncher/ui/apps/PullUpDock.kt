@@ -78,6 +78,7 @@ import kotlin.math.abs
  */
 enum class DockState { Hidden, D1, D2, D3 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PullUpDock(
     state: DockState,
