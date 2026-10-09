@@ -2,6 +2,7 @@ package com.bobot.ailauncher.ui.settings
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -105,7 +106,11 @@ fun SettingsScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().statusBarsPadding().then(swipeUpToHome),
+        // v0.61.1：和应用中心一样的半透明背景（GlassCardStrong，白 88%）
+        modifier = Modifier.fillMaxSize()
+            .background(AILauncherColors.GlassCardStrong)
+            .statusBarsPadding()
+            .then(swipeUpToHome),
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
