@@ -201,7 +201,8 @@ fun AppCenterContent(
     // UiPrefs.getDockPinned 转 AppInfo（按置顶顺序，去隐藏）
     val dockTick by UiPrefs.dockTick.collectAsState()
     // v0.56.2（Bob）：Rail 图标闪烁
-    val (flashTick, flashTarget) by UiPrefs.railFlash.collectAsState()
+    val railFlashState by UiPrefs.railFlash.collectAsState()
+    val (flashTick, flashTarget) = railFlashState
     val dockApps = remember(refreshTick, dockTick, hiddenVersion) {
         val pinned = UiPrefs.getDockPinned(context)
         if (pinned.isEmpty()) emptyList()
