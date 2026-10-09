@@ -75,6 +75,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -292,7 +293,8 @@ fun PetZone(
             // v0.49.0：AI Capsule——会议是"最值得关注"的事
             val loc = if (upcoming.location.isNotBlank()) "\n地点：${upcoming.location}" else ""
             // v0.58.0（需求4）：提取在线会议链接，Capsule 显示"加入会议"
-            val meetingUrl = extractMeetingUrl(upcoming)
+            // v0.63.1：用验证版，无效 URL 不显示按钮
+            val meetingUrl = getValidMeetingUrl(context, upcoming)
             PetRepository.showCapsule(
                 PetRepository.AiCapsule(
                     id = "cal_${upcoming.begin}",
@@ -549,22 +551,28 @@ fun PetZone(
         // v0.56.0 M5：坐卡关联——TODAY 包成磨砂卡，七仔"坐"在上面（卡片上移 30dp 压住宠物底部）
         // v0.58.0（需求1）：暖米白 #FDF8F0，圆角 28dp
         // v0.60.0：毛玻璃——白 65% + 1dp 白描边，系统壁纸透过来
-        Card(
+        // v0.63.1：不用 Material3 Card（tonal elevation 在半透明背景上形成灰边），
+        // 改用 Box + 手动柔和阴影，边缘与背景自然融合
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .offset(y = (-30).dp)
-                .heightIn(min = 120.dp), // v0.62.1：空态时不缩成一条线
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = Color.White.copy(alpha = 0.65f)
-            ),
-            // v0.62.2：去掉白色描边（反馈：描边让卡片看上去有两层）
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                .heightIn(min = 120.dp) // v0.62.1：空态时不缩成一条线
+                .shadow(
+                    elevation = 12.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    ambientColor = Color.Black.copy(alpha = 0.08f),
+                    spotColor = Color.Black.copy(alpha = 0.08f)
+                )
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color.White.copy(alpha = 0.65f))
         ) {
-            // 顶部留出七仔坐的位置
-            Box(modifier = Modifier.height(20.dp))
-            TodaySection()
+            Column {
+                // 顶部留出七仔坐的位置
+                Box(modifier = Modifier.height(20.dp))
+                TodaySection()
+            }
         }
     }
 }
@@ -1297,7 +1305,7 @@ private fun TodaySection(
                     val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
                         .format(Date(e.begin))
                     val mins = ((e.begin - System.currentTimeMillis()) / 60000).toInt()
-                    val meetingUrl = remember(e) { extractMeetingUrl(e) }
+                    val meetingUrl = remember(e) { getValidMeetingUrl(context, e) }
                     // v0.63.0：扁平会议行（无白卡），标题大字 + 时间地点 + 加入会议按钮
                     Column(
                         modifier = Modifier.clickable(enabled = !editMode) {
@@ -1862,6 +1870,18 @@ private fun extractMeetingUrl(event: CalEvent): String? {
             val lower = url.lowercase()
             MEETING_DOMAINS.any { lower.contains(it) }
         }
+}
+
+// v0.63.1：验证会议 URL 有效且系统能解析，避免无效 URL 弹出应用选择器
+private fun getValidMeetingUrl(context: android.content.Context, event: CalEvent): String? {
+    val url = extractMeetingUrl(event) ?: return null
+    if (url.isBlank()) return null
+    if (!url.startsWith("http://") && !url.startsWith("https://")) return null
+    val intent = android.content.Intent(
+        android.content.Intent.ACTION_VIEW,
+        android.net.Uri.parse(url)
+    )
+    return if (intent.resolveActivity(context.packageManager) != null) url else null
 }
 
 private fun hasCalendarPermission(context: Context): Boolean =
