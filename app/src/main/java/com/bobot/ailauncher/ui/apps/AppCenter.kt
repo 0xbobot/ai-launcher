@@ -667,6 +667,16 @@ fun AppCenterContent(
                 if (dockApps.isNotEmpty()) {
                     // v0.41.32（Bob）：幽灵 ★ 与第一行同行（像字母那样），不单独占行
                     itemsIndexed(dockOrder, key = { _, app -> "d:${app.packageName}" }) { index, app ->
+                        // v0.56.1（Bob）：手柄若因重组被重建、正在拖，保存顺序（防手势取消丢保存）
+                        DisposableEffect(app.packageName) {
+                            onDispose {
+                                if (draggingDockPkg == app.packageName) {
+                                    UiPrefs.setDockPinned(context, dockOrder.map { it.packageName })
+                                    draggingDockPkg = null
+                                    dockDragOffsetY = 0f
+                                }
+                            }
+                        }
                         // v0.41.34（Bob）：拖动中的行跟随手指，其他行自动让位
                         val isDockDragging = draggingDockPkg == app.packageName
                         Box(
