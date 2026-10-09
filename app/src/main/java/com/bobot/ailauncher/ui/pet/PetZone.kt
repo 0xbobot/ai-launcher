@@ -555,9 +555,7 @@ fun PetZone(
             colors = CardDefaults.cardColors(
                 containerColor = Color.White.copy(alpha = 0.65f)
             ),
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp, Color.White.copy(alpha = 0.3f)
-            ),
+            // v0.62.2：去掉白色描边（反馈：描边让卡片看上去有两层）
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
             // 顶部留出七仔坐的位置
