@@ -1078,6 +1078,7 @@ fun AppCenterContent(
                         val starScale = remember { Animatable(1f) }
                         LaunchedEffect(flashTick) {
                             if (flashTarget == "star" && flashTick > 0) {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 starScale.animateTo(1.7f, tween(180))
                                 starScale.animateTo(1f, tween(220))
                             }
@@ -1122,6 +1123,7 @@ fun AppCenterContent(
                         val eyeScale = remember { Animatable(1f) }
                         LaunchedEffect(flashTick) {
                             if (flashTarget == "eye" && flashTick > 0) {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 eyeScale.animateTo(1.7f, tween(180))
                                 eyeScale.animateTo(1f, tween(220))
                             }
