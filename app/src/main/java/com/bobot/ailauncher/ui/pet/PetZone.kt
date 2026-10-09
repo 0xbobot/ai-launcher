@@ -172,10 +172,11 @@ fun PetZone(
         return weatherTriggersToday < 3 // 每天最多 3 次
     }
 
-    fun onWeatherFetched(desc: String?, allowTrigger: Boolean) {
+    fun onWeatherFetched(info: WeatherRepository.WeatherInfo?, allowTrigger: Boolean) {
+        val desc = info?.desc
         val old = lastWeatherDesc
         lastWeatherDesc = desc
-        WeatherState.update(desc)
+        WeatherState.updateFull(info)
         if (desc == null || !allowTrigger || !canTriggerWeatherScene()) return
         val wasBad = old != null && isBadWeather(old)
         val isBad = isBadWeather(desc)
@@ -196,7 +197,7 @@ fun PetZone(
 
     suspend fun fetchWeather(allowTrigger: Boolean) {
         val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
-        if (w != null) onWeatherFetched(w.desc, allowTrigger)
+        if (w != null) onWeatherFetched(w, allowTrigger)
     }
 
     // 天气轮询：30 分钟一次，突变才触发场景
@@ -220,7 +221,7 @@ fun PetZone(
             val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
             if (w != null) {
                 lastWeatherDesc = w.desc
-                WeatherState.update(w.desc)
+                WeatherState.updateFull(w)
                 demoScene = if (isBadWeather(w.desc)) QizaiScene.WEATHER_RAIN
                 else QizaiScene.WEATHER_SUN
                 PetRepository.say("早上好！今天${w.desc}，${w.temp}°")
@@ -442,7 +443,7 @@ fun PetZone(
                                 }
                                 if (w != null) {
                                     lastWeatherDesc = w.desc
-                                    WeatherState.update(w.desc)
+                                    WeatherState.updateFull(w)
                                     demoScene = if (isBadWeather(w.desc))
                                         QizaiScene.WEATHER_RAIN
                                     else
@@ -943,13 +944,13 @@ private fun AiCapsuleCard(
  */
 /**
  * v0.50.0：TODAY——直接放首屏（不再用 Bottom Sheet）。
- * AI 对今天的理解：接下来、环境。极简，不抢 Capsule 的戏。
+ * AI 对今天的理解：接下来 + 天气小 pill。极简，不抢 Capsule 的戏。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TodaySection(
     modifier: Modifier = Modifier
 ) {
-    val weatherDesc by WeatherState.desc.collectAsState()
     val context = LocalContext.current
     var nextEvent by remember { mutableStateOf<CalEvent?>(null) }
     // v0.59.0 AI-2：保留今日所有事件，用于消息关联日历
@@ -977,13 +978,72 @@ private fun TodaySection(
             .padding(horizontal = 40.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // 分割线 + TODAY 标题
-        Text(
-            text = "TODAY",
-            fontSize = 11.sp,
-            color = Color(0xFFAAAAAA),
-            letterSpacing = 2.sp
-        )
+        // 分割线 + TODAY 标题 + 天气小 pill（右上角）
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "TODAY",
+                fontSize = 11.sp,
+                color = Color(0xFFAAAAAA),
+                letterSpacing = 2.sp,
+                modifier = Modifier.weight(1f)
+            )
+            // v0.61.0：天气 pill —— 点击开天气应用，长按看详情
+            val weatherFull by WeatherState.full.collectAsState()
+            weatherFull?.let { wf ->
+                val weatherEmoji = when (wf.desc) {
+                    "晴" -> "☀️"
+                    "多云" -> "⛅"
+                    "阴" -> "☁️"
+                    "雾" -> "🌫️"
+                    "雷阵雨" -> "⛈️"
+                    "雪" -> "❄️"
+                    else -> if (wf.desc.contains("雨")) "🌧️" else "⛅"
+                }
+                // 详情文案（fallback / 长按用）：高低温 + 未来降雨提醒
+                val rainHour = wf.hourly.firstOrNull {
+                    it.desc.contains("雨") || it.desc.contains("雪") || it.desc == "雷阵雨"
+                }
+                val detailText = buildString {
+                    append("今天${wf.desc}，${wf.temp}°，最高${wf.high}°最低${wf.low}°")
+                    if (rainHour != null) append("，${rainHour.hour}时后有${rainHour.desc}")
+                }
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .combinedClickable(
+                            onClick = {
+                                val weatherIntent = android.content.Intent(
+                                    android.content.Intent.ACTION_MAIN
+                                ).addCategory(android.content.Intent.CATEGORY_APP_WEATHER)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                val resolved =
+                                    weatherIntent.resolveActivity(context.packageManager)
+                                if (resolved != null) {
+                                    try {
+                                        context.startActivity(weatherIntent)
+                                    } catch (_: Exception) {
+                                        PetRepository.say(detailText)
+                                    }
+                                } else {
+                                    PetRepository.say(detailText)
+                                }
+                            },
+                            onLongClick = { PetRepository.say(detailText) }
+                        )
+                ) {
+                    Text(
+                        text = "$weatherEmoji ${wf.temp}°",
+                        fontSize = 13.sp,
+                        color = Color(0xFF57534E),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
         // 接下来
         if (!hasCalPermission) {
             OutlinedButton(
@@ -1069,36 +1129,6 @@ private fun TodaySection(
                         ) {
                             Text(text = "加入会议", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
-                    }
-                }
-            }
-        }
-        // 环境
-        weatherDesc?.let { w ->
-            Column {
-                Text(text = "环境", fontSize = 13.sp, color = Color(0xFFA8A29E))
-                Spacer(modifier = Modifier.height(6.dp))
-                // v0.58.0 需求3：可点击（七仔播天气）
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color.White.copy(alpha = 0.5f), // v0.60.0 毛玻璃：半透明
-                    shadowElevation = 1.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { PetRepository.say("今天$w") }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = w,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1C1917),
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(text = "›", fontSize = 20.sp, color = Color(0xFFD6D3D1))
                     }
                 }
             }

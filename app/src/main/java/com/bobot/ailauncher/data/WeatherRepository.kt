@@ -16,7 +16,20 @@ object WeatherRepository {
     data class WeatherInfo(
         val temp: Int,
         val desc: String,
-        val city: String
+        val city: String,
+        // v0.61.0：今日最高/最低、体感、湿度、风速、未来几小时
+        val high: Int = 0,
+        val low: Int = 0,
+        val feelsLike: Int = 0,
+        val humidity: Int = 0,
+        val windSpeed: Double = 0.0,
+        val hourly: List<HourPoint> = emptyList()
+    )
+
+    data class HourPoint(
+        val hour: Int,      // 0-23
+        val temp: Int,
+        val desc: String
     )
 
     private fun codeToDesc(code: Int): String = when (code) {
@@ -52,10 +65,12 @@ object WeatherRepository {
                 c1.disconnect()
             } catch (_: Exception) {
             }
-            // 天气
+            // 天气（v0.61.0：加体感/湿度/风速/今日高低/逐小时）
             val c2 = URL(
                 "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-                    "&current=temperature_2m,weather_code&timezone=auto"
+                    "&current=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m" +
+                    "&daily=temperature_2m_max,temperature_2m_min" +
+                    "&hourly=temperature_2m,weather_code&forecast_days=2&timezone=auto"
             ).openConnection() as HttpURLConnection
             c2.connectTimeout = 8000
             c2.readTimeout = 8000
@@ -64,7 +79,49 @@ object WeatherRepository {
             val cur = j2.getJSONObject("current")
             val temp = cur.getDouble("temperature_2m").toInt()
             val desc = codeToDesc(cur.getInt("weather_code"))
-            return WeatherInfo(temp, desc, city)
+            val feelsLike = cur.optDouble("apparent_temperature", temp.toDouble()).toInt()
+            val humidity = cur.optInt("relative_humidity_2m", 0)
+            val windSpeed = cur.optDouble("wind_speed_10m", 0.0)
+            // 今日最高/最低（取 daily 第 0 天）
+            var high = temp
+            var low = temp
+            try {
+                val daily = j2.getJSONObject("daily")
+                high = daily.getJSONArray("temperature_2m_max").getDouble(0).toInt()
+                low = daily.getJSONArray("temperature_2m_min").getDouble(0).toInt()
+            } catch (_: Exception) {
+            }
+            // 未来几小时：从当前小时往后取 3 个点
+            val hourly = mutableListOf<HourPoint>()
+            try {
+                val h = j2.getJSONObject("hourly")
+                val times = h.getJSONArray("time")
+                val temps = h.getJSONArray("temperature_2m")
+                val codes = h.getJSONArray("weather_code")
+                val curTime = cur.optString("time", "")
+                var startIdx = -1
+                for (i in 0 until times.length()) {
+                    if (times.getString(i) == curTime) { startIdx = i; break }
+                }
+                if (startIdx < 0) startIdx = 0
+                // 取 +3h / +6h / +9h 三个点
+                for (offset in intArrayOf(3, 6, 9)) {
+                    val idx = startIdx + offset
+                    if (idx < times.length()) {
+                        val t = times.getString(idx) // "2026-10-09T15:00"
+                        val hour = t.substringAfter("T").substringBefore(":").toIntOrNull() ?: 0
+                        hourly.add(
+                            HourPoint(
+                                hour = hour,
+                                temp = temps.getDouble(idx).toInt(),
+                                desc = codeToDesc(codes.getInt(idx))
+                            )
+                        )
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            return WeatherInfo(temp, desc, city, high, low, feelsLike, humidity, windSpeed, hourly)
         } catch (e: Exception) {
             Log.d(TAG, "weather failed: ${e.message}")
             return null
