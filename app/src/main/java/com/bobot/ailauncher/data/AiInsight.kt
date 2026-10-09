@@ -194,4 +194,20 @@ data class FoldCandidate(
 val title: String,
 val text: String
 )
+
+// ============ v0.63.0：AI 简报总结句 ============
+
+/**
+* v0.63.0：生成 TODAY 卡片的 AI 总结标题。
+* 纯规则拼接，不调 LLM。
+* 例："2 条要回，1 个会要开" / "3 条要回" / "1 个会要开" / "今日无事"
+*/
+fun buildSummary(replyCount: Int, meetingCount: Int): String {
+return when {
+replyCount > 0 && meetingCount > 0 -> "$replyCount 条要回，$meetingCount 个会要开"
+replyCount > 0 -> "$replyCount 条要回"
+meetingCount > 0 -> "$meetingCount 个会要开"
+else -> "今日无事"
+}
+}
 }
