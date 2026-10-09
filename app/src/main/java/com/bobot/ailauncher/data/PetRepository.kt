@@ -344,7 +344,9 @@ object PetRepository {
                 title = n.title,
                 text = n.text,
                 time = n.time,
-                packageName = n.packageName
+                packageName = n.packageName,
+                // v0.60.0：带上 contentIntent，点击直达会话
+                pendingIntent = n.contentIntent
             )
         )
     }

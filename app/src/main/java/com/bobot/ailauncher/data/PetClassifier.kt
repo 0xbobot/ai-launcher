@@ -27,7 +27,9 @@ data class PetItem(
     val packageName: String,
     val isCalendar: Boolean = false,
     val isBatchSummary: Boolean = false,
-    val batchItems: List<PetItem> = emptyList()
+    val batchItems: List<PetItem> = emptyList(),
+    // v0.60.0：通知的 contentIntent，点击直达具体会话窗口（null 则 fallback 打开 App）
+    val pendingIntent: android.app.PendingIntent? = null
 )
 
 /**

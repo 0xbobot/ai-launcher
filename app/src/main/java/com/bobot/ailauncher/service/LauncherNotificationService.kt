@@ -85,7 +85,9 @@ class LauncherNotificationService : NotificationListenerService() {
             title = title,
             text = text,
             time = postTime,
-            packageName = packageName
+            packageName = packageName,
+            // v0.60.0：带上 contentIntent，用于点击直达会话
+            contentIntent = notification.contentIntent
         )
     }
 }

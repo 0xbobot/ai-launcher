@@ -529,6 +529,7 @@ fun PetZone(
         // v0.50.0：TODAY 直接放首屏
         // v0.56.0 M5：坐卡关联——TODAY 包成磨砂卡，七仔"坐"在上面（卡片上移 30dp 压住宠物底部）
         // v0.58.0（需求1）：暖米白 #FDF8F0，圆角 28dp
+        // v0.60.0：毛玻璃——白 65% + 1dp 白描边，系统壁纸透过来
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -536,7 +537,10 @@ fun PetZone(
                 .offset(y = (-30).dp),
             shape = RoundedCornerShape(28.dp),
             colors = CardDefaults.cardColors(
-                containerColor = Color(0xFFFDF8F0).copy(alpha = 0.92f)
+                containerColor = Color.White.copy(alpha = 0.65f)
+            ),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp, Color.White.copy(alpha = 0.3f)
             ),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
@@ -1004,7 +1008,7 @@ private fun TodaySection(
                     // v0.58.0 需求3：可点击白卡（打开系统日历）
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = Color.White,
+                        color = Color.White.copy(alpha = 0.5f), // v0.60.0 毛玻璃：半透明
                         shadowElevation = 1.dp,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1077,7 +1081,7 @@ private fun TodaySection(
                 // v0.58.0 需求3：可点击（七仔播天气）
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = Color.White,
+                    color = Color.White.copy(alpha = 0.5f), // v0.60.0 毛玻璃：半透明
                     shadowElevation = 1.dp,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1166,7 +1170,7 @@ private fun TodaySection(
                         Spacer(modifier = Modifier.height(6.dp))
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = Color.White,
+                            color = Color.White.copy(alpha = 0.5f), // v0.60.0 毛玻璃：半透明
                             shadowElevation = 1.dp,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1233,7 +1237,7 @@ private fun TodaySection(
                     Spacer(modifier = Modifier.height(6.dp))
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = Color.White,
+                        color = Color.White.copy(alpha = 0.5f), // v0.60.0 毛玻璃：半透明
                         shadowElevation = 1.dp,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1323,18 +1327,30 @@ private fun AiMessageRow(
     Spacer(modifier = Modifier.height(6.dp))
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = Color.White,
+        color = Color.White.copy(alpha = 0.5f),
         shadowElevation = 1.dp,
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                val pkg = item.packageName
-                if (pkg.isNotBlank()) {
+                // v0.60.0：优先用通知的 contentIntent 直达具体会话，失败才打开 App
+                val pi = item.pendingIntent
+                var sent = false
+                if (pi != null) {
                     try {
-                        context.packageManager.getLaunchIntentForPackage(pkg)
-                            ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            ?.let { context.startActivity(it) }
+                        pi.send()
+                        sent = true
+                    } catch (_: android.app.PendingIntent.CanceledException) {
                     } catch (_: Exception) { }
+                }
+                if (!sent) {
+                    val pkg = item.packageName
+                    if (pkg.isNotBlank()) {
+                        try {
+                            context.packageManager.getLaunchIntentForPackage(pkg)
+                                ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                ?.let { context.startActivity(it) }
+                        } catch (_: Exception) { }
+                    }
                 }
             }
     ) {

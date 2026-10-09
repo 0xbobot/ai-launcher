@@ -10,7 +10,9 @@ data class SimpleNotification(
     val title: String,
     val text: String,
     val time: Long,
-    val packageName: String
+    val packageName: String,
+    // v0.60.0：通知自带的 contentIntent，点击可直达具体会话窗口
+    val contentIntent: android.app.PendingIntent? = null
 )
 
 /** 通知仓库单例：由 LauncherNotificationService 写入，首页读取展示 */
