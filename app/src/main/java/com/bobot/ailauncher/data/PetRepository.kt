@@ -198,7 +198,8 @@ object PetRepository {
         val title: String, // "下午有一件事情值得关注"
         val body: String, // 多行正文
         val primaryAction: String = "看看重点",
-        val secondaryAction: String = "稍后"
+        val secondaryAction: String = "稍后",
+        val meetingUrl: String? = null // v0.58.0：在线会议链接，有则显示"加入会议"
     )
     private val _capsule = MutableStateFlow<AiCapsule?>(null)
     val capsule: StateFlow<AiCapsule?> get() = _capsule.asStateFlow()
@@ -472,6 +473,23 @@ object PetRepository {
         }
         _filed.value = map
         items.forEach { dismissFromStream(it) }
+    }
+
+    /**
+     * v0.58.0：按条件删除已归档消息（需求2：通知栏划掉后 Today 同步清除）。
+     * 由 LauncherNotificationService.onNotificationRemoved 调用。
+     */
+    fun removeFiledByPredicate(predicate: (PetItem) -> Boolean) {
+        val map = _filed.value.toMutableMap()
+        var changed = false
+        for ((cat, list) in map) {
+            val filtered = list.filterNot(predicate)
+            if (filtered.size != list.size) {
+                map[cat] = filtered
+                changed = true
+            }
+        }
+        if (changed) _filed.value = map
     }
 
     private suspend fun runSequence(item: PetItem) {

@@ -41,6 +41,19 @@ class LauncherNotificationService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         pushActiveNotifications()
+        // v0.58.0（需求2）：通知栏划掉后，Today 首页同步清除对应消息
+        sbn?.let {
+            val pkg = it.packageName.orEmpty()
+            val extras = it.notification.extras
+            val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+            val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+            if (pkg.isNotBlank()) {
+                com.bobot.ailauncher.data.PetRepository.removeFiledByPredicate { item ->
+                    item.packageName == pkg &&
+                        (title.isBlank() || item.title == title || item.text.contains(text.take(20)))
+                }
+            }
+        }
     }
 
     private fun pushActiveNotifications() {

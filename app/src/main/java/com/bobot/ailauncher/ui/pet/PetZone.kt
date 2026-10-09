@@ -15,6 +15,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -44,6 +45,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -268,6 +270,8 @@ fun PetZone(
             demoScene = QizaiScene.READING
             // v0.49.0：AI Capsule——会议是"最值得关注"的事
             val loc = if (upcoming.location.isNotBlank()) "\n地点：${upcoming.location}" else ""
+            // v0.58.0（需求4）：提取在线会议链接，Capsule 显示"加入会议"
+            val meetingUrl = extractMeetingUrl(upcoming)
             PetRepository.showCapsule(
                 PetRepository.AiCapsule(
                     id = "cal_${upcoming.begin}",
@@ -275,7 +279,8 @@ fun PetZone(
                     title = "有一场会议值得关注",
                     body = "$timeStr $title$loc",
                     primaryAction = "看看重点",
-                    secondaryAction = "稍后"
+                    secondaryAction = "稍后",
+                    meetingUrl = meetingUrl
                 )
             )
             // v0.51.2：日历只走 Capsule + TODAY，不再走整理员（避免 5 重重复）
@@ -521,14 +526,15 @@ fun PetZone(
         }
         // v0.50.0：TODAY 直接放首屏
         // v0.56.0 M5：坐卡关联——TODAY 包成磨砂卡，七仔"坐"在上面（卡片上移 30dp 压住宠物底部）
+        // v0.58.0（需求1）：暖米白 #FDF8F0 alpha 235，圆角 28dp
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .offset(y = (-30).dp),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(28.dp),
             colors = CardDefaults.cardColors(
-                containerColor = Color.White.copy(alpha = 0.72f)
+                containerColor = Color(0xFFFDF8F0).copy(alpha = 0.92f)
             ),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
@@ -868,6 +874,32 @@ private fun AiCapsuleCard(
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(12.dp))
+            // v0.58.0（需求4）：在线会议显示"加入会议"按钮
+            capsule.meetingUrl?.let { url ->
+                val ctx = LocalContext.current
+                Button(
+                    onClick = {
+                        try {
+                            ctx.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(url)
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        } catch (_: Exception) { }
+                    },
+                    shape = RoundedCornerShape(99.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF22C55E),
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = "加入会议", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             // 操作按钮
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -905,7 +937,12 @@ private fun AiCapsuleCard(
  */
 /**
  * v0.50.0：TODAY——直接放首屏（不再用 Bottom Sheet）。
- * AI 对今天的理解：接下来、环境。极简，不抢 Capsule 的戏。
+ * v0.58.0（需求1+3）：TODAY v5 新设计——暖米白卡片 + 独立可点击行 + 分类色条。
+ * - 卡片：#FDF8F0，圆角 28dp（外层 Card）
+ * - 每行：白色小卡片，圆角 12dp，右侧 › 箭头
+ * - 消息行：左侧分类色条（重要红 #EF4444 / 工作蓝 #3B82F6 / 娱乐绿 #22C55E / 隐私灰 #9CA3AF）
+ * - 点击：消息→打开 App，日历→打开日历，天气→反馈
+ * - 日历行：识别到在线会议链接时显示绿色"加入会议"按钮
  */
 @Composable
 private fun TodaySection(
@@ -929,20 +966,26 @@ private fun TodaySection(
         }
     }
 
+    // v5 配色
+    val labelColor = Color(0xFFA8A29E)   // 标签 13sp
+    val titleColor = Color(0xFF1C1917)   // 标题 16sp Bold
+    val subColor = Color(0xFF78716C)     // 副标题 13sp
+    val arrowColor = Color(0xFFD6D3D1)   // › 箭头
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 40.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 分割线 + TODAY 标题
         Text(
             text = "TODAY",
             fontSize = 11.sp,
-            color = Color(0xFFAAAAAA),
+            color = labelColor,
             letterSpacing = 2.sp
         )
-        // 接下来
+
+        // ============ 接下来（日历）============
         if (!hasCalPermission) {
             OutlinedButton(
                 onClick = {
@@ -958,35 +1001,122 @@ private fun TodaySection(
                 val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
                     .format(Date(e.begin))
                 val mins = ((e.begin - System.currentTimeMillis()) / 60000).toInt()
+                val meetingUrl = remember(e) { extractMeetingUrl(e) }
                 Column {
-                    Text(text = "接下来", fontSize = 12.sp, color = Color(0xFF999999))
-                    Text(
-                        text = "$timeStr ${e.title.ifBlank { "（无标题）" }}，还有 $mins 分钟",
-                        fontSize = 14.sp,
-                        color = Color(0xFF333333)
-                    )
+                    Text(text = "接下来", fontSize = 13.sp, color = labelColor)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    // 可点击白卡
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White,
+                        shadowElevation = 1.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                // 需求3：打开系统日历
+                                try {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            CalendarContract.CONTENT_URI
+                                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                } catch (_: Exception) { }
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "$timeStr ${e.title.ifBlank { "（无标题）" }}",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = titleColor
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "还有 $mins 分钟" +
+                                        (if (e.location.isNotBlank()) " · ${e.location}" else ""),
+                                    fontSize = 13.sp,
+                                    color = subColor
+                                )
+                            }
+                            Text(text = "›", fontSize = 20.sp, color = arrowColor)
+                        }
+                    }
+                    // 需求4：在线会议"加入会议"按钮
+                    meetingUrl?.let { url ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                try {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(url)
+                                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                } catch (_: Exception) { }
+                            },
+                            shape = RoundedCornerShape(99.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF22C55E),
+                                contentColor = Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(text = "加入会议", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
                 }
             }
         }
-        // 环境
+
+        // ============ 环境（天气）============
         weatherDesc?.let { w ->
             Column {
-                Text(text = "环境", fontSize = 12.sp, color = Color(0xFF999999))
-                Text(text = w, fontSize = 14.sp, color = Color(0xFF333333))
+                Text(text = "环境", fontSize = 13.sp, color = labelColor)
+                Spacer(modifier = Modifier.height(6.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.White,
+                    shadowElevation = 1.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            // 需求3：天气行点击反馈（七仔说话）
+                            PetRepository.say("今天$w")
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = w,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = titleColor,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(text = "›", fontSize = 20.sp, color = arrowColor)
+                    }
+                }
             }
         }
-        // v0.51.0：消息——AI 组织（不再用右侧标签）
-        // 逻辑：只取 3 小时内的，按重要度排序，重要优先，最多显示 3 条
-        // 价值：用户不用一条条翻通知，AI 已经筛好了
+
+        // ============ 消息 ============
         val filed by PetRepository.filed.collectAsState()
         val now = System.currentTimeMillis()
         val recentMsgs = remember(filed) {
             filed.values.flatten()
-                .filter { !it.isCalendar } // 日历已在"接下来"显示，这里只显示消息
-                .filter { now - it.time < 3 * 60 * 60 * 1000 } // 3 小时内
+                .filter { !it.isCalendar }
+                .filter { now - it.time < 3 * 60 * 60 * 1000 }
                 .sortedWith(
                     compareByDescending<PetItem> {
-                        // 重要优先
                         when (it.cat) {
                             PetCat.IMP -> 3
                             PetCat.WORK -> 2
@@ -998,18 +1128,19 @@ private fun TodaySection(
         if (recentMsgs.isNotEmpty()) {
             val impCount = recentMsgs.count { it.cat == PetCat.IMP }
             Column {
-                Text(text = "消息", fontSize = 12.sp, color = Color(0xFF999999))
-                // AI 摘要行：总数 + 重要数
-                Text(
-                    text = buildString {
-                        append("${recentMsgs.size} 条新消息")
-                        if (impCount > 0) append("，$impCount 条重要")
-                    },
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF333333)
-                )
-                // 列出最重要的 3 条：应用 · 标题/摘要
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "消息", fontSize = 13.sp, color = labelColor)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = buildString {
+                            append("${recentMsgs.size} 条新消息")
+                            if (impCount > 0) append("，$impCount 条重要")
+                        },
+                        fontSize = 13.sp,
+                        color = subColor
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
                 recentMsgs.take(3).forEach { item ->
                     val snippet = when {
                         item.title.isNotBlank() && item.text.isNotBlank() ->
@@ -1018,30 +1149,76 @@ private fun TodaySection(
                         item.text.isNotBlank() -> item.text.take(30)
                         else -> item.sortDesc
                     }
-                    Row(
-                        modifier = Modifier.padding(top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    // 分类色条颜色
+                    val barColor = when (item.cat) {
+                        PetCat.IMP -> Color(0xFFEF4444)   // 重要红
+                        PetCat.WORK -> Color(0xFF3B82F6)  // 工作蓝
+                        PetCat.FUN -> Color(0xFF22C55E)   // 娱乐绿
+                        PetCat.PRIV -> Color(0xFF9CA3AF)  // 隐私灰
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White,
+                        shadowElevation = 1.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                // 需求3：打开对应 App
+                                val pkg = item.packageName
+                                if (pkg.isNotBlank()) {
+                                    try {
+                                        val intent = context.packageManager
+                                            .getLaunchIntentForPackage(pkg)
+                                        intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            ?.let { context.startActivity(it) }
+                                    } catch (_: Exception) { }
+                                }
+                            }
                     ) {
-                        // 重要标记
-                        if (item.cat == PetCat.IMP) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // 左侧分类色条
+                            Box(
+                                modifier = Modifier
+                                    .width(4.dp)
+                                    .height(56.dp)
+                                    .background(
+                                        barColor,
+                                        RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
+                                    )
+                            )
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = item.appName,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = titleColor
+                                )
+                                Text(
+                                    text = snippet,
+                                    fontSize = 13.sp,
+                                    color = subColor,
+                                    maxLines = 1
+                                )
+                            }
                             Text(
-                                text = "● ",
-                                fontSize = 10.sp,
-                                color = Color(0xFFE03131)
+                                text = "›",
+                                fontSize = 20.sp,
+                                color = arrowColor,
+                                modifier = Modifier.padding(end = 14.dp)
                             )
                         }
-                        Text(
-                            text = "${item.appName} · $snippet",
-                            fontSize = 13.sp,
-                            color = Color(0xFF666666),
-                            maxLines = 1
-                        )
                     }
                 }
             }
         }
     }
 }
+
 
 /**
  * v0.29.0：升级礼物盒——Canvas 手绘，七仔头顶。
@@ -1107,13 +1284,39 @@ private fun isGoodWeather(desc: String?): Boolean =
     desc == "晴" || desc == "多云"
 
 // v0.48.0：日程——从 v0.31.0 移除的 HomeScreen 日历逻辑迁回，由七仔统一呈现
+// v0.58.0：加 description 字段，用于提取在线会议链接
 private data class CalEvent(
     val title: String,
     val begin: Long,
     val end: Long,
     val location: String,
+    val description: String = "",
     val allDay: Boolean
 )
+
+/**
+ * v0.58.0（需求4）：从日历事件的 location/description/title 提取在线会议链接。
+ * 返回 null 表示没有识别到会议链接。
+ */
+private val MEETING_DOMAINS = listOf(
+    "meeting.tencent.com", "wemeet", "voovmeeting.com",
+    "zoom.us", "zoom.com",
+    "teams.microsoft.com", "teams.live.com",
+    "meeting.feishu.cn", "feishu.cn",
+    "webex.com",
+    "dingtalk.com"
+)
+private val URL_REGEX = Regex("""https?://[^\s<>"']+""")
+
+private fun extractMeetingUrl(event: CalEvent): String? {
+    val combined = "${event.location}\n${event.description}\n${event.title}"
+    return URL_REGEX.findAll(combined)
+        .map { it.value.trimEnd('.', ',', ')', ']', '!', '；', '。') }
+        .firstOrNull { url ->
+            val lower = url.lowercase()
+            MEETING_DOMAINS.any { lower.contains(it) }
+        }
+}
 
 private fun hasCalendarPermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(
@@ -1141,6 +1344,7 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
                 CalendarContract.Instances.BEGIN,
                 CalendarContract.Instances.END,
                 CalendarContract.Instances.EVENT_LOCATION,
+                CalendarContract.Instances.DESCRIPTION,
                 CalendarContract.Instances.ALL_DAY
             ),
             null, null,
@@ -1152,6 +1356,7 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
             val bi = it.getColumnIndex(CalendarContract.Instances.BEGIN)
             val ei = it.getColumnIndex(CalendarContract.Instances.END)
             val li = it.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
+            val di = it.getColumnIndex(CalendarContract.Instances.DESCRIPTION)
             val ai = it.getColumnIndex(CalendarContract.Instances.ALL_DAY)
             while (it.moveToNext() && list.size < 20) {
                 list += CalEvent(
@@ -1159,6 +1364,7 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
                     begin = if (bi >= 0) it.getLong(bi) else 0L,
                     end = if (ei >= 0) it.getLong(ei) else 0L,
                     location = if (li >= 0) it.getString(li).orEmpty() else "",
+                    description = if (di >= 0) it.getString(di).orEmpty() else "",
                     allDay = if (ai >= 0) it.getInt(ai) == 1 else false
                 )
             }
