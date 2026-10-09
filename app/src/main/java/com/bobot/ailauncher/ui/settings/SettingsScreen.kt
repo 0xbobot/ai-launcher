@@ -88,10 +88,12 @@ fun SettingsScreen(
     val swipeUpToHome = Modifier.pointerInput(onBack) {
         var totalY = 0f
         var startY = 0f
+        // pointerInput 作用域的 size 在 detectDragGestures 回调里不可见，先存下来
+        val heightPx = size.height
         detectDragGestures(
             onDragStart = { offset -> totalY = 0f; startY = offset.y },
             onDragEnd = {
-                val fromBottom = startY > size.height * 0.75f
+                val fromBottom = startY > heightPx * 0.75f
                 if (fromBottom && totalY < -120) onBack()
             },
             onDrag = { _, dragAmount ->
