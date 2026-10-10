@@ -1104,9 +1104,7 @@ private fun DragGroupRow(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .onGloballyPositioned {
-                    onPositioned(it.positionInParent().y, it.size.height.toFloat())
-                }
+                // v0.64.2-diag: onGloballyPositioned removed for testing
         ) {
             content()
         }
