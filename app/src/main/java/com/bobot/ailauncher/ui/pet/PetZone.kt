@@ -1143,9 +1143,10 @@ private fun TodaySection(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = summaryText,
-                        fontSize = 24.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1C1C1E)
+                        color = Color(0xFF1C1C1E),
+                        maxLines = 1
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
@@ -1504,14 +1505,17 @@ private fun PriorityReplyRow(
         enableDismissFromStartToEnd = false,
         gesturesEnabled = !editMode,
         backgroundContent = {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFFEF4444), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Text(text = "清除", fontSize = 14.sp, color = Color.White)
+            // v0.63.2：只在滑动时显示红色，避免静态透出
+            if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFFEF4444), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Text(text = "清除", fontSize = 14.sp, color = Color.White)
+                }
             }
         }
     ) {
@@ -1633,14 +1637,17 @@ private fun NormalMessageRow(
         enableDismissFromStartToEnd = false,
         gesturesEnabled = !editMode,
         backgroundContent = {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFFEF4444), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Text(text = "清除", fontSize = 14.sp, color = Color.White)
+            // v0.63.2：只在滑动时显示红色，避免静态透出
+            if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFFEF4444), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Text(text = "清除", fontSize = 14.sp, color = Color.White)
+                }
             }
         }
     ) {
@@ -1705,14 +1712,17 @@ private fun TodoRow(
             enableDismissFromStartToEnd = false,
             gesturesEnabled = !editMode && !completing,
             backgroundContent = {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFFEF4444), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 20.dp),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    Text(text = "删除", fontSize = 14.sp, color = Color.White)
+                // v0.63.2：只在滑动时显示红色，避免静态透出
+                if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFFEF4444), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 20.dp),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
+                        Text(text = "删除", fontSize = 14.sp, color = Color.White)
+                    }
                 }
             }
         ) {
