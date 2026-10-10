@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,7 +27,6 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.UiPrefs
@@ -162,14 +162,18 @@ private fun HomeHost(
     onHideDockConfirm: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
+    // v0.64.2：更新弹窗走共享流（自动检查 / TODAY 卡片"有新版本"行点击）
+    val updatePrompt by OtaUpdater.updatePrompt.collectAsState()
 
-    // OTA：每天最多自动检查一次，有新版弹更新对话框
+    // OTA：每天最多自动检查一次，有新版弹更新对话框 + TODAY 卡片底行提醒
     LaunchedEffect(Unit) {
         if (OtaUpdater.shouldAutoCheck(context)) {
             val info = OtaUpdater.checkForUpdate(context)
             OtaUpdater.markChecked(context)
-            if (info != null) updateInfo = info
+            if (info != null) {
+                OtaUpdater.latestAvailable.value = info
+                OtaUpdater.updatePrompt.value = info
+            }
         }
     }
 
@@ -195,9 +199,9 @@ private fun HomeHost(
             onOpenSettings = onOpenSettings
         )
         // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
-        // OTA 更新对话框（自动检查 / 设置页手动检查 / 长按快捷方式共用 UpdateDialog）
-        updateInfo?.let { info ->
-            UpdateDialog(info = info, onDismiss = { updateInfo = null })
+        // OTA 更新对话框（自动检查 / TODAY 卡片行点击 / 设置页手动检查 / 长按快捷方式共用 UpdateDialog）
+        updatePrompt?.let { info ->
+            UpdateDialog(info = info, onDismiss = { OtaUpdater.updatePrompt.value = null })
         }
         // v0.32.3：长按快捷方式的检查结果
         com.bobot.ailauncher.MainActivity.checkUpdateResult.value?.let { info ->

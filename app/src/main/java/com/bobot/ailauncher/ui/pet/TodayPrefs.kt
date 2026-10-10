@@ -62,4 +62,20 @@ object TodayPrefs {
     fun saveWeatherVisible(context: Context, visible: Boolean) {
         prefs(context).edit().putBoolean(KEY_WEATHER_VISIBLE, visible).apply()
     }
+
+    // v0.64.2：用户拖拽排序（组级别），key="today_user_order"，null=用 AI 优先级
+    private const val KEY_USER_ORDER = "today_user_order"
+
+    fun loadUserOrder(context: Context): List<String>? {
+        val raw = prefs(context).getString(KEY_USER_ORDER, null) ?: return null
+        val list = raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        return list.ifEmpty { null }
+    }
+
+    fun saveUserOrder(context: Context, order: List<String>?) {
+        val e = prefs(context).edit()
+        if (order == null) e.remove(KEY_USER_ORDER)
+        else e.putString(KEY_USER_ORDER, order.joinToString(","))
+        e.apply()
+    }
 }

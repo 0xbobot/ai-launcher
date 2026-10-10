@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.bobot.ailauncher.BuildConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -48,6 +49,17 @@ object OtaUpdater {
     private const val KEY_LAST_RUN_VERSION = "last_run_version"
     private const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
     const val APK_FILE_NAME = "ai-launcher-update.apk"
+
+    /**
+     * v0.64.2：最新发现的可更新版本（自动检查写入），TODAY 卡片底部的"有新版本"行读取展示。
+     * 更新后（versionCode 追上）调用 clearAvailable() 清掉。
+     */
+    val latestAvailable = MutableStateFlow<OtaInfo?>(null)
+
+    /**
+     * v0.64.2：请求弹出更新对话框（TODAY 行点击 / 自动检查），MainScreen 收集后展示 UpdateDialog。
+     */
+    val updatePrompt = MutableStateFlow<OtaInfo?>(null)
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
