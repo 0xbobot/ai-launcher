@@ -3,6 +3,7 @@ package com.bobot.ailauncher.ui.pet
 import android.content.Context
 import android.view.HapticFeedbackConstants
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -122,6 +123,7 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.core.app.NotificationManagerCompat
@@ -166,6 +168,13 @@ fun PetZone(
     val meetingSoon by PetRepository.meetingSoon.collectAsState()
     // v0.43.0：七仔场景演示——点按循环 WAVE→READING→WORKING；新通知到达自动进 READING
     var demoScene by remember { mutableStateOf(QizaiScene.NONE) }
+    // v0.64.5：编辑模式状态上提（气泡点击退出需要用到）
+    var todayEditMode by remember { mutableStateOf(false) }
+    // v0.64.5：返回键退出编辑模式
+    BackHandler(enabled = todayEditMode) {
+        todayEditMode = false
+        PetRepository.say("好啦！")
+    }
     // v0.51.0：新通知 → 七仔看手机 + 开口（徽标已删，消息统一进 Today）
     // v0.56.0 M3：改用 sayApp（同一应用 30 秒合并 + 深夜/手势中降级）
     LaunchedEffect(deliverTick) {
@@ -314,6 +323,12 @@ fun PetZone(
     }
     var blinking by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    // v0.64.5：版本更新后首次打开 → 七仔介绍新本事（只一次，首次安装不打扰）
+    LaunchedEffect(Unit) {
+        if (GuideManager.shouldShowVersionUpdate(context)) {
+            PetRepository.say("我有新本事了！长按卡片可以进编辑模式哦")
+        }
+    }
     // v0.48.0：日程轮询——15 分钟一次，30 分钟内有会就让七仔说
     // v0.49.1：修闪屏——开机自动弹权限导致 Activity 闪黑，改为 TodaySheet 里手动申请
     val notifiedCalendarKeys = remember { mutableSetOf<String>() }
@@ -365,7 +380,18 @@ fun PetZone(
     // v0.56.0 M1：眨眼已移入 PetView（8 秒 ± 3 秒随机），此处删除旧定时器
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            // v0.64.5：编辑模式下点卡片外空白退出。
+            // 卡片自身吞掉落在卡片上的点击（见卡片 Box 的 tap-blocker），冒泡到这里的必是卡片外。
+            .pointerInput(todayEditMode) {
+                if (todayEditMode) {
+                    detectTapGestures {
+                        todayEditMode = false
+                        PetRepository.say("好啦！")
+                    }
+                }
+            },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // 桌台
@@ -431,13 +457,20 @@ fun PetZone(
             }
             // v0.51.2：会议临近黄条已删（Capsule 已覆盖，避免重复）
             // v0.47.0：七仔说话气泡——统一信息区（Mii 风+游戏化），有话就弹出来
+            // v0.64.5：编辑模式下点气泡退出编辑模式
             if (speech != null) {
                 SpeechBubble(
                     text = speech!!.text,
                     visible = speechVisible,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 2.dp)
+                        .padding(top = 2.dp),
+                    onClick = if (todayEditMode) {
+                        {
+                            todayEditMode = false
+                            PetRepository.say("好啦！")
+                        }
+                    } else null
                 )
             }
     // v0.56.0 M2 抚摸：长按 + 滑动 = 抚摸（害羞+腮红+轻颤）
@@ -501,6 +534,10 @@ fun PetZone(
                             if (pettedThisGesture) {
                                 pettedThisGesture = false
                                 return@combinedClickable
+                            }
+                            // v0.64.5：首次长按七仔 → 指引（只一次）
+                            if (GuideManager.tryShow(context, GuideManager.Id.PET_LONGPRESS)) {
+                                PetRepository.say("长按我是抚摸哦")
                             }
                             // v0.46.0：长按手动刷新天气——拉最新数据并播对应场景
                             scope.launch {
@@ -617,13 +654,19 @@ fun PetZone(
         // v0.63.1：不用 Material3 Card（tonal elevation 在半透明背景上形成灰边），
         // 改用 Box + 手动柔和阴影，边缘与背景自然融合
         // v0.64.3：editMode 上提；编辑模式卡片高度自适应内容（去 minHeight、不滚动）
-        var todayEditMode by remember { mutableStateOf(false) }
+        // v0.64.5：todayEditMode 已移到 PetZone 顶部，此处不再重复声明
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .offset(y = (-30).dp)
                 .then(if (todayEditMode) Modifier else Modifier.heightIn(min = 120.dp)) // v0.62.1：空态时不缩成一条线；v0.64.3：编辑模式去掉
+                // v0.64.5：编辑模式下吞掉卡片背景上的点击（不冒泡到根布局，避免误退出）
+                .then(
+                    if (todayEditMode) Modifier.pointerInput(Unit) {
+                        detectTapGestures { /* 消费掉，不做事 */ }
+                    } else Modifier
+                )
                 .shadow(
                     elevation = 12.dp,
                     shape = RoundedCornerShape(28.dp),
@@ -903,7 +946,9 @@ private fun openAppForPet(context: Context, packageName: String, appName: String
 private fun SpeechBubble(
     text: String,
     visible: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // v0.64.5：编辑模式下点气泡退出编辑模式
+    onClick: (() -> Unit)? = null
 ) {
     // 打字机：一字一字蹦出来（RPG 对话感）
     var shownChars by remember(text) { mutableIntStateOf(0) }
@@ -928,7 +973,12 @@ private fun SpeechBubble(
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                modifier = Modifier.widthIn(max = 240.dp)
+                modifier = Modifier
+                    .widthIn(max = 240.dp)
+                    .then(if (onClick != null) Modifier.clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() }
+                    ) { onClick() } else Modifier)
             ) {
                 Text(
                     text = text.take(shownChars),
@@ -1090,7 +1140,7 @@ private fun AiCapsuleCard(
  */
 /**
  * v0.64.2：组级别拖拽容器——编辑模式下左侧显示 ⋮⋮ 手柄，长按拖拽换位。
- * v0.64.5：用 onGloballyPositioned + positionInRoot 拿每组真实 Y 坐标；
+ * v0.64.5：换位用"累计 dy + 各单元高度 + 组间隙"计算中心距（不用 positionInRoot，CI 不认）；
  * 手柄触摸目标放大到 48dp；拖拽中组 zIndex 置顶 + 放大 1.02 + 阴影。
  */
 @Composable
@@ -1105,9 +1155,11 @@ private fun DragGroupRow(
     onDragEnd: () -> Unit,
     content: @Composable () -> Unit
 ) {
+    // v0.64.5：onSizeChanged 测整行高度（手柄+内容取高者）；换位用高度+已知间距计算
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .onSizeChanged { onPositioned(0f, it.height.toFloat()) }
             .then(if (isDragging) Modifier.zIndex(1f) else Modifier)
             .then(
                 if (isDragging) Modifier
@@ -1148,10 +1200,6 @@ private fun DragGroupRow(
         Box(
             modifier = Modifier
                 .weight(1f)
-                // v0.64.5：拿真实 Y 坐标（positionInRoot），不再只传高度
-                .onGloballyPositioned { coords ->
-                    onPositioned(coords.positionInRoot().y, coords.size.height.toFloat())
-                }
         ) {
             content()
         }
@@ -1292,6 +1340,12 @@ private fun TodaySection(
     val replyMsgs = remember(recentMsgs) {
         recentMsgs.filter { AiInsight.analyzeReplyNeed(it.title, it.text).needsReply }
     }
+    // v0.64.5：首次出现 P0 需回复消息 → 七仔引导（只一次）
+    LaunchedEffect(replyMsgs.isNotEmpty()) {
+        if (replyMsgs.isNotEmpty() && GuideManager.tryShow(context, GuideManager.Id.P0_REPLY)) {
+            PetRepository.say("红色的是要回复的，点进去看看")
+        }
+    }
     val normalMsgs = remember(recentMsgs) {
         recentMsgs.filter { !AiInsight.analyzeReplyNeed(it.title, it.text).needsReply }
     }
@@ -1330,10 +1384,11 @@ private fun TodaySection(
     // 拖拽共享状态
     val scope = rememberCoroutineScope()
     val groupHeights = remember { mutableStateMapOf<String, Float>() }
-    // v0.64.5：每组 home 顶部 Y（root 坐标，非拖拽时由 onGloballyPositioned 记录；拖拽中手动同步换位）
-    val groupHomeTops = remember { mutableStateMapOf<String, Float>() }
-    // v0.64.5：被拖组 home 中心 Y（root 坐标），用于和相邻组中心比较
-    var dragHomeCenter by remember { mutableStateOf(0f) }
+    // v0.64.5：组间隙 px = 间距×2 + 分割线高（Column spacedBy 10.dp，分割线在两组之间，上下各一个间距）
+    val density = LocalDensity.current
+    val spacingPx = with(density) { 10.dp.toPx() }
+    var dividerH by remember { mutableStateOf(0f) }
+    val gapPx get() = spacingPx * 2 + dividerH
     var dragKey by remember { mutableStateOf<String?>(null) }
     val dragDy = remember { Animatable(0f) }
     // 内容变化且不在拖拽中 → 回到 baseOrder
@@ -1354,56 +1409,48 @@ private fun TodaySection(
             dragOrder = null
         }
     }
-    // v0.64.5：基于真实中心点换位——拖拽组视觉中心拖过相邻组中心即换位。
-    // home 坐标在非拖拽时由 onGloballyPositioned 记录（含分割线/间距，无需手动算）；
-    // 拖拽中换位时同步更新 bookkeeping，不依赖异步的 layout 回调。
+    // v0.64.5：基于累计 dy + 单元高度 + 组间隙换位（不用 positionInRoot）。
+    // 组间隙 = 间距×2 + 分割线高（均匀，任意相邻两组之间都有分割线）。
+    // 被拖组中心到相邻组中心距离 = myH/2 + gapPx + neighborH/2；拖过即换位，
+    // 换位后补偿 offset 保证视觉连续：newOffset = newDy ∓ centerDist。
     fun onGroupDrag(key: String, change: PointerInputChange, amount: Offset) {
         change.consume()
         val cur = dragOrder ?: return
         val idx = cur.indexOf(key)
         if (idx < 0) return
+        val myH = groupHeights[key] ?: 0f
+        if (myH <= 0f) return
         val newDy = dragDy.value + amount.y
-        val visualCenter = dragHomeCenter + newDy
+        val gap = gapPx
         scope.launch {
-            // 向下拖过下一组中心 → 与下一组换位
+            // 向下：拖过下一组中心 → 换位
             if (idx < cur.size - 1) {
-                val nkey = cur[idx + 1]
-                val nTop = groupHomeTops[nkey]
-                val nH = groupHeights[nkey]
-                if (nTop != null && nH != null && nH > 0f) {
-                    val nCenter = nTop + nH / 2f
-                    if (visualCenter > nCenter) {
+                val nH = groupHeights[cur[idx + 1]] ?: 0f
+                if (nH > 0f) {
+                    val dist = myH / 2f + gap + nH / 2f
+                    if (newDy > dist) {
+                        val nkey = cur[idx + 1]
                         dragOrder = cur.toMutableList().also {
                             it[idx] = nkey
                             it[idx + 1] = key
                         }
-                        // 同步 bookkeeping：两组交换 home
-                        val keyTop = groupHomeTops[key]
-                        if (keyTop != null) groupHomeTops[nkey] = keyTop
-                        groupHomeTops[key] = nTop
-                        dragHomeCenter = nCenter
-                        dragDy.snapTo(visualCenter - nCenter)
+                        dragDy.snapTo(newDy - dist)
                         return@launch
                     }
                 }
             }
-            // 向上拖过上一组中心 → 与上一组换位
+            // 向上：拖过上一组中心 → 换位
             if (idx > 0) {
-                val pkey = cur[idx - 1]
-                val pTop = groupHomeTops[pkey]
-                val pH = groupHeights[pkey]
-                if (pTop != null && pH != null && pH > 0f) {
-                    val pCenter = pTop + pH / 2f
-                    if (visualCenter < pCenter) {
+                val pH = groupHeights[cur[idx - 1]] ?: 0f
+                if (pH > 0f) {
+                    val dist = myH / 2f + gap + pH / 2f
+                    if (newDy < -dist) {
+                        val pkey = cur[idx - 1]
                         dragOrder = cur.toMutableList().also {
                             it[idx] = pkey
                             it[idx - 1] = key
                         }
-                        val keyTop = groupHomeTops[key]
-                        if (keyTop != null) groupHomeTops[pkey] = keyTop
-                        groupHomeTops[key] = pTop
-                        dragHomeCenter = pCenter
-                        dragDy.snapTo(visualCenter - pCenter)
+                        dragDy.snapTo(newDy + dist)
                         return@launch
                     }
                 }
@@ -1428,11 +1475,14 @@ private fun TodaySection(
                     indication = null,
                     onClick = {},
                     // v0.64.4：长按震动 + 七仔说话引导进入编辑模式
+                    // v0.64.5：纳入指引系统（只展示一次）；文案更新含退出方式
                     onLongClick = {
                         if (!editMode) {
                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                             onEditModeChange(true)
-                            PetRepository.say("拖拽可以排序，点眼睛可以隐藏或显示哦")
+                            if (GuideManager.tryShow(context, GuideManager.Id.EDIT_MODE)) {
+                                PetRepository.say("拖拽可以排序，点眼睛可以隐藏，点空白处退出哦")
+                            }
                         }
                     }
                 ),
@@ -1577,13 +1627,7 @@ private fun TodaySection(
                         }
                     }
                 }
-                TextButton(onClick = {
-                    onEditModeChange(false)
-                    // v0.64.4：退出编辑模式七仔说话
-                    PetRepository.say("好啦！")
-                }) {
-                    Text(text = "完成", fontSize = 14.sp, color = Color(0xFF3B82F6))
-                }
+                // v0.64.5：去掉"完成"按钮，退出方式：点卡片外空白 / 返回键 / 点七仔气泡
             }
         }
         // ============ v0.63.0：AI 简报式优先级渲染 ============
@@ -1795,24 +1839,25 @@ private fun TodaySection(
         }
         renderOrder.forEachIndexed { gi, gkey ->
             key(gkey) {
-                if (gi > 0) PriorityDivider()
+                // v0.64.5：分割线在单元外（高度稳定，不随换位变化）；测量高度用于换位间距计算
+                if (gi > 0) {
+                    Box(
+                        modifier = Modifier.onSizeChanged { dividerH = it.height.toFloat() }
+                    ) {
+                        PriorityDivider()
+                    }
+                }
                 DragGroupRow(
                     gkey = gkey,
                     editMode = editMode,
                     isDragging = dragKey == gkey,
                     dragDyPx = if (dragKey == gkey) dragDy.value else 0f,
-                    onPositioned = { top, h ->
+                    onPositioned = { _, h ->
                         if (groupHeights[gkey] != h) groupHeights[gkey] = h
-                        // v0.64.5：只在非拖拽时记录 home 顶部（拖拽中 offset 会污染测量值）
-                        if (dragKey == null && groupHomeTops[gkey] != top) groupHomeTops[gkey] = top
                     },
                     onDragStart = {
                         dragKey = gkey
                         dragOrder = renderOrder
-                        // v0.64.5：记录被拖组 home 中心
-                        val top = groupHomeTops[gkey] ?: 0f
-                        val h = groupHeights[gkey] ?: 0f
-                        dragHomeCenter = top + h / 2f
                         scope.launch { dragDy.snapTo(0f) }
                     },
                     onDrag = { change, amount -> onGroupDrag(gkey, change, amount) },
