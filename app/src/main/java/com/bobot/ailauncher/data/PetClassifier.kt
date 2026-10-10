@@ -29,7 +29,9 @@ data class PetItem(
     val isBatchSummary: Boolean = false,
     val batchItems: List<PetItem> = emptyList(),
     // v0.60.0：通知的 contentIntent，点击直达具体会话窗口（null 则 fallback 打开 App）
-    val pendingIntent: android.app.PendingIntent? = null
+    val pendingIntent: android.app.PendingIntent? = null,
+    // v0.64.0：十万火急标记，触发红色动效（跳动+呼吸+光带）
+    val isUrgent: Boolean = false
 )
 
 /**

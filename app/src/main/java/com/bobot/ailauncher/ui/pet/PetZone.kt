@@ -25,6 +25,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -73,6 +74,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -252,6 +254,38 @@ fun PetZone(
     val speech by PetRepository.speech.collectAsState()
     // v0.49.0：AI Capsule——一次只说一件最重要的事
     val capsule by PetRepository.capsule.collectAsState()
+    // v0.64.0：十万火急动效触发器
+    val urgentTick by PetRepository.urgentTick.collectAsState()
+    var urgentActive by remember { mutableStateOf(false) }
+    LaunchedEffect(urgentTick) {
+        if (urgentTick > 0) {
+            urgentActive = true
+            delay(5000) // 动效持续 5 秒，不循环打扰
+            urgentActive = false
+        }
+    }
+    // 七仔跳动：3 次快速上下
+    val urgentBounce = remember { Animatable(0f) }
+    LaunchedEffect(urgentActive) {
+        if (urgentActive) {
+            repeat(3) {
+                urgentBounce.animateTo(-28f, animationSpec = tween(180))
+                urgentBounce.animateTo(0f, animationSpec = tween(180))
+            }
+        } else {
+            urgentBounce.snapTo(0f)
+        }
+    }
+    // 红光呼吸：alpha 0.15↔0.35
+    val urgentGlow by rememberInfiniteTransition(label = "urgentGlow").animateFloat(
+        initialValue = 0.15f,
+        targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowAlpha"
+    )
     // v0.50.0：Today 直接放首屏（不再用 Bottom Sheet）
     // v0.64.0：Capsule 三态——PREVIEW（前2行）→ POINTS（3关键点）→ FULL（全文）
     var capsuleMode by remember { mutableStateOf(CapsuleMode.PREVIEW) }
@@ -412,6 +446,8 @@ fun PetZone(
                 onSceneDone = { demoScene = QizaiScene.NONE },
                 modifier = Modifier
                     .align(Alignment.Center)
+                    // v0.64.0：十万火急跳动（3 次快速上下）
+                    .graphicsLayer { translationY = urgentBounce.value }
                     // 场景播放时给宽舞台（同中心，宠物视觉大小不变）；常态保持 100dp
                     .then(
                         if (demoScene == QizaiScene.NONE) Modifier.size(100.dp)
@@ -480,6 +516,19 @@ fun PetZone(
                         }
                     )
             )
+            // v0.64.0：十万火急红光（身体微发红，5 秒）
+            if (urgentActive) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(100.dp)
+                        .graphicsLayer { translationY = urgentBounce.value }
+                        .background(
+                            Color(0xFFFF3B30).copy(alpha = urgentGlow * 0.5f),
+                            CircleShape
+                        )
+                )
+            }
             // P0：落地阴影（奶油白在暖灰底上加对比）；场景播放时隐藏（场景自带舞台）
             if (demoScene == QizaiScene.NONE) {
                 Box(
@@ -576,6 +625,29 @@ fun PetZone(
                 .clip(RoundedCornerShape(28.dp))
                 .background(Color.White.copy(alpha = 0.65f))
         ) {
+            // v0.64.0：十万火急红色光带扫过顶部（1 次）
+            val sweepX = remember { Animatable(-0.3f) }
+            LaunchedEffect(urgentTick) {
+                if (urgentTick > 0) {
+                    sweepX.snapTo(-0.3f)
+                    sweepX.animateTo(1.3f, animationSpec = tween(800))
+                }
+            }
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val cardW = maxWidth
+                if (urgentTick > 0 && sweepX.value < 1.3f) {
+                    Box(
+                        modifier = Modifier
+                            .width(80.dp)
+                            .height(3.dp)
+                            .offset(x = cardW * sweepX.value - 40.dp)
+                            .background(
+                                Color(0xFFFF3B30).copy(alpha = 0.8f),
+                                RoundedCornerShape(99.dp)
+                            )
+                    )
+                }
+            }
             Column {
                 // 顶部留出七仔坐的位置
                 Box(modifier = Modifier.height(20.dp))
@@ -1529,6 +1601,23 @@ private fun PriorityReplyRow(
             }
         }
     }
+    // v0.64.0：点击行展开看关键点+全文（看看重点移到 P0 行）
+    var expanded by remember(item.id) { mutableStateOf(false) }
+    val keyPoints = remember(item.id) {
+        com.bobot.ailauncher.data.AiInsight.extractKeyPoints(item.text)
+    }
+    // v0.64.0：十万火急红条呼吸（alpha 0.4↔1.0，1 秒循环，5 秒止）
+    val urgentBreath = remember(item.id) { Animatable(1f) }
+    LaunchedEffect(item.id) {
+        if (item.isUrgent) {
+            val end = System.currentTimeMillis() + 5000
+            while (System.currentTimeMillis() < end) {
+                urgentBreath.animateTo(0.4f, animationSpec = tween(500))
+                urgentBreath.animateTo(1f, animationSpec = tween(500))
+            }
+            urgentBreath.snapTo(1f)
+        }
+    }
     Spacer(modifier = Modifier.height(6.dp))
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -1561,15 +1650,17 @@ private fun PriorityReplyRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = !editMode) { openSession() }
+                // v0.64.0：点行展开看关键点+全文，去回复按钮才进会话
+                .clickable(enabled = !editMode) { expanded = !expanded }
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 红竖线
+            // 红竖线（十万火急时呼吸）
             Box(
                 modifier = Modifier
                     .width(4.dp)
                     .height(72.dp)
+                    .alpha(if (item.isUrgent) urgentBreath.value else 1f)
                     .background(Color(0xFFFF3B30), RoundedCornerShape(2.dp))
             )
             Spacer(modifier = Modifier.width(12.dp))
@@ -1581,13 +1672,35 @@ private fun PriorityReplyRow(
                     color = Color(0xFF1C1C1E)
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = snippet,
-                    fontSize = 14.sp,
-                    color = Color(0xFF3A3A3C),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (expanded) {
+                    // v0.64.0：展开态——关键点 + 全文
+                    if (keyPoints.isNotEmpty()) {
+                        keyPoints.forEach { kp ->
+                            Text(
+                                text = kp,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF1C1C1E),
+                                modifier = Modifier.padding(bottom = 2.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                    Text(
+                        text = item.text,
+                        fontSize = 13.sp,
+                        color = Color(0xFF636366),
+                        lineHeight = 18.sp
+                    )
+                } else {
+                    Text(
+                        text = snippet,
+                        fontSize = 14.sp,
+                        color = Color(0xFF3A3A3C),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 calLinkTime?.let {
                     Spacer(modifier = Modifier.height(6.dp))
                     Surface(

@@ -72,6 +72,9 @@ object PetRepository {
     // v0.29.0：新通知送达——七仔小跑送通知（app 名 + 计数，PetZone 显示浮动徽标）
     private val _deliverTick = MutableStateFlow(0)
     val deliverTick: StateFlow<Int> get() = _deliverTick.asStateFlow()
+    // v0.64.0：十万火急触发器，PetZone 观察后播放动效（七仔跳动+红光+P0呼吸+光带）
+    private val _urgentTick = MutableStateFlow(0)
+    val urgentTick: StateFlow<Int> get() = _urgentTick.asStateFlow()
     private val _deliverApp = MutableStateFlow<String?>(null)
     val deliverApp: StateFlow<String?> get() = _deliverApp.asStateFlow()
     // v0.29.0：会议临近——15 分钟内有会，七仔戴手表
@@ -311,30 +314,15 @@ object PetRepository {
         _deliverApp.value = n.appName
         _deliverTick.value += 1
         // v0.49.0：重要通知 → AI Capsule（一次只说一件）
+        // v0.64.0：重要消息不再弹 Capsule，只走七仔表情+头顶气泡+TODAY P0 置顶
         if (cat == PetCat.IMP) {
-            val timeStr = java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA)
-                .format(java.util.Date(n.time))
-            val bodyText = buildString {
-                if (n.title.isNotBlank()) append(n.title)
-                if (n.text.isNotBlank()) {
-                    if (isNotEmpty()) append("\n")
-                    // 正文截断，避免太长
-                    append(if (n.text.length > 60) n.text.take(60) + "…" else n.text)
-                }
-            }
-            showCapsule(
-                AiCapsule(
-                    id = "notif_${n.time}_${n.packageName.hashCode()}",
-                    timeLabel = timeStr,
-                    title = "${n.appName}有重要消息",
-                    body = bodyText.ifBlank { desc },
-                    primaryAction = "看看重点",
-                    secondaryAction = "稍后"
-                )
-            )
             // 重要消息七仔也开口
             say("${n.appName}有重要消息")
         }
+        // v0.64.0：十万火急判断（IMP 才判）
+        val urgent = cat == PetCat.IMP &&
+            AiInsight.isUrgentMessage(n.appName, n.title, n.text, n.time)
+        if (urgent) _urgentTick.value += 1
         handleIncoming(
             PetItem(
                 id = "n${n.time}_${n.packageName.hashCode()}",
@@ -346,7 +334,9 @@ object PetRepository {
                 time = n.time,
                 packageName = n.packageName,
                 // v0.60.0：带上 contentIntent，点击直达会话
-                pendingIntent = n.contentIntent
+                pendingIntent = n.contentIntent,
+                // v0.64.0：十万火急标记
+                isUrgent = urgent
             )
         )
     }

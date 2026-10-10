@@ -34,7 +34,7 @@ private val PURE_NOTIFY_WORDS = listOf(
 */
 fun analyzeReplyNeed(title: String, text: String): ReplyAnalysis {
 val combined = "$title $text"
-val hasAction = ACTION_WORDS.any { combined.contains(it)}
+val hasAction = ACTION_WORDS.any { combined.contains(it) }
 val hasPureNotify = PURE_NOTIFY_WORDS.any { combined.contains(it)}
 
 return when {
@@ -242,5 +242,37 @@ return scored.sortedByDescending { it.second }
 .take(3)
 .sortedBy { it.first }
 .map { "· ${it.third}" }
+}
+
+// ============ v0.64.0：十万火急判断 ============
+
+/** 紧急关键词 */
+private val URGENT_KEYWORDS = listOf("紧急", "马上", "立刻", "十万火急", "urgent", "ASAP")
+
+/** 同一发送者 5 分钟滑动窗口内的时间戳（key = appName::title） */
+private val senderWindow = mutableMapOf<String, MutableList<Long>>()
+private const val SENDER_WINDOW_MS = 5 * 60 * 1000L
+private const val SENDER_BURST_COUNT = 3
+
+/**
+ * v0.64.0：判断是否为十万火急消息。
+ * 触发任一：同一发送者 5 分钟内连发 3 条、含紧急关键词、@你的重要消息。
+ * 必须在 cat == IMP 时调用。
+ */
+fun isUrgentMessage(appName: String, title: String, text: String, time: Long): Boolean {
+    val combined = "$title$text"
+    // 1. 紧急关键词
+    if (URGENT_KEYWORDS.any { combined.contains(it) }) return true
+    // 2. @你的（@某人 / @所有人）
+    if (combined.contains("@")) return true
+    // 3. 同一发送者连发 3 条（5 分钟窗口）
+    val key = "$appName::$title"
+    val list = senderWindow.getOrPut(key) { mutableListOf() }
+    list.add(time)
+    // 清理过期
+    list.removeAll { time - it > SENDER_WINDOW_MS }
+    // 防止内存膨胀
+    if (senderWindow.size > 200) senderWindow.clear()
+    return list.size >= SENDER_BURST_COUNT
 }
 }
