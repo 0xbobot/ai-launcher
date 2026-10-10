@@ -69,7 +69,7 @@ object TodayPrefs {
     fun loadUserOrder(context: Context): List<String>? {
         val raw = prefs(context).getString(KEY_USER_ORDER, null) ?: return null
         val list = raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        return list.ifEmpty { null }
+        return list.takeIf { it.isNotEmpty() }
     }
 
     fun saveUserOrder(context: Context, order: List<String>?) {
