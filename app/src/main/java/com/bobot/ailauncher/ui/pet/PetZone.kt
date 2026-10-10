@@ -1102,8 +1102,11 @@ private fun DragGroupRow(
     ) {
         // v0.64.2-diag: editMode/pointerInput block removed for testing
         Box(
-            // v0.64.2-diag: weight/onGloballyPositioned removed for testing
             modifier = Modifier
+                .weight(1f)
+                .onGloballyPositioned {
+                    onPositioned(it.positionInParent().y, it.size.height.toFloat())
+                }
         ) {
             content()
         }
