@@ -1096,23 +1096,14 @@ private fun DragGroupRow(
     content: @Composable () -> Unit
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (isDragging) Modifier.zIndex(1f) else Modifier)
-            .then(
-                if (isDragging && dragDyPx != 0f) Modifier.offset {
-                    IntOffset(0, dragDyPx.roundToInt())
-                } else Modifier
-            ),
+        // v0.64.2-diag: then/zIndex/offset blocks removed for testing
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top
     ) {
         // v0.64.2-diag: editMode/pointerInput block removed for testing
         Box(
+            // v0.64.2-diag: weight/onGloballyPositioned removed for testing
             modifier = Modifier
-                .weight(1f)
-                .onGloballyPositioned {
-                    onPositioned(it.positionInParent().y, it.size.height.toFloat())
-                }
         ) {
             content()
         }
