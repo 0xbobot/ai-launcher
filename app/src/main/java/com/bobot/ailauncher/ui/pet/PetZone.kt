@@ -1308,16 +1308,23 @@ private fun TodaySection(
                     val mins = ((e.begin - System.currentTimeMillis()) / 60000).toInt()
                     val meetingUrl = remember(e) { getValidMeetingUrl(context, e) }
                     // v0.63.0：扁平会议行（无白卡），标题大字 + 时间地点 + 加入会议按钮
+                    // v0.63.3：用 CATEGORY_APP_CALENDAR 精准打开日历，不弹选择器
                     Column(
                         modifier = Modifier.clickable(enabled = !editMode) {
                             try {
-                                context.startActivity(
-                                    android.content.Intent(
-                                        android.content.Intent.ACTION_VIEW,
-                                        CalendarContract.CONTENT_URI
-                                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                )
-                            } catch (_: Exception) { }
+                                val intent = android.content.Intent(
+                                    android.content.Intent.ACTION_MAIN
+                                ).addCategory(
+                                    android.content.Intent.CATEGORY_APP_CALENDAR
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                if (intent.resolveActivity(context.packageManager) != null) {
+                                    context.startActivity(intent)
+                                } else {
+                                    PetRepository.say("没找到日历应用")
+                                }
+                            } catch (_: Exception) {
+                                PetRepository.say("没找到日历应用")
+                            }
                         }
                     ) {
                         Text(
