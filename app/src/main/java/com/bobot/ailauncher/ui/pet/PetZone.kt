@@ -1308,16 +1308,12 @@ private fun TodaySection(
                     val mins = ((e.begin - System.currentTimeMillis()) / 60000).toInt()
                     val meetingUrl = remember(e) { getValidMeetingUrl(context, e) }
                     // v0.63.0：扁平会议行（无白卡），标题大字 + 时间地点 + 加入会议按钮
+                    // v0.63.3：日历行点击严格校验 Intent 可解析，不弹选择器，找不到就七仔提示
                     Column(
                         modifier = Modifier.clickable(enabled = !editMode) {
-                            try {
-                                context.startActivity(
-                                    android.content.Intent(
-                                        android.content.Intent.ACTION_VIEW,
-                                        CalendarContract.CONTENT_URI
-                                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                )
-                            } catch (_: Exception) { }
+                            if (!openCalendarApp(context)) {
+                                PetRepository.say("没找到日历应用")
+                            }
                         }
                     ) {
                         Text(
@@ -1892,6 +1888,43 @@ private fun getValidMeetingUrl(context: android.content.Context, event: CalEvent
         android.net.Uri.parse(url)
     )
     return if (intent.resolveActivity(context.packageManager) != null) url else null
+}
+
+// v0.63.3：打开系统日历应用——严格校验可解析，显式指定包名不弹选择器
+// 返回 true=成功打开，false=没找到（调用方用七仔气泡提示）
+private fun openCalendarApp(context: android.content.Context): Boolean {
+    val pm = context.packageManager
+    // 方案1：标准 CATEGORY_APP_CALENDAR（最可靠，直接定位用户日历应用）
+    val calIntent = android.content.Intent(android.content.Intent.ACTION_MAIN)
+        .addCategory(android.content.Intent.CATEGORY_APP_CALENDAR)
+    val calResolve = calIntent.resolveActivity(pm)
+    if (calResolve != null) {
+        try {
+            calIntent.setPackage(calResolve.activityInfo.packageName)
+            calIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(calIntent)
+            return true
+        } catch (_: Exception) { }
+    }
+    // 方案2：ACTION_VIEW + CalendarContract.CONTENT_URI
+    // 必须校验解析到的是日历类应用（包名含 calendar），否则宁可不打开也不进错应用
+    val viewIntent = android.content.Intent(
+        android.content.Intent.ACTION_VIEW,
+        CalendarContract.CONTENT_URI
+    )
+    val viewResolve = viewIntent.resolveActivity(pm)
+    if (viewResolve != null) {
+        val pkg = viewResolve.activityInfo.packageName
+        if (pkg.contains("calendar", ignoreCase = true)) {
+            try {
+                viewIntent.setPackage(pkg)
+                viewIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(viewIntent)
+                return true
+            } catch (_: Exception) { }
+        }
+    }
+    return false
 }
 
 private fun hasCalendarPermission(context: Context): Boolean =
