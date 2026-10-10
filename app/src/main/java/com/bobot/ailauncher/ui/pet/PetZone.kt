@@ -1388,7 +1388,6 @@ private fun TodaySection(
     val density = LocalDensity.current
     val spacingPx = with(density) { 10.dp.toPx() }
     var dividerH by remember { mutableStateOf(0f) }
-    val gapPx get() = spacingPx * 2 + dividerH
     var dragKey by remember { mutableStateOf<String?>(null) }
     val dragDy = remember { Animatable(0f) }
     // 内容变化且不在拖拽中 → 回到 baseOrder
@@ -1421,7 +1420,7 @@ private fun TodaySection(
         val myH = groupHeights[key] ?: 0f
         if (myH <= 0f) return
         val newDy = dragDy.value + amount.y
-        val gap = gapPx
+        val gap = spacingPx * 2 + dividerH
         scope.launch {
             // 向下：拖过下一组中心 → 换位
             if (idx < cur.size - 1) {
