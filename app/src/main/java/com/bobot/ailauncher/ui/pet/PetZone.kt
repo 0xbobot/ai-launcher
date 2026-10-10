@@ -68,6 +68,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Path
@@ -121,7 +122,6 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.zIndex
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.core.app.NotificationManagerCompat
@@ -1090,7 +1090,8 @@ private fun AiCapsuleCard(
  */
 /**
  * v0.64.2：组级别拖拽容器——编辑模式下左侧显示 ⋮⋮ 手柄，长按拖拽换位。
- * 位置回调用 layout 坐标（无 offset 污染），拖拽视觉偏移由调用方通过 dragDyPx 传入。
+ * v0.64.5：用 onGloballyPositioned + positionInRoot 拿每组真实 Y 坐标；
+ * 手柄触摸目标放大到 48dp；拖拽中组 zIndex 置顶 + 放大 1.02 + 阴影。
  */
 @Composable
 private fun DragGroupRow(
@@ -1109,15 +1110,22 @@ private fun DragGroupRow(
             .fillMaxWidth()
             .then(if (isDragging) Modifier.zIndex(1f) else Modifier)
             .then(
-                if (isDragging && dragDyPx != 0f) Modifier.offset {
-                    IntOffset(0, dragDyPx.roundToInt())
-                } else Modifier
+                if (isDragging) Modifier
+                    .offset { IntOffset(0, dragDyPx.roundToInt()) }
+                    .graphicsLayer {
+                        scaleX = 1.02f
+                        scaleY = 1.02f
+                        shadowElevation = 16.dp.toPx()
+                    }
+                else Modifier
             ),
         verticalAlignment = Alignment.Top
     ) {
         if (editMode) {
             Box(
                 modifier = Modifier
+                    // v0.64.5：手柄触摸目标放大到 48dp，之前只有文字大小很难按中
+                    .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                     .padding(top = 4.dp, end = 8.dp)
                     .pointerInput(gkey) {
                         detectDragGesturesAfterLongPress(
@@ -1126,7 +1134,8 @@ private fun DragGroupRow(
                             onDragCancel = { onDragEnd() },
                             onDrag = { change, dragAmount -> onDrag(change, dragAmount) }
                         )
-                    }
+                    },
+                contentAlignment = Alignment.TopCenter
             ) {
                 Text(
                     text = "⋮⋮",
@@ -1139,10 +1148,9 @@ private fun DragGroupRow(
         Box(
             modifier = Modifier
                 .weight(1f)
-                // v0.64.2-fix: positionInParent() 在此 Compose 版本无法解析，改用 onSizeChanged 只跟踪高度，
-                // 拖拽换位改用相邻交换（无需绝对坐标）
-                .onSizeChanged {
-                    onPositioned(0f, it.height.toFloat())
+                // v0.64.5：拿真实 Y 坐标（positionInRoot），不再只传高度
+                .onGloballyPositioned { coords ->
+                    onPositioned(coords.positionInRoot().y, coords.size.height.toFloat())
                 }
         ) {
             content()
@@ -1322,6 +1330,10 @@ private fun TodaySection(
     // 拖拽共享状态
     val scope = rememberCoroutineScope()
     val groupHeights = remember { mutableStateMapOf<String, Float>() }
+    // v0.64.5：每组 home 顶部 Y（root 坐标，非拖拽时由 onGloballyPositioned 记录；拖拽中手动同步换位）
+    val groupHomeTops = remember { mutableStateMapOf<String, Float>() }
+    // v0.64.5：被拖组 home 中心 Y（root 坐标），用于和相邻组中心比较
+    var dragHomeCenter by remember { mutableStateOf(0f) }
     var dragKey by remember { mutableStateOf<String?>(null) }
     val dragDy = remember { Animatable(0f) }
     // 内容变化且不在拖拽中 → 回到 baseOrder
@@ -1342,36 +1354,58 @@ private fun TodaySection(
             dragOrder = null
         }
     }
-    // v0.64.2-fix: 相邻交换（无需绝对坐标）——拖过相邻组一半高度即换位
+    // v0.64.5：基于真实中心点换位——拖拽组视觉中心拖过相邻组中心即换位。
+    // home 坐标在非拖拽时由 onGloballyPositioned 记录（含分割线/间距，无需手动算）；
+    // 拖拽中换位时同步更新 bookkeeping，不依赖异步的 layout 回调。
     fun onGroupDrag(key: String, change: PointerInputChange, amount: Offset) {
         change.consume()
         val cur = dragOrder ?: return
         val idx = cur.indexOf(key)
         if (idx < 0) return
+        val newDy = dragDy.value + amount.y
+        val visualCenter = dragHomeCenter + newDy
         scope.launch {
-            val newDy = dragDy.value + amount.y
-            // 向下拖过下一组一半高度 → 与下一组换位
+            // 向下拖过下一组中心 → 与下一组换位
             if (idx < cur.size - 1) {
-                val nextH = groupHeights[cur[idx + 1]] ?: 0f
-                if (nextH > 0f && newDy > nextH / 2f) {
-                    dragOrder = cur.toMutableList().also {
-                        it[idx] = cur[idx + 1]
-                        it[idx + 1] = key
+                val nkey = cur[idx + 1]
+                val nTop = groupHomeTops[nkey]
+                val nH = groupHeights[nkey]
+                if (nTop != null && nH != null && nH > 0f) {
+                    val nCenter = nTop + nH / 2f
+                    if (visualCenter > nCenter) {
+                        dragOrder = cur.toMutableList().also {
+                            it[idx] = nkey
+                            it[idx + 1] = key
+                        }
+                        // 同步 bookkeeping：两组交换 home
+                        val keyTop = groupHomeTops[key]
+                        if (keyTop != null) groupHomeTops[nkey] = keyTop
+                        groupHomeTops[key] = nTop
+                        dragHomeCenter = nCenter
+                        dragDy.snapTo(visualCenter - nCenter)
+                        return@launch
                     }
-                    dragDy.snapTo(newDy - nextH)
-                    return@launch
                 }
             }
-            // 向上拖过上一组一半高度 → 与上一组换位
+            // 向上拖过上一组中心 → 与上一组换位
             if (idx > 0) {
-                val prevH = groupHeights[cur[idx - 1]] ?: 0f
-                if (prevH > 0f && newDy < -prevH / 2f) {
-                    dragOrder = cur.toMutableList().also {
-                        it[idx] = cur[idx - 1]
-                        it[idx - 1] = key
+                val pkey = cur[idx - 1]
+                val pTop = groupHomeTops[pkey]
+                val pH = groupHeights[pkey]
+                if (pTop != null && pH != null && pH > 0f) {
+                    val pCenter = pTop + pH / 2f
+                    if (visualCenter < pCenter) {
+                        dragOrder = cur.toMutableList().also {
+                            it[idx] = pkey
+                            it[idx - 1] = key
+                        }
+                        val keyTop = groupHomeTops[key]
+                        if (keyTop != null) groupHomeTops[pkey] = keyTop
+                        groupHomeTops[key] = pTop
+                        dragHomeCenter = pCenter
+                        dragDy.snapTo(visualCenter - pCenter)
+                        return@launch
                     }
-                    dragDy.snapTo(newDy + prevH)
-                    return@launch
                 }
             }
             dragDy.snapTo(newDy)
@@ -1767,12 +1801,18 @@ private fun TodaySection(
                     editMode = editMode,
                     isDragging = dragKey == gkey,
                     dragDyPx = if (dragKey == gkey) dragDy.value else 0f,
-                    onPositioned = { _, h ->
+                    onPositioned = { top, h ->
                         if (groupHeights[gkey] != h) groupHeights[gkey] = h
+                        // v0.64.5：只在非拖拽时记录 home 顶部（拖拽中 offset 会污染测量值）
+                        if (dragKey == null && groupHomeTops[gkey] != top) groupHomeTops[gkey] = top
                     },
                     onDragStart = {
                         dragKey = gkey
                         dragOrder = renderOrder
+                        // v0.64.5：记录被拖组 home 中心
+                        val top = groupHomeTops[gkey] ?: 0f
+                        val h = groupHeights[gkey] ?: 0f
+                        dragHomeCenter = top + h / 2f
                         scope.launch { dragDy.snapTo(0f) }
                     },
                     onDrag = { change, amount -> onGroupDrag(gkey, change, amount) },
