@@ -17,6 +17,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -1241,14 +1242,15 @@ private fun TodaySection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // v0.63.0：正常模式显示 AI 总结标题；编辑模式显示"编辑"提示
+            // v0.64.2：编辑模式下去掉 weight，开关行用横向滚动防止溢出被切
             if (editMode) {
                 Text(
                     text = "编辑卡片",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF1C1C1E),
-                    modifier = Modifier.weight(1f)
+                    color = Color(0xFF1C1C1E)
                 )
+                Spacer(modifier = Modifier.width(8.dp))
             } else {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -1322,46 +1324,54 @@ private fun TodaySection(
                 }
             }
             // v0.63.0：编辑模式——各内容显隐开关 + 完成按钮（排序已移除，P0-P4 按优先级固定）
+            // v0.64.2：开关行横向可滚动，内容再多也不被切掉
             if (editMode) {
-                // v0.63.0：消息/日程/待办显隐
-                listOf(
-                    TodaySection.MSG to "消息",
-                    TodaySection.NEXT to "日程",
-                    TodaySection.TODO to "待办"
-                ).forEach { (section, label) ->
-                    val vis = section in visibleSections
-                    TextButton(
-                        onClick = { toggleSection(section, !vis) },
-                        contentPadding = PaddingValues(4.dp)
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = if (vis) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = label,
-                                tint = if (vis) Color(0xFF57534E) else Color(0xFFD6D3D1),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(text = label, fontSize = 10.sp, color = Color(0xFF8E8E93))
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // v0.63.0：消息/日程/待办显隐
+                    listOf(
+                        TodaySection.MSG to "消息",
+                        TodaySection.NEXT to "日程",
+                        TodaySection.TODO to "待办"
+                    ).forEach { (section, label) ->
+                        val vis = section in visibleSections
+                        TextButton(
+                            onClick = { toggleSection(section, !vis) },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = if (vis) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = label,
+                                    tint = if (vis) Color(0xFF57534E) else Color(0xFFD6D3D1),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(text = label, fontSize = 10.sp, color = Color(0xFF8E8E93))
+                            }
                         }
                     }
-                }
-                TextButton(
-                    onClick = {
-                        val nv = !weatherVisible
-                        weatherVisible = nv
-                        TodayPrefs.saveWeatherVisible(context, nv)
-                    },
-                    contentPadding = PaddingValues(4.dp)
-                ) {
-                    // v0.62.2：统一用 Material Icons
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = if (weatherVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = if (weatherVisible) "隐藏天气" else "显示天气",
-                            tint = if (weatherVisible) Color(0xFF57534E) else Color(0xFFD6D3D1),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(text = "天气", fontSize = 10.sp, color = Color(0xFF8E8E93))
+                    TextButton(
+                        onClick = {
+                            val nv = !weatherVisible
+                            weatherVisible = nv
+                            TodayPrefs.saveWeatherVisible(context, nv)
+                        },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        // v0.62.2：统一用 Material Icons
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = if (weatherVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = if (weatherVisible) "隐藏天气" else "显示天气",
+                                tint = if (weatherVisible) Color(0xFF57534E) else Color(0xFFD6D3D1),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(text = "天气", fontSize = 10.sp, color = Color(0xFF8E8E93))
+                        }
                     }
                 }
                 TextButton(onClick = { editMode = false }) {
