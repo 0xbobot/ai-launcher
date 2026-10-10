@@ -1104,7 +1104,9 @@ private fun DragGroupRow(
         Box(
             modifier = Modifier
                 .weight(1f)
-                // v0.64.2-diag: onGloballyPositioned removed for testing
+                .onGloballyPositioned {
+                    // v0.64.2-diag: empty lambda test
+                }
         ) {
             content()
         }
