@@ -1105,7 +1105,8 @@ private fun DragGroupRow(
             modifier = Modifier
                 .weight(1f)
                 .onGloballyPositioned {
-                    // v0.64.2-diag: empty lambda test
+                    // v0.64.2-diag: test it.size
+                    val h = it.size.height.toFloat()
                 }
         ) {
             content()
