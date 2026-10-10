@@ -1546,8 +1546,19 @@ private fun TodaySection(
             if (replyMsgs.isNotEmpty() || meetingCount > 0 ||
                 (TodaySection.MSG in visibleSections && normalGrouped.isNotEmpty())
             ) PriorityDivider()
-            todos.forEach { todo ->
+            todos.forEachIndexed { index, todo ->
                 key(todo.id) {
+                    // v0.64.1：多条待办之间用细分割线
+                    if (index > 0) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(dividerColor)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
                     TodoRow(todo = todo, editMode = editMode)
                 }
             }
@@ -1880,7 +1891,7 @@ private fun TodoRow(
             } else false
         }
     )
-    Spacer(modifier = Modifier.height(6.dp))
+    Spacer(modifier = Modifier.height(8.dp))
     Box(modifier = Modifier.alpha(rowAlpha)) {
         SwipeToDismissBox(
             state = dismissState,
@@ -1901,59 +1912,57 @@ private fun TodoRow(
                 }
             }
         ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color.White.copy(alpha = 0.5f),
-                shadowElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth()
+            // v0.64.1：扁平化——去掉内层白卡，和 P2 消息行一致
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // 圆圈：点击勾选完成
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .border(
+                            2.dp,
+                            if (completing) Color(0xFF22C55E) else Color(0xFFD6D3D1),
+                            RoundedCornerShape(99.dp)
+                        )
+                        .background(
+                            if (completing) Color(0xFF22C55E).copy(alpha = 0.15f)
+                            else Color.Transparent,
+                            RoundedCornerShape(99.dp)
+                        )
+                        .clickable(enabled = !editMode && !completing) {
+                            completing = true
+                            scope.launch {
+                                delay(350)
+                                PetRepository.markTodoDone(todo.id)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    // 圆圈：点击勾选完成
-                    Box(
-                        modifier = Modifier
-                            .size(22.dp)
-                            .border(
-                                2.dp,
-                                if (completing) Color(0xFF22C55E) else Color(0xFFD6D3D1),
-                                RoundedCornerShape(99.dp)
-                            )
-                            .background(
-                                if (completing) Color(0xFF22C55E).copy(alpha = 0.15f)
-                                else Color.Transparent,
-                                RoundedCornerShape(99.dp)
-                            )
-                            .clickable(enabled = !editMode && !completing) {
-                                completing = true
-                                scope.launch {
-                                    delay(350)
-                                    PetRepository.markTodoDone(todo.id)
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (completing) {
-                            Text(text = "✓", fontSize = 12.sp, color = Color(0xFF22C55E))
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = todo.action,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF1C1917),
-                            textDecoration = if (completing) TextDecoration.LineThrough else null
-                        )
-                        Text(
-                            text = "${todo.source} · ${todo.deadline}",
-                            fontSize = 12.sp,
-                            color = Color(0xFF78716C)
-                        )
+                    if (completing) {
+                        Text(text = "✓", fontSize = 12.sp, color = Color(0xFF22C55E))
                     }
                 }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = todo.action,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF1C1917),
+                    textDecoration = if (completing) TextDecoration.LineThrough else null,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                // v0.64.1：截止时间放右侧
+                Text(
+                    text = todo.deadline,
+                    fontSize = 13.sp,
+                    color = if (todo.deadline.contains("今天")) Color(0xFFFF9500)
+                            else Color(0xFF8E8E93)
+                )
             }
         }
     }
