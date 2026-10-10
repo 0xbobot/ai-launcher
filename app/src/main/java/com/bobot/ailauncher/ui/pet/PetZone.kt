@@ -1395,17 +1395,10 @@ private fun TodaySection(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // v0.63.0：正常模式显示 AI 总结标题；编辑模式显示"编辑"提示
-            // v0.64.2：编辑模式下去掉 weight，开关行用横向滚动防止溢出被切
-            if (editMode) {
-                Text(
-                    text = "编辑卡片",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF1C1C1E)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            } else {
+            // v0.63.0：正常模式显示 AI 总结标题
+            // v0.64.2：编辑模式开关行用横向滚动防止溢出被切
+            // v0.64.4：编辑模式去掉"编辑卡片"标题，只留开关行 + 完成按钮
+            if (!editMode) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = summaryText,
