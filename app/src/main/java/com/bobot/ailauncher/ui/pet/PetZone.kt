@@ -1271,7 +1271,8 @@ private fun TodaySection(
             // v0.61.0：天气 pill —— 点击开天气应用，长按看详情
             // v0.62.0：受 weatherVisible 控制显隐
             val weatherFull by WeatherState.full.collectAsState()
-            if (weatherVisible) weatherFull?.let { wf ->
+            // v0.64.2：编辑模式下不显示天气 pill（开关行已有"天气"开关，避免重复占用空间）
+            if (weatherVisible && !editMode) weatherFull?.let { wf ->
                 val weatherEmoji = when (wf.desc) {
                     "晴" -> "☀️"
                     "多云" -> "⛅"
