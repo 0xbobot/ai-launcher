@@ -1105,8 +1105,8 @@ private fun DragGroupRow(
             modifier = Modifier
                 .weight(1f)
                 .onGloballyPositioned {
-                    // v0.64.2-diag: test positionInParent
-                    val pos = it.positionInParent()
+                    // v0.64.2-diag: test boundsInParent
+                    val b = it.boundsInParent()
                 }
         ) {
             content()
