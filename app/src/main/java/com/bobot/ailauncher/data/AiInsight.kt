@@ -210,4 +210,37 @@ meetingCount > 0 -> "$meetingCount 个会要开"
 else -> "今日无事"
 }
 }
+
+// ============ v0.64.0：看看重点（规则提取关键点） ============
+
+/** 关键点提取用的行动词（聚焦"要做的事"） */
+private val KEY_POINT_ACTION_WORDS = listOf(
+"要", "需要", "确认", "尽快", "麻烦", "必须", "记得"
+)
+
+/**
+* v0.64.0：从消息正文提取 3 个关键点（规则版，端侧）。
+* 分句（按 。！\n 分隔）→ 打分 → 取 top3 → 按原文顺序 → 每条前加 "· "。
+* 打分：含问号+2、含数字+2、含行动词+2、首句+1、末句+1。
+*/
+fun extractKeyPoints(text: String): List<String> {
+val sentences = text.split('。', '！', '!', '\n')
+.map { it.trim().trimStart('-', '–', '·', ' ') }
+.filter { it.isNotBlank() }
+if (sentences.isEmpty()) return emptyList()
+if (sentences.size <= 3) return sentences.map { "· $it" }
+val scored = sentences.mapIndexed { index, s ->
+var score = 0
+if (s.contains('?') || s.contains('？')) score += 2
+if (s.any { it.isDigit() }) score += 2
+if (KEY_POINT_ACTION_WORDS.any { s.contains(it) }) score += 2
+if (index == 0) score += 1
+if (index == sentences.lastIndex) score += 1
+Triple(index, score, s)
+}
+return scored.sortedByDescending { it.second }
+.take(3)
+.sortedBy { it.first }
+.map { "· ${it.third}" }
+}
 }

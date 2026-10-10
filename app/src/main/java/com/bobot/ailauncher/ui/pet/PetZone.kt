@@ -88,6 +88,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -252,7 +253,10 @@ fun PetZone(
     // v0.49.0：AI Capsule——一次只说一件最重要的事
     val capsule by PetRepository.capsule.collectAsState()
     // v0.50.0：Today 直接放首屏（不再用 Bottom Sheet）
-    var capsuleExpanded by remember { mutableStateOf(false) }
+    // v0.64.0：Capsule 三态——PREVIEW（前2行）→ POINTS（3关键点）→ FULL（全文）
+    var capsuleMode by remember { mutableStateOf(CapsuleMode.PREVIEW) }
+    // 新胶囊来时重置为预览态
+    LaunchedEffect(capsule?.id) { capsuleMode = CapsuleMode.PREVIEW }
     var speechVisible by remember { mutableStateOf(false) }
     LaunchedEffect(speech?.id) {
         val s = speech
@@ -535,15 +539,19 @@ fun PetZone(
                 AiCapsuleCard(
                     capsule = c,
                     onPrimary = {
-                        // v0.50.0：看看重点 → 展开看详情（Today 已在首屏）
-                        capsuleExpanded = !capsuleExpanded
+                        // v0.64.0：三态流转——PREVIEW(看看重点) → POINTS(看全文) → FULL(收起) → PREVIEW
+                        capsuleMode = when (capsuleMode) {
+                            CapsuleMode.PREVIEW -> CapsuleMode.POINTS
+                            CapsuleMode.POINTS -> CapsuleMode.FULL
+                            CapsuleMode.FULL -> CapsuleMode.PREVIEW
+                        }
                     },
                     onSecondary = {
                         // 稍后 → 关闭
                         PetRepository.dismissCapsule()
-                        capsuleExpanded = false
+                        capsuleMode = CapsuleMode.PREVIEW
                     },
-                    expanded = capsuleExpanded
+                    mode = capsuleMode
                 )
             }
         }
@@ -857,6 +865,12 @@ private fun SpeechBubble(
 }
 
 /**
+ * v0.64.0：Capsule 显示模式。
+ * PREVIEW 默认前2行 → POINTS 看看重点（3关键点）→ FULL 全文。
+ */
+private enum class CapsuleMode { PREVIEW, POINTS, FULL }
+
+/**
  * v0.49.0：AI Capsule——宠物下方的信息卡，一次只说一件最重要的事。
  * Mii 风：白卡圆角，柔和阴影；游戏化：滑入+弹性。
  * 宠物负责"表达"，Capsule 负责"信息"。
@@ -867,8 +881,25 @@ private fun AiCapsuleCard(
     onPrimary: () -> Unit,
     onSecondary: () -> Unit,
     modifier: Modifier = Modifier,
-    expanded: Boolean = false
+    mode: CapsuleMode = CapsuleMode.PREVIEW
 ) {
+    // v0.64.0：三态正文——PREVIEW 前2行 / POINTS 3关键点 / FULL 全文
+    val keyPoints = remember(capsule.body) {
+        com.bobot.ailauncher.data.AiInsight.extractKeyPoints(capsule.body)
+    }
+    val displayBody = when (mode) {
+        CapsuleMode.PREVIEW ->
+            capsule.body.lineSequence().take(2).joinToString("\n")
+        CapsuleMode.POINTS ->
+            if (keyPoints.isNotEmpty()) keyPoints.joinToString("\n")
+            else capsule.body
+        CapsuleMode.FULL -> capsule.body
+    }
+    val primaryLabel = when (mode) {
+        CapsuleMode.PREVIEW -> capsule.primaryAction // "看看重点"
+        CapsuleMode.POINTS -> "看全文"
+        CapsuleMode.FULL -> "收起"
+    }
     Card(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -897,9 +928,9 @@ private fun AiCapsuleCard(
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(8.dp))
-            // 正文
+            // 正文（三态）
             Text(
-                text = capsule.body,
+                text = displayBody,
                 fontSize = 13.sp,
                 lineHeight = 19.sp,
                 color = Color(0xFF666666),
@@ -947,7 +978,7 @@ private fun AiCapsuleCard(
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
                 ) {
                     Text(
-                        text = if (expanded) "收起" else capsule.primaryAction,
+                        text = primaryLabel,
                         fontSize = 13.sp
                     )
                 }
@@ -1462,9 +1493,10 @@ private fun PriorityReplyRow(
 ) {
     val snippet = when {
         item.title.isNotBlank() && item.text.isNotBlank() ->
-            "${item.title}：${item.text.take(40)}"
+            // v0.64.0：正文放宽到 80 字，配合 maxLines=2 + 省略号，不截断关键信息
+            "${item.title}：${item.text.take(80)}"
         item.title.isNotBlank() -> item.title
-        item.text.isNotBlank() -> item.text.take(40)
+        item.text.isNotBlank() -> item.text.take(80)
         else -> item.sortDesc
     }
     // AI-2：关联日历
@@ -1553,7 +1585,8 @@ private fun PriorityReplyRow(
                     text = snippet,
                     fontSize = 14.sp,
                     color = Color(0xFF3A3A3C),
-                    maxLines = 2
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
                 calLinkTime?.let {
                     Spacer(modifier = Modifier.height(6.dp))
