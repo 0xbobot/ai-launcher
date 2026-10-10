@@ -32,16 +32,38 @@ private val PURE_NOTIFY_WORDS = listOf(
 * 2. 只含纯通知词、无行动词 → 可忽略（canIgnore=true）
 * 3. 其他 → 中性（都不标记）
 */
+/**
+* v0.64.0 收紧：必须明确指向用户才标需回复。
+* 规则：
+* 1. 含"@你"/"@所有人" → 需要回复
+* 2. 含"你" + 行动词（记得/确认/回复/看一下/处理…）→ 需要回复
+* 3. 纯陈述句（"拖了两天"这类状态同步，无指向用户的动词）→ 不标
+* 4. 只含纯通知词 → 可忽略
+*/
+private val YOU_ACTION_WORDS = listOf(
+"记得", "确认", "回复", "看一下", "处理", "尽快", "麻烦",
+"查收", "过目", "审批", "签字", "反馈"
+)
+
 fun analyzeReplyNeed(title: String, text: String): ReplyAnalysis {
 val combined = "$title $text"
-val hasAction = ACTION_WORDS.any { combined.contains(it) }
-val hasPureNotify = PURE_NOTIFY_WORDS.any { combined.contains(it)}
-
-return when {
-hasAction -> ReplyAnalysis(needsReply = true, canIgnore = false)
-hasPureNotify -> ReplyAnalysis(needsReply = false, canIgnore = true)
-else -> ReplyAnalysis(needsReply = false, canIgnore = false)
+// 1. @直接点名
+if (combined.contains("@你") || combined.contains("@所有人")) {
+return ReplyAnalysis(needsReply = true, canIgnore = false)
 }
+// 2. "你" + 行动词（明确指向用户）
+val hasYou = combined.contains("你")
+val hasYouAction = YOU_ACTION_WORDS.any { combined.contains(it) }
+if (hasYou && hasYouAction) {
+return ReplyAnalysis(needsReply = true, canIgnore = false)
+}
+// 3. 纯通知词 → 可忽略
+val hasPureNotify = PURE_NOTIFY_WORDS.any { combined.contains(it)}
+if (hasPureNotify) {
+return ReplyAnalysis(needsReply = false, canIgnore = true)
+}
+// 4. 其他 → 中性（不标，宁可少标不可错标）
+return ReplyAnalysis(needsReply = false, canIgnore = false)
 }
 
 data class ReplyAnalysis(

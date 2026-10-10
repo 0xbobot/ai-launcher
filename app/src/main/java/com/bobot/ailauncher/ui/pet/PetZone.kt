@@ -17,6 +17,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -648,7 +650,12 @@ fun PetZone(
                     )
                 }
             }
-            Column {
+            // v0.64.0：卡片限高 600dp，超出内部滚动，不再无限撑大
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 600.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 // 顶部留出七仔坐的位置
                 Box(modifier = Modifier.height(20.dp))
                 TodaySection()
@@ -1378,8 +1385,9 @@ private fun TodaySection(
         }
 
         // === P0：需回复的消息（红竖线 + 大字 + 去回复按钮 + 关联标签）===
+        // v0.64.0：P0 最多 2 条，超出并入折叠
         if (TodaySection.MSG in visibleSections) {
-            replyMsgs.forEach { item ->
+            replyMsgs.take(2).forEach { item ->
                 key(item.id) {
                     PriorityReplyRow(
                         item = item,
@@ -1473,9 +1481,13 @@ private fun TodaySection(
         }
 
         // === P2 普通消息 + P3 折叠 ===
+        // v0.64.0：P2 最多 3 组，P0/P2 超出都并入折叠计数
         if (TodaySection.MSG in visibleSections && normalGrouped.isNotEmpty()) {
             if (replyMsgs.isNotEmpty() || meetingCount > 0) PriorityDivider()
-            normalGrouped.entries.take(5).forEach { (groupKey, items) ->
+            val p0Overflow = (replyMsgs.size - 2).coerceAtLeast(0)
+            val p2Shown = normalGrouped.entries.take(3)
+            val p2Overflow = (normalGrouped.size - p2Shown.size).coerceAtLeast(0)
+            p2Shown.forEach { (groupKey, items) ->
                 val first = items.first()
                 val shouldFold = remember(items) {
                     AiInsight.shouldFoldGroup(
@@ -1516,6 +1528,16 @@ private fun TodaySection(
                         )
                     }
                 }
+            }
+            // v0.64.0：P0/P2 溢出汇总
+            val totalOverflow = p0Overflow + p2Overflow
+            if (totalOverflow > 0) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "还有 $totalOverflow 条消息已折叠",
+                    fontSize = 12.sp,
+                    color = Color(0xFFAEAEB2)
+                )
             }
         }
 
