@@ -1106,27 +1106,7 @@ private fun DragGroupRow(
             ),
         verticalAlignment = Alignment.Top
     ) {
-        if (editMode) {
-            Box(
-                modifier = Modifier
-                    .padding(top = 4.dp, end = 8.dp)
-                    .pointerInput(gkey) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { onDragStart() },
-                            onDragEnd = { onDragEnd() },
-                            onDragCancel = { onDragEnd() },
-                            onDrag = { change, dragAmount -> onDrag(change, dragAmount) }
-                        )
-                    }
-            ) {
-                Text(
-                    text = "⋮⋮",
-                    fontSize = 14.sp,
-                    lineHeight = 16.sp,
-                    color = Color(0xFFAEAEB2)
-                )
-            }
-        }
+        // v0.64.2-diag: editMode/pointerInput block removed for testing
         Box(
             modifier = Modifier
                 .weight(1f)
