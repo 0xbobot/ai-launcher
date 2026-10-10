@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.pet
 
 import android.content.Context
+import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -1161,6 +1162,7 @@ private fun TodaySection(
     onEditModeChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
     var nextEvent by remember { mutableStateOf<CalEvent?>(null) }
     // v0.59.0 AI-2：保留今日所有事件，用于消息关联日历
     var allEvents by remember { mutableStateOf<List<CalEvent>>(emptyList()) }
@@ -1391,7 +1393,14 @@ private fun TodaySection(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = {},
-                    onLongClick = { if (!editMode) onEditModeChange(true) }
+                    // v0.64.4：长按震动 + 七仔说话引导进入编辑模式
+                    onLongClick = {
+                        if (!editMode) {
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            onEditModeChange(true)
+                            PetRepository.say("拖拽可以排序，点眼睛可以隐藏或显示哦")
+                        }
+                    }
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1534,7 +1543,11 @@ private fun TodaySection(
                         }
                     }
                 }
-                TextButton(onClick = { onEditModeChange(false) }) {
+                TextButton(onClick = {
+                    onEditModeChange(false)
+                    // v0.64.4：退出编辑模式七仔说话
+                    PetRepository.say("好啦！")
+                }) {
                     Text(text = "完成", fontSize = 14.sp, color = Color(0xFF3B82F6))
                 }
             }
