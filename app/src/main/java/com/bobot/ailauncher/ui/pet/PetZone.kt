@@ -615,12 +615,14 @@ fun PetZone(
         // v0.60.0：毛玻璃——白 65% + 1dp 白描边，系统壁纸透过来
         // v0.63.1：不用 Material3 Card（tonal elevation 在半透明背景上形成灰边），
         // 改用 Box + 手动柔和阴影，边缘与背景自然融合
+        // v0.64.3：editMode 上提；编辑模式卡片高度自适应内容（去 minHeight、不滚动）
+        var todayEditMode by remember { mutableStateOf(false) }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .offset(y = (-30).dp)
-                .heightIn(min = 120.dp) // v0.62.1：空态时不缩成一条线
+                .then(if (todayEditMode) Modifier else Modifier.heightIn(min = 120.dp)) // v0.62.1：空态时不缩成一条线；v0.64.3：编辑模式去掉
                 .shadow(
                     elevation = 12.dp,
                     shape = RoundedCornerShape(28.dp),
@@ -654,14 +656,19 @@ fun PetZone(
                 }
             }
             // v0.64.0：卡片限高 600dp，超出内部滚动，不再无限撑大
+            // v0.64.3：编辑模式不滚动、高度自适应内容
             Column(
-                modifier = Modifier
-                    .heightIn(max = 600.dp)
-                    .verticalScroll(rememberScrollState())
+                modifier = if (todayEditMode) {
+                    Modifier
+                } else {
+                    Modifier
+                        .heightIn(max = 600.dp)
+                        .verticalScroll(rememberScrollState())
+                }
             ) {
                 // 顶部留出七仔坐的位置
                 Box(modifier = Modifier.height(20.dp))
-                TodaySection()
+                TodaySection(editMode = todayEditMode, onEditModeChange = { todayEditMode = it })
             }
         }
     }
@@ -1149,7 +1156,9 @@ private fun DragGroupRow(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TodaySection(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    editMode: Boolean = false,
+    onEditModeChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     var nextEvent by remember { mutableStateOf<CalEvent?>(null) }
@@ -1157,7 +1166,7 @@ private fun TodaySection(
     var allEvents by remember { mutableStateOf<List<CalEvent>>(emptyList()) }
     var hasCalPermission by remember { mutableStateOf(hasCalendarPermission(context)) }
     // v0.62.0：编辑模式 / 区块排序 / 显隐
-    var editMode by remember { mutableStateOf(false) }
+    // v0.64.3：editMode 上提到 PetZone，卡片可按编辑模式调整高度
     var sectionOrder by remember { mutableStateOf(TodayPrefs.loadOrder(context)) } // v0.63.0：保留兼容，排序已移除
     var visibleSections by remember { mutableStateOf(TodayPrefs.loadVisible(context)) }
     var weatherVisible by remember { mutableStateOf(TodayPrefs.loadWeatherVisible(context)) }
@@ -1382,7 +1391,7 @@ private fun TodaySection(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = {},
-                    onLongClick = { if (!editMode) editMode = true }
+                    onLongClick = { if (!editMode) onEditModeChange(true) }
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1532,7 +1541,7 @@ private fun TodaySection(
                         }
                     }
                 }
-                TextButton(onClick = { editMode = false }) {
+                TextButton(onClick = { onEditModeChange(false) }) {
                     Text(text = "完成", fontSize = 14.sp, color = Color(0xFF3B82F6))
                 }
             }
