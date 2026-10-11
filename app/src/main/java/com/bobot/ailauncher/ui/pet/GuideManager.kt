@@ -20,6 +20,7 @@ object GuideManager {
         const val VERSION_UPDATE = "version_update" // 版本更新后首次打开
         const val QUICK_ACTIONS = "quick_actions"   // v0.65.0：首次见到快捷操作区（已废弃，v0.65.2 移到气泡）
         const val QUICK_PANEL = "quick_panel"         // v0.65.2：首次展开七仔气泡快捷面板
+        const val EQUIPMENT = "equipment"             // v0.65.5：首次见到七仔装备（拟物化快捷方式）
     }
 
     private fun prefs(context: Context) =

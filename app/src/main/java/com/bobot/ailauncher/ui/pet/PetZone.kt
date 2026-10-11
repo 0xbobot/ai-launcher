@@ -313,7 +313,7 @@ fun PetZone(
     // 新胶囊来时重置为预览态
     LaunchedEffect(capsule?.id) { capsuleMode = CapsuleMode.PREVIEW }
     var speechVisible by remember { mutableStateOf(false) }
-    // v0.65.2：快捷面板——点七仔展开气泡面板（快捷按钮），再点收起
+    // v0.65.5：七仔装备——点七仔展开/收起环绕的快捷图标（无容器拟物化）
     var showQuickPanel by remember { mutableStateOf(false) }
     LaunchedEffect(speech?.id) {
         val s = speech
@@ -469,12 +469,13 @@ fun PetZone(
             // v0.51.2：会议临近黄条已删（Capsule 已覆盖，避免重复）
             // v0.47.0：七仔说话气泡——统一信息区（Mii 风+游戏化），有话就弹出来
             // v0.64.5：编辑模式下点气泡退出编辑模式
-            // v0.65.2：快捷面板打开时优先显示面板，普通说话气泡让位
+            // v0.65.5：七仔装备——拟物化快捷方式，无容器，图标像武器一样挂在七仔周围
+            // v0.65.2：快捷面板打开时优先显示，普通说话气泡让位
             if (showQuickPanel) {
-                QuickActionsBubble(
+                QizaiEquipment(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 132.dp),
+                        .padding(top = 24.dp),
                     onLaunch = { showQuickPanel = false }
                 )
             } else if (speech != null) {
@@ -543,7 +544,7 @@ fun PetZone(
                             // v0.50.0：Today 已在首屏，点按宠物只做果冻反馈
                             // 场景改由真实事件触发（天气/通知/日程）
                             // v0.56.0 M2：开心表情，不说话
-                            // v0.65.2：点七仔展开/收起快捷面板（气泡里的快捷按钮）
+                            // v0.65.5：点七仔展开/收起装备（环绕的快捷图标）
                             if (hasUpgrade) onUpgradeTap()
                             else {
                                 jellyTick++

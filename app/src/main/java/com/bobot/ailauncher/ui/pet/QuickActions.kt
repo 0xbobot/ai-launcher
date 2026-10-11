@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,10 +50,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.ImeAction
@@ -69,6 +72,7 @@ import com.bobot.ailauncher.ui.apps.loadAppShortcuts
 import com.bobot.ailauncher.ui.apps.loadShortcutIcon
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -201,107 +205,183 @@ private fun launchQuickAction(context: Context, item: QuickActionItem) {
     }
 }
 
-// ============ v0.65.2：七仔气泡里的快捷面板 ============
-
+// ============ v0.65.5：七仔装备——拟物化快捷方式 ============
 /**
- * v0.65.4：七仔气泡展开的快捷面板（紧凑版，参考 iOS 悬浮框）。
- * 白底圆角 + 顶部小尾巴指向上方七仔；一排 32dp 小图标 + 9sp 标签（最多4字不截断），
- * 横向滚动；点即直达，长按删除。尾部小圆 "+ 添加" 进三步添加流程。
+ * v0.65.5：不要盒子/气泡。快捷图标像"武器装备"一样长在七仔周围——
+ * 左右腰间、右上（背着）、左下四个槽位，图标 36dp 圆形 + 4dp 阴影，
+ * 每个轻微不同角度，像挂在身上。标签 9sp 无背景。
+ * 超 4 个时前 3 个环绕 + 第 4 槽显示"···"，点开展开全部（下方横向浮层，无背景）。
+ * 调用方 modifier 对齐七仔位置：align(TopCenter).padding(top = 24.dp)。
  */
+
+/** 装备槽位：相对七仔中心的偏移 + 旋转角度（像挂在身上） */
+private data class EquipSlot(val x: Dp, val y: Dp, val rotation: Float)
+
+private val EquipSlots = listOf(
+    EquipSlot((-72).dp, 16.dp, -8f),   // 左腰
+    EquipSlot(72.dp, 16.dp, 8f),       // 右腰
+    EquipSlot(48.dp, (-50).dp, 12f),   // 右上（背着的武器）
+    EquipSlot((-56).dp, 58.dp, -10f),  // 左下
+)
+
 @Composable
-fun QuickActionsBubble(
+fun QizaiEquipment(
     modifier: Modifier = Modifier,
-    onLaunch: () -> Unit = {} // 启动后由调用方决定是否收起面板
+    onLaunch: () -> Unit = {} // 启动后由调用方决定是否收起
 ) {
     val context = LocalContext.current
     val view = LocalView.current
     var items by remember { mutableStateOf(QuickActionsPrefs.load(context)) }
     var showAddFlow by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<QuickActionItem?>(null) }
-    // v0.65.2：首次展开面板 → 顶部小提示（只一次）
-    var showHint by remember {
-        mutableStateOf(GuideManager.tryShow(context, GuideManager.Id.QUICK_PANEL))
+    var expanded by remember { mutableStateOf(false) }
+    // v0.65.5：首次见到装备 → 七仔介绍（只一次），4 秒后提示消失
+    var showEquipHint by remember {
+        mutableStateOf(GuideManager.tryShow(context, GuideManager.Id.EQUIPMENT))
+    }
+    if (showEquipHint) {
+        LaunchedEffect(Unit) {
+            delay(4000)
+            showEquipHint = false
+        }
     }
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-    ) {
-        // v0.65.4：小尾巴指向上方七仔（气泡在七仔下方 8dp）
-        androidx.compose.foundation.Canvas(
-            modifier = Modifier.size(18.dp, 10.dp)
-        ) {
-            val tailPath = Path().apply {
-                moveTo(0f, size.height)
-                lineTo(size.width, size.height)
-                lineTo(size.width / 2f, 0f)
-                close()
-            }
-            drawPath(tailPath, Color.White)
-        }
-        Box(
-            modifier = Modifier
-                .widthIn(max = 280.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Color.White)
-                .padding(12.dp)
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (showHint) {
-                    Text(
-                        text = "点图标直达，+ 可以添加常用按钮",
-                        fontSize = 11.sp,
-                        color = Color(0xFFAEAEB2),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    items.forEach { item ->
-                        key(item.id) {
-                            QuickBubbleButton(
-                                item = item,
-                                onClick = {
-                                    launchQuickAction(context, item)
-                                    onLaunch()
-                                },
-                                onLongPress = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                    deleteTarget = item
-                                }
-                            )
-                        }
-                    }
-                    // v0.65.4：+ 添加（小圆按钮，和图标同尺寸 32dp）
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable { showAddFlow = true }
-                    ) {
-                        Box(
+    val overflow = items.size > 4
+    val ringItems = if (overflow) items.take(3) else items.take(4)
+
+    Box(modifier = modifier) {
+        // 装备环：100dp 盒子与七仔同框，图标用 offset 挂在周围
+        if (!expanded) {
+            Box(modifier = Modifier.size(100.dp)) {
+                ringItems.forEachIndexed { index, item ->
+                    val slot = EquipSlots[index]
+                    key(item.id) {
+                        EquipButton(
+                            item = item,
+                            rotation = slot.rotation,
                             modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .border(
-                                    width = 1.5.dp,
-                                    color = Color(0xFFAEAEB2),
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(text = "+", fontSize = 18.sp, color = Color(0xFFAEAEB2))
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "添加",
-                            fontSize = 9.sp,
-                            color = Color(0xFFAEAEB2),
-                            maxLines = 1
+                                .align(Alignment.Center)
+                                .offset(slot.x, slot.y),
+                            onClick = {
+                                launchQuickAction(context, item)
+                                onLaunch()
+                            },
+                            onLongPress = {
+                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                deleteTarget = item
+                            }
                         )
                     }
+                }
+                // 超 4 个：第 4 槽显示"···"，点开展开全部
+                if (overflow) {
+                    val slot = EquipSlots[3]
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .offset(slot.x, slot.y)
+                            .graphicsLayer { rotationZ = slot.rotation }
+                            .size(36.dp)
+                            .shadow(4.dp, CircleShape)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.9f))
+                            .clickable { expanded = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "\u00B7\u00B7\u00B7", fontSize = 14.sp, color = Color(0xFF8A837C))
+                    }
+                }
+                // + 添加：右下方小圆圈虚线边
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .offset(56.dp, 58.dp)
+                        .clickable { showAddFlow = true }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .border(1.5.dp, Color(0xFFAEAEB2), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "+", fontSize = 16.sp, color = Color(0xFFAEAEB2))
+                    }
+                }
+                // 首次提示：七仔介绍小装备
+                if (showEquipHint) {
+                    Text(
+                        text = "这些是我的小装备，点一下就能用",
+                        fontSize = 11.sp,
+                        color = Color(0xFF8A837C),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .offset(y = 96.dp)
+                    )
+                }
+            }
+        } else {
+            // 展开态：全部图标横向浮层（无背景），在七仔下方
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = 108.dp)
+                    .widthIn(max = 300.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                items.forEach { item ->
+                    key(item.id) {
+                        EquipButton(
+                            item = item,
+                            rotation = 0f,
+                            onClick = {
+                                launchQuickAction(context, item)
+                                onLaunch()
+                            },
+                            onLongPress = {
+                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                deleteTarget = item
+                            }
+                        )
+                    }
+                }
+                // + 添加
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.clickable { showAddFlow = true }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .border(1.5.dp, Color(0xFFAEAEB2), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "+", fontSize = 18.sp, color = Color(0xFFAEAEB2))
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = "添加", fontSize = 9.sp, color = Color(0xFFAEAEB2), maxLines = 1)
+                }
+                // 收起
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.clickable { expanded = false }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.9f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "\u2039", fontSize = 20.sp, color = Color(0xFF8A837C))
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = "收起", fontSize = 9.sp, color = Color(0xFFAEAEB2), maxLines = 1)
                 }
             }
         }
@@ -325,7 +405,7 @@ fun QuickActionsBubble(
     if (target != null) {
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("删除这个快捷按钮？") },
+            title = { Text("删除这个小装备？") },
             text = { Text("「${target.label}」") },
             confirmButton = {
                 TextButton(onClick = {
@@ -343,34 +423,48 @@ fun QuickActionsBubble(
     }
 }
 
-/** v0.65.4：气泡里的快捷按钮——32dp 图标 + 9sp 标签（最多4字不截断，超宽横向滚动）；点即直达，长按删除 */
+/** v0.65.5：装备按钮——36dp 圆形图标 + 4dp 阴影 + 轻微旋转 + 9sp 标签（无背景） */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QuickBubbleButton(
+private fun EquipButton(
     item: QuickActionItem,
+    rotation: Float,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onLongPress: () -> Unit
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
+        modifier = modifier
+            .graphicsLayer { rotationZ = rotation }
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongPress
             )
-            .padding(2.dp)
     ) {
-        QuickActionIcon(item = item, size = 32.dp)
-        Spacer(modifier = Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .shadow(4.dp, CircleShape)
+                .clip(CircleShape)
+                .background(Color.White)
+                .padding(4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            QuickActionIcon(item = item, size = 28.dp)
+        }
+        Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = item.label,
             fontSize = 9.sp,
-            color = Color(0xFF3A3A3A),
+            color = Color(0xFF5A544E),
             maxLines = 1,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 56.dp)
         )
     }
 }
+
 
 // ============ 添加流程：选应用 → 选快捷方式 → 输标签（v0.65.0，不动） ============
 
