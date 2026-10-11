@@ -39,6 +39,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -61,6 +63,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -91,6 +94,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -1371,6 +1375,17 @@ private fun TodaySection(
     val hasAnyContent = (TodaySection.MSG in visibleSections && (replyMsgs.isNotEmpty() || normalMsgs.isNotEmpty())) ||
         meetingCount > 0 ||
         (TodaySection.TODO in visibleSections && todos.isNotEmpty())
+    // v0.65.3：空态副标题按时间段区分——在 onResume 时重算（用户回到桌面时刷新），不做轮询，避免隔夜 stale
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var resumeTick by remember { mutableStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    val emptySubtitle = remember(resumeTick) { AiInsight.buildEmptySubtitle() }
 
     // ============ v0.64.2：组级别拖拽排序 ============
     // 组 key（默认 AI 优先级顺序）；用户拖过后用 today_user_order
@@ -1513,7 +1528,8 @@ private fun TodaySection(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "七仔帮你看完了",
+                        // v0.65.3：空态副标题按时间段区分（C 方案）；有内容时保持"七仔帮你看完了"
+                        text = if (!hasAnyContent) emptySubtitle else "七仔帮你看完了",
                         fontSize = 13.sp,
                         color = Color(0xFF8E8E93)
                     )

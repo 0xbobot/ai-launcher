@@ -222,15 +222,25 @@ val text: String
 /**
 * v0.63.0：生成 TODAY 卡片的 AI 总结标题。
 * 纯规则拼接，不调 LLM。
-* 例："2 条要回，1 个会要开" / "3 条要回" / "1 个会要开" / "暂无要事"
+* 例："2 条要回，1 个会要开" / "3 条要回" / "1 个会要开" / "难得清闲"
 */
 fun buildSummary(replyCount: Int, meetingCount: Int): String {
 return when {
 replyCount > 0 && meetingCount > 0 -> "$replyCount 条要回，$meetingCount 个会要开"
 replyCount > 0 -> "$replyCount 条要回"
 meetingCount > 0 -> "$meetingCount 个会要开"
-else -> "暂无要事"
+else -> "难得清闲"
 }
+}
+
+/**
+* v0.65.3：空态副标题（C 方案）——按时间段区分。
+* 白天 6:00–22:00：「七仔帮你盯着呢」；夜晚 22:00–6:00：「好好休息 🌙」。
+* 调用方在 onResume 时重算（用户回到桌面时刷新），不做轮询，避免隔夜 stale。
+*/
+fun buildEmptySubtitle(): String {
+val hour = java.time.LocalTime.now().hour
+return if (hour >= 6 && hour < 22) "七仔帮你盯着呢" else "好好休息 🌙"
 }
 
 // ============ v0.64.0：看看重点（规则提取关键点） ============
