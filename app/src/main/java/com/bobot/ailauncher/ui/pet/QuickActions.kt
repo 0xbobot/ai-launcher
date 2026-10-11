@@ -9,6 +9,7 @@ import android.graphics.drawable.Drawable
 import android.os.Process
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -376,6 +377,7 @@ fun QuickActionsRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QuickActionButton(
     item: QuickActionItem,
@@ -456,7 +458,6 @@ private fun QuickActionButton(
     }
 }
 
-@Composable
 @Composable
 private fun AddQuickButton(onClick: () -> Unit) {
     Row(
