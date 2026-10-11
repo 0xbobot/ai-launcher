@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -364,7 +365,16 @@ fun QizaiEquipment(
                         Text(text = "+", fontSize = 18.sp, color = Color(0xFFAEAEB2))
                     }
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "添加", fontSize = 9.sp, color = Color(0xFFAEAEB2), maxLines = 1)
+                    Text(
+                        text = "添加",
+                        fontSize = 10.sp,
+                        color = Color(0xFF3A352F),
+                        maxLines = 1,
+                        modifier = Modifier
+                            .zIndex(1f)
+                            .background(Color.White.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
                 }
                 // 收起
                 Column(
@@ -381,7 +391,16 @@ fun QizaiEquipment(
                         Text(text = "\u2039", fontSize = 20.sp, color = Color(0xFF8A837C))
                     }
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "收起", fontSize = 9.sp, color = Color(0xFFAEAEB2), maxLines = 1)
+                    Text(
+                        text = "收起",
+                        fontSize = 10.sp,
+                        color = Color(0xFF3A352F),
+                        maxLines = 1,
+                        modifier = Modifier
+                            .zIndex(1f)
+                            .background(Color.White.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
                 }
             }
         }
@@ -456,11 +475,15 @@ private fun EquipButton(
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = item.label,
-            fontSize = 9.sp,
-            color = Color(0xFF5A544E),
+            fontSize = 10.sp,
+            color = Color(0xFF3A352F),
             maxLines = 1,
             textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 56.dp)
+            modifier = Modifier
+                .zIndex(1f)
+                .widthIn(max = 76.dp)
+                .background(Color.White.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
         )
     }
 }
