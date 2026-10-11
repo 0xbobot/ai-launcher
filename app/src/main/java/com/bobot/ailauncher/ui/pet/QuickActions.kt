@@ -219,10 +219,10 @@ private fun launchQuickAction(context: Context, item: QuickActionItem) {
 private data class EquipSlot(val x: Dp, val y: Dp, val rotation: Float)
 
 private val EquipSlots = listOf(
-    EquipSlot((-80).dp, 40.dp, -8f),   // 左腰（v0.66.2：下移 24dp 拉开距离）
-    EquipSlot(80.dp, 40.dp, 8f),       // 右腰（v0.66.2：下移 24dp 拉开距离）
-    EquipSlot(56.dp, (-76).dp, 12f),   // 右上（背着的武器，v0.66.2：上移 24dp）
-    EquipSlot((-60).dp, 96.dp, -10f),  // 左下（v0.66.2：下移，避开左腰）
+    EquipSlot((-58).dp, 12.dp, -8f),   // 左腰（v0.66.4：收紧贴着七仔，边缘轻微重叠 4dp）
+    EquipSlot(58.dp, 12.dp, 8f),       // 右腰（v0.66.4：收紧贴着七仔）
+    EquipSlot(44.dp, (-44).dp, 12f),   // 右上（背着的武器，v0.66.4：收紧）
+    EquipSlot((-48).dp, 64.dp, -10f),  // 左下（v0.66.4：收紧，与左腰/加号保持间距）
 )
 
 @Composable
@@ -251,7 +251,7 @@ fun QizaiEquipment(
     val ringItems = if (overflow) items.take(3) else items.take(4)
 
     Box(modifier = modifier) {
-        // 装备环：160dp 盒子与七仔同框（v0.66.2：加大以容纳拉开的槽位），图标用 offset 挂在周围
+        // 装备环：160dp 盒子与七仔同框（v0.66.4：槽位收紧贴着七仔），图标用 offset 挂在周围
         if (!expanded) {
             Box(modifier = Modifier.size(160.dp)) {
                 ringItems.forEachIndexed { index, item ->
@@ -292,12 +292,12 @@ fun QizaiEquipment(
                         Text(text = "\u00B7\u00B7\u00B7", fontSize = 14.sp, color = Color(0xFF8A837C))
                     }
                 }
-                // + 添加：底部居中（v0.66.2：随装备下移至 76dp，保持间距）
+                // + 添加：七仔正下方（v0.66.4：收到正下方 24dp 处，贴着七仔）
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .offset(0.dp, 76.dp)
+                        .offset(0.dp, 74.dp)
                         .clickable { showAddFlow = true }
                 ) {
                     Box(
@@ -310,7 +310,7 @@ fun QizaiEquipment(
                         Text(text = "+", fontSize = 16.sp, color = Color(0xFFAEAEB2))
                     }
                 }
-                // 首次提示：七仔介绍小装备
+                // 首次提示：七仔介绍小装备（v0.66.4：随收紧上移）
                 if (showEquipHint) {
                     Text(
                         text = "这些是我的小装备，点一下就能用",
@@ -319,16 +319,16 @@ fun QizaiEquipment(
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .offset(y = 120.dp)
+                            .offset(y = 96.dp)
                     )
                 }
             }
         } else {
-            // 展开态：全部图标横向浮层（无背景），在七仔下方
+            // 展开态：全部图标横向浮层（无背景），在七仔下方（v0.66.4：随收紧上移）
             Row(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 132.dp)
+                    .offset(y = 108.dp)
                     .widthIn(max = 300.dp)
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
