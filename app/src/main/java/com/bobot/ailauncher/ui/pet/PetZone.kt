@@ -1866,6 +1866,15 @@ private fun TodaySection(
                 }
             }
         }
+        // v0.65.0：快捷操作区——TODAY 卡片底部、更新提醒上方；无标题文字，首次由七仔说话介绍
+        if (hasAnyContent) {
+            Spacer(modifier = Modifier.height(4.dp))
+            PriorityDivider()
+        } else {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        QuickActionsRow(editMode = editMode)
+        Spacer(modifier = Modifier.height(4.dp))
         // v0.64.2：更新提醒——有新版本时卡片底部一行，点之弹更新对话框；无更新时不占位置
         val availUpdateState by OtaUpdater.latestAvailable.collectAsState()
         val availUpdate = availUpdateState
