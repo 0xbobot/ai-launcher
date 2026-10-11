@@ -212,7 +212,7 @@ private fun launchQuickAction(context: Context, item: QuickActionItem) {
  * 左右腰间、右上（背着）、左下四个槽位，图标 36dp 圆形 + 4dp 阴影，
  * 每个轻微不同角度，像挂在身上。标签 9sp 无背景。
  * 超 4 个时前 3 个环绕 + 第 4 槽显示"···"，点开展开全部（下方横向浮层，无背景）。
- * 调用方 modifier 对齐七仔位置：align(TopCenter).padding(top = 24.dp)。
+ * 调用方 modifier 对齐七仔位置：align(TopCenter).padding(top = 80.dp)（v0.66.3：随七仔下移）。
  */
 
 /** 装备槽位：相对七仔中心的偏移 + 旋转角度（像挂在身上） */

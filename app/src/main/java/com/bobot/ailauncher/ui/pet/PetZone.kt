@@ -408,10 +408,11 @@ fun PetZone(
         // v0.65.7：220dp → 280dp——装备图标+下方标签有充足空间，不再紧贴 TODAY 卡片
         // v0.65.9：280dp → 320dp——给七仔动画和装备更多活动空间
         // v0.66.1：320dp → 360dp——装备图标/标签/+按钮全部收进舞台，不被 TODAY 卡片遮挡
+        // v0.66.3：360dp → 400dp——七仔下移靠近舞台底部，宠物层内部拉开
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 360.dp)
+                .heightIn(min = 400.dp)
                 .wrapContentHeight()
                 .animateContentSize()
         ) {
@@ -479,7 +480,7 @@ fun PetZone(
                 QizaiEquipment(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 24.dp),
+                        .padding(top = 80.dp), // v0.66.3：随七仔下移（24dp → 80dp）
                     onLaunch = { showQuickPanel = false }
                 )
             } else if (speech != null) {
@@ -488,7 +489,7 @@ fun PetZone(
                     visible = speechVisible,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 132.dp),
+                        .padding(top = 188.dp), // v0.66.3：随七仔下移，保持 8dp 间距（132dp → 188dp）
                     onClick = if (todayEditMode) {
                         {
                             todayEditMode = false
@@ -509,7 +510,7 @@ fun PetZone(
                 onSceneDone = { demoScene = QizaiScene.NONE },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 24.dp)
+                    .padding(top = 80.dp) // v0.66.3：七仔下移（24dp → 80dp），靠近舞台底部
                     // v0.64.0：十万火急跳动（3 次快速上下）
                     .graphicsLayer { translationY = urgentBounce.value }
                     // 场景播放时给宽舞台（同中心，宠物视觉大小不变）；常态保持 100dp
