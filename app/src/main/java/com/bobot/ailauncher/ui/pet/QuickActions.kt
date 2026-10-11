@@ -222,10 +222,10 @@ private fun launchQuickAction(context: Context, item: QuickActionItem) {
 private data class EquipSlot(val x: Dp, val y: Dp, val rotation: Float)
 
 private val EquipSlots = listOf(
-    EquipSlot((-58).dp, 12.dp, -8f),   // 左腰（v0.66.4：收紧贴着七仔，边缘轻微重叠 4dp）
-    EquipSlot(58.dp, 12.dp, 8f),       // 右腰（v0.66.4：收紧贴着七仔）
-    EquipSlot(44.dp, (-44).dp, 12f),   // 右上（背着的武器，v0.66.4：收紧）
-    EquipSlot((-48).dp, 64.dp, -10f),  // 左下（v0.66.4：收紧，与左腰/加号保持间距）
+    EquipSlot((-72).dp, 15.dp, -8f),   // 左腰（v0.66.7：外移，与宠物保持 6dp 间隙，摇摆时不视觉混淆）
+    EquipSlot(72.dp, 15.dp, 8f),       // 右腰（v0.66.7：外移）
+    EquipSlot(55.dp, (-55).dp, 12f),   // 右上（背着的武器，v0.66.7：外移）
+    EquipSlot((-60).dp, 80.dp, -10f),  // 左下（v0.66.7：外移，与左腰保持间距）
 )
 
 @Composable
@@ -268,9 +268,9 @@ fun QizaiEquipment(
     val ringItems = if (overflow) items.take(3) else items.take(4)
 
     Box(modifier = modifier) {
-        // 装备环：180dp 盒子与七仔同框（v0.66.6：160dp→180dp，加号不再被裁掉一半）
+        // 装备环：200dp 盒子与七仔同框（v0.66.7：180dp→200dp，容纳外移的槽位）
         if (!expanded) {
-            Box(modifier = Modifier.size(180.dp)) {
+            Box(modifier = Modifier.size(200.dp)) {
                 ringItems.forEachIndexed { index, item ->
                     val slot = EquipSlots[index]
                     key(item.id) {

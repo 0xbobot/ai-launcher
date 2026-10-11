@@ -94,6 +94,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -176,6 +177,11 @@ fun PetZone(
     var demoScene by remember { mutableStateOf(QizaiScene.NONE) }
     // v0.64.5：编辑模式状态上提（气泡点击退出需要用到）
     var todayEditMode by remember { mutableStateOf(false) }
+    // v0.66.7：卡片顶部对齐屏幕中线——舞台高度 = 屏幕高/2 - 顶部 16dp - 卡片顶部 8dp
+    val screenH = LocalConfiguration.current.screenHeightDp.dp
+    val stageH = screenH / 2 - 24.dp
+    // v0.66.7：七仔在上半部分偏下——宠物顶部 = 舞台高 - 200dp（留 100dp 给气泡/装备下方空间）
+    val petTop = stageH - 200.dp
     // v0.64.5：返回键退出编辑模式
     BackHandler(enabled = todayEditMode) {
         todayEditMode = false
@@ -411,12 +417,11 @@ fun PetZone(
         // v0.65.9：280dp → 320dp——给七仔动画和装备更多活动空间
         // v0.66.1：320dp → 360dp——装备图标/标签/+按钮全部收进舞台，不被 TODAY 卡片遮挡
         // v0.66.3：360dp → 400dp——七仔下移靠近舞台底部，宠物层内部拉开
+        // v0.66.7：舞台高度 = 屏幕高/2 - 24dp，卡片顶部对齐屏幕中线
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 400.dp)
-                .wrapContentHeight()
-                .animateContentSize()
+                .height(stageH)
         ) {
             // ding：alpha 淡入淡出（Box 内不用 AnimatedVisibility，避免 scope 重载解析问题）
             val dingAlpha by animateFloatAsState(
@@ -483,7 +488,7 @@ fun PetZone(
                 QizaiEquipment(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 200.dp), // v0.66.6：随七仔下移（80dp → 200dp），宠物在上半部分偏下
+                        .padding(top = petTop), // v0.66.7：随七仔，七仔在上半部分偏下
                     onLaunch = { if (!panelCollapsing) panelCollapsing = true },
                     collapsing = panelCollapsing,
                     onCollapseDone = {
@@ -497,7 +502,7 @@ fun PetZone(
                     visible = speechVisible,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 308.dp), // v0.66.6：随七仔下移，保持 8dp 间距（188dp → 308dp）
+                        .padding(top = petTop + 108.dp), // v0.66.7：随七仔，保持七仔下方 8dp 间距
                     onClick = if (todayEditMode) {
                         {
                             todayEditMode = false
@@ -518,7 +523,7 @@ fun PetZone(
                 onSceneDone = { demoScene = QizaiScene.NONE },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 200.dp) // v0.66.6：七仔下移（80dp → 200dp），在上半部分偏下
+                    .padding(top = petTop) // v0.66.7：七仔在上半部分偏下（petTop = stageH - 200dp）
                     // v0.64.0：十万火急跳动（3 次快速上下）
                     .graphicsLayer { translationY = urgentBounce.value }
                     // 场景播放时给宽舞台（同中心，宠物视觉大小不变）；常态保持 100dp
