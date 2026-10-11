@@ -257,13 +257,15 @@ fun SettingsScreen(
                 checking || downloading -> null
                 dlDone -> {
                     {
+                        // v0.65.6：安装前复查 APK 可解析——坏包不装，转重新下载
                         val apk = OtaUpdater.downloadedApk(context)
+                            ?.takeIf { OtaUpdater.isValidApk(context, it) }
                         if (apk != null) {
                             if (OtaUpdater.promptInstall(context, apk)) {
                                 OtaUpdater.markInstallPrompted(context)
                             }
                         } else {
-                            Toast.makeText(context, "安装包不见了，重新下载", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "安装包不完整，重新下载", Toast.LENGTH_SHORT).show()
                             OtaDownloader.resetIfNotDownloading()
                             updateInfo?.let { OtaDownloader.start(context, it) }
                         }

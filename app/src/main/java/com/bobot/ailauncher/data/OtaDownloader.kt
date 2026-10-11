@@ -16,6 +16,7 @@ import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -115,6 +116,8 @@ object OtaDownloader {
         OtaUpdater.markDownloadStart(appContext, info.versionCode)
         _state.value = State.Downloading(0f)
         job = scope.launch {
+            // v0.65.6：partial 文件引用外提——失败/中断时删掉，不留残缺包被误装
+            var file: File? = null
             try {
                 val req = Request.Builder()
                     .url(info.apkUrl)
@@ -131,12 +134,15 @@ object OtaDownloader {
                         return@launch
                     }
                     val total = body.contentLength() // 可能为 -1（未知）
-                    val file = File(
+                    // v0.65.6：记录期望长度，用于完整性校验
+                    OtaUpdater.markDownloadSize(appContext, total)
+                    file = File(
                         appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
                         OtaUpdater.APK_FILE_NAME
                     )
+                    val outFile = file!!
                     body.byteStream().use { input ->
-                        file.outputStream().use { output ->
+                        outFile.outputStream().use { output ->
                             val buf = ByteArray(32 * 1024)
                             var downloaded = 0L
                             var lastEmit = 0L
@@ -156,20 +162,34 @@ object OtaDownloader {
                                 }
                             }
                             output.flush()
+                            // v0.65.6：长度校验——流提前结束（锁屏断网等）算失败，不装坏包
+                            if (total > 0 && downloaded != total) {
+                                throw IOException(
+                                    "incomplete download: $downloaded/$total"
+                                )
+                            }
                         }
                     }
+                    // v0.65.6：APK 可解析校验——截断/损坏包直接判失败
+                    if (!OtaUpdater.isValidApk(appContext, outFile)) {
+                        throw IOException("downloaded apk failed to parse")
+                    }
                     _state.value = State.Downloading(1f)
-                    _state.value = State.Success(file)
+                    _state.value = State.Success(outFile)
                     // 下载完成直接弹安装（Bob 要求）
                     OtaUpdater.markDownloadComplete(appContext, info.versionCode)
-                    if (OtaUpdater.promptInstall(appContext, file)) {
+                    if (OtaUpdater.promptInstall(appContext, outFile)) {
                         OtaUpdater.markInstallPrompted(appContext)
                     }
                 }
             } catch (e: CancellationException) {
+                // v0.65.6：取消也删 partial，下次 start() 会重下
+                file?.delete()
                 _state.value = State.Idle
                 throw e
             } catch (_: Exception) {
+                // v0.65.6：任何失败都删 partial——不完整的文件绝不留给安装流程
+                file?.delete()
                 _state.value = State.Failed
             }
         }

@@ -3,7 +3,9 @@ package com.bobot.ailauncher.data
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import android.widget.Toast
@@ -47,6 +49,11 @@ object OtaUpdater {
     private const val KEY_INSTALL_PROMPTED = "install_prompted"
     private const val KEY_TARGET_VERSION = "target_version"
     private const val KEY_LAST_RUN_VERSION = "last_run_version"
+    // v0.65.6：下载完整性——只有 verified 完整的包才允许安装。
+    // 背景：锁屏中断下载后残留 partial 文件，shouldPromptInstall 误判为已下好，
+    // onResume 直接弹安装 → "解析程序包时出现问题"。
+    private const val KEY_DOWNLOAD_COMPLETE = "download_complete"
+    private const val KEY_EXPECTED_SIZE = "expected_size"
     private const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
     const val APK_FILE_NAME = "ai-launcher-update.apk"
 
@@ -126,16 +133,32 @@ object OtaUpdater {
         return if (f.exists() && f.length() > 0) f else null
     }
 
-    /** 已下载的包是否就是指定版本：防止"直接安装"命中旧包 */
+    /** 已下载的包是否就是指定版本：防止"直接安装"命中旧包/残缺包 */
     fun isDownloadedVersion(context: Context, versionCode: Int): Boolean =
-        prefs(context).getInt(KEY_TARGET_VERSION, 0) == versionCode &&
-            downloadedApk(context) != null
+        isDownloadComplete(context, versionCode)
+
+    /**
+     * v0.65.6：下载是否真正完成——complete 标记 + 版本号对上 + 文件存在
+     * + 长度与服务端 Content-Length 一致（已知时）。partial 文件一律不算。
+     */
+    fun isDownloadComplete(context: Context, versionCode: Int): Boolean {
+        val p = prefs(context)
+        if (!p.getBoolean(KEY_DOWNLOAD_COMPLETE, false)) return false
+        if (p.getInt(KEY_TARGET_VERSION, 0) != versionCode) return false
+        val f = downloadedApk(context) ?: return false
+        val expected = p.getLong(KEY_EXPECTED_SIZE, -1L)
+        if (expected > 0 && f.length() != expected) return false
+        return true
+    }
 
     /** 下载已完成、是比当前更新的版本、且还没弹过安装提示 → 应该弹安装 */
-    fun shouldPromptInstall(context: Context): Boolean =
-        !prefs(context).getBoolean(KEY_INSTALL_PROMPTED, false) &&
-            prefs(context).getInt(KEY_TARGET_VERSION, 0) > BuildConfig.VERSION_CODE &&
-            downloadedApk(context) != null
+    fun shouldPromptInstall(context: Context): Boolean {
+        val p = prefs(context)
+        val target = p.getInt(KEY_TARGET_VERSION, 0)
+        return !p.getBoolean(KEY_INSTALL_PROMPTED, false) &&
+            target > BuildConfig.VERSION_CODE &&
+            isDownloadComplete(context, target)
+    }
 
     // v0.41.12：shouldPromptInstall(context, completedId) 与 isOurDownload 已删除
     //（DownloadManager 废弃，下载走 OtaDownloader）。
@@ -145,19 +168,53 @@ object OtaUpdater {
     }
 
     /**
-     * v0.41.12：OkHttp 下载器用——标记开始下载某版本（供 isDownloadedVersion 校验）。
-     * 下载完成无需单独标记：文件存在 + 版本号对上即视为已下载。
+     * v0.65.6：OkHttp 下载器用——标记开始下载某版本。complete 标记清掉，
+     * 之前的包无论是否完整都不再视为可安装（防 partial 残留被误装）。
      */
     fun markDownloadStart(context: Context, versionCode: Int) {
         prefs(context).edit()
             .putInt(KEY_TARGET_VERSION, versionCode)
             .putBoolean(KEY_INSTALL_PROMPTED, false)
+            .putBoolean(KEY_DOWNLOAD_COMPLETE, false)
+            .putLong(KEY_EXPECTED_SIZE, -1L)
             .apply()
     }
 
-    /** v0.41.12：兼容 OtaDownloader 的完成标记（实际与 markDownloadStart 同效）。 */
+    /** v0.65.6：记录服务端 Content-Length（>0 时），用于完整性校验 */
+    fun markDownloadSize(context: Context, size: Long) {
+        if (size > 0) prefs(context).edit().putLong(KEY_EXPECTED_SIZE, size).apply()
+    }
+
+    /**
+     * v0.65.6：标记下载完成——只有下载器校验通过（长度一致 + APK 可解析）
+     * 后才调用。之前版本此方法与 markDownloadStart 同效，complete 标记从未真正使用。
+     */
     fun markDownloadComplete(context: Context, versionCode: Int) {
-        markDownloadStart(context, versionCode)
+        prefs(context).edit()
+            .putInt(KEY_TARGET_VERSION, versionCode)
+            .putBoolean(KEY_DOWNLOAD_COMPLETE, true)
+            .apply()
+    }
+
+    /**
+     * v0.65.6：APK 是否可解析（防截断/损坏包）。下载完成时在 IO 线程校验一次；
+     * 调用方在安装前兜底复查。返回 false 说明包坏了，不要安装。
+     */
+    fun isValidApk(context: Context, file: File): Boolean {
+        return try {
+            if (!file.exists() || file.length() <= 0) return false
+            val pi = if (Build.VERSION.SDK_INT >= 33) {
+                context.packageManager.getPackageArchiveInfo(
+                    file.absolutePath, PackageManager.PackageInfoFlags.of(0)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+            }
+            pi != null
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**
@@ -171,6 +228,7 @@ object OtaUpdater {
             p.edit()
                 .putInt(KEY_LAST_RUN_VERSION, BuildConfig.VERSION_CODE)
                 .putBoolean(KEY_INSTALL_PROMPTED, false)
+                .putBoolean(KEY_DOWNLOAD_COMPLETE, false)
                 .apply()
         }
     }
