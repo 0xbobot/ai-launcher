@@ -219,10 +219,10 @@ private fun launchQuickAction(context: Context, item: QuickActionItem) {
 private data class EquipSlot(val x: Dp, val y: Dp, val rotation: Float)
 
 private val EquipSlots = listOf(
-    EquipSlot((-72).dp, 16.dp, -8f),   // 左腰
-    EquipSlot(72.dp, 16.dp, 8f),       // 右腰
-    EquipSlot(48.dp, (-50).dp, 12f),   // 右上（背着的武器）
-    EquipSlot((-56).dp, 58.dp, -10f),  // 左下
+    EquipSlot((-80).dp, 40.dp, -8f),   // 左腰（v0.66.2：下移 24dp 拉开距离）
+    EquipSlot(80.dp, 40.dp, 8f),       // 右腰（v0.66.2：下移 24dp 拉开距离）
+    EquipSlot(56.dp, (-76).dp, 12f),   // 右上（背着的武器，v0.66.2：上移 24dp）
+    EquipSlot((-60).dp, 96.dp, -10f),  // 左下（v0.66.2：下移，避开左腰）
 )
 
 @Composable
@@ -251,9 +251,9 @@ fun QizaiEquipment(
     val ringItems = if (overflow) items.take(3) else items.take(4)
 
     Box(modifier = modifier) {
-        // 装备环：100dp 盒子与七仔同框，图标用 offset 挂在周围
+        // 装备环：160dp 盒子与七仔同框（v0.66.2：加大以容纳拉开的槽位），图标用 offset 挂在周围
         if (!expanded) {
-            Box(modifier = Modifier.size(100.dp)) {
+            Box(modifier = Modifier.size(160.dp)) {
                 ringItems.forEachIndexed { index, item ->
                     val slot = EquipSlots[index]
                     key(item.id) {
@@ -292,12 +292,12 @@ fun QizaiEquipment(
                         Text(text = "\u00B7\u00B7\u00B7", fontSize = 14.sp, color = Color(0xFF8A837C))
                     }
                 }
-                // + 添加：底部居中（v0.66.0：从右下(56,58)上移至底部居中，避免被 TODAY 卡片遮挡）
+                // + 添加：底部居中（v0.66.2：随装备下移至 76dp，保持间距）
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .offset(0.dp, 48.dp)
+                        .offset(0.dp, 76.dp)
                         .clickable { showAddFlow = true }
                 ) {
                     Box(
@@ -319,7 +319,7 @@ fun QizaiEquipment(
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .offset(y = 96.dp)
+                            .offset(y = 120.dp)
                     )
                 }
             }
@@ -328,7 +328,7 @@ fun QizaiEquipment(
             Row(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 108.dp)
+                    .offset(y = 132.dp)
                     .widthIn(max = 300.dp)
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
