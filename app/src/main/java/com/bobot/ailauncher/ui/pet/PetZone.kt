@@ -405,10 +405,11 @@ fun PetZone(
         // 桌台
         // v0.65.4：气泡移到七仔下方（8dp 间距），有气泡时舞台自然撑高（宠物位置不动）
         // v0.65.6：舞台最小高度 148dp → 220dp——装备图标+标签+气泡不再被 TODAY 卡片遮挡
+        // v0.65.7：220dp → 280dp——装备图标+下方标签有充足空间，不再紧贴 TODAY 卡片
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 220.dp)
+                .heightIn(min = 280.dp)
                 .wrapContentHeight()
                 .animateContentSize()
         ) {
