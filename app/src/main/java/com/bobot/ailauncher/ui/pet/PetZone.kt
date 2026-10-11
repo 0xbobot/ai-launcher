@@ -407,10 +407,11 @@ fun PetZone(
         // v0.65.6：舞台最小高度 148dp → 220dp——装备图标+标签+气泡不再被 TODAY 卡片遮挡
         // v0.65.7：220dp → 280dp——装备图标+下方标签有充足空间，不再紧贴 TODAY 卡片
         // v0.65.9：280dp → 320dp——给七仔动画和装备更多活动空间
+        // v0.66.1：320dp → 360dp——装备图标/标签/+按钮全部收进舞台，不被 TODAY 卡片遮挡
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 320.dp)
+                .heightIn(min = 360.dp)
                 .wrapContentHeight()
                 .animateContentSize()
         ) {
