@@ -292,12 +292,12 @@ fun QizaiEquipment(
                         Text(text = "\u00B7\u00B7\u00B7", fontSize = 14.sp, color = Color(0xFF8A837C))
                     }
                 }
-                // + 添加：右下方小圆圈虚线边
+                // + 添加：底部居中（v0.66.0：从右下(56,58)上移至底部居中，避免被 TODAY 卡片遮挡）
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .offset(56.dp, 58.dp)
+                        .offset(0.dp, 48.dp)
                         .clickable { showAddFlow = true }
                 ) {
                     Box(
