@@ -1889,9 +1889,17 @@ private fun TodaySection(
         }
 
         // v0.63.0：空态（编辑模式不显示）
+        // v0.64.6：用 LocalTime.now() 取本地小时；加分钟 ticker，每分钟重算一次，
+        // 避免进程整晚驻留导致 composition 里的时间 stale（8 点还显示"今晚无事"）
+        var timeTick by remember { mutableStateOf(0) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(60_000L)
+                timeTick++
+            }
+        }
         if (!editMode && !hasAnyContent) {
-            val hour = java.util.Calendar.getInstance()
-                .get(java.util.Calendar.HOUR_OF_DAY)
+            val hour = remember(timeTick) { java.time.LocalTime.now().hour }
             val isNight = hour >= 22 || hour < 6
             Box(
                 modifier = Modifier
