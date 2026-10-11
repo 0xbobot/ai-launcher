@@ -204,9 +204,9 @@ private fun launchQuickAction(context: Context, item: QuickActionItem) {
 // ============ v0.65.2：七仔气泡里的快捷面板 ============
 
 /**
- * 七仔气泡展开的快捷面板：白底圆角 + 小尾巴（和 SpeechBubble 同风格）。
- * 一排小图标（36dp）+ 10sp 标签，横向滚动；点即直达，长按删除。
- * 底部小 "+ 添加"（虚线圆）进三步添加流程。
+ * v0.65.4：七仔气泡展开的快捷面板（紧凑版，参考 iOS 悬浮框）。
+ * 白底圆角 + 顶部小尾巴指向上方七仔；一排 32dp 小图标 + 9sp 标签（最多4字不截断），
+ * 横向滚动；点即直达，长按删除。尾部小圆 "+ 添加" 进三步添加流程。
  */
 @Composable
 fun QuickActionsBubble(
@@ -227,12 +227,24 @@ fun QuickActionsBubble(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
     ) {
+        // v0.65.4：小尾巴指向上方七仔（气泡在七仔下方 8dp）
+        androidx.compose.foundation.Canvas(
+            modifier = Modifier.size(18.dp, 10.dp)
+        ) {
+            val tailPath = Path().apply {
+                moveTo(0f, size.height)
+                lineTo(size.width, size.height)
+                lineTo(size.width / 2f, 0f)
+                close()
+            }
+            drawPath(tailPath, Color.White)
+        }
         Box(
             modifier = Modifier
                 .widthIn(max = 280.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .background(Color.White)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .padding(12.dp)
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (showHint) {
@@ -264,14 +276,14 @@ fun QuickActionsBubble(
                             )
                         }
                     }
-                    // + 添加（虚线圆）
+                    // v0.65.4：+ 添加（小圆按钮，和图标同尺寸 32dp）
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.clickable { showAddFlow = true }
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(32.dp)
                                 .clip(CircleShape)
                                 .border(
                                     width = 1.5.dp,
@@ -280,30 +292,18 @@ fun QuickActionsBubble(
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(text = "+", fontSize = 20.sp, color = Color(0xFFAEAEB2))
+                            Text(text = "+", fontSize = 18.sp, color = Color(0xFFAEAEB2))
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "添加",
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             color = Color(0xFFAEAEB2),
                             maxLines = 1
                         )
                     }
                 }
             }
-        }
-        // 小尾巴指向七仔（和 SpeechBubble 同风格）
-        androidx.compose.foundation.Canvas(
-            modifier = Modifier.size(18.dp, 10.dp)
-        ) {
-            val tailPath = Path().apply {
-                moveTo(0f, 0f)
-                lineTo(size.width, 0f)
-                lineTo(size.width / 2f, size.height)
-                close()
-            }
-            drawPath(tailPath, Color.White)
         }
     }
 
@@ -343,7 +343,7 @@ fun QuickActionsBubble(
     }
 }
 
-/** 气泡里的快捷按钮：36dp 图标 + 10sp 标签；点即直达，长按删除 */
+/** v0.65.4：气泡里的快捷按钮——32dp 图标 + 9sp 标签（最多4字不截断，超宽横向滚动）；点即直达，长按删除 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QuickBubbleButton(
@@ -360,15 +360,13 @@ private fun QuickBubbleButton(
             )
             .padding(2.dp)
     ) {
-        QuickActionIcon(item = item, size = 36.dp)
-        Spacer(modifier = Modifier.height(2.dp))
+        QuickActionIcon(item = item, size = 32.dp)
+        Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = item.label,
-            fontSize = 10.sp,
+            fontSize = 9.sp,
             color = Color(0xFF3A3A3A),
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 52.dp),
             textAlign = TextAlign.Center
         )
     }

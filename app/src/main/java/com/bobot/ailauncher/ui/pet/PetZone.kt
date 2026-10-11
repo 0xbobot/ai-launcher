@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -44,6 +45,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -401,10 +403,13 @@ fun PetZone(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // 桌台
+        // v0.65.4：气泡移到七仔下方（8dp 间距），有气泡时舞台自然撑高（宠物位置不动）
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(148.dp)
+                .heightIn(min = 148.dp)
+                .wrapContentHeight()
+                .animateContentSize()
         ) {
             // ding：alpha 淡入淡出（Box 内不用 AnimatedVisibility，避免 scope 重载解析问题）
             val dingAlpha by animateFloatAsState(
@@ -469,7 +474,7 @@ fun PetZone(
                 QuickActionsBubble(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 2.dp),
+                        .padding(top = 132.dp),
                     onLaunch = { showQuickPanel = false }
                 )
             } else if (speech != null) {
@@ -478,7 +483,7 @@ fun PetZone(
                     visible = speechVisible,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 2.dp),
+                        .padding(top = 132.dp),
                     onClick = if (todayEditMode) {
                         {
                             todayEditMode = false
@@ -498,7 +503,8 @@ fun PetZone(
                 scene = demoScene,
                 onSceneDone = { demoScene = QizaiScene.NONE },
                 modifier = Modifier
-                    .align(Alignment.Center)
+                    .align(Alignment.TopCenter)
+                    .padding(top = 24.dp)
                     // v0.64.0：十万火急跳动（3 次快速上下）
                     .graphicsLayer { translationY = urgentBounce.value }
                     // 场景播放时给宽舞台（同中心，宠物视觉大小不变）；常态保持 100dp
@@ -985,6 +991,18 @@ private fun SpeechBubble(
         modifier = modifier
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // v0.65.4：小尾巴指向上方七仔（气泡在七仔下方）
+            androidx.compose.foundation.Canvas(
+                modifier = Modifier.size(18.dp, 10.dp)
+            ) {
+                val tailPath = Path().apply {
+                    moveTo(0f, size.height)
+                    lineTo(size.width, size.height)
+                    lineTo(size.width / 2f, 0f)
+                    close()
+                }
+                drawPath(tailPath, Color.White)
+            }
             Card(
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -1003,18 +1021,6 @@ private fun SpeechBubble(
                     color = Color(0xFF3A3A3A),
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                 )
-            }
-            // 小尾巴指向七仔
-            androidx.compose.foundation.Canvas(
-                modifier = Modifier.size(18.dp, 10.dp)
-            ) {
-                val tailPath = Path().apply {
-                    moveTo(0f, 0f)
-                    lineTo(size.width, 0f)
-                    lineTo(size.width / 2f, size.height)
-                    close()
-                }
-                drawPath(tailPath, Color.White)
             }
         }
     }
