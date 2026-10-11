@@ -315,6 +315,8 @@ fun PetZone(
     var speechVisible by remember { mutableStateOf(false) }
     // v0.65.5：七仔装备——点七仔展开/收起环绕的快捷图标（无容器拟物化）
     var showQuickPanel by remember { mutableStateOf(false) }
+    // v0.66.6：收起时先播反向摇摆动画，再真正移除（panelCollapsing 期间保持挂载）
+    var panelCollapsing by remember { mutableStateOf(false) }
     LaunchedEffect(speech?.id) {
         val s = speech
         if (s != null) {
@@ -476,12 +478,18 @@ fun PetZone(
             // v0.64.5：编辑模式下点气泡退出编辑模式
             // v0.65.5：七仔装备——拟物化快捷方式，无容器，图标像武器一样挂在七仔周围
             // v0.65.2：快捷面板打开时优先显示，普通说话气泡让位
-            if (showQuickPanel) {
+            // v0.66.6：panelCollapsing 期间保持挂载，播完反向摇摆才移除
+            if (showQuickPanel || panelCollapsing) {
                 QizaiEquipment(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 80.dp), // v0.66.3：随七仔下移（24dp → 80dp）
-                    onLaunch = { showQuickPanel = false }
+                        .padding(top = 200.dp), // v0.66.6：随七仔下移（80dp → 200dp），宠物在上半部分偏下
+                    onLaunch = { if (!panelCollapsing) panelCollapsing = true },
+                    collapsing = panelCollapsing,
+                    onCollapseDone = {
+                        panelCollapsing = false
+                        showQuickPanel = false
+                    }
                 )
             } else if (speech != null) {
                 SpeechBubble(
@@ -489,7 +497,7 @@ fun PetZone(
                     visible = speechVisible,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 188.dp), // v0.66.3：随七仔下移，保持 8dp 间距（132dp → 188dp）
+                        .padding(top = 308.dp), // v0.66.6：随七仔下移，保持 8dp 间距（188dp → 308dp）
                     onClick = if (todayEditMode) {
                         {
                             todayEditMode = false
@@ -510,7 +518,7 @@ fun PetZone(
                 onSceneDone = { demoScene = QizaiScene.NONE },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 80.dp) // v0.66.3：七仔下移（24dp → 80dp），靠近舞台底部
+                    .padding(top = 200.dp) // v0.66.6：七仔下移（80dp → 200dp），在上半部分偏下
                     // v0.64.0：十万火急跳动（3 次快速上下）
                     .graphicsLayer { translationY = urgentBounce.value }
                     // 场景播放时给宽舞台（同中心，宠物视觉大小不变）；常态保持 100dp
@@ -550,11 +558,16 @@ fun PetZone(
                             // 场景改由真实事件触发（天气/通知/日程）
                             // v0.56.0 M2：开心表情，不说话
                             // v0.65.5：点七仔展开/收起装备（环绕的快捷图标）
+                            // v0.66.6：收起时先播反向摇摆（panelCollapsing），播完才真正移除
                             if (hasUpgrade) onUpgradeTap()
                             else {
                                 jellyTick++
                                 PetRepository.setMoodHappyBrief()
-                                showQuickPanel = !showQuickPanel
+                                if (showQuickPanel && !panelCollapsing) {
+                                    panelCollapsing = true
+                                } else if (!showQuickPanel) {
+                                    showQuickPanel = true
+                                }
                             }
                         },
                         onLongClick = {
@@ -600,19 +613,7 @@ fun PetZone(
                         )
                 )
             }
-            // P0：落地阴影（奶油白在暖灰底上加对比）；场景播放时隐藏（场景自带舞台）
-            if (demoScene == QizaiScene.NONE) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(top = 92.dp)
-                        .size(width = 64.dp, height = 12.dp)
-                        .background(
-                            Color.Black.copy(alpha = 0.12f),
-                            CircleShape
-                        )
-                )
-            }
+            // v0.66.6：落地阴影已删除（Bob：宠物下面的横线不要了）
             // carry 小纸条
             val carryAlpha by animateFloatAsState(
                 targetValue = if (carryText != null) 1f else 0f,
@@ -687,7 +688,9 @@ fun PetZone(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .offset(y = (-30).dp)
+                // v0.66.6：去掉 -30dp 上移（七仔坐卡上），上下两部分清晰分开；卡片顶部留 8dp 呼吸
+                // v0.66.6：卡片底部留 32dp，与 Dock 拉开距离
+                .padding(top = 8.dp, bottom = 32.dp)
                 .then(if (todayEditMode) Modifier else Modifier.heightIn(min = 120.dp)) // v0.62.1：空态时不缩成一条线；v0.64.3：编辑模式去掉
                 // v0.64.5：编辑模式下吞掉卡片背景上的点击（不冒泡到根布局，避免误退出）
                 .then(
@@ -738,8 +741,7 @@ fun PetZone(
                         .verticalScroll(rememberScrollState())
                 }
             ) {
-                // 顶部留出七仔坐的位置
-                Box(modifier = Modifier.height(20.dp))
+                // v0.66.6：去掉 20dp 七仔坐位（上下分开后不再需要）
                 TodaySection(editMode = todayEditMode, onEditModeChange = { todayEditMode = it })
             }
         }

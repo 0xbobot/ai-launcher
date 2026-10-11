@@ -40,6 +40,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -228,7 +231,10 @@ private val EquipSlots = listOf(
 @Composable
 fun QizaiEquipment(
     modifier: Modifier = Modifier,
-    onLaunch: () -> Unit = {} // 启动后由调用方决定是否收起
+    onLaunch: () -> Unit = {}, // 启动后由调用方决定是否收起
+    // v0.66.6：收起时播反向摇摆动画——collapsing=true 时 wobble 1→0，播完调 onCollapseDone
+    collapsing: Boolean = false,
+    onCollapseDone: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -236,6 +242,17 @@ fun QizaiEquipment(
     var showAddFlow by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<QuickActionItem?>(null) }
     var expanded by remember { mutableStateOf(false) }
+    // v0.66.6：展开摇摆——像挂件晃动（300ms ease-in-out）；收起时反向
+    val wobble = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        wobble.animateTo(1f, animationSpec = tween(300, easing = EaseInOut))
+    }
+    LaunchedEffect(collapsing) {
+        if (collapsing) {
+            wobble.animateTo(0f, animationSpec = tween(300, easing = EaseInOut))
+            onCollapseDone()
+        }
+    }
     // v0.65.5：首次见到装备 → 七仔介绍（只一次），4 秒后提示消失
     var showEquipHint by remember {
         mutableStateOf(GuideManager.tryShow(context, GuideManager.Id.EQUIPMENT))
@@ -251,15 +268,16 @@ fun QizaiEquipment(
     val ringItems = if (overflow) items.take(3) else items.take(4)
 
     Box(modifier = modifier) {
-        // 装备环：160dp 盒子与七仔同框（v0.66.4：槽位收紧贴着七仔），图标用 offset 挂在周围
+        // 装备环：180dp 盒子与七仔同框（v0.66.6：160dp→180dp，加号不再被裁掉一半）
         if (!expanded) {
-            Box(modifier = Modifier.size(160.dp)) {
+            Box(modifier = Modifier.size(180.dp)) {
                 ringItems.forEachIndexed { index, item ->
                     val slot = EquipSlots[index]
                     key(item.id) {
                         EquipButton(
                             item = item,
                             rotation = slot.rotation,
+                            wobble = wobble.value,
                             modifier = Modifier
                                 .align(Alignment.Center)
                                 .offset(slot.x, slot.y),
@@ -292,12 +310,12 @@ fun QizaiEquipment(
                         Text(text = "\u00B7\u00B7\u00B7", fontSize = 14.sp, color = Color(0xFF8A837C))
                     }
                 }
-                // + 添加：七仔正下方（v0.66.4：收到正下方 24dp 处，贴着七仔）
+                // + 添加：七仔正下方（v0.66.6：74dp→60dp，收进 180dp 盒内不再被裁）
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .offset(0.dp, 74.dp)
+                        .offset(0.dp, 60.dp)
                         .clickable { showAddFlow = true }
                 ) {
                     Box(
@@ -339,6 +357,7 @@ fun QizaiEquipment(
                         EquipButton(
                             item = item,
                             rotation = 0f,
+                            wobble = wobble.value,
                             onClick = {
                                 launchQuickAction(context, item)
                                 onLaunch()
@@ -450,12 +469,16 @@ private fun EquipButton(
     item: QuickActionItem,
     rotation: Float,
     modifier: Modifier = Modifier,
+    // v0.66.6：摇摆进度 0→1（展开）/1→0（收起反向），阻尼正弦摆动
+    wobble: Float = 0f,
     onClick: () -> Unit,
     onLongPress: () -> Unit
 ) {
+    // 摆动角度：sin 两个周期 * 12° * 阻尼(1-wobble)，wobble=1 时静止
+    val swing = (kotlin.math.sin(wobble * Math.PI * 2) * 12f * (1f - wobble)).toFloat()
     Box(
         modifier = modifier
-            .graphicsLayer { rotationZ = rotation }
+            .graphicsLayer { rotationZ = rotation + swing }
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongPress
