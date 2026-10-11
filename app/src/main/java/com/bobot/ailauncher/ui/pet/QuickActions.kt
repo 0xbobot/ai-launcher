@@ -442,7 +442,8 @@ fun QizaiEquipment(
     }
 }
 
-/** v0.65.5：装备按钮——36dp 圆形图标 + 4dp 阴影 + 轻微旋转 + 9sp 标签（无背景） */
+/** v0.65.5：装备按钮——36dp 圆形图标 + 4dp 阴影 + 轻微旋转。
+ * v0.66.5：隐藏名称标签，只显示图标；长按时删除确认框里带名称。 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EquipButton(
@@ -452,39 +453,21 @@ private fun EquipButton(
     onClick: () -> Unit,
     onLongPress: () -> Unit
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Box(
         modifier = modifier
             .graphicsLayer { rotationZ = rotation }
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongPress
             )
+            .size(36.dp)
+            .shadow(4.dp, CircleShape)
+            .clip(CircleShape)
+            .background(Color.White)
+            .padding(4.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .shadow(4.dp, CircleShape)
-                .clip(CircleShape)
-                .background(Color.White)
-                .padding(4.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            QuickActionIcon(item = item, size = 28.dp)
-        }
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = item.label,
-            fontSize = 10.sp,
-            color = Color(0xFF3A352F),
-            maxLines = 1,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .zIndex(1f)
-                .widthIn(max = 76.dp)
-                .background(Color.White.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-        )
+        QuickActionIcon(item = item, size = 28.dp)
     }
 }
 
