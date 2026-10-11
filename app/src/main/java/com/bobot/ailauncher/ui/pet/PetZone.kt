@@ -1897,32 +1897,6 @@ private fun TodaySection(
             Spacer(modifier = Modifier.height(4.dp))
         }
 
-        // v0.63.0：空态（编辑模式不显示）
-        // v0.64.6：用 LocalTime.now() 取本地小时；加分钟 ticker，每分钟重算一次，
-        // 避免进程整晚驻留导致 composition 里的时间 stale（8 点还显示"今晚无事"）
-        var timeTick by remember { mutableStateOf(0) }
-        LaunchedEffect(Unit) {
-            while (true) {
-                delay(60_000L)
-                timeTick++
-            }
-        }
-        if (!editMode && !hasAnyContent) {
-            val hour = remember(timeTick) { java.time.LocalTime.now().hour }
-            val isNight = hour >= 22 || hour < 6
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = if (isNight) "今晚无事，好好休息 🌙" else "今日暂无安排",
-                    fontSize = 13.sp,
-                    color = Color(0xFFA8A29E)
-                )
-            }
-        }
     }
 }
 
