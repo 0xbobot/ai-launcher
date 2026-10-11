@@ -18,7 +18,8 @@ object GuideManager {
         const val P0_REPLY = "p0_reply"             // 首次出现 P0 需回复消息
         const val PET_LONGPRESS = "pet_longpress"   // 首次长按七仔
         const val VERSION_UPDATE = "version_update" // 版本更新后首次打开
-        const val QUICK_ACTIONS = "quick_actions"   // v0.65.0：首次见到快捷操作区
+        const val QUICK_ACTIONS = "quick_actions"   // v0.65.0：首次见到快捷操作区（已废弃，v0.65.2 移到气泡）
+        const val QUICK_PANEL = "quick_panel"         // v0.65.2：首次展开七仔气泡快捷面板
     }
 
     private fun prefs(context: Context) =

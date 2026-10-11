@@ -307,6 +307,8 @@ fun PetZone(
     // 新胶囊来时重置为预览态
     LaunchedEffect(capsule?.id) { capsuleMode = CapsuleMode.PREVIEW }
     var speechVisible by remember { mutableStateOf(false) }
+    // v0.65.2：快捷面板——点七仔展开气泡面板（快捷按钮），再点收起
+    var showQuickPanel by remember { mutableStateOf(false) }
     LaunchedEffect(speech?.id) {
         val s = speech
         if (s != null) {
@@ -458,7 +460,15 @@ fun PetZone(
             // v0.51.2：会议临近黄条已删（Capsule 已覆盖，避免重复）
             // v0.47.0：七仔说话气泡——统一信息区（Mii 风+游戏化），有话就弹出来
             // v0.64.5：编辑模式下点气泡退出编辑模式
-            if (speech != null) {
+            // v0.65.2：快捷面板打开时优先显示面板，普通说话气泡让位
+            if (showQuickPanel) {
+                QuickActionsBubble(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 2.dp),
+                    onLaunch = { showQuickPanel = false }
+                )
+            } else if (speech != null) {
                 SpeechBubble(
                     text = speech!!.text,
                     visible = speechVisible,
@@ -523,10 +533,12 @@ fun PetZone(
                             // v0.50.0：Today 已在首屏，点按宠物只做果冻反馈
                             // 场景改由真实事件触发（天气/通知/日程）
                             // v0.56.0 M2：开心表情，不说话
+                            // v0.65.2：点七仔展开/收起快捷面板（气泡里的快捷按钮）
                             if (hasUpgrade) onUpgradeTap()
                             else {
                                 jellyTick++
                                 PetRepository.setMoodHappyBrief()
+                                showQuickPanel = !showQuickPanel
                             }
                         },
                         onLongClick = {
@@ -1866,14 +1878,7 @@ private fun TodaySection(
                 }
             }
         }
-        // v0.65.0：快捷操作区——TODAY 卡片底部、更新提醒上方；无标题文字，首次由七仔说话介绍
-        if (hasAnyContent) {
-            Spacer(modifier = Modifier.height(4.dp))
-            PriorityDivider()
-        } else {
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-        QuickActionsRow(editMode = editMode)
+        // v0.65.2：快捷操作已移到七仔气泡（点七仔展开），TODAY 卡片不再放
         Spacer(modifier = Modifier.height(4.dp))
         // v0.64.2：更新提醒——有新版本时卡片底部一行，点之弹更新对话框；无更新时不占位置
         val availUpdateState by OtaUpdater.latestAvailable.collectAsState()

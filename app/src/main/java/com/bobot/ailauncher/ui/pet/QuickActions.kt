@@ -8,24 +8,21 @@ import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
 import android.os.Process
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -46,59 +43,47 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.zIndex
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.apps.loadAppShortcuts
 import com.bobot.ailauncher.ui.apps.loadShortcutIcon
-import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import kotlin.math.roundToInt
 
 /**
- * v0.65.0：TODAY 底部快捷操作组。
- * - 空状态显示 "+ 添加"；点 + → 选应用 → 选快捷方式/打开主应用 → 输短标签 → 保存
- * - 最多直接显示 4 个，更多横向滚动
- * - 点击：有 shortcutId 用 LauncherApps.startShortcut()，否则打开主应用
- * - 普通模式长按删除（震动+确认）；编辑模式拖拽排序、× 角标删除
- * - 数据 DataStore（SharedPreferences）JSON 持久化
- * - 无"快捷操作"标题文字，首次由七仔说话介绍
+ * v0.65.2：快捷操作从 TODAY 卡片移到七仔气泡。
+ * - 点七仔 → 气泡展开为快捷面板：一排小图标（36dp）+ 10sp 标签，点即直达
+ * - 面板底部小 "+ 添加"（虚线圆）→ 三步添加流程（选应用→选快捷方式→输标签）
+ * - 长按图标 → 删除（震动+确认）
+ * - 数据层 QuickActionsPrefs 复用不动
+ * - 首次点七仔时七仔引导："点图标直达，+ 可以添加常用按钮"
  */
 
-// ============ 数据 ============
+// ============ 数据（v0.65.0，不动） ============
 
 data class QuickActionItem(
     val id: String = UUID.randomUUID().toString(),
@@ -148,7 +133,7 @@ object QuickActionsPrefs {
     }
 }
 
-// ============ 图标 / 启动 ============
+// ============ 图标 / 启动（v0.65.0，不动） ============
 
 private fun Drawable.toImageBitmap(): ImageBitmap {
     val w = intrinsicWidth.takeIf { it > 0 } ?: 96
@@ -181,13 +166,13 @@ private fun QuickActionIcon(item: QuickActionItem, size: Dp) {
             contentDescription = item.label,
             modifier = Modifier
                 .size(size)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(8.dp))
         )
     } else {
         Box(
             modifier = Modifier
                 .size(size)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(Color(0xFFE5E0D8))
         )
     }
@@ -216,132 +201,113 @@ private fun launchQuickAction(context: Context, item: QuickActionItem) {
     }
 }
 
-// ============ 主入口：快捷操作区 ============
+// ============ v0.65.2：七仔气泡里的快捷面板 ============
 
+/**
+ * 七仔气泡展开的快捷面板：白底圆角 + 小尾巴（和 SpeechBubble 同风格）。
+ * 一排小图标（36dp）+ 10sp 标签，横向滚动；点即直达，长按删除。
+ * 底部小 "+ 添加"（虚线圆）进三步添加流程。
+ */
 @Composable
-fun QuickActionsRow(
-    editMode: Boolean,
-    modifier: Modifier = Modifier
+fun QuickActionsBubble(
+    modifier: Modifier = Modifier,
+    onLaunch: () -> Unit = {} // 启动后由调用方决定是否收起面板
 ) {
     val context = LocalContext.current
     val view = LocalView.current
     var items by remember { mutableStateOf(QuickActionsPrefs.load(context)) }
     var showAddFlow by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<QuickActionItem?>(null) }
-
-    // v0.65.0：首次见到快捷操作区 → 七仔说话介绍（只一次，无标题文字）
-    LaunchedEffect(Unit) {
-        if (GuideManager.tryShow(context, GuideManager.Id.QUICK_ACTIONS)) {
-            PetRepository.say("底部点 + 可以添加常用按钮，比如一键拍照、语音聊天")
-        }
+    // v0.65.2：首次展开面板 → 顶部小提示（只一次）
+    var showHint by remember {
+        mutableStateOf(GuideManager.tryShow(context, GuideManager.Id.QUICK_PANEL))
     }
 
-    // ---- 编辑模式横向拖拽排序（相邻交换，与组拖拽同思路） ----
-    val scope = rememberCoroutineScope()
-    val buttonWidths = remember { mutableStateMapOf<String, Float>() }
-    val density = LocalDensity.current
-    val gapPx = with(density) { 8.dp.toPx() }
-    var dragId by remember { mutableStateOf<String?>(null) }
-    var dragOrder by remember { mutableStateOf<List<String>?>(null) }
-    val dragDx = remember { Animatable(0f) }
-    val renderIds = dragOrder ?: items.map { it.id }
-    val renderItems = remember(renderIds, items) {
-        renderIds.mapNotNull { id -> items.find { it.id == id } }
-    }
-
-    fun endDrag(save: Boolean) {
-        val o = dragOrder
-        if (save && o != null) {
-            val reordered = o.mapNotNull { id -> items.find { it.id == id } }
-            if (reordered.size == items.size) {
-                items = reordered
-                QuickActionsPrefs.save(context, reordered)
-            }
-        }
-        scope.launch {
-            dragDx.animateTo(0f)
-            dragId = null
-            dragOrder = null
-        }
-    }
-
-    fun onDrag(id: String, change: PointerInputChange, amount: Offset) {
-        change.consume()
-        val cur = dragOrder ?: return
-        var idx = cur.indexOf(id)
-        if (idx < 0) return
-        val myW = buttonWidths[id] ?: 0f
-        var newDx = dragDx.value + amount.x
-        var newOrder = cur
-        // 向左：与前一个交换（拖过相邻中心即换，补偿 offset 保视觉连续）
-        if (idx > 0 && newDx < 0) {
-            val prevId = cur[idx - 1]
-            val centerDist = myW / 2 + gapPx + (buttonWidths[prevId] ?: 0f) / 2
-            if (-newDx >= centerDist && centerDist > 0) {
-                newOrder = cur.toMutableList().also { Collections.swap(it, idx, idx - 1) }
-                newDx += centerDist
-                idx -= 1
-            }
-        }
-        // 向右：与后一个交换
-        if (idx < newOrder.size - 1 && newDx > 0) {
-            val nextId = newOrder[idx + 1]
-            val centerDist = myW / 2 + gapPx + (buttonWidths[nextId] ?: 0f) / 2
-            if (newDx >= centerDist && centerDist > 0) {
-                newOrder = newOrder.toMutableList().also { Collections.swap(it, idx, idx + 1) }
-                newDx -= centerDist
-            }
-        }
-        if (newOrder !== cur) dragOrder = newOrder
-        scope.launch { dragDx.snapTo(newDx) }
-    }
-
-    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
-        // 最多直接显示 4 个：按钮最大宽度 = 可用宽度/4
-        val buttonMaxW = (maxWidth - 24.dp) / 4
-        if (items.isEmpty()) {
-            // 空状态：+ 添加（居左，不占整行）
-            AddQuickButton(onClick = { showAddFlow = true })
-        } else {
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                renderItems.forEach { item ->
-                    key(item.id) {
-                        val dragging = dragId == item.id
-                        QuickActionButton(
-                            item = item,
-                            editMode = editMode,
-                            maxWidth = buttonMaxW,
-                            isDragging = dragging,
-                            dragDxPx = if (dragging) dragDx.value else 0f,
-                            onWidthMeasured = { w -> if (buttonWidths[item.id] != w) buttonWidths[item.id] = w },
-                            onClick = { launchQuickAction(context, item) },
-                            onLongPressDelete = {
-                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                deleteTarget = item
-                            },
-                            onDeleteBadge = { deleteTarget = item },
-                            onDragStart = {
-                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                dragId = item.id
-                                dragOrder = items.map { it.id }
-                                scope.launch { dragDx.snapTo(0f) }
-                            },
-                            onDrag = { change, amount -> onDrag(item.id, change, amount) },
-                            onDragEnd = { endDrag(save = true) }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .widthIn(max = 280.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.White)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (showHint) {
+                    Text(
+                        text = "点图标直达，+ 可以添加常用按钮",
+                        fontSize = 11.sp,
+                        color = Color(0xFFAEAEB2),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    items.forEach { item ->
+                        key(item.id) {
+                            QuickBubbleButton(
+                                item = item,
+                                onClick = {
+                                    launchQuickAction(context, item)
+                                    onLaunch()
+                                },
+                                onLongPress = {
+                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                    deleteTarget = item
+                                }
+                            )
+                        }
+                    }
+                    // + 添加（虚线圆）
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable { showAddFlow = true }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .border(
+                                    width = 1.5.dp,
+                                    color = Color(0xFFAEAEB2),
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "+", fontSize = 20.sp, color = Color(0xFFAEAEB2))
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "添加",
+                            fontSize = 10.sp,
+                            color = Color(0xFFAEAEB2),
+                            maxLines = 1
                         )
                     }
                 }
-                // 末尾 + 添加（小尺寸）
-                AddQuickButtonSmall(onClick = { showAddFlow = true })
             }
+        }
+        // 小尾巴指向七仔（和 SpeechBubble 同风格）
+        androidx.compose.foundation.Canvas(
+            modifier = Modifier.size(18.dp, 10.dp)
+        ) {
+            val tailPath = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(size.width, 0f)
+                lineTo(size.width / 2f, size.height)
+                close()
+            }
+            drawPath(tailPath, Color.White)
         }
     }
 
-    // 添加流程
+    // 添加流程（三步：选应用→选快捷方式→输标签）
     if (showAddFlow) {
         QuickActionAddFlow(
             onDismiss = { showAddFlow = false },
@@ -354,7 +320,7 @@ fun QuickActionsRow(
         )
     }
 
-    // 删除确认
+    // 删除确认（长按图标 → 震动+确认）
     val target = deleteTarget
     if (target != null) {
         AlertDialog(
@@ -377,118 +343,38 @@ fun QuickActionsRow(
     }
 }
 
+/** 气泡里的快捷按钮：36dp 图标 + 10sp 标签；点即直达，长按删除 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QuickActionButton(
+private fun QuickBubbleButton(
     item: QuickActionItem,
-    editMode: Boolean,
-    maxWidth: Dp,
-    isDragging: Boolean,
-    dragDxPx: Float,
-    onWidthMeasured: (Float) -> Unit,
     onClick: () -> Unit,
-    onLongPressDelete: () -> Unit,
-    onDeleteBadge: () -> Unit,
-    onDragStart: () -> Unit,
-    onDrag: (PointerInputChange, Offset) -> Unit,
-    onDragEnd: () -> Unit
+    onLongPress: () -> Unit
 ) {
-    Box(
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .widthIn(max = maxWidth)
-            .then(if (isDragging) Modifier.zIndex(1f) else Modifier)
-            .then(
-                if (isDragging) Modifier.graphicsLayer {
-                    scaleX = 1.06f
-                    scaleY = 1.06f
-                } else Modifier
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongPress
             )
-            .then(if (isDragging) Modifier.shadow(8.dp, RoundedCornerShape(16.dp)) else Modifier)
-            .then(
-                if (isDragging && dragDxPx != 0f) Modifier.offset {
-                    IntOffset(dragDxPx.roundToInt(), 0)
-                } else Modifier
-            )
-            .onSizeChanged { onWidthMeasured(it.width.toFloat()) }
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.55f))
-            .then(
-                if (editMode) {
-                    Modifier.pointerInput(item.id) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { onDragStart() },
-                            onDragEnd = { onDragEnd() },
-                            onDragCancel = { onDragEnd() },
-                            onDrag = { change, amount -> onDrag(change, amount) }
-                        )
-                    }
-                } else {
-                    Modifier.combinedClickable(
-                        onClick = onClick,
-                        onLongClick = onLongPressDelete
-                    )
-                }
-            )
-            .padding(horizontal = 10.dp, vertical = 7.dp)
+            .padding(2.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            QuickActionIcon(item = item, size = 22.dp)
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = item.label,
-                fontSize = 13.sp,
-                color = Color(0xFF1C1C1E),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (editMode) {
-                Spacer(modifier = Modifier.width(4.dp))
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFFF3B30).copy(alpha = 0.9f))
-                        .clickable { onDeleteBadge() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = "×", fontSize = 11.sp, color = Color.White)
-                }
-            }
-        }
+        QuickActionIcon(item = item, size = 36.dp)
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = item.label,
+            fontSize = 10.sp,
+            color = Color(0xFF3A3A3A),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 52.dp),
+            textAlign = TextAlign.Center
+        )
     }
 }
 
-@Composable
-private fun AddQuickButton(onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.45f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = "+", fontSize = 16.sp, color = Color(0xFF8E8E93))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(text = "添加", fontSize = 13.sp, color = Color(0xFF8E8E93))
-    }
-}
-
-@Composable
-private fun AddQuickButtonSmall(onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(38.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.45f))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text = "+", fontSize = 18.sp, color = Color(0xFF8E8E93))
-    }
-}
-
-// ============ 添加流程：选应用 → 选快捷方式 → 输标签 ============
+// ============ 添加流程：选应用 → 选快捷方式 → 输标签（v0.65.0，不动） ============
 
 @Composable
 private fun QuickActionAddFlow(
