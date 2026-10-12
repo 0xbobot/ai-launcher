@@ -135,7 +135,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.core.app.NotificationManagerCompat
 import android.provider.Settings
-import kotlin.math.maxOf
 import kotlin.math.roundToInt
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
@@ -182,7 +181,7 @@ fun PetZone(
     val screenH = LocalConfiguration.current.screenHeightDp.dp
     val stageH = screenH / 3 - 24.dp
     // v0.66.8：七仔在上 1/3 区域偏下——宠物顶部 = 舞台高 - 190dp（留气泡/装备下方空间），最小 24dp 保顶部装备不被切
-    val petTop = maxOf(stageH - 190.dp, 24.dp)
+    val petTop = if (stageH - 190.dp > 24.dp) stageH - 190.dp else 24.dp
     // v0.64.5：返回键退出编辑模式
     BackHandler(enabled = todayEditMode) {
         todayEditMode = false
