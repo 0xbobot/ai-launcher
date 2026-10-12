@@ -222,10 +222,10 @@ private fun launchQuickAction(context: Context, item: QuickActionItem) {
 private data class EquipSlot(val x: Dp, val y: Dp, val rotation: Float)
 
 private val EquipSlots = listOf(
-    EquipSlot((-72).dp, 15.dp, -8f),   // 左腰（v0.66.7：外移，与宠物保持 6dp 间隙，摇摆时不视觉混淆）
-    EquipSlot(72.dp, 15.dp, 8f),       // 右腰（v0.66.7：外移）
-    EquipSlot(55.dp, (-55).dp, 12f),   // 右上（背着的武器，v0.66.7：外移）
-    EquipSlot((-60).dp, 80.dp, -10f),  // 左下（v0.66.7：外移，与左腰保持间距）
+    EquipSlot((-72).dp, 5.dp, -8f),    // 左腰（v0.66.9：y 15→5，bottom 在 stageH-17，卡片在 stageH+24）
+    EquipSlot(72.dp, 5.dp, 8f),        // 右腰（v0.66.9：y 15→5）
+    EquipSlot(55.dp, (-55).dp, 12f),   // 右上（背着的武器，保持）
+    EquipSlot((-58).dp, (-52).dp, -10f), // 左上（v0.66.9：左下 80→-52 移到左上，bottom 在 stageH-74，不被卡片裁）
 )
 
 @Composable
@@ -310,12 +310,12 @@ fun QizaiEquipment(
                         Text(text = "\u00B7\u00B7\u00B7", fontSize = 14.sp, color = Color(0xFF8A837C))
                     }
                 }
-                // + 添加：七仔正下方（v0.66.6：74dp→60dp，收进 180dp 盒内不再被裁）
+                // + 添加：七仔正下方（v0.66.9：60→10，bottom 在 stageH-16，卡片在 stageH+24）
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .offset(0.dp, 60.dp)
+                        .offset(0.dp, 10.dp)
                         .clickable { showAddFlow = true }
                 ) {
                     Box(
@@ -328,7 +328,7 @@ fun QizaiEquipment(
                         Text(text = "+", fontSize = 16.sp, color = Color(0xFFAEAEB2))
                     }
                 }
-                // 首次提示：七仔介绍小装备（v0.66.4：随收紧上移）
+                // 首次提示：七仔介绍小装备（v0.66.9：移到上方 y=-85，bottom 在 stageH-115，不被卡片裁）
                 if (showEquipHint) {
                     Text(
                         text = "这些是我的小装备，点一下就能用",
@@ -337,7 +337,7 @@ fun QizaiEquipment(
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .offset(y = 96.dp)
+                            .offset(y = (-85).dp)
                     )
                 }
             }

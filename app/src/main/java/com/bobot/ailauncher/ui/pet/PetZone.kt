@@ -180,8 +180,8 @@ fun PetZone(
     // v0.66.8：卡片顶部对齐屏幕 1/3 处——舞台高度 = 屏幕高/3 - 顶部 16dp - 卡片顶部 8dp
     val screenH = LocalConfiguration.current.screenHeightDp.dp
     val stageH = screenH / 3 - 24.dp
-    // v0.66.8：七仔在上 1/3 区域偏下——宠物顶部 = 舞台高 - 190dp（留气泡/装备下方空间），最小 24dp 保顶部装备不被切
-    val petTop = if (stageH - 190.dp > 24.dp) stageH - 190.dp else 24.dp
+    // v0.66.9：七仔靠近宠物区底部——宠物顶部 = 舞台高 - 140dp（离卡片 40dp），最小 24dp 保顶部装备不被切
+    val petTop = if (stageH - 140.dp > 24.dp) stageH - 140.dp else 24.dp
     // v0.64.5：返回键退出编辑模式
     BackHandler(enabled = todayEditMode) {
         todayEditMode = false
@@ -503,7 +503,7 @@ fun PetZone(
                     visible = speechVisible,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = petTop + 108.dp), // v0.66.8：随七仔，保持七仔下方 8dp 间距
+                        .padding(top = petTop + 90.dp), // v0.66.9：气泡紧贴七仔下方（40dp 间隙内，2 行文本 bottom 在 stageH+16，卡片在 stageH+24，不遮挡）
                     onClick = if (todayEditMode) {
                         {
                             todayEditMode = false
@@ -524,7 +524,7 @@ fun PetZone(
                 onSceneDone = { demoScene = QizaiScene.NONE },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = petTop) // v0.66.8：七仔在上 1/3 区域偏下（petTop = maxOf(stageH - 190dp, 24dp)）
+                    .padding(top = petTop) // v0.66.9：七仔靠近宠物区底部（petTop = stageH - 140dp，离卡片 40dp）
                     // v0.64.0：十万火急跳动（3 次快速上下）
                     .graphicsLayer { translationY = urgentBounce.value }
                     // 场景播放时给宽舞台（同中心，宠物视觉大小不变）；常态保持 100dp
