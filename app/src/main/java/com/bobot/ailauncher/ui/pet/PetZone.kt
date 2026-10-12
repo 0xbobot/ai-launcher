@@ -135,6 +135,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.core.app.NotificationManagerCompat
 import android.provider.Settings
+import kotlin.math.maxOf
 import kotlin.math.roundToInt
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
@@ -177,11 +178,11 @@ fun PetZone(
     var demoScene by remember { mutableStateOf(QizaiScene.NONE) }
     // v0.64.5：编辑模式状态上提（气泡点击退出需要用到）
     var todayEditMode by remember { mutableStateOf(false) }
-    // v0.66.7：卡片顶部对齐屏幕中线——舞台高度 = 屏幕高/2 - 顶部 16dp - 卡片顶部 8dp
+    // v0.66.8：卡片顶部对齐屏幕 1/3 处——舞台高度 = 屏幕高/3 - 顶部 16dp - 卡片顶部 8dp
     val screenH = LocalConfiguration.current.screenHeightDp.dp
-    val stageH = screenH / 2 - 24.dp
-    // v0.66.7：七仔在上半部分偏下——宠物顶部 = 舞台高 - 200dp（留 100dp 给气泡/装备下方空间）
-    val petTop = stageH - 200.dp
+    val stageH = screenH / 3 - 24.dp
+    // v0.66.8：七仔在上 1/3 区域偏下——宠物顶部 = 舞台高 - 190dp（留气泡/装备下方空间），最小 24dp 保顶部装备不被切
+    val petTop = maxOf(stageH - 190.dp, 24.dp)
     // v0.64.5：返回键退出编辑模式
     BackHandler(enabled = todayEditMode) {
         todayEditMode = false
@@ -418,6 +419,7 @@ fun PetZone(
         // v0.66.1：320dp → 360dp——装备图标/标签/+按钮全部收进舞台，不被 TODAY 卡片遮挡
         // v0.66.3：360dp → 400dp——七仔下移靠近舞台底部，宠物层内部拉开
         // v0.66.7：舞台高度 = 屏幕高/2 - 24dp，卡片顶部对齐屏幕中线
+        // v0.66.8：舞台高度 = 屏幕高/3 - 24dp，卡片顶部对齐屏幕 1/3 处
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -488,7 +490,7 @@ fun PetZone(
                 QizaiEquipment(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = petTop), // v0.66.7：随七仔，七仔在上半部分偏下
+                        .padding(top = petTop), // v0.66.8：随七仔，七仔在上 1/3 区域偏下
                     onLaunch = { if (!panelCollapsing) panelCollapsing = true },
                     collapsing = panelCollapsing,
                     onCollapseDone = {
@@ -502,7 +504,7 @@ fun PetZone(
                     visible = speechVisible,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = petTop + 108.dp), // v0.66.7：随七仔，保持七仔下方 8dp 间距
+                        .padding(top = petTop + 108.dp), // v0.66.8：随七仔，保持七仔下方 8dp 间距
                     onClick = if (todayEditMode) {
                         {
                             todayEditMode = false
@@ -523,7 +525,7 @@ fun PetZone(
                 onSceneDone = { demoScene = QizaiScene.NONE },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = petTop) // v0.66.7：七仔在上半部分偏下（petTop = stageH - 200dp）
+                    .padding(top = petTop) // v0.66.8：七仔在上 1/3 区域偏下（petTop = maxOf(stageH - 190dp, 24dp)）
                     // v0.64.0：十万火急跳动（3 次快速上下）
                     .graphicsLayer { translationY = urgentBounce.value }
                     // 场景播放时给宽舞台（同中心，宠物视觉大小不变）；常态保持 100dp
