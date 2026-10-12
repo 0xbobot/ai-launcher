@@ -268,9 +268,9 @@ fun QizaiEquipment(
     val ringItems = if (overflow) items.take(3) else items.take(4)
 
     Box(modifier = modifier) {
-        // 装备环：200dp 盒子与七仔同框（v0.66.7：180dp→200dp，容纳外移的槽位）
+        // 装备环：220dp 盒子与七仔同框（v0.67.0：200dp→220dp，容纳移到 (-90,-52) 的 "+" 按钮，左边缘 -104 不被裁）
         if (!expanded) {
-            Box(modifier = Modifier.size(200.dp)) {
+            Box(modifier = Modifier.size(220.dp)) {
                 ringItems.forEachIndexed { index, item ->
                     val slot = EquipSlots[index]
                     key(item.id) {
@@ -310,12 +310,12 @@ fun QizaiEquipment(
                         Text(text = "\u00B7\u00B7\u00B7", fontSize = 14.sp, color = Color(0xFF8A837C))
                     }
                 }
-                // + 添加：七仔正下方（v0.66.9：60→10，bottom 在 stageH-16，卡片在 stageH+24）
+                // + 添加：左上槽位旁（v0.67.0：从七仔正下方 (0,10) 移到 (-90,-52)，原位置被七仔挡住）
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .offset(0.dp, 10.dp)
+                        .offset((-90).dp, (-52).dp)
                         .clickable { showAddFlow = true }
                 ) {
                     Box(
