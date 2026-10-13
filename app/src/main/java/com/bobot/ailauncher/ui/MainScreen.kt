@@ -165,14 +165,14 @@ private fun HomeHost(
     // v0.64.2：更新弹窗走共享流（自动检查 / TODAY 卡片"有新版本"行点击）
     val updatePrompt by OtaUpdater.updatePrompt.collectAsState()
 
-    // OTA：每天最多自动检查一次，有新版弹更新对话框 + TODAY 卡片底行提醒
+    // OTA：每天最多自动检查一次，有新版只在 TODAY 卡片底行提醒（v0.67.1：不再自动弹模态对话框，
+    // 产品原则：重要信息不用模态弹窗；用户点卡片"有新版本"行才弹 UpdateDialog）
     LaunchedEffect(Unit) {
         if (OtaUpdater.shouldAutoCheck(context)) {
             val info = OtaUpdater.checkForUpdate(context)
             OtaUpdater.markChecked(context)
             if (info != null) {
                 OtaUpdater.latestAvailable.value = info
-                OtaUpdater.updatePrompt.value = info
             }
         }
     }
@@ -199,7 +199,8 @@ private fun HomeHost(
             onOpenSettings = onOpenSettings
         )
         // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
-        // OTA 更新对话框（自动检查 / TODAY 卡片行点击 / 设置页手动检查 / 长按快捷方式共用 UpdateDialog）
+        // OTA 更新对话框——v0.67.1：只在用户主动点击时弹（TODAY 卡片"有新版本"行 / 设置页手动检查），
+        // 不再每天自动检查后自动弹（产品原则：重要信息不用模态弹窗）
         updatePrompt?.let { info ->
             UpdateDialog(info = info, onDismiss = { OtaUpdater.updatePrompt.value = null })
         }

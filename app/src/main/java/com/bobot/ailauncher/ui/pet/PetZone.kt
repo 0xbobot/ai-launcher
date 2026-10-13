@@ -279,8 +279,7 @@ fun PetZone(
     }
     // v0.47.0：七仔说话——统一信息区，自动消失
     val speech by PetRepository.speech.collectAsState()
-    // v0.49.0：AI Capsule——一次只说一件最重要的事
-    val capsule by PetRepository.capsule.collectAsState()
+    // v0.67.1：AI Capsule 已删除（不再弹窗）
     // v0.64.0：十万火急动效触发器
     val urgentTick by PetRepository.urgentTick.collectAsState()
     var urgentActive by remember { mutableStateOf(false) }
@@ -314,10 +313,6 @@ fun PetZone(
         label = "glowAlpha"
     )
     // v0.50.0：Today 直接放首屏（不再用 Bottom Sheet）
-    // v0.64.0：Capsule 三态——PREVIEW（前2行）→ POINTS（3关键点）→ FULL（全文）
-    var capsuleMode by remember { mutableStateOf(CapsuleMode.PREVIEW) }
-    // 新胶囊来时重置为预览态
-    LaunchedEffect(capsule?.id) { capsuleMode = CapsuleMode.PREVIEW }
     var speechVisible by remember { mutableStateOf(false) }
     // v0.65.5：七仔装备——点七仔展开/收起环绕的快捷图标（无容器拟物化）
     var showQuickPanel by remember { mutableStateOf(false) }
@@ -363,26 +358,11 @@ fun PetZone(
                 .format(Date(upcoming.begin))
             val title = upcoming.title.ifBlank { "（无标题）" }
             // 七仔开口 + 看日程场景
+            // v0.67.1：会议提醒不再弹模态 Capsule——只走七仔说话 + TODAY P1，
+            // 产品原则：重要信息不用模态弹窗
             PetRepository.say("$timeStr 有日程：$title")
             demoScene = QizaiScene.READING
-            // v0.49.0：AI Capsule——会议是"最值得关注"的事
-            val loc = if (upcoming.location.isNotBlank()) "\n地点：${upcoming.location}" else ""
-            // v0.58.0（需求4）：提取在线会议链接，Capsule 显示"加入会议"
-            // v0.63.1：用验证版，无效 URL 不显示按钮
-            val meetingUrl = getValidMeetingUrl(context, upcoming)
-            PetRepository.showCapsule(
-                PetRepository.AiCapsule(
-                    id = "cal_${upcoming.begin}",
-                    timeLabel = timeStr,
-                    title = "有一场会议值得关注",
-                    body = "$timeStr $title$loc",
-                    primaryAction = "看看重点",
-                    secondaryAction = "稍后",
-                    meetingUrl = meetingUrl
-                )
-            )
-            // v0.51.2：日历只走 Capsule + TODAY，不再走整理员（避免 5 重重复）
-            // 15 分钟内的会议临近黄条也删掉，Capsule 已覆盖
+            // v0.51.2：日历只走 TODAY，不再走整理员（避免多重重复）
         }
         checkCalendar() // 首次立即查一次
         while (true) {
@@ -653,35 +633,8 @@ fun PetZone(
                 )
             }
         }
-        // v0.49.0：AI Capsule——宠物下方的信息卡
-        AnimatedVisibility(
-            visible = capsule != null,
-            enter = slideInVertically(
-                initialOffsetY = { it / 2 },
-                animationSpec = spring(dampingRatio = 0.8f)
-            ) + fadeIn(),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
-        ) {
-            capsule?.let { c ->
-                AiCapsuleCard(
-                    capsule = c,
-                    onPrimary = {
-                        // v0.64.0：三态流转——PREVIEW(看看重点) → POINTS(看全文) → FULL(收起) → PREVIEW
-                        capsuleMode = when (capsuleMode) {
-                            CapsuleMode.PREVIEW -> CapsuleMode.POINTS
-                            CapsuleMode.POINTS -> CapsuleMode.FULL
-                            CapsuleMode.FULL -> CapsuleMode.PREVIEW
-                        }
-                    },
-                    onSecondary = {
-                        // 稍后 → 关闭
-                        PetRepository.dismissCapsule()
-                        capsuleMode = CapsuleMode.PREVIEW
-                    },
-                    mode = capsuleMode
-                )
-            }
-        }
+        // v0.67.1：AI Capsule 模态卡已删除——会议/重要信息不再弹窗，
+        // 只走七仔说话 + TODAY 卡片 + 视觉动效（产品原则）
         // v0.50.0：TODAY 直接放首屏
         // v0.56.0 M5：坐卡关联——TODAY 包成磨砂卡，七仔"坐"在上面（卡片上移 30dp 压住宠物底部）
         // v0.58.0（需求1）：暖米白 #FDF8F0，圆角 28dp
@@ -1035,137 +988,6 @@ private fun SpeechBubble(
                     color = Color(0xFF3A3A3A),
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                 )
-            }
-        }
-    }
-}
-
-/**
- * v0.64.0：Capsule 显示模式。
- * PREVIEW 默认前2行 → POINTS 看看重点（3关键点）→ FULL 全文。
- */
-private enum class CapsuleMode { PREVIEW, POINTS, FULL }
-
-/**
- * v0.49.0：AI Capsule——宠物下方的信息卡，一次只说一件最重要的事。
- * Mii 风：白卡圆角，柔和阴影；游戏化：滑入+弹性。
- * 宠物负责"表达"，Capsule 负责"信息"。
- */
-@Composable
-private fun AiCapsuleCard(
-    capsule: PetRepository.AiCapsule,
-    onPrimary: () -> Unit,
-    onSecondary: () -> Unit,
-    modifier: Modifier = Modifier,
-    mode: CapsuleMode = CapsuleMode.PREVIEW
-) {
-    // v0.64.0：三态正文——PREVIEW 前2行 / POINTS 3关键点 / FULL 全文
-    val keyPoints = remember(capsule.body) {
-        com.bobot.ailauncher.data.AiInsight.extractKeyPoints(capsule.body)
-    }
-    val displayBody = when (mode) {
-        CapsuleMode.PREVIEW ->
-            capsule.body.lineSequence().take(2).joinToString("\n")
-        CapsuleMode.POINTS ->
-            if (keyPoints.isNotEmpty()) keyPoints.joinToString("\n")
-            else capsule.body
-        CapsuleMode.FULL -> capsule.body
-    }
-    val primaryLabel = when (mode) {
-        CapsuleMode.PREVIEW -> capsule.primaryAction // "看看重点"
-        CapsuleMode.POINTS -> "看全文"
-        CapsuleMode.FULL -> "收起"
-    }
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-        modifier = modifier
-            .fillMaxWidth(0.88f)
-            .padding(top = 8.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // 时间标签
-            Text(
-                text = capsule.timeLabel,
-                fontSize = 11.sp,
-                color = Color(0xFF999999)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            // 标题
-            Text(
-                text = capsule.title,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color(0xFF333333),
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            // 正文（三态）
-            Text(
-                text = displayBody,
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-                color = Color(0xFF666666),
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            // v0.58.0（需求4）：在线会议显示"加入会议"按钮
-            capsule.meetingUrl?.let { url ->
-                val ctx = LocalContext.current
-                Button(
-                    onClick = {
-                        try {
-                            ctx.startActivity(
-                                android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(url)
-                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        } catch (_: Exception) { }
-                    },
-                    shape = RoundedCornerShape(99.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF22C55E),
-                        contentColor = Color.White
-                    ),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(text = "加入会议", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-            // 操作按钮
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // 主按钮：实心
-                Button(
-                    onClick = onPrimary,
-                    shape = RoundedCornerShape(99.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF5B8DEF),
-                        contentColor = Color.White
-                    ),
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = primaryLabel,
-                        fontSize = 13.sp
-                    )
-                }
-                // 次按钮：描边
-                OutlinedButton(
-                    onClick = onSecondary,
-                    shape = RoundedCornerShape(99.dp),
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
-                ) {
-                    Text(text = capsule.secondaryAction, fontSize = 13.sp)
-                }
             }
         }
     }
