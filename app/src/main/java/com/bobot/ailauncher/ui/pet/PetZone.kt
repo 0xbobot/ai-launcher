@@ -1,6 +1,8 @@
 package com.bobot.ailauncher.ui.pet
 
 import android.content.Context
+import android.content.Intent
+import android.provider.CallLog
 import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -1811,6 +1813,13 @@ private fun PriorityReplyRow(
         }
     }
     fun openSession() {
+        // v0.67.4：未接来电直接开通话记录
+        if (isMissedCallItem(item)) {
+            if (!openCallLog(context)) {
+                com.bobot.ailauncher.data.PetRepository.say("打不开通话记录")
+            }
+            return
+        }
         // v0.67.2：contentIntent 失败时 fallback 直接打开 App；全部失败时七仔说话反馈
         val pi = item.pendingIntent
         var sent = false
@@ -1968,6 +1977,38 @@ private fun PriorityReplyRow(
 }
 
 /**
+ * v0.67.4：未接来电识别——标题/正文含"未接来电"，或包名为拨号/通话应用。
+ */
+private fun isMissedCallItem(item: PetItem): Boolean {
+    val t = "${item.title} ${item.text}"
+    return t.contains("未接来电") || t.contains("未接电话") ||
+        t.contains("Missed call", ignoreCase = true) ||
+        item.packageName.lowercase().contains("dialer") ||
+        item.packageName.lowercase().contains("incallui")
+}
+
+/**
+ * v0.67.4：打开系统通话记录，失败则 fallback 拨号盘。
+ * @return true=成功打开其一
+ */
+private fun openCallLog(context: Context): Boolean {
+    try {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, CallLog.Calls.CONTENT_URI)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        return true
+    } catch (_: Exception) { }
+    try {
+        context.startActivity(
+            Intent(Intent.ACTION_DIAL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        return true
+    } catch (_: Exception) { }
+    return false
+}
+
+/**
  * v0.63.0：P2 普通消息行——扁平（无白卡），小圆点 + 应用名 + 正文，点击进会话，左滑清除。
  */
 @Composable
@@ -1988,6 +2029,13 @@ private fun NormalMessageRow(
         else -> item.sortDesc
     }
     fun openSession() {
+        // v0.67.4：未接来电直接开通话记录
+        if (isMissedCallItem(item)) {
+            if (!openCallLog(context)) {
+                com.bobot.ailauncher.data.PetRepository.say("打不开通话记录")
+            }
+            return
+        }
         // v0.67.2：contentIntent 失败时 fallback 直接打开 App；全部失败时七仔说话反馈
         val pi = item.pendingIntent
         var sent = false
@@ -2044,7 +2092,7 @@ private fun NormalMessageRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(enabled = !editMode) { openSession() }
-                .padding(vertical = 4.dp),
+                .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -2053,20 +2101,25 @@ private fun NormalMessageRow(
                     .background(dotColor, RoundedCornerShape(99.dp))
             )
             Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = item.appName,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color(0xFF1C1C1E)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = snippet,
-                fontSize = 14.sp,
-                color = Color(0xFF636366),
-                maxLines = 1,
-                modifier = Modifier.weight(1f)
-            )
+            // v0.67.4：标题+正文改 Column 垂直排列，杜绝横向重叠；单行省略
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.appName,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF1C1C1E),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = snippet,
+                    fontSize = 14.sp,
+                    color = Color(0xFF636366),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
