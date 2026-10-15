@@ -92,7 +92,30 @@ class LauncherNotificationService : NotificationListenerService() {
             // v0.60.0：带上 contentIntent，用于点击直达会话
             contentIntent = notification.contentIntent,
             // v0.67.2：带上通知 key，用于移除时精确匹配
-            notifKey = key.orEmpty()
+            notifKey = key.orEmpty(),
+            // v0.67.4：未接来电提取号码，用于显示+一键回拨
+            phoneNumber = extractPhoneNumber(title, text, packageName)
         )
+    }
+
+    /**
+     * v0.67.4：仅对未接来电类通知提取号码（避免普通消息里的数字误伤）。
+     * 匹配 +86/0086 可选前缀 + 7~15 位数字（允许空格/横杠/括号）。
+     */
+    private fun extractPhoneNumber(title: String, text: String, packageName: String): String {
+        val t = "$title $text"
+        val pkg = packageName.lowercase()
+        val isMissed = t.contains("未接来电") || t.contains("未接电话") ||
+            t.contains("Missed call", ignoreCase = true) ||
+            pkg.contains("dialer") || pkg.contains("incallui")
+        if (!isMissed) return ""
+        val m = Regex("""(\+?86)?[\s\-()]*(\d[\d\s\-()]{6,14}\d)""").find(t) ?: return ""
+        val digits = m.value.filter { it.isDigit() }
+        val num = when {
+            digits.startsWith("0086") -> digits.removePrefix("0086")
+            digits.startsWith("86") && digits.length > 11 -> digits.removePrefix("86")
+            else -> digits
+        }
+        return if (num.length in 7..15) num else ""
     }
 }

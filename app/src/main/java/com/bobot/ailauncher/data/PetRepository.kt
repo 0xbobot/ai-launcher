@@ -338,7 +338,9 @@ object PetRepository {
                 // v0.64.0：十万火急标记
                 isUrgent = urgent,
                 // v0.67.2：带上通知 key
-                notifKey = n.notifKey
+                notifKey = n.notifKey,
+                // v0.67.4：带上未接来电号码
+                phoneNumber = n.phoneNumber
             )
         )
     }

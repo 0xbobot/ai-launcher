@@ -2,6 +2,7 @@ package com.bobot.ailauncher.ui.pet
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.CallLog
 import android.view.HapticFeedbackConstants
 import android.widget.Toast
@@ -1813,10 +1814,15 @@ private fun PriorityReplyRow(
         }
     }
     fun openSession() {
-        // v0.67.4：未接来电直接开通话记录
+        // v0.67.4：未接来电——有号码直接回拨，无号码才开通话记录
         if (isMissedCallItem(item)) {
-            if (!openCallLog(context)) {
-                com.bobot.ailauncher.data.PetRepository.say("打不开通话记录")
+            val ok = if (item.phoneNumber.isNotBlank()) {
+                dialBack(context, item.phoneNumber)
+            } else {
+                openCallLog(context)
+            }
+            if (!ok) {
+                com.bobot.ailauncher.data.PetRepository.say("打不开拨号盘")
             }
             return
         }
@@ -1936,7 +1942,8 @@ private fun PriorityReplyRow(
                     )
                 } else {
                     Text(
-                        text = snippet,
+                        // v0.67.4：未接来电有号码时直接显示号码
+                        text = if (isMissedCallItem(item) && item.phoneNumber.isNotBlank()) item.phoneNumber else snippet,
                         fontSize = 14.sp,
                         color = Color(0xFF3A3A3C),
                         maxLines = 2,
@@ -1959,7 +1966,7 @@ private fun PriorityReplyRow(
                 }
             }
             Spacer(modifier = Modifier.width(8.dp))
-            // 去回复按钮
+            // 去回复按钮（v0.67.4：未接来电有号码时改为"回拨"）
             Button(
                 onClick = { openSession() },
                 enabled = !editMode,
@@ -1970,7 +1977,11 @@ private fun PriorityReplyRow(
                 ),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
             ) {
-                Text(text = "去回复", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    text = if (isMissedCallItem(item) && item.phoneNumber.isNotBlank()) "回拨" else "去回复",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     }
@@ -2009,6 +2020,26 @@ private fun openCallLog(context: Context): Boolean {
 }
 
 /**
+ * v0.67.4：一键回拨。有 CALL_PHONE 权限直接拨出，否则打开拨号盘带号码（用户点一下拨出）。
+ * @return true=成功打开
+ */
+private fun dialBack(context: Context, number: String): Boolean {
+    return try {
+        val uri = Uri.parse("tel:${number.trim()}")
+        val base = if (androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.CALL_PHONE
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            Intent(Intent.ACTION_CALL, uri)
+        } else {
+            Intent(Intent.ACTION_DIAL, uri)
+        }
+        context.startActivity(base.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (_: Exception) { false }
+}
+
+/**
  * v0.63.0：P2 普通消息行——扁平（无白卡），小圆点 + 应用名 + 正文，点击进会话，左滑清除。
  */
 @Composable
@@ -2029,10 +2060,15 @@ private fun NormalMessageRow(
         else -> item.sortDesc
     }
     fun openSession() {
-        // v0.67.4：未接来电直接开通话记录
+        // v0.67.4：未接来电——有号码直接回拨，无号码才开通话记录
         if (isMissedCallItem(item)) {
-            if (!openCallLog(context)) {
-                com.bobot.ailauncher.data.PetRepository.say("打不开通话记录")
+            val ok = if (item.phoneNumber.isNotBlank()) {
+                dialBack(context, item.phoneNumber)
+            } else {
+                openCallLog(context)
+            }
+            if (!ok) {
+                com.bobot.ailauncher.data.PetRepository.say("打不开拨号盘")
             }
             return
         }
@@ -2102,6 +2138,8 @@ private fun NormalMessageRow(
             )
             Spacer(modifier = Modifier.width(10.dp))
             // v0.67.4：标题+正文改 Column 垂直排列，杜绝横向重叠；单行省略
+            // 未接来电有号码时第二行直接显示号码
+            val showNumber = isMissedCallItem(item) && item.phoneNumber.isNotBlank()
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.appName,
@@ -2113,7 +2151,7 @@ private fun NormalMessageRow(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = snippet,
+                    text = if (showNumber) item.phoneNumber else snippet,
                     fontSize = 14.sp,
                     color = Color(0xFF636366),
                     maxLines = 1,
