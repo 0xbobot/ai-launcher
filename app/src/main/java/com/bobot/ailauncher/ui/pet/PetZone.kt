@@ -271,8 +271,7 @@ fun PetZone(
             if (w != null) {
                 lastWeatherDesc = w.desc
                 WeatherState.updateFull(w)
-                demoScene = if (isBadWeather(w.desc)) QizaiScene.WEATHER_RAIN
-                else QizaiScene.WEATHER_SUN
+                demoScene = weatherSceneFor(w.desc)
                 PetRepository.say("早上好！今天${w.desc}，${w.temp}°")
             }
         }
@@ -574,10 +573,7 @@ fun PetZone(
                                 if (w != null) {
                                     lastWeatherDesc = w.desc
                                     WeatherState.updateFull(w)
-                                    demoScene = if (isBadWeather(w.desc))
-                                        QizaiScene.WEATHER_RAIN
-                                    else
-                                        QizaiScene.WEATHER_SUN
+                                    demoScene = weatherSceneFor(w.desc)
                                     PetRepository.say("${w.city}${w.desc}，${w.temp}°")
                                 } else {
                                     jellyTick++ // 拉取失败，给个果冻反馈
@@ -1110,7 +1106,8 @@ private fun TodaySection(
             val now = System.currentTimeMillis()
             // v0.59.0 AI-2：保留所有今日事件用于关联
             allEvents = events.filter { !it.allDay }
-            nextEvent = allEvents.firstOrNull { it.begin > now }
+            // v0.67.2：过滤已结束的会议（end <= now 的不显示，避免"还有 -1240 分钟"）
+            nextEvent = allEvents.firstOrNull { it.end > now }
         }
     }
 
@@ -1554,13 +1551,19 @@ private fun TodaySection(
                                 nextEvent?.let { e ->
                                     val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
                                         .format(Date(e.begin))
-                                    val mins = ((e.begin - System.currentTimeMillis()) / 60000).toInt()
+                                    // v0.67.2：已开始未结束显示"进行中"，未开始显示倒计时
+                                    val nowMs = System.currentTimeMillis()
+                                    val timeLabel = if (e.begin <= nowMs) "进行中"
+                                    else "还有 ${((e.begin - nowMs) / 60000).toInt()} 分钟"
                                     val meetingUrl = remember(e) { getValidMeetingUrl(context, e) }
                                     // v0.63.0：扁平会议行（无白卡），标题大字 + 时间地点 + 加入会议按钮
                                     // v0.63.3：用 CATEGORY_APP_CALENDAR 精准打开日历，不弹选择器
                                     Column(
                                         modifier = Modifier.clickable(enabled = !editMode) {
+                                            // v0.67.2：三级 fallback 打开日历（豆包手机 CATEGORY_APP_CALENDAR 解析不到）
+                                            var opened = false
                                             try {
+                                                // 1. 系统日历分类
                                                 val intent = android.content.Intent(
                                                     android.content.Intent.ACTION_MAIN
                                                 ).addCategory(
@@ -1568,10 +1571,26 @@ private fun TodaySection(
                                                 ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                                                 if (intent.resolveActivity(context.packageManager) != null) {
                                                     context.startActivity(intent)
-                                                } else {
-                                                    PetRepository.say("没找到日历应用")
+                                                    opened = true
                                                 }
-                                            } catch (_: Exception) {
+                                            } catch (_: Exception) { }
+                                            if (!opened && e.eventId > 0) {
+                                                try {
+                                                    // 2. 直接打开事件详情
+                                                    val uri = android.net.Uri.parse(
+                                                        "content://com.android.calendar/events/${e.eventId}"
+                                                    )
+                                                    val viewIntent = android.content.Intent(
+                                                        android.content.Intent.ACTION_VIEW, uri
+                                                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    if (viewIntent.resolveActivity(context.packageManager) != null) {
+                                                        context.startActivity(viewIntent)
+                                                        opened = true
+                                                    }
+                                                } catch (_: Exception) { }
+                                            }
+                                            // 3. 都失败则七仔说话，不弹系统 toast
+                                            if (!opened) {
                                                 PetRepository.say("没找到日历应用")
                                             }
                                         }
@@ -1584,7 +1603,7 @@ private fun TodaySection(
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            text = "$timeStr · 还有 $mins 分钟" +
+                                            text = "$timeStr · $timeLabel" +
                                                 (if (e.location.isNotBlank()) " · ${e.location}" else ""),
                                             fontSize = 14.sp,
                                             color = Color(0xFF636366)
@@ -1792,6 +1811,7 @@ private fun PriorityReplyRow(
         }
     }
     fun openSession() {
+        // v0.67.2：contentIntent 失败时 fallback 直接打开 App；全部失败时七仔说话反馈
         val pi = item.pendingIntent
         var sent = false
         if (pi != null) {
@@ -1802,13 +1822,15 @@ private fun PriorityReplyRow(
             } catch (_: Exception) { }
         }
         if (!sent) {
-            val pkg = item.packageName
-            if (pkg.isNotBlank()) {
-                try {
-                    context.packageManager.getLaunchIntentForPackage(pkg)
-                        ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        ?.let { context.startActivity(it) }
-                } catch (_: Exception) { }
+            val pkg = item.packageName.ifBlank { "com.ss.android.lark" }
+            var launched = false
+            try {
+                launched = context.packageManager.getLaunchIntentForPackage(pkg)
+                    ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    ?.let { context.startActivity(it); true } ?: false
+            } catch (_: Exception) { }
+            if (!launched) {
+                com.bobot.ailauncher.data.PetRepository.say("打不开，试试手动打开${item.appName}")
             }
         }
     }
@@ -1966,6 +1988,7 @@ private fun NormalMessageRow(
         else -> item.sortDesc
     }
     fun openSession() {
+        // v0.67.2：contentIntent 失败时 fallback 直接打开 App；全部失败时七仔说话反馈
         val pi = item.pendingIntent
         var sent = false
         if (pi != null) {
@@ -1976,13 +1999,15 @@ private fun NormalMessageRow(
             } catch (_: Exception) { }
         }
         if (!sent) {
-            val pkg = item.packageName
-            if (pkg.isNotBlank()) {
-                try {
-                    context.packageManager.getLaunchIntentForPackage(pkg)
-                        ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        ?.let { context.startActivity(it) }
-                } catch (_: Exception) { }
+            val pkg = item.packageName.ifBlank { "com.ss.android.lark" }
+            var launched = false
+            try {
+                launched = context.packageManager.getLaunchIntentForPackage(pkg)
+                    ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    ?.let { context.startActivity(it); true } ?: false
+            } catch (_: Exception) { }
+            if (!launched) {
+                com.bobot.ailauncher.data.PetRepository.say("打不开，试试手动打开${item.appName}")
             }
         }
     }
@@ -2209,6 +2234,15 @@ private fun isBadWeather(desc: String?): Boolean =
 private fun isGoodWeather(desc: String?): Boolean =
     desc == "晴" || desc == "多云"
 
+// v0.67.2：天气描述 → 宠物场景（一眼可区分）
+private fun weatherSceneFor(desc: String?): QizaiScene = when (desc) {
+    "晴" -> QizaiScene.WEATHER_SUN
+    "多云" -> QizaiScene.WEATHER_CLOUDY
+    "阴", "雾", "霾" -> QizaiScene.WEATHER_OVERCAST
+    "小雨", "雨", "雪", "雷阵雨", "中雨", "大雨" -> QizaiScene.WEATHER_RAIN
+    else -> QizaiScene.WEATHER_SUN
+}
+
 // v0.48.0：日程——从 v0.31.0 移除的 HomeScreen 日历逻辑迁回，由七仔统一呈现
 // v0.58.0：加 description 字段，用于提取在线会议链接
 private data class CalEvent(
@@ -2217,7 +2251,9 @@ private data class CalEvent(
     val end: Long,
     val location: String,
     val description: String = "",
-    val allDay: Boolean
+    val allDay: Boolean,
+    // v0.67.2：事件 ID，用于日历 fallback 直接打开事件详情
+    val eventId: Long = 0L
 )
 
 /**
@@ -2283,7 +2319,8 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
                 CalendarContract.Instances.END,
                 CalendarContract.Instances.EVENT_LOCATION,
                 CalendarContract.Instances.DESCRIPTION,
-                CalendarContract.Instances.ALL_DAY
+                CalendarContract.Instances.ALL_DAY,
+                CalendarContract.Instances.EVENT_ID
             ),
             null, null,
             CalendarContract.Instances.BEGIN + " ASC"
@@ -2296,6 +2333,7 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
             val li = it.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
             val di = it.getColumnIndex(CalendarContract.Instances.DESCRIPTION)
             val ai = it.getColumnIndex(CalendarContract.Instances.ALL_DAY)
+            val eidi = it.getColumnIndex(CalendarContract.Instances.EVENT_ID)
             while (it.moveToNext() && list.size < 20) {
                 list += CalEvent(
                     title = if (ti >= 0) it.getString(ti).orEmpty() else "",
@@ -2303,7 +2341,8 @@ private fun loadTodayEvents(context: Context): List<CalEvent> {
                     end = if (ei >= 0) it.getLong(ei) else 0L,
                     location = if (li >= 0) it.getString(li).orEmpty() else "",
                     description = if (di >= 0) it.getString(di).orEmpty() else "",
-                    allDay = if (ai >= 0) it.getInt(ai) == 1 else false
+                    allDay = if (ai >= 0) it.getInt(ai) == 1 else false,
+                    eventId = if (eidi >= 0) it.getLong(eidi) else 0L
                 )
             }
         }

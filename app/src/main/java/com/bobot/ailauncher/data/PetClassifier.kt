@@ -31,7 +31,9 @@ data class PetItem(
     // v0.60.0：通知的 contentIntent，点击直达具体会话窗口（null 则 fallback 打开 App）
     val pendingIntent: android.app.PendingIntent? = null,
     // v0.64.0：十万火急标记，触发红色动效（跳动+呼吸+光带）
-    val isUrgent: Boolean = false
+    val isUrgent: Boolean = false,
+    // v0.67.2：通知 key，用于 onNotificationRemoved 精确匹配清除
+    val notifKey: String = ""
 )
 
 /**

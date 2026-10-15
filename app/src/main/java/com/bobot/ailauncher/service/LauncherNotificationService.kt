@@ -44,13 +44,16 @@ class LauncherNotificationService : NotificationListenerService() {
         // v0.58.0（需求2）：通知栏划掉后，Today 首页同步清除对应消息
         sbn?.let {
             val pkg = it.packageName.orEmpty()
+            val key = it.key.orEmpty()
             val extras = it.notification.extras
             val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
             val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
             if (pkg.isNotBlank()) {
                 com.bobot.ailauncher.data.PetRepository.removeFiledByPredicate { item ->
                     item.packageName == pkg &&
-                        (title.isBlank() || item.title == title || item.text.contains(text.take(20)))
+                        // v0.67.2：优先按通知 key 精确匹配，key 为空时 fallback 标题/正文匹配
+                        (if (key.isNotBlank() && item.notifKey.isNotBlank()) item.notifKey == key
+                         else (title.isBlank() || item.title == title || item.text.contains(text.take(20))))
                 }
             }
         }
@@ -87,7 +90,9 @@ class LauncherNotificationService : NotificationListenerService() {
             time = postTime,
             packageName = packageName,
             // v0.60.0：带上 contentIntent，用于点击直达会话
-            contentIntent = notification.contentIntent
+            contentIntent = notification.contentIntent,
+            // v0.67.2：带上通知 key，用于移除时精确匹配
+            notifKey = key.orEmpty()
         )
     }
 }

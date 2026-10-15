@@ -336,7 +336,9 @@ object PetRepository {
                 // v0.60.0：带上 contentIntent，点击直达会话
                 pendingIntent = n.contentIntent,
                 // v0.64.0：十万火急标记
-                isUrgent = urgent
+                isUrgent = urgent,
+                // v0.67.2：带上通知 key
+                notifKey = n.notifKey
             )
         )
     }

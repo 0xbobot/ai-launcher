@@ -41,7 +41,7 @@ import kotlin.math.tan
  *
  * 点按七仔可在场景间循环演示；新通知到达自动进 READING。
  */
-enum class QizaiScene { NONE, WAVE, READING, WORKING, WEATHER_RAIN, WEATHER_SUN }
+enum class QizaiScene { NONE, WAVE, READING, WORKING, WEATHER_RAIN, WEATHER_SUN, WEATHER_CLOUDY, WEATHER_OVERCAST }
 
 fun QizaiScene.durationSec(): Float = when (this) {
     QizaiScene.WAVE -> 2.6f
@@ -49,6 +49,8 @@ fun QizaiScene.durationSec(): Float = when (this) {
     QizaiScene.WORKING -> 6.4f
     QizaiScene.WEATHER_RAIN -> 4.5f
     QizaiScene.WEATHER_SUN -> 5.0f
+    QizaiScene.WEATHER_CLOUDY -> 4.5f
+    QizaiScene.WEATHER_OVERCAST -> 4.5f
     QizaiScene.NONE -> 0f
 }
 
@@ -188,6 +190,10 @@ private fun DrawScope.drawQizaiScene(
     var rain = 0f
     var cool = 0f
     var sun = 0f
+    // v0.67.2：多云/阴场景变量
+    var cloudy = 0f
+    var overcast = 0f
+    var squint = 0f // 晴：眯眼（眼部压缩）
     var xPx = 0f // 抖身时的像素级水平位移
     var shakeT = -1f // 抖身起始后的秒数，<0 表示未激活
     val br = sin(2f * Math.PI.toFloat() * t / 2.4f)
@@ -241,8 +247,29 @@ private fun DrawScope.drawQizaiScene(
                 shakeT = t - 0.3f
             }
             sun = ss(0.8f, 1.8f, t)
+            // v0.67.2：晴天眯眼（阳光刺眼），眼部压缩到 40%
+            squint = ss(1.0f, 2.0f, t) * (1f - ss(4.0f, 5.0f, t))
             if (t in 2.4f..3.0f) yFrac += -0.07f * sin(Math.PI.toFloat() * (t - 2.4f) / 0.6f)
             val dt = (t - 3.4f) / 0.06f
+            blink = 1f - 0.92f * exp(-dt * dt)
+        }
+        // v0.67.2：多云——柔和云影飘过，中性色温，七仔微抬头看云
+        QizaiScene.WEATHER_CLOUDY -> {
+            poses = listOf("main" to 1f)
+            cloudy = ss(0.5f, 1.5f, t) * (1f - ss(3.8f, 4.5f, t))
+            val look = ss(0.7f, 1.5f, t) * (1f - ss(3.8f, 4.5f, t))
+            yFrac = -0.02f * look // 微抬头
+            val dt = (t - 2.5f) / 0.06f
+            blink = 1f - 0.92f * exp(-dt * dt)
+        }
+        // v0.67.2：阴——灰调低对比，七仔微微低头，无精打采
+        QizaiScene.WEATHER_OVERCAST -> {
+            poses = listOf("main" to 1f)
+            overcast = ss(0.5f, 1.5f, t) * (1f - ss(3.8f, 4.5f, t))
+            val droop = ss(0.7f, 1.5f, t) * (1f - ss(3.8f, 4.5f, t))
+            yFrac = 0.025f * droop // 微低头
+            sy = 1f - 0.03f * droop // 微塌
+            val dt = (t - 2.5f) / 0.06f
             blink = 1f - 0.92f * exp(-dt * dt)
         }
         QizaiScene.NONE -> {
@@ -286,8 +313,10 @@ private fun DrawScope.drawQizaiScene(
         )
         placed.add(Placed(name, wt, left, top, dw, dh))
         // 眨眼：眼部盒纵向压缩（120ms 快闪，纯 drawImage）。
+        // v0.67.2：眯眼（squint）叠加——晴天眼部压缩到 40%
         // 注意：src 用位图像素，dst 用画布像素。
-        if (blink < 0.985f) {
+        val eyeScale = blink * (1f - 0.6f * squint)
+        if (eyeScale < 0.985f) {
             for (b in EYE_BOXES.getValue(name)) {
                 val sbl = (b.l * bm.width).toInt()
                 val sbt = (b.t * bm.height).toInt()
@@ -298,7 +327,7 @@ private fun DrawScope.drawQizaiScene(
                 val dbr = left + b.r * dw
                 val dbb = top + b.b * dh
                 val dbw = (dbr - dbl).toInt().coerceAtLeast(2)
-                val dbh = ((dbb - dbt) * blink).toInt().coerceAtLeast(2)
+                val dbh = ((dbb - dbt) * eyeScale).toInt().coerceAtLeast(2)
                 val cy = (dbt + dbb) / 2f
                 drawImage(
                     image = bm,
@@ -524,6 +553,30 @@ private fun DrawScope.drawQizaiScene(
             )
             drawRect(Color(255, 210, 130, (26f * sAlpha).toInt().coerceIn(0, 255)))
         }
+    }
+    // v0.67.2：多云——柔和云影飘过（横向移动的半透明椭圆）+ 中性色温
+    if (scene == QizaiScene.WEATHER_CLOUDY && cloudy > 0.01f) {
+        val cAlpha = cloudy
+        // 3 片云影，缓慢横向飘动
+        for (i in 0 until 3) {
+            val speed = 0.03f + i * 0.015f
+            val cx = ((t * speed + i * 0.37f) % 1.4f - 0.2f) * w
+            val cy = h * (0.15f + i * 0.18f)
+            val rx = w * (0.28f + i * 0.06f)
+            val ry = h * 0.09f
+            drawOval(
+                color = Color(200, 205, 215, (38f * cAlpha).toInt().coerceIn(0, 255)),
+                topLeft = Offset(cx - rx, cy - ry),
+                size = androidx.compose.ui.geometry.Size(rx * 2, ry * 2)
+            )
+        }
+        // 中性色温罩（轻微冷灰）
+        drawRect(Color(180, 185, 195, (18f * cAlpha).toInt().coerceIn(0, 255)))
+    }
+    // v0.67.2：阴——灰调 + 低对比（整体压暗去饱和）
+    if (scene == QizaiScene.WEATHER_OVERCAST && overcast > 0.01f) {
+        val oAlpha = overcast
+        drawRect(Color(120, 125, 135, (55f * oAlpha).toInt().coerceIn(0, 255)))
     }
 }
 
