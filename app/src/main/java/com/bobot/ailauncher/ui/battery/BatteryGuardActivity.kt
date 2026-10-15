@@ -1,7 +1,9 @@
 package com.bobot.ailauncher.ui.battery
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -69,10 +71,13 @@ class BatteryGuardActivity : ComponentActivity() {
         }
         val pct = intent.getIntExtra(EXTRA_PCT, 10)
         val critical = intent.getBooleanExtra(EXTRA_CRITICAL, false)
+        // 已开省电模式时不再建议"去开省电模式"（文案与状态矛盾）
+        val powerSaveMode = (getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode
         setContent {
             BatteryGuardDialog(
                 pct = pct,
                 critical = critical,
+                powerSaveMode = powerSaveMode,
                 onOpenSaver = {
                     // 只引导：跳系统省电设置，开关用户自己点
                     // 注意：SDK 里只有 ACTION_BATTERY_SAVER_SETTINGS，没有 ACTION_BATTERY_SETTINGS
@@ -107,6 +112,7 @@ class BatteryGuardActivity : ComponentActivity() {
 private fun BatteryGuardDialog(
     pct: Int,
     critical: Boolean,
+    powerSaveMode: Boolean,
     onOpenSaver: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -114,8 +120,11 @@ private fun BatteryGuardDialog(
     val accent = if (critical) Color(0xFFE8734A) else Color(0xFFF0A24A)
     val title = if (critical) "七仔快要睡着了…"
     else "七仔快没能量了"
-    val message = if (critical) "电量掉到 $pct% 了，再不充电它就要关机了"
-    else "电量只剩 $pct%，充个电帮它回血吧？也可以开省电模式"
+    val message = when {
+        critical -> "电量掉到 $pct% 了，再不充电它就要关机了"
+        powerSaveMode -> "电量只剩 $pct%，已经在省电模式了，充个电帮它回血吧"
+        else -> "电量只剩 $pct%，充个电帮它回血吧？也可以开省电模式"
+    }
 
     Box(
         modifier = Modifier
@@ -153,22 +162,24 @@ private fun BatteryGuardDialog(
                     lineHeight = 20.sp
                 )
                 Spacer(modifier = Modifier.height(20.dp))
-                // 主按钮：引导去开省电模式（友好文案）
-                Button(
-                    onClick = onOpenSaver,
-                    colors = ButtonDefaults.buttonColors(containerColor = accent),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "去开省电模式",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
+                // 主按钮：引导去开省电模式（已在省电模式则隐藏）
+                if (!powerSaveMode) {
+                    Button(
+                        onClick = onOpenSaver,
+                        colors = ButtonDefaults.buttonColors(containerColor = accent),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "去开省电模式",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
-                Spacer(modifier = Modifier.height(4.dp))
                 // 次按钮：一键关闭，毫无压力
                 TextButton(onClick = onDismiss) {
                     Text(
