@@ -10,10 +10,7 @@ import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.core.event.LauncherEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -22,7 +19,8 @@ import java.util.Calendar
  *
  * 当前提供：
  * - 时间段（MORNING/AFTERNOON/EVENING/NIGHT）：Dock 智能排序、Pet 状态机共用
- * - 前台应用追踪：UsageStats 轮询（60 秒，best-effort）→ AppOpened/AppClosed 事件
+ * - 前台应用追踪：v0.67.6 已删除 60 秒轮询（省电原则；AppOpened/AppClosed 无订阅者，零功能损失）。
+ *   保留亮屏时单次追踪（事件驱动）与 pollForeground 函数体，以后真用再加回调度。
  * - 屏幕 on/off → ScreenOn/ScreenOff 事件（亮屏时立即追一次前台）
  *
  * 全部 best-effort：无权限/异常时静默跳过，不影响 Launcher。
@@ -42,7 +40,6 @@ object ContextEngine {
         }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var pollJob: Job? = null
     private var receiver: BroadcastReceiver? = null
     private var lastForeground: String? = null
     private var started = false
@@ -80,19 +77,11 @@ object ContextEngine {
             Log.w("ContextEngine", "registerReceiver failed", t)
         }
 
-        // 前台应用轮询（60 秒一次，低功耗）
-        pollJob = scope.launch {
-            pollForeground(appCtx)
-            while (isActive) {
-                delay(60_000)
-                pollForeground(appCtx)
-            }
-        }
+        // v0.67.6：删除 60 秒前台轮询（省电原则；事件无订阅者，零功能损失）
+        // 亮屏时单次追踪保留（上方 ACTION_SCREEN_ON 分支，事件驱动）
     }
 
     fun stop() {
-        pollJob?.cancel()
-        pollJob = null
         started = false
     }
 

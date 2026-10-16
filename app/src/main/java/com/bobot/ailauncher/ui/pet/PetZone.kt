@@ -73,6 +73,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -209,6 +210,9 @@ fun PetZone(
     var weatherTriggersToday by remember { mutableIntStateOf(0) }
     var weatherTriggerDate by remember { mutableStateOf("") }
     var morningBriefedDate by remember { mutableStateOf("") }
+    // v0.67.6：天气缓存 TTL（省电原则）——60 分钟内不重复发网络请求
+    var lastWeatherFetchMs by remember { mutableLongStateOf(0L) }
+    var weatherInitDone by remember { mutableStateOf(false) }
 
     fun todayStr(): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Calendar.getInstance().time)
@@ -252,14 +256,9 @@ fun PetZone(
         if (w != null) onWeatherFetched(w, allowTrigger)
     }
 
-    // 天气轮询：30 分钟一次，突变才触发场景
-    LaunchedEffect(Unit) {
-        fetchWeather(allowTrigger = false) // 首次只更新状态，不播
-        while (true) {
-            delay(30 * 60 * 1000L)
-            fetchWeather(allowTrigger = true)
-        }
-    }
+    // v0.67.6：删除 30 分钟天气轮询（省电原则）
+    // 改为 onResume + 缓存 TTL：见下方 LaunchedEffect(resumeTick) 旁的天气检查块——
+    // 回桌面/亮屏时检查，60 分钟内查过直接用缓存，不发网络请求
 
     // 早晨简报：6-10 点首次进入播一次今日天气
     // v0.56.0 M4：先挥手打招呼（WAVE），再播天气
@@ -273,6 +272,8 @@ fun PetZone(
             val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
             if (w != null) {
                 lastWeatherDesc = w.desc
+                lastWeatherFetchMs = System.currentTimeMillis() // v0.67.6：计入 TTL，避免重复请求
+                weatherInitDone = true
                 WeatherState.updateFull(w)
                 demoScene = weatherSceneFor(w.desc)
                 PetRepository.say("早上好！今天${w.desc}，${w.temp}°")
@@ -342,35 +343,26 @@ fun PetZone(
             PetRepository.say("我有新本事了！长按卡片可以进编辑模式哦")
         }
     }
-    // v0.48.0：日程轮询——15 分钟一次，30 分钟内有会就让七仔说
-    // v0.49.1：修闪屏——开机自动弹权限导致 Activity 闪黑，改为 TodaySheet 里手动申请
+    // v0.67.6：删除 15 分钟日程轮询（省电原则）
+    // 改为一次性任务：见下方 LaunchedEffect(nextEvent) 后的提醒调度块——
+    // 日历数据变化时重算，在"开会前30分钟"和"前15分钟"各安排一次提醒；
+    // onResume 重查日历会触发 allEvents 更新从而重调度，天然兜底（防任务被杀）
     val notifiedCalendarKeys = remember { mutableSetOf<String>() }
-    LaunchedEffect(Unit) {
-        suspend fun checkCalendar() {
-            // 没权限就静默跳过，用户在 TodaySheet 里手动授权
-            if (!hasCalendarPermission(context)) return
-            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
-            val now = System.currentTimeMillis()
-            val upcoming = events.firstOrNull {
-                !it.allDay && it.begin in (now + 1)..(now + 30 * 60 * 1000)
-            } ?: return
-            val key = "${upcoming.title}|${upcoming.begin}"
-            if (!notifiedCalendarKeys.add(key)) return // 同一场只提醒一次
-            val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
-                .format(Date(upcoming.begin))
-            val title = upcoming.title.ifBlank { "（无标题）" }
-            // 七仔开口 + 看日程场景
-            // v0.67.1：会议提醒不再弹模态 Capsule——只走七仔说话 + TODAY P1，
-            // 产品原则：重要信息不用模态弹窗
-            PetRepository.say("$timeStr 有日程：$title")
-            demoScene = QizaiScene.READING
-            // v0.51.2：日历只走 TODAY，不再走整理员（避免多重重复）
-        }
-        checkCalendar() // 首次立即查一次
-        while (true) {
-            delay(15 * 60 * 1000L)
-            checkCalendar()
-        }
+    // 七仔会议提醒（含去重：同一场同一档只提醒一次）
+    // v0.67.1：会议提醒不再弹模态 Capsule——只走七仔说话 + TODAY P1，
+    // 产品原则：重要信息不用模态弹窗
+    fun remindMeeting(e: CalEvent, tag: String) {
+        // 没权限就静默跳过，用户在 TodaySheet 里手动授权
+        if (!hasCalendarPermission(context)) return
+        val key = "${e.title}|${e.begin}|$tag"
+        if (!notifiedCalendarKeys.add(key)) return
+        val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
+            .format(Date(e.begin))
+        val title = e.title.ifBlank { "（无标题）" }
+        // 七仔开口 + 看日程场景
+        PetRepository.say("$timeStr 有日程：$title")
+        demoScene = QizaiScene.READING
+        // v0.51.2：日历只走 TODAY，不再走整理员（避免多重重复）
     }
     // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
     var jellyTick by remember { mutableIntStateOf(0) }
@@ -1129,6 +1121,26 @@ private fun TodaySection(
             nextEvent = allEvents.firstOrNull { it.end > now2 }
         }
     }
+    // v0.67.6：会议提醒一次性任务（省电原则：不轮询）
+    // 日历数据变化（加载/onResume重查/边界刷新）时取消旧任务重算；
+    // 在"开会前30分钟"和"前15分钟"各提醒一次；已进入 30 分钟窗口则立即提醒
+    LaunchedEffect(allEvents) {
+        val now = System.currentTimeMillis()
+        val upcoming = allEvents.firstOrNull { !it.allDay && it.begin > now }
+            ?: return@LaunchedEffect
+        // 30 分钟前提醒
+        val d30 = upcoming.begin - 30 * 60 * 1000L - System.currentTimeMillis()
+        if (d30 > 0) delay(d30)
+        if (System.currentTimeMillis() >= upcoming.begin - 30 * 60 * 1000L) {
+            remindMeeting(upcoming, "30")
+        }
+        // 15 分钟前提醒
+        val d15 = upcoming.begin - 15 * 60 * 1000L - System.currentTimeMillis()
+        if (d15 > 0) delay(d15)
+        if (System.currentTimeMillis() >= upcoming.begin - 15 * 60 * 1000L) {
+            remindMeeting(upcoming, "15")
+        }
+    }
 
 
     // v0.62.0：区块显隐切换（含按需权限请求）
@@ -1257,6 +1269,17 @@ private fun TodaySection(
             val now = System.currentTimeMillis()
             allEvents = events.filter { !it.allDay }
             nextEvent = allEvents.firstOrNull { it.end > now }
+        }
+    }
+    // v0.67.6：天气 onResume + 缓存 TTL（省电原则）
+    // 回桌面/亮屏时检查：60 分钟内查过直接用缓存，不发网络请求；
+    // 首次只更新状态不播场景（allowTrigger=false），之后有突变才播
+    LaunchedEffect(resumeTick) {
+        val now = System.currentTimeMillis()
+        if (!weatherInitDone || now - lastWeatherFetchMs >= 60 * 60 * 1000L) {
+            lastWeatherFetchMs = now
+            fetchWeather(allowTrigger = weatherInitDone)
+            weatherInitDone = true
         }
     }
 
