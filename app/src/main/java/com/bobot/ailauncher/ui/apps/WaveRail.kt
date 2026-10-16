@@ -230,8 +230,9 @@ internal fun WaveRail(
                     modifier = Modifier.weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
-                    when (item) {
-                        is RailItem.Letter -> Text(
+                    // v0.67.13：房子/收藏/隐藏图标，同样参与波浪
+                    if (item is RailItem.Letter) {
+                        Text(
                             text = item.char.toString(),
                             // v0.41.0（B 方案）：更细更淡
                             // v0.41.2：提示灰在透壁纸上对比度不够（Bob：看不清）→
@@ -250,27 +251,26 @@ internal fun WaveRail(
                                 scaleY = sc
                             }
                         )
-                        // v0.67.13：房子/收藏/隐藏图标，同样参与波浪
-                        is RailItem.House, is RailItem.Star, is RailItem.Eye -> {
-                            val icon = when (item) {
-                                is RailItem.House -> androidx.compose.material.icons.Icons.Filled.Home
-                                is RailItem.Star -> androidx.compose.material.icons.Icons.Filled.Star
-                                else -> androidx.compose.material.icons.Icons.Filled.VisibilityOff
-                            }
-                            androidx.compose.material3.Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = AILauncherColors.Hint,
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .graphicsLayer {
-                                        translationX = dirSign * bulgePx * g + waveShiftX * g
-                                        val sc = (1f + g) * pulse
-                                        scaleX = sc
-                                        scaleY = sc
-                                    }
-                            )
+                    } else {
+                        val icon = when (item) {
+                            RailItem.House -> androidx.compose.material.icons.Icons.Filled.Home
+                            RailItem.Star -> androidx.compose.material.icons.Icons.Filled.Star
+                            RailItem.Eye -> androidx.compose.material.icons.Icons.Filled.VisibilityOff
+                            is RailItem.Letter -> androidx.compose.material.icons.Icons.Filled.Home
                         }
+                        androidx.compose.material3.Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = AILauncherColors.Hint,
+                            modifier = Modifier
+                                .size(14.dp)
+                                .graphicsLayer {
+                                    translationX = dirSign * bulgePx * g + waveShiftX * g
+                                    val sc = (1f + g) * pulse
+                                    scaleX = sc
+                                    scaleY = sc
+                                }
+                        )
                     }
                 }
             }
@@ -295,26 +295,27 @@ internal fun WaveRail(
                     .border(2.dp, AILauncherColors.Accent, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                when (val item = items[idx]) {
-                    is RailItem.Letter -> Text(
-                        text = item.char.toString(),
+                val bubbleItem = items[idx]
+                if (bubbleItem is RailItem.Letter) {
+                    Text(
+                        text = bubbleItem.char.toString(),
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         color = AILauncherColors.Title
                     )
-                    else -> {
-                        val icon = when (item) {
-                            is RailItem.House -> androidx.compose.material.icons.Icons.Filled.Home
-                            is RailItem.Star -> androidx.compose.material.icons.Icons.Filled.Star
-                            else -> androidx.compose.material.icons.Icons.Filled.VisibilityOff
-                        }
-                        androidx.compose.material3.Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = AILauncherColors.Title,
-                            modifier = Modifier.size(24.dp)
-                        )
+                } else {
+                    val icon = when (bubbleItem) {
+                        RailItem.House -> androidx.compose.material.icons.Icons.Filled.Home
+                        RailItem.Star -> androidx.compose.material.icons.Icons.Filled.Star
+                        RailItem.Eye -> androidx.compose.material.icons.Icons.Filled.VisibilityOff
+                        is RailItem.Letter -> androidx.compose.material.icons.Icons.Filled.Home
                     }
+                    androidx.compose.material3.Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = AILauncherColors.Title,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
         }
