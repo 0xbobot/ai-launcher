@@ -213,6 +213,28 @@ fun PetZone(
     // v0.67.6：天气缓存 TTL（省电原则）——60 分钟内不重复发网络请求
     var lastWeatherFetchMs by remember { mutableLongStateOf(0L) }
     var weatherInitDone by remember { mutableStateOf(false) }
+    // v0.67.6：onResume 观察器上提（省电原则：只在用户看到时刷新）
+    // 原在 TodaySection，现上提至 PetZone，TodaySection 改为接收 resumeTick 参数
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var resumeTick by remember { mutableStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    // v0.67.6：天气 onResume + 缓存 TTL
+    // 回桌面/亮屏时检查：60 分钟内查过直接用缓存，不发网络请求；
+    // 首次只更新状态不播场景（allowTrigger=false），之后有突变才播
+    LaunchedEffect(resumeTick) {
+        val now = System.currentTimeMillis()
+        if (!weatherInitDone || now - lastWeatherFetchMs >= 60 * 60 * 1000L) {
+            lastWeatherFetchMs = now
+            fetchWeather(allowTrigger = weatherInitDone)
+            weatherInitDone = true
+        }
+    }
 
     fun todayStr(): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Calendar.getInstance().time)
@@ -692,7 +714,13 @@ fun PetZone(
                 }
             ) {
                 // v0.66.6：去掉 20dp 七仔坐位（上下分开后不再需要）
-                TodaySection(editMode = todayEditMode, onEditModeChange = { todayEditMode = it })
+                // v0.67.6：传入 resumeTick（onResume 观察器上提）与会议提醒回调
+                TodaySection(
+                    editMode = todayEditMode,
+                    onEditModeChange = { todayEditMode = it },
+                    resumeTick = resumeTick,
+                    onMeetingRemind = { e, tag -> remindMeeting(e, tag) }
+                )
             }
         }
     }
@@ -1064,7 +1092,11 @@ private fun DragGroupRow(
 private fun TodaySection(
     modifier: Modifier = Modifier,
     editMode: Boolean = false,
-    onEditModeChange: (Boolean) -> Unit = {}
+    onEditModeChange: (Boolean) -> Unit = {},
+    // v0.67.6：resumeTick 由 PetZone 传入（onResume 观察器上提）
+    resumeTick: Int = 0,
+    // v0.67.6：会议提醒回调（省电原则：一次性任务；实际提醒逻辑在 PetZone 的 remindMeeting）
+    onMeetingRemind: (CalEvent, String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -1124,6 +1156,7 @@ private fun TodaySection(
     // v0.67.6：会议提醒一次性任务（省电原则：不轮询）
     // 日历数据变化（加载/onResume重查/边界刷新）时取消旧任务重算；
     // 在"开会前30分钟"和"前15分钟"各提醒一次；已进入 30 分钟窗口则立即提醒
+    // 实际提醒走 onMeetingRemind（PetZone 的 remindMeeting：七仔说话 + 去重）
     LaunchedEffect(allEvents) {
         val now = System.currentTimeMillis()
         val upcoming = allEvents.firstOrNull { !it.allDay && it.begin > now }
@@ -1132,13 +1165,13 @@ private fun TodaySection(
         val d30 = upcoming.begin - 30 * 60 * 1000L - System.currentTimeMillis()
         if (d30 > 0) delay(d30)
         if (System.currentTimeMillis() >= upcoming.begin - 30 * 60 * 1000L) {
-            remindMeeting(upcoming, "30")
+            onMeetingRemind(upcoming, "30")
         }
         // 15 分钟前提醒
         val d15 = upcoming.begin - 15 * 60 * 1000L - System.currentTimeMillis()
         if (d15 > 0) delay(d15)
         if (System.currentTimeMillis() >= upcoming.begin - 15 * 60 * 1000L) {
-            remindMeeting(upcoming, "15")
+            onMeetingRemind(upcoming, "15")
         }
     }
 
@@ -1252,15 +1285,7 @@ private fun TodaySection(
         meetingCount > 0 ||
         (TodaySection.TODO in visibleSections && todos.isNotEmpty())
     // v0.65.3：空态副标题按时间段区分——在 onResume 时重算（用户回到桌面时刷新），不做轮询，避免隔夜 stale
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var resumeTick by remember { mutableStateOf(0) }
-    DisposableEffect(lifecycleOwner) {
-        val obs = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
-        }
-        lifecycleOwner.lifecycle.addObserver(obs)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
-    }
+    // v0.67.6：resumeTick 上提至 PetZone，此处改为接收参数
     val emptySubtitle = remember(resumeTick) { AiInsight.buildEmptySubtitle() }
     // v0.67.5：回到桌面时重查日历（省电原则：只在用户看到时刷新，不轮询），避免隔夜 stale
     LaunchedEffect(resumeTick) {
@@ -1271,17 +1296,7 @@ private fun TodaySection(
             nextEvent = allEvents.firstOrNull { it.end > now }
         }
     }
-    // v0.67.6：天气 onResume + 缓存 TTL（省电原则）
-    // 回桌面/亮屏时检查：60 分钟内查过直接用缓存，不发网络请求；
-    // 首次只更新状态不播场景（allowTrigger=false），之后有突变才播
-    LaunchedEffect(resumeTick) {
-        val now = System.currentTimeMillis()
-        if (!weatherInitDone || now - lastWeatherFetchMs >= 60 * 60 * 1000L) {
-            lastWeatherFetchMs = now
-            fetchWeather(allowTrigger = weatherInitDone)
-            weatherInitDone = true
-        }
-    }
+    // v0.67.6：天气 onResume + TTL 检查已移至 PetZone（天气状态在 PetZone），此处删除
 
     // ============ v0.64.2：组级别拖拽排序 ============
     // 组 key（默认 AI 优先级顺序）；用户拖过后用 today_user_order
