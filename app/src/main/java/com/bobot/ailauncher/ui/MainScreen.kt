@@ -21,7 +21,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,7 +31,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.compose.NavHost
-import kotlinx.coroutines.launch
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.bobot.ailauncher.data.OtaUpdater
@@ -207,11 +205,11 @@ private fun HomeHost(
             onHideDockRequest = onHideDockRequest,
             onOpenSettings = onOpenSettings
         )
-        // v0.67.9（Bob）：主屏 rail 长按 → 字母快找；主屏不显示字母导航。
-        // 长按震动后选择器浮现，手指一动选中字母 → 立刻打开应用中心（不等松手），
-        // 选择器在 D3 转场动画期间保持可见（与应用中心 rail 同位置），无缝衔接
+        // v0.67.10（Bob）：主屏 rail 长按 → 字母快找，真无缝——
+        // 长按震动后选择器浮现；手指一动选中字母立刻打开应用中心；
+        // picker 会话在 D3 打开后继续存活（手势不断），手指不松开可继续滑动，
+        // 字母经 homeLetterRequest 连续驱动 D3 列表滚动；松手后 picker 撤下，D3 自己的 rail 接管
         val haptics = LocalHapticFeedback.current
-        val homeScope = rememberCoroutineScope()
         var pickerActive by remember { mutableStateOf(false) }
         var pickerIndex by remember { mutableIntStateOf(-1) }
         var d3Opened by remember { mutableStateOf(false) }
@@ -220,9 +218,12 @@ private fun HomeHost(
             pickerActive = false
             pickerIndex = -1
             d3Opened = false
+            UiPrefs.homeLetterRequest.value = null
+            UiPrefs.d3EnterFromPicker.value = false
         }
-        // 隐形长按区：右边缘，位置/高度与应用中心 rail 一致（BottomEnd + 70dp，400dp 高）
-        if (dockState != DockState.D3) {
+        // 隐形长按区：右边缘，位置/高度与应用中心 rail 一致；
+        // picker 会话期间即使 D3 已打开也不销毁，保证手势连续
+        if (dockState != DockState.D3 || pickerActive) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -248,16 +249,13 @@ private fun HomeHost(
                                 if (i != pickerIndex) {
                                     pickerIndex = i
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                }
-                                // 一动就由应用中心接管：立刻打开，不等松手
-                                if (!d3Opened && pickerIndex >= 0) {
-                                    d3Opened = true
-                                    UiPrefs.homeLetterRequest.value = homeLetters[pickerIndex]
-                                    onOpenAppDrawer()
-                                    // D3 滑入动画期间选择器保持可见，无缝过渡后撤下
-                                    homeScope.launch {
-                                        kotlinx.coroutines.delay(400)
-                                        dismissPicker()
+                                    // 连续驱动 D3 滚动
+                                    UiPrefs.homeLetterRequest.value = homeLetters[i]
+                                    // 第一次选中 → 立刻打开应用中心（不等松手）
+                                    if (!d3Opened) {
+                                        d3Opened = true
+                                        UiPrefs.d3EnterFromPicker.value = true
+                                        onOpenAppDrawer()
                                     }
                                 }
                             },
@@ -268,7 +266,7 @@ private fun HomeHost(
             )
         }
         // 字母选择器：长按后浮现，复用 WaveRail 视觉（触摸由长按区接管）；
-        // 放在 D3 条件外，转场动画期间继续盖在上面，保证视觉连续
+        // D3 打开后继续盖在上面（同位置），直到松手，保证视觉与手势都连续
         if (pickerActive) {
             WaveRail(
                 letters = homeLetters,

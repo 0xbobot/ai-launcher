@@ -274,9 +274,12 @@ fun PullUpDock(
         }
 
         // ---- D3 全屏：不透明整屏替换 ----
+        // v0.67.10（Bob）：从主屏 picker 进入时只用淡入（不滑入）——选择器已在 rail 位置，无缝衔接
+        val d3FromPicker by UiPrefs.d3EnterFromPicker.collectAsState()
         AnimatedVisibility(
             visible = state == DockState.D3,
-            enter = slideInVertically(
+            enter = if (d3FromPicker) fadeIn(tween(200))
+            else slideInVertically(
                 animationSpec = spring(
                     stiffness = Spring.StiffnessMediumLow,
                     dampingRatio = 0.9f

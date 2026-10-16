@@ -283,13 +283,16 @@ fun AppCenterContent(
     val azTotalItems = remember(azGroups) { azGroups.sumOf { it.second.size + 1 } }
     val hiddenHeaderIndex = dockSectionSize + azTotalItems
 
-    // v0.67.8（Bob）：主屏长按 rail 选字母 → D3 打开后直接定位到该字母
+    // v0.67.10（Bob）：主屏 picker 连续驱动——手指不松开时持续跟随滚动；
+    // 字母无精确锚点时找最近的有应用字母
     val homeLetter by UiPrefs.homeLetterRequest.collectAsState()
-    LaunchedEffect(homeLetter) {
+    LaunchedEffect(homeLetter, letterAnchors) {
         homeLetter?.let { letter ->
-            UiPrefs.homeLetterRequest.value = null
-            val anchor = letterAnchors[letter] ?: 0
-            listState.scrollToItem(anchor)
+            val anchor = letterAnchors[letter]
+                ?: letterAnchors.minByOrNull { kotlin.math.abs(it.key - letter) }?.value
+            if (anchor != null) {
+                listState.scrollToItem(anchor)
+            }
         }
     }
 
