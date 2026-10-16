@@ -1,8 +1,10 @@
 package com.bobot.ailauncher.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,12 +18,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.compose.NavHost
@@ -32,6 +38,7 @@ import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.apps.DockState
 import com.bobot.ailauncher.ui.apps.PullUpDock
+import com.bobot.ailauncher.ui.apps.WaveRail
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
@@ -198,6 +205,69 @@ private fun HomeHost(
             onHideDockRequest = onHideDockRequest,
             onOpenSettings = onOpenSettings
         )
+        // v0.67.8（Bob）：主屏 rail 长按 → 字母快找；主屏不显示字母导航，
+        // 长按后才浮现选择器，松手打开应用中心定位到该字母
+        if (dockState != DockState.D3) {
+            val haptics = LocalHapticFeedback.current
+            var pickerActive by remember { mutableStateOf(false) }
+            var pickerIndex by remember { mutableIntStateOf(-1) }
+            val homeLetters = remember { ('A'..'Z').toList() }
+            // 隐形长按区：右边缘，位置/高度与应用中心 rail 一致（BottomEnd + 70dp，400dp 高）
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 70.dp)
+                    .width(56.dp)
+                    .height(400.dp)
+                    .pointerInput(Unit) {
+                        detectDragGesturesAfterLongPress(
+                            onLongPress = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                pickerActive = true
+                                pickerIndex = -1
+                            },
+                            onDrag = { change, _ ->
+                                change.consume()
+                                // 与 WaveRail.indexAt 同公式：rail 占 85%，居中
+                                val hPx = size.height.toFloat()
+                                val railHpx = hPx * 0.85f
+                                val railTopPx = (hPx - railHpx) / 2f
+                                val i = (((change.position.y - railTopPx) / railHpx) * homeLetters.size)
+                                    .toInt().coerceIn(homeLetters.indices)
+                                if (i != pickerIndex) {
+                                    pickerIndex = i
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            },
+                            onDragEnd = {
+                                if (pickerActive && pickerIndex >= 0) {
+                                    UiPrefs.homeLetterRequest.value = homeLetters[pickerIndex]
+                                    onOpenAppDrawer()
+                                }
+                                pickerActive = false
+                                pickerIndex = -1
+                            },
+                            onDragCancel = {
+                                pickerActive = false
+                                pickerIndex = -1
+                            }
+                        )
+                    }
+            )
+            // 字母选择器：长按后浮现，复用 WaveRail 视觉（触摸由上面的长按区接管）
+            if (pickerActive) {
+                WaveRail(
+                    letters = homeLetters,
+                    onActiveLetter = {},
+                    onRelease = {},
+                    forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 70.dp)
+                        .height(400.dp)
+                )
+            }
+        }
         // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
         // OTA 更新对话框——v0.67.1：只在用户主动点击时弹（TODAY 卡片"有新版本"行 / 设置页手动检查），
         // 不再每天自动检查后自动弹（产品原则：重要信息不用模态弹窗）

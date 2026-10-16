@@ -23,6 +23,8 @@ object UiPrefs {
     fun flashRail(target: String) {
         _railFlash.value = (_railFlash.value.first + 1) to target
     }
+    // v0.67.8（Bob）：主屏长按 rail 选字母 → 打开应用中心定位到该字母；消费后置 null
+    val homeLetterRequest = MutableStateFlow<Char?>(null)
     fun bumpDock() {
         dockTick.value++
     }

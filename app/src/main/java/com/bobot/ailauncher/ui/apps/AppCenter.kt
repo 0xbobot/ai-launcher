@@ -283,6 +283,16 @@ fun AppCenterContent(
     val azTotalItems = remember(azGroups) { azGroups.sumOf { it.second.size + 1 } }
     val hiddenHeaderIndex = dockSectionSize + azTotalItems
 
+    // v0.67.8（Bob）：主屏长按 rail 选字母 → D3 打开后直接定位到该字母
+    val homeLetter by UiPrefs.homeLetterRequest.collectAsState()
+    LaunchedEffect(homeLetter) {
+        homeLetter?.let { letter ->
+            UiPrefs.homeLetterRequest.value = null
+            val anchor = letterAnchors[letter] ?: 0
+            listState.scrollToItem(anchor)
+        }
+    }
+
     // v0.41.8：手动吸顶——当前组首行滚出顶部后，悬停 overlay 接管显示；
     // 下一组首行接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走）
     val stuckLetter: Char? by remember(azGroups) {
