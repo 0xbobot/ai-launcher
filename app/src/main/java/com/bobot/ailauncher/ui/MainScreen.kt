@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +32,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.compose.NavHost
+import kotlinx.coroutines.launch
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.bobot.ailauncher.data.OtaUpdater
@@ -205,14 +207,22 @@ private fun HomeHost(
             onHideDockRequest = onHideDockRequest,
             onOpenSettings = onOpenSettings
         )
-        // v0.67.8（Bob）：主屏 rail 长按 → 字母快找；主屏不显示字母导航，
-        // 长按后才浮现选择器，松手打开应用中心定位到该字母
+        // v0.67.9（Bob）：主屏 rail 长按 → 字母快找；主屏不显示字母导航。
+        // 长按震动后选择器浮现，手指一动选中字母 → 立刻打开应用中心（不等松手），
+        // 选择器在 D3 转场动画期间保持可见（与应用中心 rail 同位置），无缝衔接
+        val haptics = LocalHapticFeedback.current
+        val homeScope = rememberCoroutineScope()
+        var pickerActive by remember { mutableStateOf(false) }
+        var pickerIndex by remember { mutableIntStateOf(-1) }
+        var d3Opened by remember { mutableStateOf(false) }
+        val homeLetters = remember { ('A'..'Z').toList() }
+        fun dismissPicker() {
+            pickerActive = false
+            pickerIndex = -1
+            d3Opened = false
+        }
+        // 隐形长按区：右边缘，位置/高度与应用中心 rail 一致（BottomEnd + 70dp，400dp 高）
         if (dockState != DockState.D3) {
-            val haptics = LocalHapticFeedback.current
-            var pickerActive by remember { mutableStateOf(false) }
-            var pickerIndex by remember { mutableIntStateOf(-1) }
-            val homeLetters = remember { ('A'..'Z').toList() }
-            // 隐形长按区：右边缘，位置/高度与应用中心 rail 一致（BottomEnd + 70dp，400dp 高）
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -220,13 +230,12 @@ private fun HomeHost(
                     .width(56.dp)
                     .height(400.dp)
                     .pointerInput(Unit) {
-                        // v0.67.8 fix：不用 onLongPress 参数（API 不确定），
-                        // onDragStart 即代表长按后开始滑动，同样触发震动+选择器
                         detectDragGesturesAfterLongPress(
                             onDragStart = {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 pickerActive = true
                                 pickerIndex = -1
+                                d3Opened = false
                             },
                             onDrag = { change, _ ->
                                 change.consume()
@@ -240,35 +249,37 @@ private fun HomeHost(
                                     pickerIndex = i
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 }
-                            },
-                            onDragEnd = {
-                                if (pickerActive && pickerIndex >= 0) {
+                                // 一动就由应用中心接管：立刻打开，不等松手
+                                if (!d3Opened && pickerIndex >= 0) {
+                                    d3Opened = true
                                     UiPrefs.homeLetterRequest.value = homeLetters[pickerIndex]
                                     onOpenAppDrawer()
+                                    // D3 滑入动画期间选择器保持可见，无缝过渡后撤下
+                                    homeScope.launch {
+                                        kotlinx.coroutines.delay(400)
+                                        dismissPicker()
+                                    }
                                 }
-                                pickerActive = false
-                                pickerIndex = -1
                             },
-                            onDragCancel = {
-                                pickerActive = false
-                                pickerIndex = -1
-                            }
+                            onDragEnd = { dismissPicker() },
+                            onDragCancel = { dismissPicker() }
                         )
                     }
             )
-            // 字母选择器：长按后浮现，复用 WaveRail 视觉（触摸由上面的长按区接管）
-            if (pickerActive) {
-                WaveRail(
-                    letters = homeLetters,
-                    onActiveLetter = {},
-                    onRelease = {},
-                    forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = 70.dp)
-                        .height(400.dp)
-                )
-            }
+        }
+        // 字母选择器：长按后浮现，复用 WaveRail 视觉（触摸由长按区接管）；
+        // 放在 D3 条件外，转场动画期间继续盖在上面，保证视觉连续
+        if (pickerActive) {
+            WaveRail(
+                letters = homeLetters,
+                onActiveLetter = {},
+                onRelease = {},
+                forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 70.dp)
+                    .height(400.dp)
+            )
         }
         // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
         // OTA 更新对话框——v0.67.1：只在用户主动点击时弹（TODAY 卡片"有新版本"行 / 设置页手动检查），
