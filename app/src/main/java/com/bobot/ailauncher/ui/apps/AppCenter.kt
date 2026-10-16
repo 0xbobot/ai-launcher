@@ -283,16 +283,18 @@ fun AppCenterContent(
     val azTotalItems = remember(azGroups) { azGroups.sumOf { it.second.size + 1 } }
     val hiddenHeaderIndex = dockSectionSize + azTotalItems
 
-    // v0.67.10（Bob）：主屏 picker 连续驱动——手指不松开时持续跟随滚动；
-    // 字母无精确锚点时找最近的有应用字母
-    val homeLetter by UiPrefs.homeLetterRequest.collectAsState()
-    LaunchedEffect(homeLetter, letterAnchors) {
-        homeLetter?.let { letter ->
-            val anchor = letterAnchors[letter]
-                ?: letterAnchors.minByOrNull { kotlin.math.abs(it.key - letter) }?.value
-            if (anchor != null) {
-                listState.scrollToItem(anchor)
+    // v0.67.13（Bob）：主屏 picker 连续驱动——手指不松开时持续跟随滚动
+    val homeTarget by UiPrefs.homeRailTarget.collectAsState()
+    LaunchedEffect(homeTarget, letterAnchors) {
+        when (val t = homeTarget) {
+            is UiPrefs.HomeRailTarget.Letter -> {
+                val anchor = letterAnchors[t.char]
+                    ?: letterAnchors.minByOrNull { kotlin.math.abs(it.key - t.char) }?.value
+                if (anchor != null) listState.scrollToItem(anchor)
             }
+            is UiPrefs.HomeRailTarget.Dock -> listState.scrollToItem(0)
+            is UiPrefs.HomeRailTarget.Hidden -> listState.scrollToItem(hiddenHeaderIndex)
+            null -> {}
         }
     }
 
@@ -1054,7 +1056,7 @@ fun AppCenterContent(
             // 左边不摆 rail（摆两个很奇怪），但左侧滑动同样触发字母切换，
             // 触发后是右侧 rail 亮起波浪跟随；应用列表左侧缩进给手指留空间。
             // v0.67.11（Bob）：主屏 picker 会话中隐藏自己的 rail，避免与 picker 重叠
-            if (!searching && letters.isNotEmpty() && homeLetter == null) {
+            if (!searching && letters.isNotEmpty() && homeTarget == null) {
                 var glideJob by remember { mutableStateOf<Job?>(null) }
                 // 左侧隐形区触发时，右侧可见 rail 跟随显示波浪
                 var mirrorIndex by remember { mutableStateOf<Int?>(null) }
@@ -1078,102 +1080,48 @@ fun AppCenterContent(
                 }
                 // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区
                 // v0.67.12（Bob）：改用共享 AppRail，单一样式单布局
-                val starSlot: (@Composable () -> Unit)? = if (dockApps.isNotEmpty()) ({
-                    // v0.43.3：★/眼是字母导航的一部分；v0.55.2：点击加震动；v0.56.2：收藏时脉冲
-
-                        // v0.56.2（Bob）：收藏时 ★ 脉冲闪烁
-                        val starScale = remember { Animatable(1f) }
-                        LaunchedEffect(flashTick) {
-                            if (flashTarget == "star" && flashTick > 0) {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                starScale.animateTo(1.7f, tween(180))
-                                starScale.animateTo(1f, tween(220))
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .width(44.dp)
-                                .height(24.dp)
-                                .clickable(
-                                    indication = null,
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    onClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        scope.launch { listState.animateScrollToItem(0) }
-                                    }
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Filled.Star,
-                                contentDescription = "Dock 收藏",
-                                tint = AILauncherColors.Hint,
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .graphicsLayer {
-                                        scaleX = starScale.value
-                                        scaleY = starScale.value
-                                    }
-                            )
-                        }
-                }) else null
-                val eyeSlot: (@Composable () -> Unit)? = if (hiddenApps.isNotEmpty()) ({
-
-                        // v0.56.2（Bob）：隐藏时眼睛脉冲闪烁
-                        val eyeScale = remember { Animatable(1f) }
-                        LaunchedEffect(flashTick) {
-                            if (flashTarget == "eye" && flashTick > 0) {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                eyeScale.animateTo(1.7f, tween(180))
-                                eyeScale.animateTo(1f, tween(220))
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .width(44.dp)
-                                .height(24.dp)
-                                .clickable(
-                                    indication = null,
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    onClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
-                                    }
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Filled.VisibilityOff,
-                                contentDescription = "隐藏应用",
-                                tint = AILauncherColors.Hint,
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .graphicsLayer {
-                                        scaleX = eyeScale.value
-                                        scaleY = eyeScale.value
-                                    }
-                            )
-                        }
-                }) else null
+                // v0.67.13（Bob）：房子/收藏/隐藏做进 rail 滑动项，一条导航滑到哪去哪
+                val railItems = remember(dockApps, letters, hiddenApps) {
+                    buildList {
+                        add(RailItem.House)
+                        if (dockApps.isNotEmpty()) add(RailItem.Star)
+                        letters.forEach { add(RailItem.Letter(it)) }
+                        if (hiddenApps.isNotEmpty()) add(RailItem.Eye)
+                    }
+                }
+                // 收藏/隐藏时的脉冲目标
+                val pulseItem = when (flashTarget) {
+                    "star" -> RailItem.Star
+                    "eye" -> RailItem.Eye
+                    else -> null
+                }
+                val onRailItem: (RailItem) -> Unit = { item ->
+                    when (item) {
+                        is RailItem.House -> onHeaderSwipeRightState.value()
+                        is RailItem.Star -> scope.launch { listState.animateScrollToItem(0) }
+                        is RailItem.Eye -> scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
+                        is RailItem.Letter -> glideToLetter(item.char)
+                    }
+                }
                 AppRail(
-                    letters = letters,
-                    starContent = starSlot,
-                    eyeContent = eyeSlot,
-                    onActiveLetter = glideToLetter,
+                    items = railItems,
+                    onActiveItem = onRailItem,
                     onRelease = stopGlide,
                     forcedActiveIndex = mirrorIndex,
+                    pulseTick = flashTick,
+                    pulseItem = pulseItem,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(bottom = 70.dp)
                 )
                 WaveRail(
-                    letters = letters,
+                    items = railItems,
                     side = RailSide.LEFT,
                     visible = false,
                     railWidth = 56.dp,
-                    onActiveLetter = { letter ->
-                        mirrorIndex = letters.indexOf(letter)
-                        glideToLetter(letter)
+                    onActiveItem = { item ->
+                        mirrorIndex = railItems.indexOf(item)
+                        onRailItem(item)
                     },
                     onRelease = { mirrorIndex = null },
                     modifier = Modifier.align(Alignment.CenterStart).fillMaxHeight()

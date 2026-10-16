@@ -23,9 +23,13 @@ object UiPrefs {
     fun flashRail(target: String) {
         _railFlash.value = (_railFlash.value.first + 1) to target
     }
-    // v0.67.8（Bob）：主屏长按 rail 选字母 → 打开应用中心定位到该字母
-    // v0.67.10：连续驱动——手指不松开时持续更新，应用中心跟随滚动；dismiss 时置 null
-    val homeLetterRequest = MutableStateFlow<Char?>(null)
+    // v0.67.13（Bob）：主屏 picker 目标——字母/收藏/隐藏；连续驱动，dismiss 时置 null
+    sealed interface HomeRailTarget {
+        data class Letter(val char: Char) : HomeRailTarget
+        data object Dock : HomeRailTarget
+        data object Hidden : HomeRailTarget
+    }
+    val homeRailTarget = MutableStateFlow<HomeRailTarget?>(null)
     // v0.67.10：从主屏 picker 打开 D3 时，D3 用淡入（不滑入），过渡无缝
     val d3EnterFromPicker = MutableStateFlow(false)
     fun bumpDock() {

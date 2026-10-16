@@ -40,6 +40,7 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.apps.DockState
 import com.bobot.ailauncher.ui.apps.AppRail
 import com.bobot.ailauncher.ui.apps.PullUpDock
+import com.bobot.ailauncher.ui.apps.RailItem
 import com.bobot.ailauncher.ui.apps.WaveRail
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.home.HomeScreen
@@ -197,11 +198,7 @@ private fun HomeHost(
         // v0.32.0：全透明——去掉渐隐罩，壁纸直接透出（Bob）
         // 单页桌面：只有首页；v0.16 首页上滑直达 D3，不再经 D1
         // v0.31.0：首屏只留 Dock（Bob）
-        HomeScreen(
-            onOpenAppDrawer = onOpenAppDrawer,
-            // v0.68.0：D3 打开时不豁免右边缘系统手势
-            cleanHome = dockState != DockState.D3,
-        )
+        HomeScreen(onOpenAppDrawer = onOpenAppDrawer)
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         PullUpDock(
             state = dockState,
@@ -211,20 +208,27 @@ private fun HomeHost(
             onHideDockRequest = onHideDockRequest,
             onOpenSettings = onOpenSettings
         )
-        // v0.67.10（Bob）：主屏 rail 长按 → 字母快找，真无缝——
-        // 长按震动后选择器浮现；手指一动选中字母立刻打开应用中心；
-        // picker 会话在 D3 打开后继续存活（手势不断），手指不松开可继续滑动，
-        // 字母经 homeLetterRequest 连续驱动 D3 列表滚动；松手后 picker 撤下，D3 自己的 rail 接管
+        // v0.67.13（Bob）：主屏 rail 长按 → 快找；房子/收藏/字母/隐藏一条导航滑动到达。
+        // 长按震动后选择器浮现；手指一动就由应用中心接管（D3 淡入）；picker 会话在 D3 打开后
+        // 继续存活（手势不断），手指不松开可继续滑动；松手后 picker 撤下，D3 自己的 rail 接管
         val haptics = LocalHapticFeedback.current
         var pickerActive by remember { mutableStateOf(false) }
         var pickerIndex by remember { mutableIntStateOf(-1) }
         var d3Opened by remember { mutableStateOf(false) }
-        val homeLetters = remember { ('A'..'Z').toList() }
+        // v0.67.13：房子/收藏/字母/隐藏都在一条导航里（与应用中心 rail 一致）
+        val homeItems = remember {
+            buildList {
+                add(RailItem.House)
+                add(RailItem.Star)
+                ('A'..'Z').forEach { add(RailItem.Letter(it)) }
+                add(RailItem.Eye)
+            }
+        }
         fun dismissPicker() {
             pickerActive = false
             pickerIndex = -1
             d3Opened = false
-            UiPrefs.homeLetterRequest.value = null
+            UiPrefs.homeRailTarget.value = null
             UiPrefs.d3EnterFromPicker.value = false
         }
         // 隐形长按区：右边缘，位置/高度与应用中心 rail 一致；
@@ -250,18 +254,41 @@ private fun HomeHost(
                                 val hPx = size.height.toFloat()
                                 val railHpx = hPx * 0.85f
                                 val railTopPx = (hPx - railHpx) / 2f
-                                val i = (((change.position.y - railTopPx) / railHpx) * homeLetters.size)
-                                    .toInt().coerceIn(homeLetters.indices)
+                                val i = (((change.position.y - railTopPx) / railHpx) * homeItems.size)
+                                    .toInt().coerceIn(homeItems.indices)
                                 if (i != pickerIndex) {
                                     pickerIndex = i
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    // 连续驱动 D3 滚动
-                                    UiPrefs.homeLetterRequest.value = homeLetters[i]
-                                    // 第一次选中 → 立刻打开应用中心（不等松手）
-                                    if (!d3Opened) {
-                                        d3Opened = true
-                                        UiPrefs.d3EnterFromPicker.value = true
-                                        onOpenAppDrawer()
+                                    when (val item = homeItems[i]) {
+                                        is RailItem.House -> {
+                                            // 主屏已在首页：仅撤下选择器
+                                            dismissPicker()
+                                        }
+                                        is RailItem.Star -> {
+                                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.Dock
+                                            if (!d3Opened) {
+                                                d3Opened = true
+                                                UiPrefs.d3EnterFromPicker.value = true
+                                                onOpenAppDrawer()
+                                            }
+                                        }
+                                        is RailItem.Eye -> {
+                                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.Hidden
+                                            if (!d3Opened) {
+                                                d3Opened = true
+                                                UiPrefs.d3EnterFromPicker.value = true
+                                                onOpenAppDrawer()
+                                            }
+                                        }
+                                        is RailItem.Letter -> {
+                                            UiPrefs.homeRailTarget.value =
+                                                UiPrefs.HomeRailTarget.Letter(item.char)
+                                            if (!d3Opened) {
+                                                d3Opened = true
+                                                UiPrefs.d3EnterFromPicker.value = true
+                                                onOpenAppDrawer()
+                                            }
+                                        }
                                     }
                                 }
                             },
@@ -273,19 +300,11 @@ private fun HomeHost(
         }
         // 字母选择器：长按后浮现（触摸由长按区接管）；
         // D3 打开后继续盖在上面，直到松手，保证视觉与手势都连续。
-        // v0.67.12（Bob）：改用共享 AppRail，与应用中心同一套
+        // v0.67.13：改用共享 AppRail（RailItem），与应用中心同一套
         if (pickerActive) {
-            val dockNotEmpty = remember(pickerActive) {
-                UiPrefs.getDockPinned(context).isNotEmpty()
-            }
-            val hiddenNotEmpty = remember(pickerActive) {
-                com.bobot.ailauncher.data.HiddenApps.getHidden(context).isNotEmpty()
-            }
             AppRail(
-                letters = homeLetters,
-                starContent = if (dockNotEmpty) ({ Spacer(modifier = Modifier.height(24.dp)) }) else null,
-                eyeContent = if (hiddenNotEmpty) ({ Spacer(modifier = Modifier.height(24.dp)) }) else null,
-                onActiveLetter = {},
+                items = homeItems,
+                onActiveItem = {},
                 onRelease = {},
                 forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
                 modifier = Modifier

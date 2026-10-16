@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +52,16 @@ import kotlinx.coroutines.launch
 internal enum class RailSide { LEFT, RIGHT }
 
 /**
+ * v0.67.13（Bob）：rail 滑动项——房子/收藏/字母/隐藏都在一条导航里滑动到达
+ */
+internal sealed interface RailItem {
+    data object House : RailItem
+    data object Star : RailItem
+    data class Letter(val char: Char) : RailItem
+    data object Eye : RailItem
+}
+
+/**
  * 波浪字母导航 v2（v0.25）。
  * - v0.40.2：右侧一条可见 rail + 左侧隐形触发区（Bob：左边不摆 rail，摆两个很奇怪；
  *   但左侧滑动同样触发字母切换，触发后右侧 rail 亮起波浪跟随；列表左侧缩进给手指留空间）
@@ -67,8 +78,8 @@ internal enum class RailSide { LEFT, RIGHT }
  */
 @Composable
 internal fun WaveRail(
-    letters: List<Char>,
-    onActiveLetter: (Char) -> Unit,
+    items: List<RailItem>,
+    onActiveItem: (RailItem) -> Unit,
     onRelease: () -> Unit,
     modifier: Modifier = Modifier,
     side: RailSide = RailSide.RIGHT,
@@ -76,7 +87,10 @@ internal fun WaveRail(
     // 触摸时通过 forcedActiveIndex 让右侧可见 rail 跟随显示波浪
     visible: Boolean = true,
     forcedActiveIndex: Int? = null,
-    railWidth: Dp = 44.dp
+    railWidth: Dp = 44.dp,
+    // v0.67.13：脉冲高亮某一项（收藏/隐藏时的闪烁反馈）
+    pulseTick: Int = 0,
+    pulseItem: RailItem? = null
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
@@ -94,12 +108,22 @@ internal fun WaveRail(
     // 外部驱动优先（左侧隐形区触发时），否则用内部触摸状态
     val displayIndex = forcedActiveIndex ?: activeIndex
 
+    // v0.67.13：脉冲高亮（收藏/隐藏时的闪烁+震动反馈）
+    val pulseScale = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(pulseTick) {
+        if (pulseItem != null && pulseTick > 0) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            pulseScale.animateTo(1.7f, tween(180))
+            pulseScale.animateTo(1f, tween(220))
+        }
+    }
+
     // v0.40.2：字母切换给一记结实的震动——TextHandleMove 在部分机型上几乎无感
-    fun emitLetter(i: Int) {
+    fun emitItem(i: Int) {
         if (i == activeIndex) return
         activeIndex = i
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        onActiveLetter(letters[i])
+        onActiveItem(items[i])
     }
 
     // v0.43.3（Bob）：字母被截断——行高 < 字高，比例提到 0.85
@@ -111,10 +135,10 @@ internal fun WaveRail(
             .width(railWidth)
     ) {
         val hPx = constraints.maxHeight.toFloat()
-        if (hPx <= 0f || letters.isEmpty()) return@BoxWithConstraints
+        if (hPx <= 0f || items.isEmpty()) return@BoxWithConstraints
         val railHpx = hPx * railFraction
         val railTopPx = (hPx - railHpx) / 2f
-        val rowHpx = railHpx / letters.size
+        val rowHpx = railHpx / items.size
         val bulgePx = with(density) { 36.dp.toPx() }
         val shiftPx = with(density) { 56.dp.toPx() }
         // 气泡在靠应用的一侧：明显离开波浪区
@@ -132,21 +156,21 @@ internal fun WaveRail(
         )
 
         fun indexAt(y: Float): Int {
-            return (((y - railTopPx) / railHpx) * letters.size)
-                .toInt().coerceIn(letters.indices)
+            return (((y - railTopPx) / railHpx) * items.size)
+                .toInt().coerceIn(items.indices)
         }
 
         // 触摸层：点按与纵向拖动
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(letters, hPx) {
+                .pointerInput(items, hPx) {
                     detectTapGestures(onTap = { offset ->
                         // 点按：直接跳转
                         val i = indexAt(offset.y)
                         cancelPendingTapRelease()
                         activeIndex = -1 // 允许点按重复触发同一字母
-                        emitLetter(i)
+                        emitItem(i)
                         // v0.41.1：等滚动落定再收波浪——立刻 onRelease 的话，
                         // 右侧 rail 的 stopGlide 会把刚启动的 animateScrollToItem
                         // （近距离字母）直接掐掉，导致列表不动、波浪卡住；
@@ -158,12 +182,12 @@ internal fun WaveRail(
                         }
                     })
                 }
-                .pointerInput(letters, hPx) {
+                .pointerInput(items, hPx) {
                     detectVerticalDragGestures(
                         onDragStart = { offset ->
                             // 点按后立刻转拖动：掐掉点按的延迟收波浪，拖动接管
                             cancelPendingTapRelease()
-                            emitLetter(indexAt(offset.y))
+                            emitItem(indexAt(offset.y))
                         },
                         onDragEnd = {
                             activeIndex = -1
@@ -175,7 +199,7 @@ internal fun WaveRail(
                         },
                         onVerticalDrag = { change, _ ->
                             change.consume()
-                            emitLetter(indexAt(change.position.y))
+                            emitItem(indexAt(change.position.y))
                         }
                     )
                 }
@@ -190,7 +214,7 @@ internal fun WaveRail(
                 .fillMaxHeight(railFraction),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            letters.forEachIndexed { i, ch ->
+            items.forEachIndexed { i, item ->
                 val d = if (displayIndex >= 0) (i - displayIndex).toFloat() else 999f
                 // v0.25.7：波浪更宽更平（sigma 4.5），头尾字母也有弧度，更优美
                 // v0.40.2：tween 120→80，波浪响应更快更轻盈
@@ -200,29 +224,54 @@ internal fun WaveRail(
                     animationSpec = tween(80),
                     label = "waveG"
                 )
+                // v0.67.13：脉冲项额外放大
+                val pulse = if (item == pulseItem && pulseTick > 0) pulseScale.value else 1f
                 Box(
                     modifier = Modifier.weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = ch.toString(),
-                        // v0.41.0（B 方案）：更细更淡
-                        // v0.41.2：提示灰在透壁纸上对比度不够（Bob：看不清）→
-                        // 深色 60%，字重保持常规，波浪交互不变
-                        // v0.55.3（Bob）：G/S 底部被截断——显式 lineHeight 给足字高
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        color = AILauncherColors.Title.copy(alpha = 0.6f),
-                        fontWeight = FontWeight.Normal,
-                        maxLines = 1,
-                        modifier = Modifier.graphicsLayer {
-                            // 高斯波浪：越靠近手指越大；波浪整体再往拇指反方向避让
-                            translationX = dirSign * bulgePx * g + waveShiftX * g
-                            val sc = 1f + g
-                            scaleX = sc
-                            scaleY = sc
+                    when (item) {
+                        is RailItem.Letter -> Text(
+                            text = item.char.toString(),
+                            // v0.41.0（B 方案）：更细更淡
+                            // v0.41.2：提示灰在透壁纸上对比度不够（Bob：看不清）→
+                            // 深色 60%，字重保持常规，波浪交互不变
+                            // v0.55.3（Bob）：G/S 底部被截断——显式 lineHeight 给足字高
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            color = AILauncherColors.Title.copy(alpha = 0.6f),
+                            fontWeight = FontWeight.Normal,
+                            maxLines = 1,
+                            modifier = Modifier.graphicsLayer {
+                                // 高斯波浪：越靠近手指越大；波浪整体再往拇指反方向避让
+                                translationX = dirSign * bulgePx * g + waveShiftX * g
+                                val sc = (1f + g) * pulse
+                                scaleX = sc
+                                scaleY = sc
+                            }
+                        )
+                        // v0.67.13：房子/收藏/隐藏图标，同样参与波浪
+                        is RailItem.House, is RailItem.Star, is RailItem.Eye -> {
+                            val icon = when (item) {
+                                is RailItem.House -> androidx.compose.material.icons.Icons.Filled.Home
+                                is RailItem.Star -> androidx.compose.material.icons.Icons.Filled.Star
+                                else -> androidx.compose.material.icons.Icons.Filled.VisibilityOff
+                            }
+                            androidx.compose.material3.Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = AILauncherColors.Hint,
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .graphicsLayer {
+                                        translationX = dirSign * bulgePx * g + waveShiftX * g
+                                        val sc = (1f + g) * pulse
+                                        scaleX = sc
+                                        scaleY = sc
+                                    }
+                            )
                         }
-                    )
+                    }
                 }
             }
         }
@@ -231,7 +280,7 @@ internal fun WaveRail(
         // 当前字母气泡：靠应用的一侧（远离 rail），跟随手指高度（隐形触发区不画）
         // v0.41.0（B 方案）：实心金圆 → 金环（2dp 描边 + 深色字母），更轻
         if (visible && displayIndex >= 0) {
-            val idx = displayIndex.coerceIn(letters.indices)
+            val idx = displayIndex.coerceIn(items.indices)
             val rPx = with(density) { 24.dp.toPx() }
             Box(
                 modifier = Modifier
@@ -246,46 +295,53 @@ internal fun WaveRail(
                     .border(2.dp, AILauncherColors.Accent, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = letters[idx].toString(),
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AILauncherColors.Title
-                )
+                when (val item = items[idx]) {
+                    is RailItem.Letter -> Text(
+                        text = item.char.toString(),
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AILauncherColors.Title
+                    )
+                    else -> {
+                        val icon = when (item) {
+                            is RailItem.House -> androidx.compose.material.icons.Icons.Filled.Home
+                            is RailItem.Star -> androidx.compose.material.icons.Icons.Filled.Star
+                            else -> androidx.compose.material.icons.Icons.Filled.VisibilityOff
+                        }
+                        androidx.compose.material3.Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = AILauncherColors.Title,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 /**
- * v0.67.12（Bob）：共享 rail——★ + 字母 WaveRail + 眼睛，单一样式单布局。
- * 应用中心和主屏 picker 共用一套，避免两套错位。
- * starContent/eyeContent：null=不占位；{}=占24dp空位；有内容=显示（应用中心传带点击+脉冲的图标）。
+ * v0.67.12（Bob）：共享 rail——单一样式单布局，应用中心和主屏 picker 共用，避免两套错位。
+ * v0.67.13：房子/收藏/隐藏直接做进 WaveRail 的滑动项（RailItem），不再用外部 slot。
  */
 @Composable
 internal fun AppRail(
-    letters: List<Char>,
-    starContent: (@Composable () -> Unit)?,
-    eyeContent: (@Composable () -> Unit)?,
-    onActiveLetter: (Char) -> Unit,
+    items: List<RailItem>,
+    onActiveItem: (RailItem) -> Unit,
     onRelease: () -> Unit,
     forcedActiveIndex: Int? = null,
+    pulseTick: Int = 0,
+    pulseItem: RailItem? = null,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // 调用方自己控制 slot 尺寸（应用中心：44x24dp Box+点击；主屏 picker：24dp Spacer 占位）
-        starContent?.invoke()
-        WaveRail(
-            letters = letters,
-            onActiveLetter = onActiveLetter,
-            onRelease = onRelease,
-            forcedActiveIndex = forcedActiveIndex,
-            modifier = Modifier.height(400.dp)
-        )
-        eyeContent?.invoke()
-    }
+    WaveRail(
+        items = items,
+        onActiveItem = onActiveItem,
+        onRelease = onRelease,
+        forcedActiveIndex = forcedActiveIndex,
+        pulseTick = pulseTick,
+        pulseItem = pulseItem,
+        modifier = modifier.height(400.dp)
+    )
 }
