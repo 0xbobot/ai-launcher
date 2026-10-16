@@ -7,9 +7,10 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,7 +76,6 @@ import com.bobot.ailauncher.util.rebindListener
  * 先弹 App 内说明卡（讲清为什么需要这个权限），再放"去开启"跳系统设置；
  * 看过一次后不再弹整卡；点了去开启仍没授权，下次再轻提醒一次，之后回落到 Toast，不死缠。
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     onOpenAppDrawer: () -> Unit,
@@ -90,6 +90,8 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     // v0.68.0：盲操状态
     var blindUi by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
+    // v0.68.2：真实落点 x（供边缘区检查，见下方落点跟踪）
+    val blindDownX = remember { mutableStateOf(-1f) }
     var showBlindCustomConfig by remember { mutableStateOf(false) }
     val blindEdgePx = with(density) { 24.dp.toPx() }
     // holder 打破 launcher 回调 ↔ controller 的循环引用
@@ -184,17 +186,22 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .onGloballyPositioned { coords -> homeSize = coords.size }
+            // v0.68.2：落点跟踪——detectDragGestures 的 onDragStart(Offset) 给的是
+            // 过 touch slop 点（左滑比真实落点偏左约 18dp），导致 24dp 边缘区检查
+            // 几乎永远失败。单独跟踪真实落点，不消费事件。
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    blindDownX.value = down.position.x
+                }
+            }
             .pointerInput(blindCtl) {
                 var totalX = 0f
                 var totalY = 0f
                 detectDragGestures(
-                    orientationLock = null,
-                    onDragStart = { down, _, _ ->
+                    onDragStart = {
                         totalX = 0f; totalY = 0f
-                        // v0.68.1：用真实落点 down.position.x——简易 overload 的 onDragStart(Offset)
-                        // 给的是过 touch slop 点（左滑会比落点偏左约 18dp），导致 24dp 边缘区
-                        // 检查几乎永远失败，盲操无响应。实验性 overload 直接暴露 down。
-                        blindCtl.onStart(down.position.x, size.width.toFloat())
+                        blindCtl.onStart(blindDownX.value, size.width.toFloat())
                     },
                     onDragEnd = {
                         // v0.68.0：盲操消费掉的手势不再走纵向逻辑
