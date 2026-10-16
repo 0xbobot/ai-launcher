@@ -224,17 +224,6 @@ fun PetZone(
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    // v0.67.6：天气 onResume + 缓存 TTL
-    // 回桌面/亮屏时检查：60 分钟内查过直接用缓存，不发网络请求；
-    // 首次只更新状态不播场景（allowTrigger=false），之后有突变才播
-    LaunchedEffect(resumeTick) {
-        val now = System.currentTimeMillis()
-        if (!weatherInitDone || now - lastWeatherFetchMs >= 60 * 60 * 1000L) {
-            lastWeatherFetchMs = now
-            fetchWeather(allowTrigger = weatherInitDone)
-            weatherInitDone = true
-        }
-    }
 
     fun todayStr(): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Calendar.getInstance().time)
@@ -276,6 +265,17 @@ fun PetZone(
     suspend fun fetchWeather(allowTrigger: Boolean) {
         val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
         if (w != null) onWeatherFetched(w, allowTrigger)
+    }
+    // v0.67.6：天气 onResume + 缓存 TTL（省电原则）
+    // 回桌面/亮屏时检查：60 分钟内查过直接用缓存，不发网络请求；
+    // 首次只更新状态不播场景（allowTrigger=false），之后有突变才播
+    LaunchedEffect(resumeTick) {
+        val now = System.currentTimeMillis()
+        if (!weatherInitDone || now - lastWeatherFetchMs >= 60 * 60 * 1000L) {
+            lastWeatherFetchMs = now
+            fetchWeather(allowTrigger = weatherInitDone)
+            weatherInitDone = true
+        }
     }
 
     // v0.67.6：删除 30 分钟天气轮询（省电原则）
