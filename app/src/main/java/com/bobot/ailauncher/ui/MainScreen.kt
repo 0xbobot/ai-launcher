@@ -220,8 +220,10 @@ private fun HomeHost(
                     .width(56.dp)
                     .height(400.dp)
                     .pointerInput(Unit) {
+                        // v0.67.8 fix：不用 onLongPress 参数（API 不确定），
+                        // onDragStart 即代表长按后开始滑动，同样触发震动+选择器
                         detectDragGesturesAfterLongPress(
-                            onLongPress = {
+                            onDragStart = {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 pickerActive = true
                                 pickerIndex = -1
