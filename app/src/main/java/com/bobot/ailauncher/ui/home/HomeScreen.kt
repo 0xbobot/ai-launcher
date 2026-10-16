@@ -7,6 +7,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -74,6 +75,7 @@ import com.bobot.ailauncher.util.rebindListener
  * 先弹 App 内说明卡（讲清为什么需要这个权限），再放"去开启"跳系统设置；
  * 看过一次后不再弹整卡；点了去开启仍没授权，下次再轻提醒一次，之后回落到 Toast，不死缠。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     onOpenAppDrawer: () -> Unit,
@@ -186,9 +188,13 @@ fun HomeScreen(
                 var totalX = 0f
                 var totalY = 0f
                 detectDragGestures(
-                    onDragStart = { offset ->
+                    orientationLock = null,
+                    onDragStart = { down, _, _ ->
                         totalX = 0f; totalY = 0f
-                        blindCtl.onStart(offset.x, size.width.toFloat())
+                        // v0.68.1：用真实落点 down.position.x——简易 overload 的 onDragStart(Offset)
+                        // 给的是过 touch slop 点（左滑会比落点偏左约 18dp），导致 24dp 边缘区
+                        // 检查几乎永远失败，盲操无响应。实验性 overload 直接暴露 down。
+                        blindCtl.onStart(down.position.x, size.width.toFloat())
                     },
                     onDragEnd = {
                         // v0.68.0：盲操消费掉的手势不再走纵向逻辑
