@@ -192,7 +192,7 @@ private fun appIconOrNull(context: Context, packageName: String): Drawable? {
     } catch (_: Exception) { null }
 }
 
-private fun launchQuickAction(context: Context, item: QuickActionItem) {
+internal fun launchQuickAction(context: Context, item: QuickActionItem) {
     try {
         if (item.shortcutId != null) {
             val lm = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
@@ -498,7 +498,7 @@ private fun EquipButton(
 // ============ 添加流程：选应用 → 选快捷方式 → 输标签（v0.65.0，不动） ============
 
 @Composable
-private fun QuickActionAddFlow(
+internal fun QuickActionAddFlow(
     onDismiss: () -> Unit,
     onSaved: (QuickActionItem) -> Unit
 ) {

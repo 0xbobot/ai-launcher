@@ -1,8 +1,12 @@
 package com.bobot.ailauncher.ui.home
 
 import android.content.Intent
+import android.graphics.Rect
+import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -10,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,20 +33,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.NotificationRepository
+import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.PanelAccessibilityService
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
+import com.bobot.ailauncher.ui.pet.QuickActionAddFlow
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.util.rebindListener
 
@@ -64,12 +75,51 @@ import com.bobot.ailauncher.util.rebindListener
  */
 @Composable
 fun HomeScreen(
-    onOpenAppDrawer: () -> Unit
+    onOpenAppDrawer: () -> Unit,
+    cleanHome: Boolean = true,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    val view = LocalView.current
+    val haptics = LocalHapticFeedback.current
 
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
+    // v0.68.0：盲操状态
+    var blindUi by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
+    var showBlindCustomConfig by remember { mutableStateOf(false) }
+    val blindEdgePx = with(density) { 24.dp.toPx() }
+    // holder 打破 launcher 回调 ↔ controller 的循环引用
+    val blindCtlRef = remember { mutableStateOf<BlindCaptureController?>(null) }
+    val audioPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> blindCtlRef.value?.onAudioPermissionResult(granted) }
+    val blindCtl = remember {
+        BlindCaptureController(
+            context = context,
+            haptics = haptics,
+            setUi = { blindUi = it },
+            requestAudioPermission = {
+                audioPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            },
+            openCustomConfig = { showBlindCustomConfig = true },
+            edgePx = blindEdgePx,
+            triggerPx = with(density) { 24.dp.toPx() },
+        ).also { blindCtlRef.value = it }
+    }
+    // v0.68.0：右边缘系统手势豁免（响应 cleanHome 变化）
+    var homeSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    androidx.compose.runtime.LaunchedEffect(cleanHome, homeSize) {
+        // 干净桌面时豁免右边缘系统手势（桌面上系统返回是空操作）；
+        // D3 抽屉等打开时不豁免，保证返回手势正常
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && homeSize.width > 0) {
+            view.systemGestureExclusionRects = if (cleanHome) {
+                val e = blindEdgePx.toInt().coerceAtLeast(1)
+                listOf(Rect(homeSize.width - e, 0, homeSize.width, homeSize.height))
+            } else {
+                emptyList()
+            }
+        }
+    }
     // v0.27.3：上滑阈值降低（120dp→48dp），更容易触发 D3
     val swipeThresholdPx = with(density) { 48.dp.toPx() }
     // 斜滑方向判定：x 偏移超过此值才算"往左/往右"
@@ -128,39 +178,53 @@ fun HomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
+            .onGloballyPositioned { coords -> homeSize = coords.size }
+            .pointerInput(blindCtl) {
+                blindCtl.attachScope(this)
                 var totalX = 0f
                 var totalY = 0f
                 detectDragGestures(
-                    onDragStart = { totalX = 0f; totalY = 0f },
+                    onDragStart = { offset ->
+                        totalX = 0f; totalY = 0f
+                        blindCtl.onStart(offset.x, size.width.toFloat())
+                    },
                     onDragEnd = {
-                        when {
-                            // 上滑 → D3（y 为负是上滑）
-                            totalY < -swipeThresholdPx -> openDrawerState()
-                            // 下滑 → 按 x 偏向决定
-                            totalY > swipeThresholdPx -> {
-                                when {
-                                    totalX < -xBiasPx -> {
-                                        if (ensurePanelService())
-                                            PanelAccessibilityService.openControlCenter()
-                                    }
-                                    totalX > xBiasPx -> {
-                                        if (ensurePanelService())
-                                            PanelAccessibilityService.openNotificationCenter()
-                                    }
-                                    // 纯下滑：默认通知中心
-                                    else -> {
-                                        if (ensurePanelService())
-                                            PanelAccessibilityService.openNotificationCenter()
+                        // v0.68.0：盲操消费掉的手势不再走纵向逻辑
+                        if (!blindCtl.onEnd()) {
+                            when {
+                                // 上滑 → D3（y 为负是上滑）
+                                totalY < -swipeThresholdPx -> {
+                                    BlindCaptureController.noteNavigation()
+                                    openDrawerState()
+                                }
+                                // 下滑 → 按 x 偏向决定
+                                totalY > swipeThresholdPx -> {
+                                    when {
+                                        totalX < -xBiasPx -> {
+                                            if (ensurePanelService())
+                                                PanelAccessibilityService.openControlCenter()
+                                        }
+                                        totalX > xBiasPx -> {
+                                            if (ensurePanelService())
+                                                PanelAccessibilityService.openNotificationCenter()
+                                        }
+                                        // 纯下滑：默认通知中心
+                                        else -> {
+                                            if (ensurePanelService())
+                                                PanelAccessibilityService.openNotificationCenter()
+                                        }
                                     }
                                 }
                             }
                         }
                     },
+                    onDragCancel = { blindCtl.onCancel() },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         totalX += dragAmount.x
                         totalY += dragAmount.y
+                        // v0.68.0：盲操跟踪（右边缘左滑）
+                        blindCtl.onMove(change, dragAmount, totalX, totalY, size, swipeThresholdPx)
                     }
                 )
             }
@@ -194,6 +258,34 @@ fun HomeScreen(
                     panelGuideMode = null
                 }
             )
+        }
+        // v0.68.0：盲操模式轨（右侧纵向，当前项放大高亮，跟随手指）
+        (blindUi as? BlindUiState.Selecting)?.let { s ->
+            BlindCaptureRail(
+                selectedIndex = s.modeIndex,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 10.dp)
+                    .fillMaxHeight(0.62f)
+            )
+        }
+        // v0.68.0：盲操自定义☆配置（复用宠物装备添加流程：选应用→选动作→保存）
+        if (showBlindCustomConfig) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.32f)),
+                contentAlignment = Alignment.Center
+            ) {
+                QuickActionAddFlow(
+                    onDismiss = { showBlindCustomConfig = false },
+                    onSaved = { item ->
+                        BlindCapturePrefs.save(context, item)
+                        showBlindCustomConfig = false
+                        PetRepository.say("自定义动作已设置")
+                    }
+                )
+            }
         }
     }
 }

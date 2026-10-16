@@ -197,7 +197,11 @@ private fun HomeHost(
         // v0.32.0：全透明——去掉渐隐罩，壁纸直接透出（Bob）
         // 单页桌面：只有首页；v0.16 首页上滑直达 D3，不再经 D1
         // v0.31.0：首屏只留 Dock（Bob）
-        HomeScreen(onOpenAppDrawer = onOpenAppDrawer)
+        HomeScreen(
+            onOpenAppDrawer = onOpenAppDrawer,
+            // v0.68.0：D3 打开时不豁免右边缘系统手势
+            cleanHome = dockState != DockState.D3,
+        )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         PullUpDock(
             state = dockState,
