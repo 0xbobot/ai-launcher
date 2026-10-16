@@ -1113,6 +1113,22 @@ private fun TodaySection(
             nextEvent = allEvents.firstOrNull { it.end > now }
         }
     }
+    // v0.67.5：会议开始/结束时间点一次性刷新（省电原则：边界点一次性任务，不轮询）
+    LaunchedEffect(nextEvent) {
+        val e = nextEvent ?: return@LaunchedEffect
+        val effectiveEnd = if (e.end > e.begin) e.end else e.begin + 3600_000L
+        val now = System.currentTimeMillis()
+        // 先等到开始（"还有X分钟"→"进行中"），再等到结束（切下一场/消失）
+        if (e.begin > now) delay(e.begin - now)
+        val waitEnd = effectiveEnd - System.currentTimeMillis()
+        if (waitEnd > 0) delay(waitEnd)
+        if (hasCalPermission) {
+            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
+            val now2 = System.currentTimeMillis()
+            allEvents = events.filter { !it.allDay }
+            nextEvent = allEvents.firstOrNull { it.end > now2 }
+        }
+    }
 
 
     // v0.62.0：区块显隐切换（含按需权限请求）
@@ -1211,7 +1227,13 @@ private fun TodaySection(
     val normalGrouped = remember(normalMsgs) {
         normalMsgs.groupBy { "${it.appName}|${it.title}" }
     }
-    val meetingCount = if (TodaySection.NEXT in visibleSections && hasCalPermission && nextEvent != null) 1 else 0
+    // v0.67.5：已结束的会议不计入（无结束时间默认按1小时算），避免 stale "1 个会要开"
+    val meetingCount = if (TodaySection.NEXT in visibleSections && hasCalPermission && nextEvent != null) {
+        val e = nextEvent!!
+        val nowM = System.currentTimeMillis()
+        val effEnd = if (e.end > e.begin) e.end else e.begin + 3600_000L
+        if (nowM < effEnd) 1 else 0
+    } else 0
     val summaryText = AiInsight.buildSummary(replyMsgs.size, meetingCount)
     // v0.63.0：空态判断——P0/P1/P2/P4 任一有内容即非空
     val hasAnyContent = (TodaySection.MSG in visibleSections && (replyMsgs.isNotEmpty() || normalMsgs.isNotEmpty())) ||
@@ -1228,6 +1250,15 @@ private fun TodaySection(
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
     val emptySubtitle = remember(resumeTick) { AiInsight.buildEmptySubtitle() }
+    // v0.67.5：回到桌面时重查日历（省电原则：只在用户看到时刷新，不轮询），避免隔夜 stale
+    LaunchedEffect(resumeTick) {
+        if (resumeTick > 0 && hasCalPermission) {
+            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
+            val now = System.currentTimeMillis()
+            allEvents = events.filter { !it.allDay }
+            nextEvent = allEvents.firstOrNull { it.end > now }
+        }
+    }
 
     // ============ v0.64.2：组级别拖拽排序 ============
     // 组 key（默认 AI 优先级顺序）；用户拖过后用 today_user_order
@@ -1551,7 +1582,13 @@ private fun TodaySection(
                                     Text(text = "授权日历，七仔帮你盯日程", fontSize = 12.sp)
                                 }
                             } else {
-                                nextEvent?.let { e ->
+                                // v0.67.5：已结束的会议不在此显示（无结束时间默认按1小时算），避免 stale "进行中"
+                                val activeEvent = nextEvent?.takeIf { e ->
+                                    val now = System.currentTimeMillis()
+                                    val effEnd = if (e.end > e.begin) e.end else e.begin + 3600_000L
+                                    now < effEnd
+                                }
+                                activeEvent?.let { e ->
                                     val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
                                         .format(Date(e.begin))
                                     // v0.67.2：已开始未结束显示"进行中"，未开始显示倒计时
