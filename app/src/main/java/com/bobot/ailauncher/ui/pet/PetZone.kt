@@ -1241,6 +1241,7 @@ private fun TodaySection(
         // AI-4：按 (appName+title) 分组，判断折叠（v0.63.0：groupedMsgs 已废弃，用 normalGrouped）
         var expandedGroups by remember { mutableStateOf<Set<String>>(emptySet()) }
         // AI-3：待办提取（最多 2 条，排除已完成）
+        // v0.67.7：保留来源 PetItem，"看原文"点正文直达来源会话
         val todos = remember(recentMsgs, doneTodos) {
             recentMsgs.mapNotNull { item ->
                 AiInsight.extractTodo(
@@ -1249,9 +1250,9 @@ private fun TodaySection(
                     title = item.title,
                     text = item.text,
                     time = item.time
-                )
-            }.filter { it.id !in doneTodos }
-                .sortedByDescending { it.time }
+                )?.let { todo -> todo to item }
+            }.filter { (todo, _) -> todo.id !in doneTodos }
+                .sortedByDescending { (todo, _) -> todo.time }
                 .take(2)
         }
     // v0.63.0：AI 简报式——按行动优先级渲染，不再按"接下来/消息/待办"区块
@@ -1783,7 +1784,7 @@ private fun TodaySection(
                 "todo" -> {
                 // === P4：待办 ===
                         if (TodaySection.TODO in visibleSections && todos.isNotEmpty()) {
-                            todos.forEachIndexed { index, todo ->
+                            todos.forEachIndexed { index, (todo, source) ->
                                 key(todo.id) {
                                     // v0.64.1：多条待办之间用细分割线
                                     if (index > 0) {
@@ -1796,7 +1797,7 @@ private fun TodaySection(
                                         )
                                         Spacer(modifier = Modifier.height(2.dp))
                                     }
-                                    TodoRow(todo = todo, editMode = editMode)
+                                    TodoRow(todo = todo, source = source, editMode = editMode)
                                 }
                             }
                         }
@@ -1888,42 +1889,8 @@ private fun PriorityReplyRow(
             } else null
         }
     }
-    fun openSession() {
-        // v0.67.4：未接来电——有号码直接回拨，无号码才开通话记录
-        if (isMissedCallItem(item)) {
-            val ok = if (item.phoneNumber.isNotBlank()) {
-                dialBack(context, item.phoneNumber)
-            } else {
-                openCallLog(context)
-            }
-            if (!ok) {
-                com.bobot.ailauncher.data.PetRepository.say("打不开拨号盘")
-            }
-            return
-        }
-        // v0.67.2：contentIntent 失败时 fallback 直接打开 App；全部失败时七仔说话反馈
-        val pi = item.pendingIntent
-        var sent = false
-        if (pi != null) {
-            try {
-                pi.send()
-                sent = true
-            } catch (_: android.app.PendingIntent.CanceledException) {
-            } catch (_: Exception) { }
-        }
-        if (!sent) {
-            val pkg = item.packageName.ifBlank { "com.ss.android.lark" }
-            var launched = false
-            try {
-                launched = context.packageManager.getLaunchIntentForPackage(pkg)
-                    ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    ?.let { context.startActivity(it); true } ?: false
-            } catch (_: Exception) { }
-            if (!launched) {
-                com.bobot.ailauncher.data.PetRepository.say("打不开，试试手动打开${item.appName}")
-            }
-        }
-    }
+    // v0.67.7：逻辑已抽取为顶层 openPetItemSession，待办"看原文"共用
+    fun openSession() = openPetItemSession(context, item)
     // v0.64.0：点击行展开看关键点+全文（看看重点移到 P0 行）
     var expanded by remember(item.id) { mutableStateOf(false) }
     val keyPoints = remember(item.id) {
@@ -2115,6 +2082,47 @@ private fun dialBack(context: Context, number: String): Boolean {
 }
 
 /**
+ * v0.67.7：消息行/待办行共用——点按直达会话（contentIntent），失败时打开 App。
+ * 由 NormalMessageRow.openSession() 抽取，待办"看原文"复用同一逻辑。
+ */
+private fun openPetItemSession(context: Context, item: PetItem) {
+    // v0.67.4：未接来电——有号码直接回拨，无号码才开通话记录
+    if (isMissedCallItem(item)) {
+        val ok = if (item.phoneNumber.isNotBlank()) {
+            dialBack(context, item.phoneNumber)
+        } else {
+            openCallLog(context)
+        }
+        if (!ok) {
+            com.bobot.ailauncher.data.PetRepository.say("打不开拨号盘")
+        }
+        return
+    }
+    // v0.67.2：contentIntent 失败时 fallback 直接打开 App；全部失败时七仔说话反馈
+    val pi = item.pendingIntent
+    var sent = false
+    if (pi != null) {
+        try {
+            pi.send()
+            sent = true
+        } catch (_: android.app.PendingIntent.CanceledException) {
+        } catch (_: Exception) { }
+    }
+    if (!sent) {
+        val pkg = item.packageName.ifBlank { "com.ss.android.lark" }
+        var launched = false
+        try {
+            launched = context.packageManager.getLaunchIntentForPackage(pkg)
+                ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                ?.let { context.startActivity(it); true } ?: false
+        } catch (_: Exception) { }
+        if (!launched) {
+            com.bobot.ailauncher.data.PetRepository.say("打不开，试试手动打开${item.appName}")
+        }
+    }
+}
+
+/**
  * v0.63.0：P2 普通消息行——扁平（无白卡），小圆点 + 应用名 + 正文，点击进会话，左滑清除。
  */
 @Composable
@@ -2134,42 +2142,8 @@ private fun NormalMessageRow(
         item.title.isNotBlank() -> item.title
         else -> item.sortDesc
     }
-    fun openSession() {
-        // v0.67.4：未接来电——有号码直接回拨，无号码才开通话记录
-        if (isMissedCallItem(item)) {
-            val ok = if (item.phoneNumber.isNotBlank()) {
-                dialBack(context, item.phoneNumber)
-            } else {
-                openCallLog(context)
-            }
-            if (!ok) {
-                com.bobot.ailauncher.data.PetRepository.say("打不开拨号盘")
-            }
-            return
-        }
-        // v0.67.2：contentIntent 失败时 fallback 直接打开 App；全部失败时七仔说话反馈
-        val pi = item.pendingIntent
-        var sent = false
-        if (pi != null) {
-            try {
-                pi.send()
-                sent = true
-            } catch (_: android.app.PendingIntent.CanceledException) {
-            } catch (_: Exception) { }
-        }
-        if (!sent) {
-            val pkg = item.packageName.ifBlank { "com.ss.android.lark" }
-            var launched = false
-            try {
-                launched = context.packageManager.getLaunchIntentForPackage(pkg)
-                    ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    ?.let { context.startActivity(it); true } ?: false
-            } catch (_: Exception) { }
-            if (!launched) {
-                com.bobot.ailauncher.data.PetRepository.say("打不开，试试手动打开${item.appName}")
-            }
-        }
-    }
+    // v0.67.7：逻辑已抽取为顶层 openPetItemSession，待办"看原文"共用
+    fun openSession() = openPetItemSession(context, item)
     Spacer(modifier = Modifier.height(8.dp))
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -2239,12 +2213,15 @@ private fun NormalMessageRow(
 
 /**
  * v0.62.0：待办行——点左侧圆圈勾选完成（删除线 + 淡出动画后移除），左滑删除。
+ * v0.67.7：点正文"看原文"——直达来源消息会话（复用 openPetItemSession）。
  */
 @Composable
 private fun TodoRow(
     todo: AiInsight.TodoItem,
+    source: PetItem,
     editMode: Boolean = false
 ) {
+    val context = LocalContext.current
     var completing by remember(todo.id) { mutableStateOf(false) }
     val rowAlpha by animateFloatAsState(
         targetValue = if (completing) 0f else 1f,
@@ -2316,6 +2293,7 @@ private fun TodoRow(
                     }
                 }
                 Spacer(modifier = Modifier.width(12.dp))
+                // v0.67.7：正文可点——"看原文"，直达来源消息会话
                 Text(
                     text = todo.action,
                     fontSize = 15.sp,
@@ -2324,6 +2302,9 @@ private fun TodoRow(
                     textDecoration = if (completing) TextDecoration.LineThrough else null,
                     maxLines = 1,
                     modifier = Modifier.weight(1f)
+                        .clickable(enabled = !editMode && !completing) {
+                            openPetItemSession(context, source)
+                        }
                 )
                 // v0.64.1：截止时间放右侧
                 Text(
