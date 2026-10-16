@@ -1076,18 +1076,11 @@ fun AppCenterContent(
                     glideJob = null
                     // 列表已在拖动中滚到位，松手无需任何操作
                 }
-                // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区；
-                // 分区空时不显示按钮（占位保持 rail 居中）
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = 70.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    // v0.43.3（Bob）：★/眼是字母导航的一部分——同宽(44dp)、同节奏(24dp 高)，不隔开
-                    // v0.55.2（Bob）：点击加震动，和字母导航一致
-                    if (dockApps.isNotEmpty()) {
+                // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区
+                // v0.67.12（Bob）：改用共享 AppRail，单一样式单布局
+                val starSlot: (@Composable () -> Unit)? = if (dockApps.isNotEmpty()) ({
+                    // v0.43.3：★/眼是字母导航的一部分；v0.55.2：点击加震动；v0.56.2：收藏时脉冲
+
                         // v0.56.2（Bob）：收藏时 ★ 脉冲闪烁
                         val starScale = remember { Animatable(1f) }
                         LaunchedEffect(flashTick) {
@@ -1123,16 +1116,9 @@ fun AppCenterContent(
                                     }
                             )
                         }
-                    }
-                    WaveRail(
-                        letters = letters,
-                        side = RailSide.RIGHT,
-                        onActiveLetter = glideToLetter,
-                        onRelease = stopGlide,
-                        forcedActiveIndex = mirrorIndex,
-                        modifier = Modifier.height(400.dp)
-                    )
-                    if (hiddenApps.isNotEmpty()) {
+                }) else null
+                val eyeSlot: (@Composable () -> Unit)? = if (hiddenApps.isNotEmpty()) ({
+
                         // v0.56.2（Bob）：隐藏时眼睛脉冲闪烁
                         val eyeScale = remember { Animatable(1f) }
                         LaunchedEffect(flashTick) {
@@ -1168,8 +1154,18 @@ fun AppCenterContent(
                                     }
                             )
                         }
-                    }
-                }
+                }) else null
+                AppRail(
+                    letters = letters,
+                    starContent = starSlot,
+                    eyeContent = eyeSlot,
+                    onActiveLetter = glideToLetter,
+                    onRelease = stopGlide,
+                    forcedActiveIndex = mirrorIndex,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 70.dp)
+                )
                 WaveRail(
                     letters = letters,
                     side = RailSide.LEFT,

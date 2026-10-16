@@ -38,6 +38,7 @@ import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.apps.DockState
+import com.bobot.ailauncher.ui.apps.AppRail
 import com.bobot.ailauncher.ui.apps.PullUpDock
 import com.bobot.ailauncher.ui.apps.WaveRail
 import com.bobot.ailauncher.ui.components.UpdateDialog
@@ -266,9 +267,9 @@ private fun HomeHost(
                     }
             )
         }
-        // 字母选择器：长按后浮现，复用 WaveRail 视觉（触摸由长按区接管）；
+        // 字母选择器：长按后浮现（触摸由长按区接管）；
         // D3 打开后继续盖在上面，直到松手，保证视觉与手势都连续。
-        // v0.67.11（Bob）：结构与应用中心 rail 完全对齐（★/眼占位），解决重叠错位
+        // v0.67.12（Bob）：改用共享 AppRail，与应用中心同一套
         if (pickerActive) {
             val dockNotEmpty = remember(pickerActive) {
                 UiPrefs.getDockPinned(context).isNotEmpty()
@@ -276,23 +277,17 @@ private fun HomeHost(
             val hiddenNotEmpty = remember(pickerActive) {
                 com.bobot.ailauncher.data.HiddenApps.getHidden(context).isNotEmpty()
             }
-            Column(
+            AppRail(
+                letters = homeLetters,
+                starContent = if (dockNotEmpty) ({ Spacer(modifier = Modifier.height(24.dp)) }) else null,
+                eyeContent = if (hiddenNotEmpty) ({ Spacer(modifier = Modifier.height(24.dp)) }) else null,
+                onActiveLetter = {},
+                onRelease = {},
+                forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 70.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                if (dockNotEmpty) Spacer(modifier = Modifier.height(24.dp))
-                WaveRail(
-                    letters = homeLetters,
-                    onActiveLetter = {},
-                    onRelease = {},
-                    forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
-                    modifier = Modifier.height(400.dp)
-                )
-                if (hiddenNotEmpty) Spacer(modifier = Modifier.height(24.dp))
-            }
+                    .padding(bottom = 70.dp)
+            )
         }
         // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
         // OTA 更新对话框——v0.67.1：只在用户主动点击时弹（TODAY 卡片"有新版本"行 / 设置页手动检查），

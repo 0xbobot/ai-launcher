@@ -7,12 +7,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -252,5 +254,38 @@ internal fun WaveRail(
                 )
             }
         }
+    }
+}
+
+/**
+ * v0.67.12（Bob）：共享 rail——★ + 字母 WaveRail + 眼睛，单一样式单布局。
+ * 应用中心和主屏 picker 共用一套，避免两套错位。
+ * starContent/eyeContent：null=不占位；{}=占24dp空位；有内容=显示（应用中心传带点击+脉冲的图标）。
+ */
+@Composable
+internal fun AppRail(
+    letters: List<Char>,
+    starContent: (@Composable () -> Unit)?,
+    eyeContent: (@Composable () -> Unit)?,
+    onActiveLetter: (Char) -> Unit,
+    onRelease: () -> Unit,
+    forcedActiveIndex: Int? = null,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // 调用方自己控制 slot 尺寸（应用中心：44x24dp Box+点击；主屏 picker：24dp Spacer 占位）
+        starContent?.invoke()
+        WaveRail(
+            letters = letters,
+            onActiveLetter = onActiveLetter,
+            onRelease = onRelease,
+            forcedActiveIndex = forcedActiveIndex,
+            modifier = Modifier.height(400.dp)
+        )
+        eyeContent?.invoke()
     }
 }
