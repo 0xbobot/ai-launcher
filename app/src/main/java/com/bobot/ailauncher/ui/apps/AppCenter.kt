@@ -1053,7 +1053,8 @@ fun AppCenterContent(
             // v0.40.2：右侧一条可见 rail + 左侧隐形触发区（Bob）——
             // 左边不摆 rail（摆两个很奇怪），但左侧滑动同样触发字母切换，
             // 触发后是右侧 rail 亮起波浪跟随；应用列表左侧缩进给手指留空间。
-            if (!searching && letters.isNotEmpty()) {
+            // v0.67.11（Bob）：主屏 picker 会话中隐藏自己的 rail，避免与 picker 重叠
+            if (!searching && letters.isNotEmpty() && homeLetter == null) {
                 var glideJob by remember { mutableStateOf<Job?>(null) }
                 // 左侧隐形区触发时，右侧可见 rail 跟随显示波浪
                 var mirrorIndex by remember { mutableStateOf<Int?>(null) }
