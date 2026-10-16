@@ -28,6 +28,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -84,6 +85,7 @@ fun HomeScreen(
     val haptics = LocalHapticFeedback.current
 
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
+    val scope = rememberCoroutineScope()
     // v0.68.0：盲操状态
     var blindUi by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
     var showBlindCustomConfig by remember { mutableStateOf(false) }
@@ -97,6 +99,7 @@ fun HomeScreen(
         BlindCaptureController(
             context = context,
             haptics = haptics,
+            scope = scope,
             setUi = { blindUi = it },
             requestAudioPermission = {
                 audioPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
@@ -180,7 +183,6 @@ fun HomeScreen(
             .fillMaxSize()
             .onGloballyPositioned { coords -> homeSize = coords.size }
             .pointerInput(blindCtl) {
-                blindCtl.attachScope(this)
                 var totalX = 0f
                 var totalY = 0f
                 detectDragGestures(

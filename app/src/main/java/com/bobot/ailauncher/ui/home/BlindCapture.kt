@@ -156,6 +156,7 @@ object BlindAudioRecorder {
 class BlindCaptureController(
     private val context: Context,
     private val haptics: HapticFeedback,
+    private val scope: CoroutineScope,
     private val setUi: (BlindUiState) -> Unit,
     private val requestAudioPermission: () -> Unit,
     private val openCustomConfig: () -> Unit,
@@ -176,9 +177,6 @@ class BlindCaptureController(
         private fun cooldownOk(): Boolean =
             SystemClock.uptimeMillis() - lastNavMs > COOLDOWN_MS
     }
-
-    private var scope: CoroutineScope? = null
-    fun attachScope(s: CoroutineScope) { scope = s }
 
     private var tracking = false
     private var armed = false
@@ -224,7 +222,7 @@ class BlindCaptureController(
                     // 左滑到位 → 等待 120ms 停留
                     armed = true
                     val y0 = change.position.y
-                    dwellJob = scope?.launch {
+                    dwellJob = scope.launch {
                         delay(DWELL_MS)
                         if (armed && !selecting) activate(y0)
                     }
@@ -300,7 +298,7 @@ class BlindCaptureController(
 
     private fun resetIdle() {
         idleJob?.cancel()
-        idleJob = scope?.launch {
+        idleJob = scope.launch {
             delay(IDLE_CANCEL_MS)
             if (selecting) reset() // 3 秒不动 → 静默取消
         }
