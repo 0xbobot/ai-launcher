@@ -248,9 +248,11 @@ class BlindCaptureController(
         lastDragDx = Int.MIN_VALUE
         // v0.68.12：诊断——显示落点 x 及跟踪与否的原因；
         // 被拒绝时只更新文字不震动（onStart 对每次滑动都调用，不能每次都震）
-        val msg = "onStart(x=${x.toInt()})" + when {
+        // v0.68.13：加上屏宽 w 与阈值线，方便对账（x/w/线 全是 px，单位一致无换算 bug）
+        val thresholdPx = widthPx - edgePx
+        val msg = "onStart(x=${x.toInt()}/w=${widthPx.toInt()})" + when {
             tracking -> ""
-            !inEdge -> "✗非边缘(需右48dp内)"
+            !inEdge -> "✗非边缘(差${(thresholdPx - x).toInt().coerceAtLeast(0)}px)"
             else -> "✗冷却中"
         }
         if (tracking) diagState(msg) else diagText(msg)
