@@ -1,6 +1,6 @@
-package com.bobot.ailauncher.ui.pet
-
 @file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
+package com.bobot.ailauncher.ui.pet
 
 import android.content.ContentValues
 import android.content.Context
