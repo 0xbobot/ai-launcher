@@ -64,7 +64,6 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
-import kotlin.math.maxOf
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
