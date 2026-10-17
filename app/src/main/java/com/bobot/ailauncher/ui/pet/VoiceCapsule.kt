@@ -1,5 +1,7 @@
 package com.bobot.ailauncher.ui.pet
 
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -31,6 +33,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
