@@ -323,7 +323,7 @@ private fun HomeHost(
                             // v0.68.30（Bob）：picker 房子上拉——D3 开着时要先关 D3 回主页，
                             // 不能只关 picker（不然还停在 D3 里）
                             if (d3Opened) {
-                                goDock(DockState.D2)
+                                onD3SwipeRight()
                             }
                             dismissPicker()
                         }
