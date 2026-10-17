@@ -7,6 +7,7 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateOffsetAsState
 import androidx.compose.animation.core.infiniteRepeatable
