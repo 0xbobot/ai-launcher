@@ -229,7 +229,8 @@ internal fun WaveRail(
                             emitItem(i)
                             // v0.68.20（Bob）：意向拉拽——房子继续上拉/眼睛继续下拉，进度 0→1
                             // v0.68.21：眼睛在底部空间有限，阈值缩短到 60dp 不然触发不了
-                            val houseThresholdPx = with(density) { 100.dp.toPx() }
+                            // v0.68.22（Bob）：房子滑程缩短 1/3，67dp 更跟手
+                            val houseThresholdPx = with(density) { 67.dp.toPx() }
                             val eyeThresholdPx = with(density) { 60.dp.toPx() }
                             if (items.isNotEmpty() && items[0] is RailItem.House &&
                                 i == 0 && y < railTopPx
@@ -368,11 +369,10 @@ internal fun WaveRail(
             val rPx = with(density) { 24.dp.toPx() }
             // v0.68.21（Bob）：拉拽放大时金环就淡出，不然图标比圈大很奇怪
             val bubbleRingAlpha = (1f - explodeProgress) * (1f - housePull * 0.9f)
-            // v0.68.20：气泡跟随拉拽——房子上拉时上移，眼睛下拉时下移
-            val houseOffPx = with(density) { 100.dp.toPx() }
+            // v0.68.20：气泡跟随拉拽——眼睛下拉时下移
+            // v0.68.22（Bob）：房子不位移，直接在原位置放大
             val eyeOffPx = with(density) { 60.dp.toPx() }
             val bubblePullOffsetY = when (items.getOrNull(idx)) {
-                is RailItem.House -> -housePull * houseOffPx
                 is RailItem.Eye -> eyePull * eyeOffPx
                 else -> 0f
             }
