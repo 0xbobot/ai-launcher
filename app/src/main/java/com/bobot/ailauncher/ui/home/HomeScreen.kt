@@ -50,12 +50,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.NotificationRepository
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.PanelAccessibilityService
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
-import com.bobot.ailauncher.ui.pet.QuickActionAddFlow
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.util.rebindListener
 
@@ -81,9 +79,9 @@ fun HomeScreen(
     onOpenAppDrawer: () -> Unit,
     cleanHome: Boolean = true,
     onBlindActiveChange: (Boolean) -> Unit = {},
-    // v0.68.32：扇形选择状态上报 MainScreen（扇形绘制层级提到 Dock 之上）；
-    // String = 自定义段标签
-    onBlindSelectingChange: (BlindUiState.Selecting?, String) -> Unit = { _, _ -> },
+    // v0.68.32：扇形选择状态上报 MainScreen（扇形绘制层级提到 Dock 之上）
+    // v0.68.35：Selecting 自带动态段列表，不再传自定义标签
+    onBlindSelectingChange: (BlindUiState.Selecting?) -> Unit = { },
     // v0.68.32：底部 Dock 区高度（dp），用于扇形圆心钳制
     blindDockZoneDp: Float = 0f,
 ) {
@@ -110,14 +108,12 @@ fun HomeScreen(
         label = "todayAlpha",
     )
     // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
-    var showBlindCustomConfig by remember { mutableStateOf(false) }
-    // v0.68.20：自定义☆动作状态——配置保存后刷新扇形显示
-    var blindCustomItem by remember { mutableStateOf(BlindCapturePrefs.load(context)) }
+    // v0.68.35：旧"自定义☆"固定槽位已作废——扇形快捷段直接读七仔装备列表，
+    // 增删复用七仔装备长按/+ 流程，不再需要扇形侧配置弹窗
     // v0.68.32：扇形选择状态上报 MainScreen（扇形在 MainScreen 最顶层绘制，盖住 Dock）
     val blindSelecting = blindUi as? BlindUiState.Selecting
-    val blindCustomLabel = blindCustomItem?.label?.takeIf { it.isNotBlank() } ?: "自定义"
-    androidx.compose.runtime.LaunchedEffect(blindSelecting, blindCustomLabel) {
-        onBlindSelectingChange(blindSelecting, blindCustomLabel)
+    androidx.compose.runtime.LaunchedEffect(blindSelecting) {
+        onBlindSelectingChange(blindSelecting)
     }
     // v0.68.17：右边缘系统手势豁免宽度（仅用于 setSystemGestureExclusionRects，
     // 盲操触发已改为"任何左滑"，不再依赖边缘区）
@@ -135,7 +131,6 @@ fun HomeScreen(
             requestAudioPermission = {
                 audioPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
             },
-            openCustomConfig = { showBlindCustomConfig = true },
             triggerPx = with(density) { 24.dp.toPx() },
             onDiag = { blindDiag = it }, // v0.68.12：诊断浮层
         ).also { blindCtlRef.value = it }
@@ -312,26 +307,6 @@ fun HomeScreen(
                 fontSize = 11.sp,
                 color = Color.White
             )
-        }
-        // v0.68.0：盲操自定义☆配置（复用宠物装备添加流程：选应用→选动作→保存）
-        if (showBlindCustomConfig) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.32f)),
-                contentAlignment = Alignment.Center
-            ) {
-                QuickActionAddFlow(
-                    onDismiss = { showBlindCustomConfig = false },
-                    onSaved = { item ->
-                        BlindCapturePrefs.save(context, item)
-                        // v0.68.20：保存后刷新状态，扇形立即显示新名称
-                        blindCustomItem = item
-                        showBlindCustomConfig = false
-                        PetRepository.say("自定义动作已设置")
-                    }
-                )
-            }
         }
     }
 }

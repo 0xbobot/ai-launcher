@@ -206,7 +206,7 @@ private fun HomeHost(
     var blindActive by remember { mutableStateOf(false) }
     // v0.68.32：扇形选择状态（上报自 HomeScreen）——扇形在最顶层绘制，盖住 Dock
     var blindSelecting by remember { mutableStateOf<BlindUiState.Selecting?>(null) }
-    var blindCustomLabel by remember { mutableStateOf("自定义") }
+    // v0.68.35：旧自定义标签已作废——段列表自带于 Selecting.segments
     // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位），收起后恢复
     val dockAlpha by animateFloatAsState(
         targetValue = if (blindActive) 0.3f else 1f,
@@ -226,9 +226,8 @@ private fun HomeHost(
             cleanHome = dockState != DockState.D3,
             onBlindActiveChange = { blindActive = it },
             // v0.68.32：扇形状态上报（顶层绘制）+ Dock 区高度（圆心钳制）
-            onBlindSelectingChange = { s, label ->
+            onBlindSelectingChange = { s ->
                 blindSelecting = s
-                blindCustomLabel = label
             },
             blindDockZoneDp = when (dockState) {
                 DockState.D1 -> 112f
@@ -420,7 +419,7 @@ private fun HomeHost(
                 centerX = s.centerX,
                 centerY = s.centerY,
                 selectedIndex = s.modeIndex,
-                customLabel = blindCustomLabel,
+                segments = s.segments,
                 direction = s.direction,
                 modifier = Modifier.zIndex(100f),
             )
