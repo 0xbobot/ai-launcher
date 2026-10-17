@@ -85,8 +85,19 @@
         <!-- v0.40.0：低电量守护前台服务已删除（常驻通知打扰），改为 LauncherApp 里
              跟随进程生命周期的动态广播监听 -->
 
+        <!-- v0.68.27：低电量悬浮窗服务（替代 BatteryGuardActivity 弹窗，不拽回桌面） -->
+        <service
+            android:name=".ui.battery.BatteryOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="低电量悬浮窗提醒" />
+        </service>
+
         <!-- 低电量提醒弹窗：半透明主题，居中温和卡片。
-             v0.36.1：全屏 intent 必须能盖住视频/游戏等全屏应用 -->
+             v0.36.1：全屏 intent 必须能盖住视频/游戏等全屏应用
+             v0.68.27：已废弃，改走 BatteryOverlayService 悬浮窗（保留 activity 供降级） -->
         <activity
             android:name=".ui.battery.BatteryGuardActivity"
             android:exported="false"

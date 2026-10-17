@@ -9,9 +9,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.ui.battery.BatteryGuardActivity
+import com.bobot.ailauncher.ui.battery.BatteryOverlayService
 
 /**
  * v0.40.0：低电量守护（替代已删除的 BatteryGuardService 前台服务）。
@@ -50,11 +52,12 @@ object BatteryGuard {
             // 电池状态同步给七仔省电模式
             BatteryState.update(pct, charging)
 
-            // 充电中或回升到安全线以上：重置，下轮再提醒；归还音频焦点
+            // 充电中或回升到安全线以上：重置，下轮再提醒；归还音频焦点；关悬浮窗
             if (charging || pct >= RESET_PCT) {
                 warnFired = false
                 criticalFired = false
                 BatteryInterrupt.abandonAudioFocus()
+                dismissAlert(app)
                 return
             }
 
@@ -118,25 +121,29 @@ object BatteryGuard {
     }
 
     /**
-     * 低电量提醒。
-     * v0.41.14（Bob 要求中断播放）：critical 档先申请音频焦点（暂停视频省电），
-     * 再尝试直接启动全屏（有悬浮窗权限时稳定盖住）；没权限则降级全屏通知。
-     * warn 档保持温和：只通知，不抢焦点。
+     * 低电量提醒（v0.68.27 重构）。
+     * - critical 档：先申请音频焦点（暂停视频省电），再弹悬浮窗小气泡
+     * - warn 档：只弹悬浮窗，不抢音频焦点
+     * - 有悬浮窗权限 → 小气泡盖在当前应用上层；无权限 → 降级为普通通知
      */
     private fun fireAlert(context: Context, pct: Int, critical: Boolean) {
         if (critical) {
             // 先暂停正在播放的视频/音乐（省电的关键）
             BatteryInterrupt.requestAudioFocus(context)
-            // 有悬浮窗权限 → 直接全屏盖住；没有 → 降级全屏通知
-            if (BatteryInterrupt.launchAlertDirectly(context, pct, critical)) return
         }
-        val fullScreen = Intent(context, BatteryGuardActivity::class.java).apply {
+        // 悬浮窗小气泡（不拽回桌面，不弹模态框）
+        if (Settings.canDrawOverlays(context)) {
+            BatteryOverlayService.show(context, pct, critical)
+            return
+        }
+        // 无悬浮窗权限：降级为普通通知（点开进设置页引导开权限）
+        val overlayGuide = Intent(context, BatteryGuardActivity::class.java).apply {
             putExtra(BatteryGuardActivity.EXTRA_PCT, pct)
             putExtra(BatteryGuardActivity.EXTRA_CRITICAL, critical)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
-        val fullScreenPi = PendingIntent.getActivity(
-            context, if (critical) 2 else 1, fullScreen,
+        val pi = PendingIntent.getActivity(
+            context, if (critical) 2 else 1, overlayGuide,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val title = if (critical) "七仔快要睡着了…" else "七仔快没能量了"
@@ -148,13 +155,22 @@ object BatteryGuard {
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setFullScreenIntent(fullScreenPi, true)
-            .setContentIntent(fullScreenPi)
+            .setContentIntent(pi)
             .setAutoCancel(true)
             .build()
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         try {
             nm.notify(ALERT_ID, notification)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** 充电或电量恢复时：关掉悬浮窗。 */
+    fun dismissAlert(context: Context) {
+        BatteryOverlayService.hide(context)
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        try {
+            nm.cancel(ALERT_ID)
         } catch (_: Exception) {
         }
     }
