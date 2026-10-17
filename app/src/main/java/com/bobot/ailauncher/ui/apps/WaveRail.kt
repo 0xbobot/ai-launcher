@@ -21,8 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +35,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.positionInParent
@@ -259,7 +260,7 @@ internal fun WaveRail(
                             }
                         )
                     } else {
-                        // v0.68.4：House 用手绘 glyph（Icons.Filled.Home 在当前依赖不可用）
+                        // v0.68.6：精致版 HouseGlyph（细描边+圆角+门洞）
                         val waveMod = Modifier
                             .size(14.dp)
                             .graphicsLayer {
@@ -325,7 +326,7 @@ internal fun WaveRail(
                         color = AILauncherColors.Title
                     )
                 } else {
-                    // v0.68.4：House 用手绘 glyph（Icons.Filled.Home 在当前依赖不可用）
+                    // v0.68.6：精致版 HouseGlyph（细描边+圆角+门洞）
                     when (bubbleItem) {
                         RailItem.House -> HouseGlyph(
                             color = AILauncherColors.Title,
@@ -379,18 +380,49 @@ internal fun AppRail(
         pulseItem = pulseItem,
         modifier = modifier.height(400.dp)
     )
-}
-
 /**
- * v0.68.4：手绘房子 glyph。
- * Icons.Filled.Home 在当前 material-icons 依赖中不可用（Star/VisibilityOff 可用），
- * 房子项改用 Canvas 手绘，保证确定性渲染。
+ * v0.68.6（Bob）：精致版房子——细描边+圆角+门洞，告别实心丑房子。
  */
 @Composable
 private fun HouseGlyph(
     color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
 ) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.095f
+        val roofY = h * 0.44f
+        val peakY = h * 0.14f
+        val bodyBottom = h * 0.88f
+        val path = Path().apply {
+            // 屋顶：两条斜线在顶部圆角相接
+            moveTo(w * 0.10f, roofY)
+            lineTo(w * 0.50f, peakY)
+            lineTo(w * 0.90f, roofY)
+            // 房体左右竖线
+            moveTo(w * 0.26f, roofY)
+            lineTo(w * 0.26f, bodyBottom)
+            moveTo(w * 0.74f, roofY)
+            lineTo(w * 0.74f, bodyBottom)
+            // 房体底线
+            moveTo(w * 0.26f, bodyBottom)
+            lineTo(w * 0.74f, bodyBottom)
+            // 门：居中竖线
+            moveTo(w * 0.50f, h * 0.64f)
+            lineTo(w * 0.50f, bodyBottom)
+        }
+        drawPath(
+            path = path,
+            color = color,
+            style = Stroke(
+                width = stroke,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
+        )
+    }
+}
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height

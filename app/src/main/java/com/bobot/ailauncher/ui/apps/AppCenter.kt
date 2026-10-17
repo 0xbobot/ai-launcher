@@ -1078,10 +1078,15 @@ fun AppCenterContent(
                 val stopGlide: () -> Unit = {
                     glideJob?.cancel()
                     glideJob = null
+                    houseDwellJob?.cancel()
+                    houseDwellJob = null
                     // 列表已在拖动中滚到位，松手无需任何操作
                 }
                 // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区
                 // v0.67.12（Bob）：改用共享 AppRail，单一样式单布局
+                // v0.68.6（Bob）：房子停留确认——滑到房子后停留450ms才回首页，
+                // 给操作反应时间，避免滑过时误触太突然；手指移开或松手即取消
+                var houseDwellJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                 // v0.67.13（Bob）：房子/收藏/隐藏做进 rail 滑动项，一条导航滑到哪去哪
                 val railItems = remember(dockApps, letters, hiddenApps) {
                     buildList {
@@ -1098,8 +1103,15 @@ fun AppCenterContent(
                     else -> null
                 }
                 val onRailItem: (RailItem) -> Unit = { item ->
+                    houseDwellJob?.cancel()
+                    houseDwellJob = null
                     when (item) {
-                        is RailItem.House -> onHeaderSwipeRightState.value()
+                        is RailItem.House -> {
+                            houseDwellJob = scope.launch {
+                                kotlinx.coroutines.delay(450)
+                                onHeaderSwipeRightState.value()
+                            }
+                        }
                         is RailItem.Star -> scope.launch { listState.animateScrollToItem(0) }
                         is RailItem.Eye -> scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
                         is RailItem.Letter -> glideToLetter(item.char)
