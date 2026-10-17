@@ -168,9 +168,13 @@ object BlindCapturePrefs {
 object BlindAudioRecorder {
     var isRecording: Boolean = false
         private set
+    // v0.68.24：录音时长（生成语音胶囊时显示）
+    var lastDurationSec: Int = 0
+        private set
     private var recorder: MediaRecorder? = null
     private var outPfd: android.os.ParcelFileDescriptor? = null
     private var outUri: android.net.Uri? = null
+    private var startMs: Long = 0L
 
     fun start(context: Context): Boolean {
         if (isRecording) return true
@@ -200,6 +204,7 @@ object BlindAudioRecorder {
             r.setOutputFile(pfd.fileDescriptor)
             r.prepare()
             r.start()
+            startMs = System.currentTimeMillis()
             recorder = r
             outPfd = pfd
             outUri = uri
@@ -217,9 +222,14 @@ object BlindAudioRecorder {
         }
     }
 
-    /** 停止并返回 MediaStore Uri（可空） */
+    /** 停止并返回 MediaStore Uri（可空）；同时结算本次时长 */
     fun stop(context: Context): android.net.Uri? {
         val uri = outUri
+        if (startMs > 0) {
+            lastDurationSec =
+                ((System.currentTimeMillis() - startMs) / 1000).toInt().coerceAtLeast(1)
+            startMs = 0L
+        }
         try { recorder?.stop() } catch (_: Exception) { }
         try { recorder?.release() } catch (_: Exception) { }
         try { outPfd?.close() } catch (_: Exception) { }
@@ -275,8 +285,6 @@ class BlindCaptureController(
     private val openCustomConfig: () -> Unit,
     private val triggerPx: Float,
     private val onDiag: (String) -> Unit = {},
-    // v0.68.22：录音结束回调（HomeScreen 弹出"转文字"卡片）
-    private val onRecordingDone: () -> Unit = {},
 ) {
     companion object {
         private const val TAG = "BlindCapture"
@@ -483,11 +491,18 @@ class BlindCaptureController(
 
     private fun toggleAudio() {
         if (BlindAudioRecorder.isRecording) {
-            BlindAudioRecorder.stop(context)
+            val uri = BlindAudioRecorder.stop(context)
+            val durSec = BlindAudioRecorder.lastDurationSec
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            // v0.68.22：告知公共目录位置，并弹出"转文字"卡片
-            PetRepository.say("录音已保存到 Music/Recordings")
-            onRecordingDone()
+            // v0.68.24：录音结束 → 生成语音胶囊（浮在七仔周围）
+            if (uri != null) {
+                com.bobot.ailauncher.ui.pet.VoiceCapsuleStore.add(
+                    context, uri.toString(), durSec
+                )
+                PetRepository.say("录音变成胶囊啦，点它可以播放或转文字")
+            } else {
+                PetRepository.say("录音保存失败了")
+            }
         } else if (hasAudioPermission()) {
             startAudio()
         } else {
