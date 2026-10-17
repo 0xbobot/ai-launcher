@@ -16,6 +16,9 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -228,6 +231,11 @@ private fun HomeHost(
         var pickerActive by remember { mutableStateOf(false) }
         var pickerIndex by remember { mutableIntStateOf(-1) }
         var d3Opened by remember { mutableStateOf(false) }
+        // v0.68.24（Bob）：picker 房子也支持上拉手势，不中断
+        var pickerHousePull by remember { mutableStateOf(0f) }
+        var pickerHouseArmed by remember { mutableStateOf(true) }
+        var lastPickerHousePull by remember { mutableStateOf(0f) }
+        val pickerExplode = remember { Animatable(0f) }
         // v0.67.13：房子/收藏/字母/隐藏都在一条导航里（与应用中心 rail 一致）
         val homeItems = remember {
             buildList {
@@ -243,6 +251,9 @@ private fun HomeHost(
             pickerActive = false
             pickerIndex = -1
             d3Opened = false
+            pickerHousePull = 0f
+            lastPickerHousePull = 0f
+            pickerHouseArmed = true
             UiPrefs.homeRailTarget.value = null
             UiPrefs.homeRailLetter.value = null
             UiPrefs.d3EnterFromPicker.value = false
@@ -256,13 +267,8 @@ private fun HomeHost(
                     val i = homeItems.indexOf(item)
                     pickerIndex = i
                     when (item) {
-                        is RailItem.House -> {
-                            // 主屏已在首页：高亮 150ms 给反馈再撤下
-                            scope.launch {
-                                delay(150)
-                                dismissPicker()
-                            }
-                        }
+                        // v0.68.24：房子由上拉手势驱动，不再一碰就消失
+                        is RailItem.House -> {}
                         is RailItem.Star -> {
                             UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.DOCK
                             if (!d3Opened) {
@@ -292,14 +298,51 @@ private fun HomeHost(
                         is RailItem.Separator -> {}
                     }
                 },
-                onRelease = { dismissPicker() },
+                onRelease = {
+                    pickerHousePull = 0f
+                    lastPickerHousePull = 0f
+                    pickerHouseArmed = true
+                    scope.launch { pickerExplode.snapTo(0f) }
+                    dismissPicker()
+                },
                 forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
                 requireLongPress = true,
                 onLongPressStart = {
                     pickerActive = true
                     pickerIndex = -1
                     d3Opened = false
+                    pickerHousePull = 0f
+                    pickerHouseArmed = true
                 },
+                housePull = pickerHousePull,
+                onHousePull = { p ->
+                    if (pickerHouseArmed) {
+                        val cp = p.coerceIn(0f, 1f)
+                        pickerHousePull = cp
+                        if (cp >= 0.5f && lastPickerHousePull < 0.5f) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        }
+                        if (cp >= 1f) {
+                            pickerHouseArmed = false
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            scope.launch {
+                                try {
+                                    pickerExplode.snapTo(0f)
+                                    pickerHousePull = 0f
+                                    pickerExplode.animateTo(
+                                        1f,
+                                        animationSpec = tween(450, easing = FastOutSlowInEasing)
+                                    )
+                                } finally {
+                                    pickerExplode.snapTo(0f)
+                                    dismissPicker()
+                                }
+                            }
+                        }
+                        lastPickerHousePull = cp
+                    }
+                },
+                explodeProgress = pickerExplode.value,
                 visible = pickerActive,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
