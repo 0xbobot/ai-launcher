@@ -7,6 +7,7 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.util.Log
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -164,6 +165,7 @@ class BlindCaptureController(
     private val triggerPx: Float,
 ) {
     companion object {
+        private const val TAG = "BlindCapture"
         private const val DWELL_MS = 120L          // 停留激活
         private const val IDLE_CANCEL_MS = 3000L  // 3 秒不动取消
         private const val COOLDOWN_MS = 800L       // 导航后冷却
@@ -202,6 +204,7 @@ class BlindCaptureController(
     fun onStart(x: Float, widthPx: Float) {
         cancelJobs()
         tracking = widthPx > 0f && x >= widthPx - edgePx && cooldownOk()
+        Log.d(TAG, "onStart x=$x width=$widthPx tracking=$tracking")
         armed = false
         selecting = false
     }
@@ -221,6 +224,7 @@ class BlindCaptureController(
                 if (totalX <= -triggerPx && abs(totalX) > abs(totalY) * 1.5f) {
                     // 左滑到位 → 等待 120ms 停留
                     armed = true
+                    Log.d(TAG, "armed, waiting dwell")
                     val y0 = change.position.y
                     dwellJob = scope.launch {
                         delay(DWELL_MS)
@@ -232,8 +236,17 @@ class BlindCaptureController(
                 }
             }
             armed && !selecting -> {
-                // 停留中：大幅移动则取消（回到跟踪）；dwellJob 负责激活
-                if (abs(drag.x) + abs(drag.y) > edgePx) {
+                // v0.68.6：停留中只要求"手指不离开"——继续左滑不取消，
+                // 只有回滑（向右回到接近起点）或转纵向才取消。
+                // 之前要求单帧位移 < 24dp，自然滑动速度下 dwell 几乎必被取消，
+                // 这就是盲操"滑动没反应"的主因（滑得越快越必取消）。
+                if (totalX > -triggerPx * 0.5f) {
+                    Log.d(TAG, "dwell cancelled: reversed totalX=$totalX")
+                    armed = false
+                    cancelJobs()
+                    tracking = false
+                } else if (abs(totalY) > verticalThresholdPx && abs(totalY) > abs(totalX)) {
+                    Log.d(TAG, "dwell cancelled: turned vertical")
                     armed = false
                     cancelJobs()
                     tracking = false
@@ -290,6 +303,7 @@ class BlindCaptureController(
     private fun activate(fingerY: Float) {
         selecting = true
         modeIndex = 1 // 默认拍照
+        Log.d(TAG, "activated")
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         PetRepository.say("拍点什么？")
         setUi(BlindUiState.Selecting(modeIndex, fingerY))
@@ -306,12 +320,17 @@ class BlindCaptureController(
 
     private fun indexForY(y: Float, h: Float): Int {
         if (h <= 0f) return 1
-        return ((y / h) * BlindMode.values().size).toInt()
+        // v0.68.6：与视觉模式轨对齐——轨占 62% 高度、垂直居中
+        // （之前用全屏高度四等分，触摸区与视觉高亮错位）
+        val railTop = h * 0.19f
+        val railH = h * 0.62f
+        return (((y - railTop) / railH) * BlindMode.values().size).toInt()
             .coerceIn(BlindMode.values().indices)
     }
 
     private fun commit() {
         noteNavigation() // 提交后冷却，防连续误触
+        Log.d(TAG, "commit mode=${BlindMode.values()[modeIndex]}")
         when (BlindMode.values()[modeIndex]) {
             BlindMode.PHOTO -> launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
             BlindMode.VIDEO -> launchCamera(MediaStore.ACTION_VIDEO_CAPTURE)

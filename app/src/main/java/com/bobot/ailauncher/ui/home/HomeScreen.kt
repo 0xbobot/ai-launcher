@@ -80,6 +80,7 @@ import com.bobot.ailauncher.util.rebindListener
 fun HomeScreen(
     onOpenAppDrawer: () -> Unit,
     cleanHome: Boolean = true,
+    onBlindActiveChange: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -90,6 +91,12 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     // v0.68.0：盲操状态
     var blindUi by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
+    // v0.68.6：盲操激活状态上报 MainScreen——选择中时压住右边缘字母快找区，
+    // 避免长按（~400ms）与盲操 dwell（120ms）双重触发
+    val blindActive = blindUi is BlindUiState.Selecting
+    androidx.compose.runtime.LaunchedEffect(blindActive) {
+        onBlindActiveChange(blindActive)
+    }
     // v0.68.2：真实落点 x（供边缘区检查，见下方落点跟踪）
     val blindDownX = remember { mutableStateOf(-1f) }
     var showBlindCustomConfig by remember { mutableStateOf(false) }

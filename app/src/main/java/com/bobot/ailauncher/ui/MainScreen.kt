@@ -177,8 +177,7 @@ private fun HomeHost(
 
     // OTA：每天最多自动检查一次，有新版只在 TODAY 卡片底行提醒（v0.67.1：不再自动弹模态对话框，
     // 产品原则：重要信息不用模态弹窗；用户点卡片"有新版本"行才弹 UpdateDialog）
-    LaunchedEffect(Unit) {
-        if (OtaUpdater.shouldAutoCheck(context)) {
+    LaunchedEffect(Unit) {        if (OtaUpdater.shouldAutoCheck(context)) {
             val info = OtaUpdater.checkForUpdate(context)
             OtaUpdater.markChecked(context)
             if (info != null) {
@@ -193,12 +192,22 @@ private fun HomeHost(
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         }
     }
+    // v0.68.6：盲操激活中（上报自 HomeScreen）——选择中时压住右边缘字母快找区，
+    // 避免长按（~400ms）与盲操 dwell（120ms）在重叠区双重触发
+    var blindActive by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // v0.32.0：全透明——去掉渐隐罩，壁纸直接透出（Bob）
         // 单页桌面：只有首页；v0.16 首页上滑直达 D3，不再经 D1
         // v0.31.0：首屏只留 Dock（Bob）
-        HomeScreen(onOpenAppDrawer = onOpenAppDrawer)
+        // v0.68.6：cleanHome 传入 HomeScreen——D3 应用中心打开时取消右边缘
+        // 系统手势豁免，让系统返回手势正常工作（之前漏传，恒为 true，
+        // 豁免在应用中心也生效，吃掉了系统返回）
+        HomeScreen(
+            onOpenAppDrawer = onOpenAppDrawer,
+            cleanHome = dockState != DockState.D3,
+            onBlindActiveChange = { blindActive = it },
+        )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         PullUpDock(
             state = dockState,
@@ -233,8 +242,10 @@ private fun HomeHost(
             UiPrefs.d3EnterFromPicker.value = false
         }
         // 隐形长按区：右边缘，位置/高度与应用中心 rail 一致；
-        // picker 会话期间即使 D3 已打开也不销毁，保证手势连续
-        if (dockState != DockState.D3 || pickerActive) {
+        // picker 会话期间即使 D3 已打开也不销毁，保证手势连续。
+        // v0.68.6：盲操选择中时隐藏，避免重叠区（右边缘 24dp × 底部 400dp）
+        // 长按（~400ms）与盲操同时触发
+        if ((dockState != DockState.D3 || pickerActive) && !blindActive) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
