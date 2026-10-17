@@ -355,6 +355,12 @@ class BlindCaptureController(
     private var triggered = false
     // v0.68.28：扇形方向（左滑=朝左，右滑=朝右镜像）
     private var fanDir = FanDirection.LEFT
+    // v0.68.32：手势开始以来的最大左行/右行位移（正值）——方向按主导者判定，
+    // 落点后反向小勾（<24dp）不再误锁方向
+    private var maxLeftPx = 0f
+    private var maxRightPx = 0f
+    // v0.68.32：底部 Dock 区高度（px，0=无 Dock）——圆心钳制用
+    var dockZonePx: Float = 0f
     private var centerX = 0f
     private var centerY = 0f
     private var modeIndex = -1
@@ -404,6 +410,8 @@ class BlindCaptureController(
         tracking = true
         triggered = false
         modeIndex = -1
+        maxLeftPx = 0f
+        maxRightPx = 0f
         diagText("idle(跟踪中)")
         Log.d(TAG, "onStart tracking")
     }
@@ -420,8 +428,14 @@ class BlindCaptureController(
         if (!triggered) {
             // 触发：左滑/右滑过阈值且横向主导 → 直接展开扇形（无停留、无边缘要求）
             // v0.68.28：右滑也触发，扇形朝右镜像
-            val leftSwipe = totalX <= -triggerPx && abs(totalX) > abs(totalY) * 1.5f
-            val rightSwipe = totalX >= triggerPx && abs(totalX) > abs(totalY) * 1.5f
+            // v0.68.32：主导方向判定——跟踪最大左行/右行位移，任一超阈值才触发，
+            // 方向取较大者；落点后的反向小勾（<24dp）不再误锁方向；触发后方向锁定不变
+            maxLeftPx = maxOf(maxLeftPx, -totalX)
+            maxRightPx = maxOf(maxRightPx, totalX)
+            val leftSwipe = maxLeftPx >= triggerPx && maxLeftPx >= maxRightPx &&
+                maxLeftPx > abs(totalY) * 1.5f
+            val rightSwipe = maxRightPx >= triggerPx && maxRightPx > maxLeftPx &&
+                maxRightPx > abs(totalY) * 1.5f
             if (leftSwipe || rightSwipe) {
                 triggered = true
                 fanDir = if (leftSwipe) FanDirection.LEFT else FanDirection.RIGHT
@@ -436,7 +450,17 @@ class BlindCaptureController(
                 val minY = fanHalfHPx + fanMarginPx
                 val maxY = (size.height - fanHalfHPx - fanMarginPx)
                     .coerceAtLeast(minY)
-                centerY = pos.y.coerceIn(minY, maxY)
+                // v0.68.32：Dock 钳制——触摸点离底部 Dock 区 < 扇形外半径（含选中伸长）
+                // 时，圆心上移到 Dock 上方，保证扇形主体完整可见
+                val fanROuterSelPx = FAN_R_OUTER_SELECTED_DP * density
+                centerY = if (dockZonePx > 0 &&
+                    size.height - pos.y < fanROuterSelPx + fanMarginPx
+                ) {
+                    (size.height - dockZonePx - fanROuterSelPx - fanMarginPx)
+                        .coerceAtLeast(minY)
+                } else {
+                    pos.y.coerceIn(minY, maxY)
+                }
                 modeIndex = -1
                 setUi(BlindUiState.Selecting(centerX, centerY, -1, fanDir))
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -460,7 +484,7 @@ class BlindCaptureController(
         val idx = sectorForIndex(pos.x - centerX, pos.y - centerY, deadZonePx, fanDir)
         if (idx != modeIndex) {
             modeIndex = idx
-            setUi(BlindUiState.Selecting(centerX, centerY, idx))
+            setUi(BlindUiState.Selecting(centerX, centerY, idx, fanDir))
             if (idx >= 0) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 PetRepository.say(modeLabel(idx))

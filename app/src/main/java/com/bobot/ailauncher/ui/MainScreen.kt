@@ -15,6 +15,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
@@ -46,6 +50,8 @@ import com.bobot.ailauncher.ui.apps.PullUpDock
 import com.bobot.ailauncher.ui.apps.RailItem
 import com.bobot.ailauncher.ui.apps.WaveRail
 import com.bobot.ailauncher.ui.components.UpdateDialog
+import com.bobot.ailauncher.ui.home.BlindCaptureFan
+import com.bobot.ailauncher.ui.home.BlindUiState
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -198,6 +204,15 @@ private fun HomeHost(
     // v0.68.6：盲操激活中（上报自 HomeScreen）——选择中时压住右边缘字母快找区，
     // 避免长按（~400ms）与盲操 dwell（120ms）在重叠区双重触发
     var blindActive by remember { mutableStateOf(false) }
+    // v0.68.32：扇形选择状态（上报自 HomeScreen）——扇形在最顶层绘制，盖住 Dock
+    var blindSelecting by remember { mutableStateOf<BlindUiState.Selecting?>(null) }
+    var blindCustomLabel by remember { mutableStateOf("自定义") }
+    // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位），收起后恢复
+    val dockAlpha by animateFloatAsState(
+        targetValue = if (blindActive) 0.3f else 1f,
+        animationSpec = tween(200),
+        label = "dockAlpha",
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         // v0.32.0：全透明——去掉渐隐罩，壁纸直接透出（Bob）
@@ -210,13 +225,25 @@ private fun HomeHost(
             onOpenAppDrawer = onOpenAppDrawer,
             cleanHome = dockState != DockState.D3,
             onBlindActiveChange = { blindActive = it },
+            // v0.68.32：扇形状态上报（顶层绘制）+ Dock 区高度（圆心钳制）
+            onBlindSelectingChange = { s, label ->
+                blindSelecting = s
+                blindCustomLabel = label
+            },
+            blindDockZoneDp = when (dockState) {
+                DockState.D1 -> 112f
+                DockState.D2 -> 144f
+                else -> 0f
+            },
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
+        // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位）
         PullUpDock(
             state = dockState,
             onStateChange = onStateChange,
             onD3SwipeRight = onD3SwipeRight,
             onD3SwipeUpToHome = onD3SwipeUpToHome,
+            modifier = Modifier.graphicsLayer { alpha = dockAlpha },
             onHideDockRequest = onHideDockRequest,
             onOpenSettings = onOpenSettings
         )
@@ -383,6 +410,17 @@ private fun HomeHost(
                 dismissButton = {
                     TextButton(onClick = onHideDockDialogDismiss) { Text("取消") }
                 }
+            )
+        }
+        // v0.68.32：盲操扇形——临时操作层级最高，在 MainScreen 最顶层绘制（盖住 Dock/卡片/弹窗）
+        blindSelecting?.let { s ->
+            BlindCaptureFan(
+                centerX = s.centerX,
+                centerY = s.centerY,
+                selectedIndex = s.modeIndex,
+                customLabel = blindCustomLabel,
+                direction = s.direction,
+                modifier = Modifier.zIndex(100f),
             )
         }
     }

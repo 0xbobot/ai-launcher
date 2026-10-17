@@ -79,6 +79,11 @@ fun HomeScreen(
     onOpenAppDrawer: () -> Unit,
     cleanHome: Boolean = true,
     onBlindActiveChange: (Boolean) -> Unit = {},
+    // v0.68.32：扇形选择状态上报 MainScreen（扇形绘制层级提到 Dock 之上）；
+    // String = 自定义段标签
+    onBlindSelectingChange: (BlindUiState.Selecting?, String) -> Unit = { _, _ -> },
+    // v0.68.32：底部 Dock 区高度（dp），用于扇形圆心钳制
+    blindDockZoneDp: Float = 0f,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -95,6 +100,12 @@ fun HomeScreen(
     val blindActive = blindUi is BlindUiState.Selecting
     androidx.compose.runtime.LaunchedEffect(blindActive) {
         onBlindActiveChange(blindActive)
+    }
+    // v0.68.32：扇形选择状态上报 MainScreen（扇形在 MainScreen 最顶层绘制，盖住 Dock）
+    val blindSelecting = blindUi as? BlindUiState.Selecting
+    val blindCustomLabel = blindCustomItem?.label?.takeIf { it.isNotBlank() } ?: "自定义"
+    androidx.compose.runtime.LaunchedEffect(blindSelecting, blindCustomLabel) {
+        onBlindSelectingChange(blindSelecting, blindCustomLabel)
     }
     // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
     var showBlindCustomConfig by remember { mutableStateOf(false) }
@@ -139,6 +150,10 @@ fun HomeScreen(
     val swipeThresholdPx = with(density) { 48.dp.toPx() }
     // 斜滑方向判定：x 偏移超过此值才算"往左/往右"
     val xBiasPx = with(density) { 24.dp.toPx() }
+    // v0.68.32：底部 Dock 区高度同步给盲操控制器（圆心钳制用）
+    androidx.compose.runtime.LaunchedEffect(blindDockZoneDp) {
+        blindCtl.dockZonePx = with(density) { blindDockZoneDp.dp.toPx() }
+    }
     // Toast 防抖：2 秒内只提示一次
     val hintShownAt = remember { mutableStateOf(0L) }
     // v0.36.0：权限引导卡状态——null 不显示，0 整卡，1 轻提醒
@@ -273,18 +288,8 @@ fun HomeScreen(
                 }
             )
         }
-        // v0.68.17：扇形选择器（替代纵向模式轨）：以触发点为圆心、左侧 150°
-        // v0.68.28：右滑镜像——扇形朝右展开
-        (blindUi as? BlindUiState.Selecting)?.let { s ->
-            BlindCaptureFan(
-                centerX = s.centerX,
-                centerY = s.centerY,
-                selectedIndex = s.modeIndex,
-                // v0.68.20：自定义段显示用户配置的名称
-                customLabel = blindCustomItem?.label?.takeIf { it.isNotBlank() } ?: "自定义",
-                direction = s.direction,
-            )
-        }
+        // v0.68.32：扇形选择器已移到 MainScreen 最顶层绘制（盖住 Dock），
+        // 这里只保留诊断浮层
         // v0.68.12：盲操诊断浮层（左上角半透明小字，实时显示状态机状态）
         Box(
             modifier = Modifier
