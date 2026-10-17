@@ -1082,7 +1082,7 @@ fun AppCenterContent(
                 var houseDwellJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                 // v0.68.12（Bob）：房子停留进度 0→1，图标同步放大，引导用户感知"停留会回首页"
                 val dwellProgress = remember { Animatable(0f) }
-                // v0.68.18（Bob）：原地绽放——气泡位置优雅放大铺满
+                // v0.68.19（Bob）：柔和消散进度
                 val explodeProgress = remember { Animatable(0f) }
                 val stopGlide: () -> Unit = {
                     glideJob?.cancel()
@@ -1136,12 +1136,12 @@ fun AppCenterContent(
                                         easing = FastOutSlowInEasing
                                     )
                                 )
-                                // v0.68.18（Bob）：原地绽放——气泡位置优雅放大铺满再切首页
+                                // v0.68.19（Bob）：柔和消散——2x→8x同时淡出，首页在下显现
                                 explodeProgress.snapTo(0f)
                                 explodeProgress.animateTo(
                                     1f,
                                     animationSpec = tween(
-                                        500,
+                                        450,
                                         easing = FastOutSlowInEasing
                                     )
                                 )

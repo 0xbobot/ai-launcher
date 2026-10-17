@@ -337,7 +337,7 @@ internal fun WaveRail(
         if (visible && displayIndex >= 0) {
             val idx = displayIndex.coerceIn(items.indices)
             val rPx = with(density) { 24.dp.toPx() }
-            // v0.68.18（Bob）：原地绽放——explode 时金环淡出，房子从气泡位置放大铺满
+            // v0.68.19：消散时金环淡出
             val bubbleRingAlpha = 1f - explodeProgress
             Box(
                 modifier = Modifier
@@ -368,12 +368,13 @@ internal fun WaveRail(
                     // v0.68.6：精致版 HouseGlyph（细描边+圆角+门洞）
                     when (bubbleItem) {
                         RailItem.House -> {
-                            // 停留 1x→2.5x；绽放 2.5x→18x 铺满，结尾轻微淡出更优雅
-                            val dwellScale = 1f + dwellProgress * 1.5f
-                            val explodeScale = 2.5f + explodeProgress * 15.5f
+                            // v0.68.19（Bob）：柔和消散——停留1x→2x温和；消散2x→8x同时淡出，
+                            // 图标手绘质感放大显糙，用淡出遮住不暴露
+                            val dwellScale = 1f + dwellProgress * 1f
+                            val dissolveScale = 2f + explodeProgress * 6f
                             val houseScale =
-                                if (explodeProgress > 0f) explodeScale else dwellScale
-                            val houseAlpha = 1f - explodeProgress * 0.25f
+                                if (explodeProgress > 0f) dissolveScale else dwellScale
+                            val houseAlpha = 1f - explodeProgress * explodeProgress
                             HouseGlyph(
                                 color = AILauncherColors.Title,
                                 modifier = Modifier
