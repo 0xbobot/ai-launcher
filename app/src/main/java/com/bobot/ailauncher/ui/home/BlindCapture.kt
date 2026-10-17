@@ -48,7 +48,7 @@ import kotlin.math.abs
  * v0.68.0：盲操——不看屏幕快速捕捉瞬间。
  *
  * L 形手势（右边缘）：
- * 1. 触发：右边缘 24dp 内起滑，向左滑过阈值，停留 120ms → 激活
+ * 1. 触发：右边缘 48dp 内起滑，向左滑过阈值，停留 120ms → 激活
  *    （震动 + 七仔说"拍点什么？"）
  * 2. 选择：按住不放上下滑，模式轨高亮跟随
  *    （每过一格震动 + 七仔报模式名）
@@ -239,7 +239,7 @@ class BlindCaptureController(
         setUi(BlindUiState.Hidden)
     }
 
-    /** 手势开始：右边缘 24dp 内起滑才跟踪 */
+    /** 手势开始：右边缘 48dp 内起滑才跟踪 */
     fun onStart(x: Float, widthPx: Float) {
         cancelJobs()
         val inEdge = widthPx > 0f && x >= widthPx - edgePx
@@ -250,7 +250,7 @@ class BlindCaptureController(
         // 被拒绝时只更新文字不震动（onStart 对每次滑动都调用，不能每次都震）
         val msg = "onStart(x=${x.toInt()})" + when {
             tracking -> ""
-            !inEdge -> "✗非边缘"
+            !inEdge -> "✗非边缘(需右48dp内)"
             else -> "✗冷却中"
         }
         if (tracking) diagState(msg) else diagText(msg)

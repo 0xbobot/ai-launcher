@@ -103,7 +103,8 @@ fun HomeScreen(
     // v0.68.2：真实落点 x（供边缘区检查，见下方落点跟踪）
     val blindDownX = remember { mutableStateOf(-1f) }
     var showBlindCustomConfig by remember { mutableStateOf(false) }
-    val blindEdgePx = with(density) { 24.dp.toPx() }
+    // v0.68.13：盲操边缘区 24dp→48dp（Android 标准最小触摸目标，盲操不用看屏幕）
+    val blindEdgePx = with(density) { 48.dp.toPx() }
     // holder 打破 launcher 回调 ↔ controller 的循环引用
     val blindCtlRef = remember { mutableStateOf<BlindCaptureController?>(null) }
     val audioPermLauncher = rememberLauncherForActivityResult(
