@@ -1110,7 +1110,11 @@ fun AppCenterContent(
                 val railItems = remember(dockApps, letters, hiddenApps) {
                     buildList {
                         add(RailItem.House)
-                        if (dockApps.isNotEmpty()) add(RailItem.Star)
+                        // v0.68.33（Bob）：房子和星星之间也加分隔线，间距和其他一致
+                        if (dockApps.isNotEmpty()) {
+                            add(RailItem.Separator)
+                            add(RailItem.Star)
+                        }
                         // v0.68.13（Bob）：图标和字母之间加分隔线，视觉分隔+拉开间距
                         add(RailItem.Separator)
                         letters.forEach { add(RailItem.Letter(it)) }

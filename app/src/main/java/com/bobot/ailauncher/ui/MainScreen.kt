@@ -263,6 +263,8 @@ private fun HomeHost(
         val homeItems = remember {
             buildList {
                 add(RailItem.House)
+                // v0.68.33（Bob）：房子和星星之间也加分隔线，间距和其他一致
+                add(RailItem.Separator)
                 add(RailItem.Star)
                 add(RailItem.Separator)
                 ('A'..'Z').forEach { add(RailItem.Letter(it)) }
