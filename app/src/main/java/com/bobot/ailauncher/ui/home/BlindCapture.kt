@@ -5,29 +5,19 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.os.Build
-import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
+import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -36,31 +26,32 @@ import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.pet.QuickActionItem
 import com.bobot.ailauncher.ui.pet.launchQuickAction
 import com.bobot.ailauncher.ui.theme.AILauncherColors
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
- * v0.68.0：盲操——不看屏幕快速捕捉瞬间。
+ * v0.68.17：盲操触发简化（用户拍板）。
  *
- * L 形手势（右边缘）：
- * 1. 触发：右边缘 48dp 内起滑 → 跟踪；向左滑过阈值后，
- *    手指速度降到接近 0 并持续 120ms → 激活（震动 + 七仔说"拍点什么？"）
- *    （直接滑动末端自然减速停顿即触发；快速 flick 无停顿抬手则取消）
- * 2. 选择：按住不放上下滑，模式轨高亮跟随
- *    （每过一格震动 + 七仔报模式名）
- * 3. 确认：松手 → 启动选中模式
- * 4. 取消：滑回右边缘 / 3 秒不动
+ * 去掉：边缘区要求、120ms 停留激活、导航后 800ms 冷却。
+ * 新触发：首页背景任何左滑直接触发（组件已消费的手势除外：
+ * 七仔拖拽、应用行横扫等优先）。
  *
- * 防误触三层：边缘起始区 + 120ms 停留（过滤 flick）+ 导航后 800ms 冷却。
- * 与右边缘长按字母快找天然区分：长按不动走 picker，一动即左滑走盲操。
+ * 扇形选择器：
+ * 1. 左滑触发 → 以触发点为圆心，左侧展开 150° 扇形菜单（4 段）
+ * 2. 4 段从上到下：录像 / 拍照 / 录音 / 自定义
+ * 3. 手指滑入某段 → 高亮 + 震动 tick + 七仔报模式名
+ * 4. 松手 → 启动高亮模式；段外松手 → 静默取消；右滑回 → 取消
+ *
+ * 保留：三重反馈（震动/七仔语音/视觉高亮）、自定义☆槽位、诊断浮层。
+ * 误触时松手即取消，不执行任何动作。
  */
 
-/** 模式轨（自上而下）：录像 / 拍照（默认）/ 录音 / 自定义 */
+/** 扇形 4 段（从上到下）：录像 / 拍照 / 录音 / 自定义 */
 enum class BlindMode(val label: String) {
     VIDEO("录像"),
     PHOTO("拍照"),
@@ -68,10 +59,14 @@ enum class BlindMode(val label: String) {
     CUSTOM("自定义"),
 }
 
-/** 盲操 UI 状态：隐藏 / 选择中 */
+/** 盲操 UI 状态：隐藏 / 扇形选择中（modeIndex=-1 表示无高亮） */
 sealed interface BlindUiState {
     data object Hidden : BlindUiState
-    data class Selecting(val modeIndex: Int, val fingerY: Float) : BlindUiState
+    data class Selecting(
+        val centerX: Float,
+        val centerY: Float,
+        val modeIndex: Int,
+    ) : BlindUiState
 }
 
 /** 自定义☆动作存取（复用 QuickActionItem 数据模型） */
@@ -158,62 +153,49 @@ object BlindAudioRecorder {
 class BlindCaptureController(
     private val context: Context,
     private val haptics: HapticFeedback,
-    private val scope: CoroutineScope,
     private val setUi: (BlindUiState) -> Unit,
     private val requestAudioPermission: () -> Unit,
     private val openCustomConfig: () -> Unit,
-    private val edgePx: Float,
     private val triggerPx: Float,
     private val onDiag: (String) -> Unit = {},
 ) {
     companion object {
         private const val TAG = "BlindCapture"
-        private const val DWELL_MS = 120L          // 停留激活
-        private const val IDLE_CANCEL_MS = 3000L  // 3 秒不动取消
-        private const val COOLDOWN_MS = 800L       // 导航后冷却
-        private var lastNavMs: Long = 0L
-
-        /** 页面导航时调用（D3 打开/盲操提交等），800ms 内忽略盲操触发 */
-        fun noteNavigation() {
-            lastNavMs = SystemClock.uptimeMillis()
-        }
-
-        private fun cooldownOk(): Boolean =
-            SystemClock.uptimeMillis() - lastNavMs > COOLDOWN_MS
+        // 扇形几何（Canvas 角度制：0°=正右方，顺时针为正，y 向下）
+        // 左侧 150°：105°（下-左）~ 255°（上-左），index 0 在最上方
+        const val FAN_START_DEG = 105f
+        const val FAN_SWEEP_DEG = 150f
+        const val FAN_R_OUTER_DP = 148f
+        const val FAN_R_INNER_DP = 46f
+        const val FAN_EDGE_MARGIN_DP = 12f
     }
+
+    private val density = context.resources.displayMetrics.density
+    // 死区半径 = 内圈半径（与视觉一致）：圆心附近无扇区
+    private val deadZonePx = FAN_R_INNER_DP * density
+    private val cancelBackPx = 24f * density
+    private val fanROuterPx = FAN_R_OUTER_DP * density
+    // 扇形垂直半高 = sin(75°) * R，用于圆心 Y 钳制
+    private val fanHalfHPx =
+        (FAN_R_OUTER_DP * sin(Math.toRadians(75.0)).toFloat()) * density
+    private val fanMarginPx = FAN_EDGE_MARGIN_DP * density
 
     private var tracking = false
-    private var armed = false
-    private var selecting = false
-    private var modeIndex = 1 // 默认拍照
-    private var dwellJob: Job? = null
-    private var idleJob: Job? = null
-    private var lastDragDx: Int = Int.MIN_VALUE // 诊断浮层 dragging 去重
-    // v0.68.13：dwell 从"手指停下"开始计时——记录最近一次实质位移的时间；
-    // jitterPx 过滤触摸抖动（3dp）
-    private var lastMoveTime: Long = 0L
-    private var dwellAnchorY: Float = 0f
-    private val jitterPx: Float = 3 * context.resources.displayMetrics.density
+    private var triggered = false
+    private var centerX = 0f
+    private var centerY = 0f
+    private var modeIndex = -1
 
-    private fun cancelJobs() {
-        dwellJob?.cancel(); dwellJob = null
-        idleJob?.cancel(); idleJob = null
-    }
+    private fun diagText(s: String) = onDiag(s)
 
-    // v0.68.12：诊断——只更新浮层文字，不震动（高频调用如 dragging 用）
-    private fun diagText(s: String) {
-        onDiag(s)
-    }
-
-    // v0.68.12：诊断——状态变化时更新浮层 + 50ms 短震动（区别于模式刻度的 TextHandleMove）
     private fun diagState(s: String) {
         onDiag(s)
         diagTick()
         Log.d(TAG, "diag: $s")
     }
 
-    // v0.68.12：50ms 精确短震动（Compose 1.7 的 HapticFeedbackType 只有基础款，
-    // SegmentTick/KeyboardTap 都不存在，改用系统 Vibrator）
+    // 50ms 精确短震动（Compose 1.7 的 HapticFeedbackType 只有基础款，
+    // 用系统 Vibrator；VIBRATE 为普通权限，安装即授）
     private fun diagTick() {
         try {
             val vib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -238,34 +220,19 @@ class BlindCaptureController(
     }
 
     private fun reset() {
-        cancelJobs()
         tracking = false
-        armed = false
-        selecting = false
-        lastMoveTime = 0L
+        triggered = false
+        modeIndex = -1
         setUi(BlindUiState.Hidden)
     }
 
-    /** 手势开始：右边缘 48dp 内起滑才跟踪 */
-    fun onStart(x: Float, widthPx: Float) {
-        cancelJobs()
-        val inEdge = widthPx > 0f && x >= widthPx - edgePx
-        val coolOk = cooldownOk()
-        tracking = inEdge && coolOk
-        lastDragDx = Int.MIN_VALUE
-        // v0.68.12：诊断——显示落点 x 及跟踪与否的原因；
-        // 被拒绝时只更新文字不震动（onStart 对每次滑动都调用，不能每次都震）
-        // v0.68.13：加上屏宽 w 与阈值线，方便对账（x/w/线 全是 px，单位一致无换算 bug）
-        val thresholdPx = widthPx - edgePx
-        val msg = "onStart(x=${x.toInt()}/w=${widthPx.toInt()})" + when {
-            tracking -> ""
-            !inEdge -> "✗非边缘(差${(thresholdPx - x).toInt().coerceAtLeast(0)}px)"
-            else -> "✗冷却中"
-        }
-        if (tracking) diagState(msg) else diagText(msg)
-        Log.d(TAG, "onStart x=$x width=$widthPx tracking=$tracking")
-        armed = false
-        selecting = false
+    /** 手势开始：无条件跟踪（组件已消费的手势到不了这里） */
+    fun onStart() {
+        tracking = true
+        triggered = false
+        modeIndex = -1
+        diagText("idle(跟踪中)")
+        Log.d(TAG, "onStart tracking")
     }
 
     fun onMove(
@@ -274,124 +241,70 @@ class BlindCaptureController(
         totalX: Float,
         totalY: Float,
         size: IntSize,
-        verticalThresholdPx: Float,
     ) {
         if (!tracking) return
-        val now = SystemClock.uptimeMillis()
-        when {
-            !armed && !selecting -> {
-                // v0.68.13：dwell 从"手指停下"开始计时。进入触发区后，
-                // 每次有实质位移（≥ jitterPx，过滤触摸抖动）就重启 120ms 计时；
-                // 只有手指静止满 120ms 才激活。直接滑动末端自然减速停顿即触发；
-                // 快速 flick（无停顿直接抬手）因 onEnd 取消计时而永不触发。
-                val inTriggerZone = totalX <= -triggerPx && abs(totalX) > abs(totalY) * 1.5f
-                if (!inTriggerZone && dwellJob != null) {
-                    // 离开触发区（回滑）：取消待定的激活，保持跟踪
-                    Log.d(TAG, "dwell cancelled: left trigger zone totalX=$totalX")
-                    dwellJob?.cancel(); dwellJob = null
-                    diagText("dragging(dx=${totalX.toInt()})")
-                }
-                when {
-                    inTriggerZone -> {
-                        if (drag.getDistance() >= jitterPx) {
-                            // 手指还在动：重启静止计时
-                            lastMoveTime = now
-                            dwellJob?.cancel()
-                            dwellAnchorY = change.position.y
-                            dwellJob = scope.launch {
-                                delay(DWELL_MS)
-                                // 120ms 内再无实质位移 → 手指真的停下了
-                                if (tracking && !armed && !selecting &&
-                                    SystemClock.uptimeMillis() - lastMoveTime >= DWELL_MS
-                                ) {
-                                    armed = true
-                                    activate(dwellAnchorY)
-                                }
-                            }
-                            val dxInt = totalX.toInt()
-                            if (dxInt != lastDragDx) {
-                                lastDragDx = dxInt
-                                diagText("dragging(dx=$dxInt)")
-                            }
-                        } else if (dwellJob == null) {
-                            // 进入触发区时手指已静止（少见）：直接开始计时
-                            Log.d(TAG, "finger still on zone entry, dwell start")
-                            diagState("dwell…") // 诊断——停留计时中
-                            lastMoveTime = now
-                            dwellAnchorY = change.position.y
-                            dwellJob = scope.launch {
-                                delay(DWELL_MS)
-                                if (tracking && !armed && !selecting &&
-                                    SystemClock.uptimeMillis() - lastMoveTime >= DWELL_MS
-                                ) {
-                                    armed = true
-                                    activate(dwellAnchorY)
-                                }
-                            }
-                        }
-                        // else: dwell 计时中且手指静止 → 静静等待，不重启
-                    }
-                    abs(totalY) > verticalThresholdPx && abs(totalY) > abs(totalX) -> {
-                        // 转为纵向手势，盲操退出
-                        diagState("idle(转纵向退出)") // v0.68.12：诊断
-                        tracking = false
-                    }
-                    else -> {
-                        // v0.68.12：诊断——滑动中，显示累计位移（去重，不震动）
-                        val dxInt = totalX.toInt()
-                        if (dxInt != lastDragDx) {
-                            lastDragDx = dxInt
-                            diagText("dragging(dx=$dxInt)")
-                        }
-                    }
-                }
+        val pos = change.position
+        if (!triggered) {
+            // 触发：左滑过阈值且横向主导 → 直接展开扇形（无停留、无边缘要求）
+            if (totalX <= -triggerPx && abs(totalX) > abs(totalY) * 1.5f) {
+                triggered = true
+                // 圆心内移，保证扇形不被屏幕边缘裁掉
+                centerX = pos.x.coerceAtLeast(fanROuterPx + fanMarginPx)
+                val minY = fanHalfHPx + fanMarginPx
+                val maxY = (size.height - fanHalfHPx - fanMarginPx)
+                    .coerceAtLeast(minY)
+                centerY = pos.y.coerceIn(minY, maxY)
+                modeIndex = -1
+                setUi(BlindUiState.Selecting(centerX, centerY, -1))
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                PetRepository.say("拍点什么？")
+                diagState("fan展开")
+                Log.d(TAG, "triggered center=($centerX, $centerY)")
             }
-            selecting -> {
-                // 取消：滑回右边缘
-                if (change.position.x >= size.width - edgePx / 2f) {
-                    diagState("idle(滑回取消)") // v0.68.12：诊断
-                    reset()
-                    return
-                }
-                val idx = indexForY(change.position.y, size.height.toFloat())
-                setUi(BlindUiState.Selecting(idx, change.position.y))
-                if (idx != modeIndex) {
-                    modeIndex = idx
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    PetRepository.say(BlindMode.values()[idx].label)
-                    diagState("selecting(mode=${BlindMode.values()[idx].label})") // v0.68.12：诊断
-                    resetIdle()
-                }
+            return
+        }
+        // 右滑回 → 取消
+        if (pos.x > centerX + cancelBackPx) {
+            diagState("idle(右滑取消)")
+            reset()
+            return
+        }
+        val idx = sectorFor(pos.x - centerX, pos.y - centerY)
+        if (idx != modeIndex) {
+            modeIndex = idx
+            setUi(BlindUiState.Selecting(centerX, centerY, idx))
+            if (idx >= 0) {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                PetRepository.say(BlindMode.values()[idx].label)
+                diagState("sector=${BlindMode.values()[idx].label}")
+            } else {
+                diagText("sector=无")
             }
         }
     }
 
     /**
-     * 手指抬起。返回 true 表示手势被盲操消费，调用方跳过原有纵向逻辑。
+     * 手指抬起。返回 true 表示被盲操消费，调用方跳过原有纵向逻辑。
      */
     fun onEnd(): Boolean {
-        val wasDwelling = dwellJob != null
-        cancelJobs()
-        return when {
-            selecting -> {
-                commit()
-                reset()
-                true
+        if (!tracking) return false
+        val wasTriggered = triggered
+        val idx = modeIndex
+        reset()
+        if (wasTriggered) {
+            if (idx >= 0) {
+                commit(idx)
+                diagState("commit(${BlindMode.values()[idx].label})")
+            } else {
+                diagText("idle(段外松手取消)")
             }
-            tracking -> {
-                // v0.68.13：dwell 未完成（快速 flick 无停顿抬手）或位移不够：
-                // 吞掉，不触发纵向
-                if (wasDwelling) diagState("dwell取消(抬手)")
-                else diagText("idle(抬手,位移不够)")
-                reset()
-                true
-            }
-            else -> false
+            return true
         }
+        return false
     }
 
     fun onCancel() {
-        diagText("idle(手势取消)") // v0.68.12：诊断
+        diagText("idle(手势取消)")
         reset()
     }
 
@@ -401,43 +314,24 @@ class BlindCaptureController(
         else PetRepository.say("没有麦克风权限，录不了音")
     }
 
-    private fun activate(fingerY: Float) {
-        selecting = true
-        modeIndex = 1 // 默认拍照
-        Log.d(TAG, "activated")
-        diagState("armed") // v0.68.12：诊断——已激活
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        PetRepository.say("拍点什么？")
-        setUi(BlindUiState.Selecting(modeIndex, fingerY))
-        resetIdle()
+    /**
+     * 扇形命中：返回 sector index（0=最上方），-1 = 死区内或扇形外。
+     * dx/dy 为手指相对圆心的偏移（px，y 向下）。
+     */
+    private fun sectorFor(dx: Float, dy: Float): Int {
+        if (sqrt(dx * dx + dy * dy) < deadZonePx) return -1
+        var deg = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+        if (deg < 0f) deg += 360f
+        if (deg < FAN_START_DEG || deg > FAN_START_DEG + FAN_SWEEP_DEG) return -1
+        // index 0 在最上方（角度大的一端），从上到下：录像/拍照/录音/自定义
+        val n = BlindMode.values().size
+        return ((FAN_START_DEG + FAN_SWEEP_DEG - deg) / (FAN_SWEEP_DEG / n))
+            .toInt().coerceIn(0, n - 1)
     }
 
-    private fun resetIdle() {
-        idleJob?.cancel()
-        idleJob = scope.launch {
-            delay(IDLE_CANCEL_MS)
-            if (selecting) {
-                diagState("idle(3秒超时)") // v0.68.12：诊断
-                reset() // 3 秒不动 → 静默取消
-            }
-        }
-    }
-
-    private fun indexForY(y: Float, h: Float): Int {
-        if (h <= 0f) return 1
-        // v0.68.6：与视觉模式轨对齐——轨占 62% 高度、垂直居中
-        // （之前用全屏高度四等分，触摸区与视觉高亮错位）
-        val railTop = h * 0.19f
-        val railH = h * 0.62f
-        return (((y - railTop) / railH) * BlindMode.values().size).toInt()
-            .coerceIn(BlindMode.values().indices)
-    }
-
-    private fun commit() {
-        noteNavigation() // 提交后冷却，防连续误触
-        Log.d(TAG, "commit mode=${BlindMode.values()[modeIndex]}")
-        diagState("commit(mode=${BlindMode.values()[modeIndex].label})") // v0.68.12：诊断——已提交
-        when (BlindMode.values()[modeIndex]) {
+    private fun commit(idx: Int) {
+        Log.d(TAG, "commit mode=${BlindMode.values()[idx]}")
+        when (BlindMode.values()[idx]) {
             BlindMode.PHOTO -> launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
             BlindMode.VIDEO -> launchCamera(MediaStore.ACTION_VIDEO_CAPTURE)
             BlindMode.AUDIO -> toggleAudio()
@@ -494,45 +388,65 @@ class BlindCaptureController(
     }
 }
 
-/** 右侧纵向模式轨：当前项放大+高亮 */
+/**
+ * 扇形选择器：以触发点为圆心，左侧展开 150°（4 段从上到下：
+ * 录像 / 拍照 / 录音 / 自定义），当前段高亮。
+ */
 @Composable
-fun BlindCaptureRail(
+fun BlindCaptureFan(
+    centerX: Float,
+    centerY: Float,
     selectedIndex: Int,
     modifier: Modifier = Modifier,
 ) {
     val modes = BlindMode.values()
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.SpaceEvenly,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+    val labelPaint = remember {
+        android.graphics.Paint().apply {
+            textAlign = android.graphics.Paint.Align.CENTER
+            isAntiAlias = true
+        }
+    }
+    val titleArgb = AILauncherColors.Title.toArgb()
+    val bodyArgb = AILauncherColors.Body.toArgb()
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val rOuter = FAN_R_OUTER_DP.dp.toPx()
+        val rInner = FAN_R_INNER_DP.dp.toPx()
+        val rLabel = (rOuter + rInner) / 2f
+        val sweep = FAN_SWEEP_DEG / modes.size
+        val gap = 3f
         modes.forEachIndexed { i, mode ->
             val selected = i == selectedIndex
-            val scale by animateFloatAsState(
-                targetValue = if (selected) 1.3f else 1f,
-                label = "blindRailScale"
+            // index 0 在最上方：startAngle 从 255° 往下排
+            val start = (FAN_START_DEG + FAN_SWEEP_DEG) - (i + 1) * sweep
+            drawArc(
+                color = if (selected) AILauncherColors.AccentSoft
+                else Color.White.copy(alpha = 0.78f),
+                startAngle = start + gap / 2f,
+                sweepAngle = sweep - gap,
+                useCenter = true,
+                topLeft = Offset(centerX - rOuter, centerY - rOuter),
+                size = Size(rOuter * 2f, rOuter * 2f)
             )
-            Box(
-                modifier = Modifier
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                    }
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(
-                        if (selected) AILauncherColors.AccentSoft
-                        else Color.White.copy(alpha = 0.72f)
-                    )
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = mode.label,
-                    fontSize = 14.sp,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    color = if (selected) AILauncherColors.Title else AILauncherColors.Body
-                )
+            // 段标签画在该段中心
+            val midDeg = start + sweep / 2f
+            val rad = Math.toRadians(midDeg.toDouble())
+            val lx = centerX + cos(rad).toFloat() * rLabel
+            val ly = centerY + sin(rad).toFloat() * rLabel
+            val fs = 14.sp.toPx()
+            labelPaint.apply {
+                textSize = fs
+                isFakeBoldText = selected
+                color = if (selected) titleArgb else bodyArgb
             }
+            drawContext.canvas.nativeCanvas.drawText(
+                mode.label, lx, ly + fs * 0.35f, labelPaint
+            )
         }
+        // 死区内圈（与命中死区半径一致）
+        drawCircle(
+            color = Color.White.copy(alpha = 0.88f),
+            radius = rInner,
+            center = Offset(centerX, centerY)
+        )
     }
 }

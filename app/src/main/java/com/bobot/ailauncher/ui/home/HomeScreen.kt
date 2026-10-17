@@ -9,14 +9,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -89,7 +86,6 @@ fun HomeScreen(
     val haptics = LocalHapticFeedback.current
 
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
-    val scope = rememberCoroutineScope()
     // v0.68.0：盲操状态
     var blindUi by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
     // v0.68.12：盲操诊断浮层文字（用户无电脑看 logcat，屏上直接看状态机）
@@ -100,10 +96,10 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(blindActive) {
         onBlindActiveChange(blindActive)
     }
-    // v0.68.2：真实落点 x（供边缘区检查，见下方落点跟踪）
-    val blindDownX = remember { mutableStateOf(-1f) }
+    // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
     var showBlindCustomConfig by remember { mutableStateOf(false) }
-    // v0.68.13：盲操边缘区 24dp→48dp（Android 标准最小触摸目标，盲操不用看屏幕）
+    // v0.68.17：右边缘系统手势豁免宽度（仅用于 setSystemGestureExclusionRects，
+    // 盲操触发已改为"任何左滑"，不再依赖边缘区）
     val blindEdgePx = with(density) { 48.dp.toPx() }
     // holder 打破 launcher 回调 ↔ controller 的循环引用
     val blindCtlRef = remember { mutableStateOf<BlindCaptureController?>(null) }
@@ -114,13 +110,11 @@ fun HomeScreen(
         BlindCaptureController(
             context = context,
             haptics = haptics,
-            scope = scope,
             setUi = { blindUi = it },
             requestAudioPermission = {
                 audioPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
             },
             openCustomConfig = { showBlindCustomConfig = true },
-            edgePx = blindEdgePx,
             triggerPx = with(density) { 24.dp.toPx() },
             onDiag = { blindDiag = it }, // v0.68.12：诊断浮层
         ).also { blindCtlRef.value = it }
@@ -198,22 +192,14 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .onGloballyPositioned { coords -> homeSize = coords.size }
-            // v0.68.2：落点跟踪——detectDragGestures 的 onDragStart(Offset) 给的是
-            // 过 touch slop 点（左滑比真实落点偏左约 18dp），导致 24dp 边缘区检查
-            // 几乎永远失败。单独跟踪真实落点，不消费事件。
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    blindDownX.value = down.position.x
-                }
-            }
+            // v0.68.17：落点跟踪已删除（触发改为"任何左滑"，不再需要真实落点）
             .pointerInput(blindCtl) {
                 var totalX = 0f
                 var totalY = 0f
                 detectDragGestures(
                     onDragStart = {
                         totalX = 0f; totalY = 0f
-                        blindCtl.onStart(blindDownX.value, size.width.toFloat())
+                        blindCtl.onStart()
                     },
                     onDragEnd = {
                         // v0.68.0：盲操消费掉的手势不再走纵向逻辑
@@ -221,7 +207,6 @@ fun HomeScreen(
                             when {
                                 // 上滑 → D3（y 为负是上滑）
                                 totalY < -swipeThresholdPx -> {
-                                    BlindCaptureController.noteNavigation()
                                     openDrawerState()
                                 }
                                 // 下滑 → 按 x 偏向决定
@@ -250,8 +235,8 @@ fun HomeScreen(
                         change.consume()
                         totalX += dragAmount.x
                         totalY += dragAmount.y
-                        // v0.68.0：盲操跟踪（右边缘左滑）
-                        blindCtl.onMove(change, dragAmount, totalX, totalY, size, swipeThresholdPx)
+                        // v0.68.17：盲操跟踪（首页背景任何左滑直接触发扇形）
+                        blindCtl.onMove(change, dragAmount, totalX, totalY, size)
                     }
                 )
             }
@@ -286,14 +271,12 @@ fun HomeScreen(
                 }
             )
         }
-        // v0.68.0：盲操模式轨（右侧纵向，当前项放大高亮，跟随手指）
+        // v0.68.17：扇形选择器（替代纵向模式轨）：以触发点为圆心、左侧 150°
         (blindUi as? BlindUiState.Selecting)?.let { s ->
-            BlindCaptureRail(
+            BlindCaptureFan(
+                centerX = s.centerX,
+                centerY = s.centerY,
                 selectedIndex = s.modeIndex,
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 10.dp)
-                    .fillMaxHeight(0.62f)
             )
         }
         // v0.68.12：盲操诊断浮层（左上角半透明小字，实时显示状态机状态）
