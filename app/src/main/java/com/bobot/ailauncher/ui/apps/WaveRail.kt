@@ -105,9 +105,12 @@ internal fun WaveRail(
     // v0.67.13：脉冲高亮某一项（收藏/隐藏时的闪烁反馈）
     pulseTick: Int = 0,
     pulseItem: RailItem? = null,
-    // v0.68.12（Bob）：房子停留进度 0→1，图标同步放大，引导用户感知过渡
-    dwellProgress: Float = 0f,
-    // v0.68.18（Bob）：原地绽放进度 0→1，气泡位置放大铺满
+    // v0.68.20（Bob）：手势驱动——房子上拉/眼睛下拉的意向进度 0→1，替代停留时长
+    housePull: Float = 0f,
+    eyePull: Float = 0f,
+    onHousePull: (Float) -> Unit = {},
+    onEyePull: (Float) -> Unit = {},
+    // v0.68.19（Bob）：柔和消散进度 0→1（阈值触发后的时间驱动）
     explodeProgress: Float = 0f
 ) {
     val density = LocalDensity.current
@@ -221,7 +224,31 @@ internal fun WaveRail(
                         },
                         onVerticalDrag = { change, _ ->
                             change.consume()
-                            emitItem(indexAt(change.position.y))
+                            val y = change.position.y
+                            val i = indexAt(y)
+                            emitItem(i)
+                            // v0.68.20（Bob）：意向拉拽——房子继续上拉/眼睛继续下拉，进度 0→1
+                            val pullThresholdPx = with(density) { 100.dp.toPx() }
+                            if (items.isNotEmpty() && items[0] is RailItem.House &&
+                                i == 0 && y < railTopPx
+                            ) {
+                                onHousePull(
+                                    ((railTopPx - y) / pullThresholdPx).coerceIn(0f, 1.2f)
+                                )
+                            } else {
+                                onHousePull(0f)
+                            }
+                            val lastIdx = items.indices.lastOrNull()
+                            if (lastIdx != null && items[lastIdx] is RailItem.Eye &&
+                                i == lastIdx && y > railTopPx + railHpx
+                            ) {
+                                onEyePull(
+                                    ((y - (railTopPx + railHpx)) / pullThresholdPx)
+                                        .coerceIn(0f, 1.2f)
+                                )
+                            } else {
+                                onEyePull(0f)
+                            }
                         }
                     )
                 }
@@ -339,18 +366,28 @@ internal fun WaveRail(
             val rPx = with(density) { 24.dp.toPx() }
             // v0.68.19：消散时金环淡出
             val bubbleRingAlpha = 1f - explodeProgress
+            // v0.68.20：气泡跟随拉拽——房子上拉时上移，眼睛下拉时下移
+            val pullThresholdPx = with(density) { 100.dp.toPx() }
+            val bubblePullOffsetY = when (items.getOrNull(idx)) {
+                is RailItem.House -> -housePull * pullThresholdPx
+                is RailItem.Eye -> eyePull * pullThresholdPx
+                else -> 0f
+            }
+            // 眼睛下拉时边框加粗，给"即将解锁"的视觉提示
+            val bubbleBorderWidth = 2.dp + eyePull * 2.dp
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .offset {
                         IntOffset(
                             (dirSign * bubbleOutX).roundToInt(),
-                            (railTopPx + idx * rowHpx + rowHpx / 2f - rPx - hPx / 2f).roundToInt()
+                            (railTopPx + idx * rowHpx + rowHpx / 2f - rPx - hPx / 2f +
+                                bubblePullOffsetY).roundToInt()
                         )
                     }
                     .size(48.dp)
                     .border(
-                        2.dp,
+                        bubbleBorderWidth,
                         AILauncherColors.Accent.copy(alpha = bubbleRingAlpha),
                         CircleShape
                     ),
@@ -368,12 +405,11 @@ internal fun WaveRail(
                     // v0.68.6：精致版 HouseGlyph（细描边+圆角+门洞）
                     when (bubbleItem) {
                         RailItem.House -> {
-                            // v0.68.19（Bob）：柔和消散——停留1x→2x温和；消散2x→8x同时淡出，
-                            // 图标手绘质感放大显糙，用淡出遮住不暴露
-                            val dwellScale = 1f + dwellProgress * 1f
-                            val dissolveScale = 2f + explodeProgress * 6f
+                            // v0.68.20（Bob）：手势驱动——上拉 1x→2.5x；消散 2.5x→8x 同时淡出
+                            val pullScale = 1f + housePull * 1.5f
+                            val dissolveScale = 2.5f + explodeProgress * 5.5f
                             val houseScale =
-                                if (explodeProgress > 0f) dissolveScale else dwellScale
+                                if (explodeProgress > 0f) dissolveScale else pullScale
                             val houseAlpha = 1f - explodeProgress * explodeProgress
                             HouseGlyph(
                                 color = AILauncherColors.Title,
@@ -391,10 +427,19 @@ internal fun WaveRail(
                             color = AILauncherColors.Title,
                             modifier = Modifier.size(24.dp)
                         )
-                        RailItem.Eye -> EyeOffGlyph(
-                            color = AILauncherColors.Title,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        RailItem.Eye -> {
+                            // v0.68.20：下拉 1x→2x，配合震动给解锁反馈
+                            val eyeScale = 1f + eyePull * 1f
+                            EyeOffGlyph(
+                                color = AILauncherColors.Title,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .graphicsLayer {
+                                        scaleX = eyeScale
+                                        scaleY = eyeScale
+                                    }
+                            )
+                        }
                         is RailItem.Letter -> StarGlyph(
                             color = AILauncherColors.Title,
                             modifier = Modifier.size(24.dp)
@@ -419,8 +464,10 @@ internal fun AppRail(
     forcedActiveIndex: Int? = null,
     pulseTick: Int = 0,
     pulseItem: RailItem? = null,
-    dwellProgress: Float = 0f,
-    // v0.68.18（Bob）：原地绽放——气泡位置放大铺满
+    housePull: Float = 0f,
+    eyePull: Float = 0f,
+    onHousePull: (Float) -> Unit = {},
+    onEyePull: (Float) -> Unit = {},
     explodeProgress: Float = 0f,
     modifier: Modifier = Modifier
 ) {
@@ -431,7 +478,10 @@ internal fun AppRail(
         forcedActiveIndex = forcedActiveIndex,
         pulseTick = pulseTick,
         pulseItem = pulseItem,
-        dwellProgress = dwellProgress,
+        housePull = housePull,
+        eyePull = eyePull,
+        onHousePull = onHousePull,
+        onEyePull = onEyePull,
         explodeProgress = explodeProgress,
         modifier = modifier.height(400.dp)
     )

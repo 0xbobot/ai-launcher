@@ -1077,22 +1077,27 @@ fun AppCenterContent(
                     }
                 }
                 // v0.68.6（Bob）：房子停留确认——滑到房子后停留450ms才回首页，
-                // 给操作反应时间，避免滑过时误触太突然；手指移开或松手即取消
-                // （声明前移到 stopGlide 之前：Kotlin 局部变量必须先声明后使用）
-                var houseDwellJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-                // v0.68.12（Bob）：房子停留进度 0→1，图标同步放大，引导用户感知"停留会回首页"
-                val dwellProgress = remember { Animatable(0f) }
-                // v0.68.19（Bob）：柔和消散进度
+                // v0.68.20（Bob）：手势驱动——拉拽进度替代停留时长
+                var housePull by remember { mutableStateOf(0f) }
+                var eyePull by remember { mutableStateOf(0f) }
+                var housePullCommitted by remember { mutableStateOf(false) }
+                var eyePullCommitted by remember { mutableStateOf(false) }
+                var lastHousePull by remember { mutableStateOf(0f) }
+                var lastEyePull by remember { mutableStateOf(0f) }
+                // v0.68.19（Bob）：柔和消散进度（阈值触发后）
                 val explodeProgress = remember { Animatable(0f) }
                 val stopGlide: () -> Unit = {
                     glideJob?.cancel()
                     glideJob = null
-                    houseDwellJob?.cancel()
-                    houseDwellJob = null
-                    scope.launch {
-                        dwellProgress.snapTo(0f)
-                        explodeProgress.snapTo(0f)
+                    if (!housePullCommitted) {
+                        housePull = 0f
+                        lastHousePull = 0f
                     }
+                    if (!eyePullCommitted) {
+                        eyePull = 0f
+                        lastEyePull = 0f
+                    }
+                    scope.launch { explodeProgress.snapTo(0f) }
                     // 列表已在拖动中滚到位，松手无需任何操作
                 }
                 // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区
@@ -1120,23 +1125,27 @@ fun AppCenterContent(
                     else -> null
                 }
                 val onRailItem: (RailItem) -> Unit = { item ->
-                    houseDwellJob?.cancel()
-                    houseDwellJob = null
-                    if (item != RailItem.House) {
-                        scope.launch { dwellProgress.snapTo(0f) }
-                    }
                     when (item) {
-                        is RailItem.House -> {
-                            houseDwellJob = scope.launch {
-                                dwellProgress.snapTo(0f)
-                                dwellProgress.animateTo(
-                                    1f,
-                                    animationSpec = tween(
-                                        450,
-                                        easing = FastOutSlowInEasing
-                                    )
-                                )
-                                // v0.68.19（Bob）：柔和消散——2x→8x同时淡出，首页在下显现
+                        // v0.68.20：房子不再用停留触发，改上拉手势（onHousePull）
+                        is RailItem.House -> {}
+                        is RailItem.Star -> scope.launch { listState.animateScrollToItem(0) }
+                        is RailItem.Eye -> scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
+                        is RailItem.Letter -> glideToLetter(item.char)
+                        is RailItem.Separator -> {}
+                    }
+                }
+                // v0.68.20（Bob）：房子上拉——手指驱动 0→1，到阈值消散回首页；滑回则反向
+                val onHousePull: (Float) -> Unit = { p ->
+                    if (!housePullCommitted) {
+                        val cp = p.coerceIn(0f, 1f)
+                        housePull = cp
+                        if (cp >= 0.5f && lastHousePull < 0.5f) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        }
+                        if (cp >= 1f) {
+                            housePullCommitted = true
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            scope.launch {
                                 explodeProgress.snapTo(0f)
                                 explodeProgress.animateTo(
                                     1f,
@@ -1147,13 +1156,31 @@ fun AppCenterContent(
                                 )
                                 onHeaderSwipeRightState.value()
                                 explodeProgress.snapTo(0f)
-                                dwellProgress.snapTo(0f)
+                                housePull = 0f
+                                lastHousePull = 0f
+                                housePullCommitted = false
                             }
                         }
-                        is RailItem.Star -> scope.launch { listState.animateScrollToItem(0) }
-                        is RailItem.Eye -> scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
-                        is RailItem.Letter -> glideToLetter(item.char)
-                        is RailItem.Separator -> {}
+                        lastHousePull = cp
+                    }
+                }
+                // v0.68.20（Bob）：眼睛下拉——到阈值直接弹生物识别，带动画+震动
+                val onEyePull: (Float) -> Unit = { p ->
+                    if (!eyePullCommitted && !hiddenUnlocked) {
+                        val cp = p.coerceIn(0f, 1f)
+                        eyePull = cp
+                        if (cp >= 0.5f && lastEyePull < 0.5f) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        }
+                        if (cp >= 1f) {
+                            eyePullCommitted = true
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            unlockHiddenApps()
+                            eyePull = 0f
+                            lastEyePull = 0f
+                            eyePullCommitted = false
+                        }
+                        lastEyePull = cp
                     }
                 }
                 AppRail(
@@ -1163,7 +1190,10 @@ fun AppCenterContent(
                     forcedActiveIndex = mirrorIndex,
                     pulseTick = flashTick,
                     pulseItem = pulseItem,
-                    dwellProgress = dwellProgress.value,
+                    housePull = housePull,
+                    eyePull = eyePull,
+                    onHousePull = onHousePull,
+                    onEyePull = onEyePull,
                     explodeProgress = explodeProgress.value,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
