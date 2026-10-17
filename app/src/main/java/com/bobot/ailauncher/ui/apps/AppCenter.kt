@@ -1075,6 +1075,10 @@ fun AppCenterContent(
                         }
                     }
                 }
+                // v0.68.6（Bob）：房子停留确认——滑到房子后停留450ms才回首页，
+                // 给操作反应时间，避免滑过时误触太突然；手指移开或松手即取消
+                // （声明前移到 stopGlide 之前：Kotlin 局部变量必须先声明后使用）
+                var houseDwellJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                 val stopGlide: () -> Unit = {
                     glideJob?.cancel()
                     glideJob = null
@@ -1086,7 +1090,6 @@ fun AppCenterContent(
                 // v0.67.12（Bob）：改用共享 AppRail，单一样式单布局
                 // v0.68.6（Bob）：房子停留确认——滑到房子后停留450ms才回首页，
                 // 给操作反应时间，避免滑过时误触太突然；手指移开或松手即取消
-                var houseDwellJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                 // v0.67.13（Bob）：房子/收藏/隐藏做进 rail 滑动项，一条导航滑到哪去哪
                 val railItems = remember(dockApps, letters, hiddenApps) {
                     buildList {

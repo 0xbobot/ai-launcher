@@ -373,6 +373,8 @@ internal fun AppRail(
         pulseItem = pulseItem,
         modifier = modifier.height(400.dp)
     )
+}
+
 /**
  * v0.68.8（Bob）：线条风星星——与房子同款细描边+圆角，和字母统一。
  */
