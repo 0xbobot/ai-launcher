@@ -3,6 +3,8 @@ package com.bobot.ailauncher.ui.home
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.drawable.Drawable
 import android.media.MediaRecorder
 import android.os.Build
 import android.provider.MediaStore
@@ -18,10 +20,19 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,10 +47,13 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
@@ -47,6 +61,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.ui.apps.loadShortcutIcon
 import com.bobot.ailauncher.ui.pet.QuickActionItem
 import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
 import com.bobot.ailauncher.ui.pet.launchQuickAction
@@ -102,6 +118,12 @@ import kotlin.math.sqrt
  * v0.68.36：拍照最容易触发——拍照段 60°→84°（正中方向上下各 42°）；边界磁吸
  * （落点在拍照边界外 ±10° 内吸附为拍照，只影响判定不影响绘制）；录音固定最下方
  * （离拍照最远）；快滑覆盖（松手速度超 4500px/s 直接=拍照，忽略段选择）。
+ *
+ * v0.68.37：窄段标题竖排（<40° 的录音/快捷段，中文标签 upright 沿径向堆叠；
+ * 非中文或超 4 字 fallback 小一号字号 + 省略）；选中反馈改图标（删除方案C七仔
+ * 探出——选中段外缘+36dp 跟一枚 32dp 线稿小图标，淡入淡出 + 轻微 scale；
+ * 快捷段用装备自己的图标，无图标显示标签首字小圆章）；保留七仔语音报段名、
+ * 段伸长动效、震动、中心涟漪。
  *
  * 保留：三重反馈（震动/七仔语音/视觉高亮）、诊断浮层。
  */
@@ -747,6 +769,79 @@ class BlindCaptureController(
 
 }
 
+/** v0.68.37：选中段外缘跟随的线稿小图标（替代方案C七仔探出）
+ * 录像/拍照/录音用 Material Outlined 线稿（深暖灰）；快捷段用装备自己的图标，
+ * 无图标时显示标签首字小圆章。 */
+@Composable
+private fun FanIndicatorIcon(seg: FanSegment) {
+    val iconTint = Color(0xFF6B6259) // 深暖灰
+    when (seg) {
+        is FanSegment.BuiltIn -> {
+            val iv = when (seg.mode) {
+                BlindMode.VIDEO -> Icons.Outlined.Videocam
+                BlindMode.PHOTO -> Icons.Outlined.PhotoCamera
+                BlindMode.AUDIO -> Icons.Outlined.Mic
+            }
+            Icon(
+                imageVector = iv,
+                contentDescription = seg.mode.label,
+                tint = iconTint,
+                modifier = Modifier.size(32.dp)
+            )
+        }
+        is FanSegment.Quick -> {
+            val context = LocalContext.current
+            val bitmap = remember(seg.item.packageName, seg.item.shortcutId) {
+                try {
+                    val d: Drawable? = if (seg.item.shortcutId != null) {
+                        loadShortcutIcon(context, seg.item.packageName, seg.item.shortcutId)
+                    } else null
+                    (d ?: try {
+                        context.packageManager.getApplicationIcon(seg.item.packageName)
+                    } catch (_: Exception) { null })?.toFanImageBitmap()
+                } catch (_: Exception) { null }
+            }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = seg.item.label,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                )
+            } else {
+                // 无图标：标签首字小圆章
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE5E0D8)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = seg.item.label.firstOrNull()?.toString() ?: "快",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = iconTint,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Drawable → ImageBitmap（与 QuickActions.kt 内同名私有函数逻辑一致，本地复用） */
+private fun Drawable.toFanImageBitmap(): ImageBitmap {
+    val w = intrinsicWidth.takeIf { it > 0 } ?: 96
+    val h = intrinsicHeight.takeIf { it > 0 } ?: 96
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    setBounds(0, 0, w, h)
+    draw(canvas)
+    return bmp.asImageBitmap()
+}
+
 /** v0.68.22：段内纯文字，已无图标（modeIcon 删除） */
 
 /**
@@ -906,94 +1001,76 @@ fun BlindCaptureFan(
                 style = Stroke(width = 2.dp.toPx())
             )
         }
-        // v0.68.29 方案C「选中探出」：七仔从选中段外缘+36dp 处探出报模式；
-        // 换段位移动画跳过去，滑出缩回；位置钳制防出屏；左右扇镜像共用
-        // v0.68.35：分模式姿态（拍照jump/录像wave/录音hold/快捷main）；
-        // 探出带 15° 旋转回正 + overshoot，收回"钻回去"（下沉+缩小+淡出）
+        // v0.68.37：选中反馈改图标（替代方案C七仔探出）——选中段外缘+36dp 处跟一枚
+        // 32dp 线稿小图标，随选中段出现/切换/消失（淡入淡出 + 轻微 scale）；
+        // 位置钳制防出屏；左右扇镜像共用
         val hasSel = selectedIndex in segments.indices
-        val probeSizeDp = 64.dp
-        val probeSizePx = with(density) { probeSizeDp.toPx() }
-        val probeGapPx = with(density) { 36.dp.toPx() }
-        val probeEdgePx = with(density) { 40.dp.toPx() }
-        val probeSinkPx = with(density) { 16.dp.toPx() }
-        val probeResId = when (val seg = segments.getOrNull(selectedIndex)) {
-            is FanSegment.BuiltIn -> when (seg.mode) {
-                BlindMode.PHOTO -> com.bobot.ailauncher.R.drawable.meteor_jump
-                BlindMode.VIDEO -> com.bobot.ailauncher.R.drawable.meteor_wave
-                BlindMode.AUDIO -> com.bobot.ailauncher.R.drawable.meteor_hold
-            }
-            is FanSegment.Quick -> com.bobot.ailauncher.R.drawable.meteor_main
-            null -> com.bobot.ailauncher.R.drawable.meteor_wave
-        }
-        val probeRaw = if (hasSel) {
+        val indSizeDp = 32.dp
+        val indSizePx = with(density) { indSizeDp.toPx() }
+        val indGapPx = with(density) { 36.dp.toPx() }
+        val indEdgePx = with(density) { 40.dp.toPx() }
+        val indRaw = if (hasSel) {
             val (ps, psw) = segmentAngles(selectedIndex, sweeps, direction)
             val pRad = Math.toRadians((ps + psw / 2).toDouble())
             val pR = with(density) { segRadiiDp[selectedIndex].value.dp.toPx() } +
-                probeGapPx
+                indGapPx
             Offset(
                 centerX + cos(pRad).toFloat() * pR,
                 centerY + sin(pRad).toFloat() * pR
             )
         } else null
-        val probeClamped = probeRaw?.let {
+        val indClamped = indRaw?.let {
             Offset(
                 it.x.coerceIn(
-                    probeEdgePx,
-                    (screenSize.width - probeEdgePx).coerceAtLeast(probeEdgePx)
+                    indEdgePx,
+                    (screenSize.width - indEdgePx).coerceAtLeast(indEdgePx)
                 ),
                 it.y.coerceIn(
-                    probeEdgePx,
-                    (screenSize.height - probeEdgePx).coerceAtLeast(probeEdgePx)
+                    indEdgePx,
+                    (screenSize.height - indEdgePx).coerceAtLeast(indEdgePx)
                 )
             )
         }
-        // 无选中时锚点停留上次位置（缩回原地，下次从该处探出）
-        var probeAnchor by remember { mutableStateOf(Offset(centerX, centerY)) }
-        LaunchedEffect(probeClamped) {
-            if (probeClamped != null) probeAnchor = probeClamped
+        // 无选中时锚点停留上次位置
+        var indAnchor by remember { mutableStateOf(Offset(centerX, centerY)) }
+        LaunchedEffect(indClamped) {
+            if (indClamped != null) indAnchor = indClamped
         }
-        val probeOffset by animateOffsetAsState(
-            targetValue = probeClamped ?: probeAnchor,
+        val indOffset by animateOffsetAsState(
+            targetValue = indClamped ?: indAnchor,
             animationSpec = spring(dampingRatio = 0.62f, stiffness = 380f),
-            label = "probeOffset"
+            label = "indOffset"
         )
-        val probeScale by animateFloatAsState(
-            targetValue = if (hasSel) 1f else 0f,
-            animationSpec = spring(dampingRatio = 0.55f, stiffness = 480f),
-            label = "probeScale"
+        val indScale by animateFloatAsState(
+            targetValue = if (hasSel) 1f else 0.8f,
+            animationSpec = spring(dampingRatio = 0.6f, stiffness = 420f),
+            label = "indScale"
         )
-        val probeAlpha by animateFloatAsState(
+        val indAlpha by animateFloatAsState(
             targetValue = if (hasSel) 1f else 0f,
             animationSpec = tween(150),
-            label = "probeAlpha"
+            label = "indAlpha"
         )
-        // v0.68.35：探出时从 -15° 旋转回正（overshoot 弹性），收回时转回去（不可见）
-        val probeRot by animateFloatAsState(
-            targetValue = if (hasSel) 0f else -15f,
-            animationSpec = spring(dampingRatio = 0.5f, stiffness = 380f),
-            label = "probeRot"
-        )
-        if (probeAlpha > 0.01f) {
-            Image(
-                painter = androidx.compose.ui.res.painterResource(id = probeResId),
-                contentDescription = null,
+        val indSeg = segments.getOrNull(selectedIndex)
+        if (indAlpha > 0.01f && indSeg != null) {
+            Box(
                 modifier = Modifier
                     .offset {
                         IntOffset(
-                            (probeOffset.x - probeSizePx * probeScale / 2f).roundToInt(),
-                            (probeOffset.y - probeSizePx * probeScale / 2f).roundToInt()
+                            (indOffset.x - indSizePx / 2f).roundToInt(),
+                            (indOffset.y - indSizePx / 2f).roundToInt()
                         )
                     }
                     .graphicsLayer {
-                        scaleX = probeScale
-                        scaleY = probeScale
-                        rotationZ = probeRot
-                        // "钻回去"：收回时轻微下沉
-                        translationY = (1f - probeScale) * probeSinkPx
-                        alpha = (probeAlpha * fanAlpha).coerceIn(0f, 1f)
+                        scaleX = indScale
+                        scaleY = indScale
+                        alpha = (indAlpha * fanAlpha).coerceIn(0f, 1f)
                     }
-                    .size(probeSizeDp)
-            )
+                    .size(indSizeDp),
+                contentAlignment = Alignment.Center
+            ) {
+                FanIndicatorIcon(seg = indSeg)
+            }
         }
         // v0.68.20：图标 + 文字 overlay（Compose 排版）
         // v0.68.24 方案A：文字随段半径走（选中段伸长后文字外移）；选中字号放大
@@ -1019,12 +1096,19 @@ fun BlindCaptureFan(
             )
             key(i) {
                 // v0.68.22：纯文字排版（去图标，段内空间小，字号拉大居中）
+                // v0.68.37：窄段（<40°，即录音 28°/快捷 30°）中文标签竖排——
+                // 字保持 upright、沿径向垂直堆叠；非中文或超 4 字 fallback 小一号字号 + 省略
+                val narrow = sw < 40f
+                val vertical = narrow && segLabel.length in 1..4 &&
+                    segLabel.all { it in '\u4e00'..'\u9fff' }
+                val boxW = if (vertical) 36.dp else 96.dp
+                val boxH = if (vertical) 104.dp else 48.dp
                 Box(
                     modifier = Modifier
                         .offset {
                             IntOffset(
-                                (lx - with(density) { 48.dp.toPx() }).roundToInt(),
-                                (ly - with(density) { 24.dp.toPx() }).roundToInt()
+                                (lx - with(density) { boxW.toPx() } / 2f).roundToInt(),
+                                (ly - with(density) { boxH.toPx() } / 2f).roundToInt()
                             )
                         }
                         .graphicsLayer {
@@ -1032,23 +1116,42 @@ fun BlindCaptureFan(
                             scaleY = pop
                             alpha = fanAlpha
                         }
-                        .size(96.dp, 48.dp),
+                        .size(boxW, boxH),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = segLabel,
-                        // v0.68.24 方案A：选中放大——拍照 19sp→22sp，其他 16sp→19sp
-                        fontSize = when {
-                            selected && isPhoto -> 22.sp
-                            selected -> 19.sp
-                            isPhoto -> 19.sp
-                            else -> 16.sp
-                        },
-                        fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
-                        color = if (selected) titleColor else bodyColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (vertical) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            segLabel.forEach { ch ->
+                                Text(
+                                    text = ch.toString(),
+                                    fontSize = if (selected) 16.sp else 14.sp,
+                                    fontWeight = if (selected) FontWeight.Bold
+                                    else FontWeight.Medium,
+                                    color = if (selected) titleColor else bodyColor,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = segLabel,
+                            // v0.68.24 方案A：选中放大——拍照 19sp→22sp，其他 16sp→19sp
+                            fontSize = when {
+                                selected && isPhoto -> 22.sp
+                                selected -> 19.sp
+                                isPhoto -> 19.sp
+                                narrow -> 13.sp // v0.68.37：窄段非中文 fallback 小一号
+                                else -> 16.sp
+                            },
+                            fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) titleColor else bodyColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
