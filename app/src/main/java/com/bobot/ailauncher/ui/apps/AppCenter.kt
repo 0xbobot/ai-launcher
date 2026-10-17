@@ -1079,11 +1079,14 @@ fun AppCenterContent(
                 // 给操作反应时间，避免滑过时误触太突然；手指移开或松手即取消
                 // （声明前移到 stopGlide 之前：Kotlin 局部变量必须先声明后使用）
                 var houseDwellJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+                // v0.68.12（Bob）：房子停留进度 0→1，图标同步放大，引导用户感知"停留会回首页"
+                val dwellProgress = remember { Animatable(0f) }
                 val stopGlide: () -> Unit = {
                     glideJob?.cancel()
                     glideJob = null
                     houseDwellJob?.cancel()
                     houseDwellJob = null
+                    scope.launch { dwellProgress.snapTo(0f) }
                     // 列表已在拖动中滚到位，松手无需任何操作
                 }
                 // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区
@@ -1108,10 +1111,17 @@ fun AppCenterContent(
                 val onRailItem: (RailItem) -> Unit = { item ->
                     houseDwellJob?.cancel()
                     houseDwellJob = null
+                    if (item != RailItem.House) {
+                        scope.launch { dwellProgress.snapTo(0f) }
+                    }
                     when (item) {
                         is RailItem.House -> {
                             houseDwellJob = scope.launch {
-                                kotlinx.coroutines.delay(450)
+                                dwellProgress.snapTo(0f)
+                                dwellProgress.animateTo(
+                                    1f,
+                                    animationSpec = tween(450)
+                                )
                                 onHeaderSwipeRightState.value()
                             }
                         }
@@ -1127,6 +1137,7 @@ fun AppCenterContent(
                     forcedActiveIndex = mirrorIndex,
                     pulseTick = flashTick,
                     pulseItem = pulseItem,
+                    dwellProgress = dwellProgress.value,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(bottom = 70.dp)

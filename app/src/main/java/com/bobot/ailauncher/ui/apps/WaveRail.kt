@@ -101,7 +101,9 @@ internal fun WaveRail(
     railWidth: Dp = 44.dp,
     // v0.67.13：脉冲高亮某一项（收藏/隐藏时的闪烁反馈）
     pulseTick: Int = 0,
-    pulseItem: RailItem? = null
+    pulseItem: RailItem? = null,
+    // v0.68.12（Bob）：房子停留进度 0→1，图标同步放大，引导用户感知过渡
+    dwellProgress: Float = 0f
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
@@ -272,12 +274,18 @@ internal fun WaveRail(
                                 scaleX = sc
                                 scaleY = sc
                             }
+                        // v0.68.12：房子停留时逐渐放大，提示"停留会回首页"
+                        val houseScale = if (item == RailItem.House && i == displayIndex)
+                            1f + dwellProgress * 0.7f else 1f
                         when (item) {
                             RailItem.House -> HouseGlyph(
                                 color = AILauncherColors.Title.copy(alpha = 0.6f),
-                                modifier = waveMod
+                                modifier = waveMod.graphicsLayer {
+                                    scaleX = houseScale
+                                    scaleY = houseScale
+                                }
                             )
-                            // v0.68.11：线条风图标颜色与字母统一（Title 60%）
+                            // v0.68.8：线条风，与房子同款描边
                             RailItem.Star -> StarGlyph(
                                 color = AILauncherColors.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
@@ -362,6 +370,7 @@ internal fun AppRail(
     forcedActiveIndex: Int? = null,
     pulseTick: Int = 0,
     pulseItem: RailItem? = null,
+    dwellProgress: Float = 0f,
     modifier: Modifier = Modifier
 ) {
     WaveRail(
@@ -371,6 +380,7 @@ internal fun AppRail(
         forcedActiveIndex = forcedActiveIndex,
         pulseTick = pulseTick,
         pulseItem = pulseItem,
+        dwellProgress = dwellProgress,
         modifier = modifier.height(400.dp)
     )
 }
@@ -386,7 +396,7 @@ private fun StarGlyph(
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val stroke = w * 0.08f  // v0.68.11：调细，和 11sp 纤细字母统一
+        val stroke = w * 0.08f
         val cx = w * 0.5f
         val cy = h * 0.52f
         val outerR = w * 0.42f
@@ -424,7 +434,7 @@ private fun EyeOffGlyph(
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val stroke = w * 0.08f  // v0.68.11：调细，和 11sp 纤细字母统一
+        val stroke = w * 0.08f
         val style = Stroke(width = stroke, cap = StrokeCap.Round)
         // 眼睛轮廓
         drawOval(
@@ -462,7 +472,7 @@ private fun HouseGlyph(
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val stroke = w * 0.08f  // v0.68.11：调细，和 11sp 纤细字母统一
+        val stroke = w * 0.08f
         val roofY = h * 0.44f
         val peakY = h * 0.14f
         val bodyBottom = h * 0.88f
