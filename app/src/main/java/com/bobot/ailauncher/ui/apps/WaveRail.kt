@@ -21,8 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,8 +50,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -276,22 +277,17 @@ internal fun WaveRail(
                                 color = AILauncherColors.Hint,
                                 modifier = waveMod
                             )
-                            RailItem.Star -> androidx.compose.material3.Icon(
-                                imageVector = Icons.Filled.Star,
-                                contentDescription = null,
-                                tint = AILauncherColors.Hint,
+                            // v0.68.8：线条风，与房子同款描边
+                            RailItem.Star -> StarGlyph(
+                                color = AILauncherColors.Hint,
                                 modifier = waveMod
                             )
-                            RailItem.Eye -> androidx.compose.material3.Icon(
-                                imageVector = Icons.Filled.VisibilityOff,
-                                contentDescription = null,
-                                tint = AILauncherColors.Hint,
+                            RailItem.Eye -> EyeOffGlyph(
+                                color = AILauncherColors.Hint,
                                 modifier = waveMod
                             )
-                            is RailItem.Letter -> androidx.compose.material3.Icon(
-                                imageVector = Icons.Filled.Star,
-                                contentDescription = null,
-                                tint = AILauncherColors.Hint,
+                            is RailItem.Letter -> StarGlyph(
+                                color = AILauncherColors.Hint,
                                 modifier = waveMod
                             )
                         }
@@ -334,22 +330,17 @@ internal fun WaveRail(
                             color = AILauncherColors.Title,
                             modifier = Modifier.size(24.dp)
                         )
-                        RailItem.Star -> androidx.compose.material3.Icon(
-                            imageVector = Icons.Filled.Star,
-                            contentDescription = null,
-                            tint = AILauncherColors.Title,
+                        // v0.68.8：线条风，与房子同款描边
+                        RailItem.Star -> StarGlyph(
+                            color = AILauncherColors.Title,
                             modifier = Modifier.size(24.dp)
                         )
-                        RailItem.Eye -> androidx.compose.material3.Icon(
-                            imageVector = Icons.Filled.VisibilityOff,
-                            contentDescription = null,
-                            tint = AILauncherColors.Title,
+                        RailItem.Eye -> EyeOffGlyph(
+                            color = AILauncherColors.Title,
                             modifier = Modifier.size(24.dp)
                         )
-                        is RailItem.Letter -> androidx.compose.material3.Icon(
-                            imageVector = Icons.Filled.Star,
-                            contentDescription = null,
-                            tint = AILauncherColors.Title,
+                        is RailItem.Letter -> StarGlyph(
+                            color = AILauncherColors.Title,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -382,6 +373,82 @@ internal fun AppRail(
         pulseItem = pulseItem,
         modifier = modifier.height(400.dp)
     )
+/**
+ * v0.68.8（Bob）：线条风星星——与房子同款细描边+圆角，和字母统一。
+ */
+@Composable
+private fun StarGlyph(
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.095f
+        val cx = w * 0.5f
+        val cy = h * 0.52f
+        val outerR = w * 0.42f
+        val innerR = w * 0.175f
+        val path = Path().apply {
+            for (i in 0..9) {
+                val angleRad = (-90f + i * 36f) * PI / 180.0
+                val r = if (i % 2 == 0) outerR else innerR
+                val x = cx + (r * cos(angleRad)).toFloat()
+                val y = cy + (r * sin(angleRad)).toFloat()
+                if (i == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+        drawPath(
+            path = path,
+            color = color,
+            style = Stroke(
+                width = stroke,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
+        )
+    }
+}
+
+/**
+ * v0.68.8（Bob）：线条风眼睛（隐藏）——椭圆+瞳孔+斜线，与房子同款描边。
+ */
+@Composable
+private fun EyeOffGlyph(
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.095f
+        val style = Stroke(width = stroke, cap = StrokeCap.Round)
+        // 眼睛轮廓
+        drawOval(
+            color = color,
+            topLeft = Offset(w * 0.08f, h * 0.30f),
+            size = Size(w * 0.84f, h * 0.40f),
+            style = style
+        )
+        // 瞳孔
+        drawCircle(
+            color = color,
+            radius = w * 0.085f,
+            center = Offset(w * 0.5f, h * 0.5f),
+            style = style
+        )
+        // 斜线（表示隐藏）
+        drawLine(
+            color = color,
+            start = Offset(w * 0.16f, h * 0.80f),
+            end = Offset(w * 0.84f, h * 0.20f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
 /**
  * v0.68.6（Bob）：精致版房子——细描边+圆角+门洞，告别实心丑房子。
  */
@@ -425,25 +492,4 @@ private fun HouseGlyph(
         )
     }
 }
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val bodyTop = h * 0.45f
-        // 房体
-        drawRect(
-            color = color,
-            topLeft = Offset(w * 0.22f, bodyTop),
-            size = Size(w * 0.56f, h - bodyTop)
-        )
-        // 屋顶
-        drawPath(
-            path = Path().apply {
-                moveTo(w * 0.06f, bodyTop + h * 0.04f)
-                lineTo(w * 0.5f, h * 0.06f)
-                lineTo(w * 0.94f, bodyTop + h * 0.04f)
-                close()
-            },
-            color = color
-        )
-    }
 }
