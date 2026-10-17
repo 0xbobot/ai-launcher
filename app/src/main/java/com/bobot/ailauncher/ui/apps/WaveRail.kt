@@ -494,4 +494,3 @@ private fun HouseGlyph(
         )
     }
 }
-}
