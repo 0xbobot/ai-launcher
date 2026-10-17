@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -31,6 +32,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.positionInParent
@@ -253,25 +257,39 @@ internal fun WaveRail(
                             }
                         )
                     } else {
-                        val icon = when (item) {
-                            RailItem.House -> Icons.Filled.Home
-                            RailItem.Star -> Icons.Filled.Star
-                            RailItem.Eye -> Icons.Filled.VisibilityOff
-                            is RailItem.Letter -> Icons.Filled.Home
+                        // v0.68.4：House 用手绘 glyph（Icons.Filled.Home 在当前依赖不可用）
+                        val waveMod = Modifier
+                            .size(14.dp)
+                            .graphicsLayer {
+                                translationX = dirSign * bulgePx * g + waveShiftX * g
+                                val sc = (1f + g) * pulse
+                                scaleX = sc
+                                scaleY = sc
+                            }
+                        when (item) {
+                            RailItem.House -> HouseGlyph(
+                                color = AILauncherColors.Hint,
+                                modifier = waveMod
+                            )
+                            RailItem.Star -> androidx.compose.material3.Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = null,
+                                tint = AILauncherColors.Hint,
+                                modifier = waveMod
+                            )
+                            RailItem.Eye -> androidx.compose.material3.Icon(
+                                imageVector = Icons.Filled.VisibilityOff,
+                                contentDescription = null,
+                                tint = AILauncherColors.Hint,
+                                modifier = waveMod
+                            )
+                            is RailItem.Letter -> androidx.compose.material3.Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = null,
+                                tint = AILauncherColors.Hint,
+                                modifier = waveMod
+                            )
                         }
-                        androidx.compose.material3.Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = AILauncherColors.Hint,
-                            modifier = Modifier
-                                .size(14.dp)
-                                .graphicsLayer {
-                                    translationX = dirSign * bulgePx * g + waveShiftX * g
-                                    val sc = (1f + g) * pulse
-                                    scaleX = sc
-                                    scaleY = sc
-                                }
-                        )
                     }
                 }
             }
@@ -305,18 +323,31 @@ internal fun WaveRail(
                         color = AILauncherColors.Title
                     )
                 } else {
-                    val icon = when (bubbleItem) {
-                        RailItem.House -> Icons.Filled.Home
-                        RailItem.Star -> Icons.Filled.Star
-                        RailItem.Eye -> Icons.Filled.VisibilityOff
-                        is RailItem.Letter -> Icons.Filled.Home
+                    // v0.68.4：House 用手绘 glyph（Icons.Filled.Home 在当前依赖不可用）
+                    when (bubbleItem) {
+                        RailItem.House -> HouseGlyph(
+                            color = AILauncherColors.Title,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        RailItem.Star -> androidx.compose.material3.Icon(
+                            imageVector = Icons.Filled.Star,
+                            contentDescription = null,
+                            tint = AILauncherColors.Title,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        RailItem.Eye -> androidx.compose.material3.Icon(
+                            imageVector = Icons.Filled.VisibilityOff,
+                            contentDescription = null,
+                            tint = AILauncherColors.Title,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        is RailItem.Letter -> androidx.compose.material3.Icon(
+                            imageVector = Icons.Filled.Star,
+                            contentDescription = null,
+                            tint = AILauncherColors.Title,
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
-                    androidx.compose.material3.Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = AILauncherColors.Title,
-                        modifier = Modifier.size(24.dp)
-                    )
                 }
             }
         }
@@ -346,4 +377,37 @@ internal fun AppRail(
         pulseItem = pulseItem,
         modifier = modifier.height(400.dp)
     )
+}
+
+/**
+ * v0.68.4：手绘房子 glyph。
+ * Icons.Filled.Home 在当前 material-icons 依赖中不可用（Star/VisibilityOff 可用），
+ * 房子项改用 Canvas 手绘，保证确定性渲染。
+ */
+@Composable
+private fun HouseGlyph(
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val bodyTop = h * 0.45f
+        // 房体
+        drawRect(
+            color = color,
+            topLeft = Offset(w * 0.22f, bodyTop),
+            size = Size(w * 0.56f, h - bodyTop)
+        )
+        // 屋顶
+        drawPath(
+            path = Path().apply {
+                moveTo(w * 0.06f, bodyTop + h * 0.04f)
+                lineTo(w * 0.5f, h * 0.06f)
+                lineTo(w * 0.94f, bodyTop + h * 0.04f)
+                close()
+            },
+            color = color
+        )
+    }
 }
