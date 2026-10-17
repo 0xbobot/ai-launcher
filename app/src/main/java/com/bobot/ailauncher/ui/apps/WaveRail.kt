@@ -274,20 +274,20 @@ internal fun WaveRail(
                             }
                         when (item) {
                             RailItem.House -> HouseGlyph(
-                                color = AILauncherColors.Hint,
+                                color = AILauncherColors.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
-                            // v0.68.8：线条风，与房子同款描边
+                            // v0.68.11：线条风图标颜色与字母统一（Title 60%）
                             RailItem.Star -> StarGlyph(
-                                color = AILauncherColors.Hint,
+                                color = AILauncherColors.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
                             RailItem.Eye -> EyeOffGlyph(
-                                color = AILauncherColors.Hint,
+                                color = AILauncherColors.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
                             is RailItem.Letter -> StarGlyph(
-                                color = AILauncherColors.Hint,
+                                color = AILauncherColors.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
                         }
@@ -386,7 +386,7 @@ private fun StarGlyph(
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val stroke = w * 0.095f
+        val stroke = w * 0.08f  // v0.68.11：调细，和 11sp 纤细字母统一
         val cx = w * 0.5f
         val cy = h * 0.52f
         val outerR = w * 0.42f
@@ -424,7 +424,7 @@ private fun EyeOffGlyph(
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val stroke = w * 0.095f
+        val stroke = w * 0.08f  // v0.68.11：调细，和 11sp 纤细字母统一
         val style = Stroke(width = stroke, cap = StrokeCap.Round)
         // 眼睛轮廓
         drawOval(
@@ -462,7 +462,7 @@ private fun HouseGlyph(
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val stroke = w * 0.095f
+        val stroke = w * 0.08f  // v0.68.11：调细，和 11sp 纤细字母统一
         val roofY = h * 0.44f
         val peakY = h * 0.14f
         val bodyBottom = h * 0.88f
