@@ -88,6 +88,8 @@ enum class BlindMode(val label: String) {
 private const val FAN_START_DEG = 105f
 private const val FAN_SWEEP_DEG = 150f
 private const val FAN_R_OUTER_DP = 148f
+// v0.68.24 方案A：选中段伸长到的外半径（+28dp）
+private const val FAN_R_OUTER_SELECTED_DP = 176f
 private const val FAN_R_INNER_DP = 46f
 private const val FAN_EDGE_MARGIN_DP = 12f
 
@@ -553,19 +555,23 @@ fun BlindCaptureFan(
 ) {
     val modes = BlindMode.values()
     val density = LocalDensity.current
-    val accent = AILauncherColors.Accent
-    val accentSoft = AILauncherColors.AccentSoft
+    val selectedFill = Color(0xFFD8CBB6) // v0.68.24 方案A：选中段暖棕底
     val titleColor = AILauncherColors.Title
     val bodyColor = AILauncherColors.Body
 
-    // v0.68.20：展开弹性动画——半径从 0 弹到全尺寸 + 淡入
+    // v0.68.24 方案A：选中段径向伸长——每段外半径独立 spring；
+    // 展开 0→148dp，选中该段 148→176dp（+28dp），滑出回弹
     var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { expanded = true }
-    val rOuterDp by animateFloatAsState(
-        targetValue = if (expanded) FAN_R_OUTER_DP else 0f,
-        animationSpec = spring(dampingRatio = 0.68f, stiffness = 280f),
-        label = "fanExpand"
-    )
+    val segRadiiDp = modes.indices.map { i ->
+        animateFloatAsState(
+            targetValue = if (!expanded) 0f
+            else if (i == selectedIndex) FAN_R_OUTER_SELECTED_DP
+            else FAN_R_OUTER_DP,
+            animationSpec = spring(dampingRatio = 0.62f, stiffness = 300f),
+            label = "segR$i"
+        )
+    }
     val fanAlpha by animateFloatAsState(
         targetValue = if (expanded) 1f else 0f,
         animationSpec = tween(160),
@@ -578,29 +584,18 @@ fun BlindCaptureFan(
                 .fillMaxSize()
                 .alpha(fanAlpha)
         ) {
-            val rOuter = rOuterDp.dp.toPx()
-            if (rOuter < 1f) return@Canvas
             val rInner = FAN_R_INNER_DP.dp.toPx()
             val center = Offset(centerX, centerY)
-            // v0.68.20：选中光晕——底层大一圈的柔光
-            if (selectedIndex in modes.indices) {
-                val (s, sw) = segmentAngles(selectedIndex)
-                drawArc(
-                    color = accent.copy(alpha = 0.30f),
-                    startAngle = s - 2f,
-                    sweepAngle = sw + 4f,
-                    useCenter = true,
-                    topLeft = Offset(centerX - rOuter - 10f, centerY - rOuter - 10f),
-                    size = Size((rOuter + 10f) * 2f, (rOuter + 10f) * 2f)
-                )
-            }
-            // 各段底
+            // v0.68.24 方案A：选中光晕已删除，改径向伸长
+            // 各段底（每段用自己的半径）
             modes.forEachIndexed { i, mode ->
                 val (s, sw) = segmentAngles(i)
                 val selected = i == selectedIndex
+                val rOuter = segRadiiDp[i].value.dp.toPx()
+                if (rOuter < 1f) return@forEachIndexed
                 drawArc(
                     color = when {
-                        selected -> accentSoft
+                        selected -> selectedFill
                         mode == BlindMode.PHOTO -> Color.White.copy(alpha = 0.92f)
                         else -> Color.White.copy(alpha = 0.78f)
                     },
@@ -611,7 +606,7 @@ fun BlindCaptureFan(
                     size = Size(rOuter * 2f, rOuter * 2f)
                 )
             }
-            // v0.68.20：段间分隔线
+            // v0.68.20：段间分隔线（v0.68.24：伸到相邻两段半径较大者）
             var acc = FAN_START_DEG + FAN_SWEEP_DEG
             val divColor = Color(0xFF8A7B6B).copy(alpha = 0.55f)
             val divW = 2.dp.toPx()
@@ -619,10 +614,15 @@ fun BlindCaptureFan(
                 acc -= FAN_SWEEPS[i]
                 val rad = Math.toRadians(acc.toDouble())
                 val dir = Offset(cos(rad).toFloat(), sin(rad).toFloat())
+                val rMax = maxOf(
+                    segRadiiDp[i].value,
+                    segRadiiDp[i + 1].value
+                ).dp.toPx()
+                if (rMax < 1f) continue
                 drawLine(
                     color = divColor,
                     start = center + dir * (rInner + 4f),
-                    end = center + dir * (rOuter - 4f),
+                    end = center + dir * (rMax - 4f),
                     strokeWidth = divW,
                     cap = StrokeCap.Round
                 )
@@ -658,11 +658,12 @@ fun BlindCaptureFan(
                 .size((FAN_R_INNER_DP * 2).dp)
         )
         // v0.68.20：图标 + 文字 overlay（Compose 排版）
-        val rOuterPx = with(density) { rOuterDp.dp.toPx() }
+        // v0.68.24 方案A：文字随段半径走（选中段伸长后文字外移）；选中字号放大
         val rInnerPx = with(density) { FAN_R_INNER_DP.dp.toPx() }
-        val rMid = (rOuterPx + rInnerPx) / 2f
         modes.forEachIndexed { i, mode ->
             val (s, sw) = segmentAngles(i)
+            val segRPx = with(density) { segRadiiDp[i].value.dp.toPx() }
+            val rMid = (segRPx + rInnerPx) / 2f
             val midRad = Math.toRadians((s + sw / 2).toDouble())
             val lx = centerX + cos(midRad).toFloat() * rMid
             val ly = centerY + sin(midRad).toFloat() * rMid
@@ -693,7 +694,13 @@ fun BlindCaptureFan(
                 ) {
                     Text(
                         text = if (mode == BlindMode.CUSTOM) customLabel else mode.label,
-                        fontSize = if (isPhoto) 19.sp else 16.sp,
+                        // v0.68.24 方案A：选中放大——拍照 19sp→22sp，其他 16sp→19sp
+                        fontSize = when {
+                            selected && isPhoto -> 22.sp
+                            selected -> 19.sp
+                            isPhoto -> 19.sp
+                            else -> 16.sp
+                        },
                         fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
                         color = if (selected) titleColor else bodyColor,
                         maxLines = 1,
