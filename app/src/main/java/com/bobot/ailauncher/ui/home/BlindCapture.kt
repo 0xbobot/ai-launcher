@@ -11,20 +11,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,7 +32,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -170,18 +160,34 @@ object BlindCapturePrefs {
     }
 }
 
-/** App 内极简录音（MediaRecorder） */
+/**
+ * App 内极简录音（MediaRecorder）。
+ * v0.68.22：改存 MediaStore 公共目录 Music/Recordings/，用户在文件管理器/音乐 App 可找到。
+ * （Android 10+ 用 RELATIVE_PATH，无需 WRITE_EXTERNAL_STORAGE 权限）
+ */
 object BlindAudioRecorder {
     var isRecording: Boolean = false
         private set
     private var recorder: MediaRecorder? = null
-    private var outFile: File? = null
+    private var outPfd: android.os.ParcelFileDescriptor? = null
+    private var outUri: android.net.Uri? = null
 
     fun start(context: Context): Boolean {
         if (isRecording) return true
         return try {
-            val dir = File(context.filesDir, "blind_audio").apply { mkdirs() }
-            outFile = File(dir, "rec_${System.currentTimeMillis()}.m4a")
+            // v0.68.22：MediaStore 公共目录
+            val values = android.content.ContentValues().apply {
+                put(MediaStore.Audio.Media.DISPLAY_NAME, "rec_${System.currentTimeMillis()}.m4a")
+                put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
+                put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/Recordings")
+            }
+            val uri = context.contentResolver.insert(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values
+            ) ?: return false
+            val pfd = context.contentResolver.openFileDescriptor(uri, "w") ?: run {
+                context.contentResolver.delete(uri, null, null)
+                return false
+            }
             val r = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 MediaRecorder(context)
             } else {
@@ -191,28 +197,70 @@ object BlindAudioRecorder {
             r.setAudioSource(MediaRecorder.AudioSource.MIC)
             r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            r.setOutputFile(outFile!!.absolutePath)
+            r.setOutputFile(pfd.fileDescriptor)
             r.prepare()
             r.start()
             recorder = r
+            outPfd = pfd
+            outUri = uri
             isRecording = true
             true
         } catch (_: Exception) {
             try { recorder?.release() } catch (_: Exception) { }
+            try { outPfd?.close() } catch (_: Exception) { }
+            outUri?.let { try { context.contentResolver.delete(it, null, null) } catch (_: Exception) { } }
             recorder = null
+            outPfd = null
+            outUri = null
             isRecording = false
             false
         }
     }
 
-    fun stop(): File? {
-        val f = outFile
+    /** 停止并返回 MediaStore Uri（可空） */
+    fun stop(context: Context): android.net.Uri? {
+        val uri = outUri
         try { recorder?.stop() } catch (_: Exception) { }
         try { recorder?.release() } catch (_: Exception) { }
+        try { outPfd?.close() } catch (_: Exception) { }
         recorder = null
-        outFile = null
+        outPfd = null
+        outUri = null
         isRecording = false
-        return f
+        return uri
+    }
+}
+
+/** 速记备忘存储（SharedPreferences JSON 列表） */
+object QuickMemoStore {
+    private const val PREFS = "quick_memo_prefs"
+    private const val KEY_MEMOS = "memos_json"
+
+    data class Memo(val text: String, val time: Long)
+
+    fun all(context: Context): List<Memo> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_MEMOS, null) ?: return emptyList()
+        return try {
+            val arr = org.json.JSONArray(raw)
+            List(arr.length()) { i ->
+                val o = arr.getJSONObject(i)
+                Memo(o.getString("text"), o.getLong("time"))
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    fun add(context: Context, text: String) {
+        val list = all(context).toMutableList()
+        list.add(0, Memo(text, System.currentTimeMillis()))
+        // 只保留最近 50 条
+        val trimmed = list.take(50)
+        val arr = org.json.JSONArray()
+        trimmed.forEach { m ->
+            arr.put(org.json.JSONObject().put("text", m.text).put("time", m.time))
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_MEMOS, arr.toString()).apply()
     }
 }
 
@@ -227,6 +275,8 @@ class BlindCaptureController(
     private val openCustomConfig: () -> Unit,
     private val triggerPx: Float,
     private val onDiag: (String) -> Unit = {},
+    // v0.68.22：录音结束回调（HomeScreen 弹出"转文字"卡片）
+    private val onRecordingDone: () -> Unit = {},
 ) {
     companion object {
         private const val TAG = "BlindCapture"
@@ -397,9 +447,30 @@ class BlindCaptureController(
         }
     }
 
+    /**
+     * v0.68.22：找系统自带相机包名——query 所有能处理该 action 的应用，
+     * 优先选 system app（用户手机自带相机），避免调起三方相机。
+     */
+    private fun findSystemCameraPackage(action: String): String? {
+        return try {
+            val pm = context.packageManager
+            val infos = pm.queryIntentActivities(
+                Intent(action), PackageManager.MATCH_DEFAULT_ONLY
+            )
+            if (infos.isEmpty()) return null
+            infos.firstOrNull {
+                it.activityInfo.applicationInfo.flags and
+                    android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0
+            }?.activityInfo?.packageName
+                ?: infos.first().activityInfo.packageName
+        } catch (_: Exception) { null }
+    }
+
     private fun launchCamera(action: String) {
         try {
             val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // v0.68.22：明确指定系统相机包，避免 resolve 到三方相机
+            findSystemCameraPackage(action)?.let { intent.setPackage(it) }
             if (intent.resolveActivity(context.packageManager) != null) {
                 context.startActivity(intent)
             } else {
@@ -412,9 +483,11 @@ class BlindCaptureController(
 
     private fun toggleAudio() {
         if (BlindAudioRecorder.isRecording) {
-            BlindAudioRecorder.stop()
+            BlindAudioRecorder.stop(context)
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            PetRepository.say("录音已保存")
+            // v0.68.22：告知公共目录位置，并弹出"转文字"卡片
+            PetRepository.say("录音已保存到 Music/Recordings")
+            onRecordingDone()
         } else if (hasAudioPermission()) {
             startAudio()
         } else {
@@ -446,13 +519,7 @@ class BlindCaptureController(
     }
 }
 
-/** 各模式图标 */
-private fun modeIcon(mode: BlindMode): ImageVector = when (mode) {
-    BlindMode.VIDEO -> Icons.Filled.Videocam
-    BlindMode.PHOTO -> Icons.Filled.PhotoCamera
-    BlindMode.AUDIO -> Icons.Filled.Mic
-    BlindMode.CUSTOM -> Icons.Filled.Star
-}
+/** v0.68.22：段内纯文字，已无图标（modeIcon 删除） */
 
 /**
  * 扇形选择器 v0.68.20 视觉重构：
@@ -545,13 +612,36 @@ fun BlindCaptureFan(
                     cap = StrokeCap.Round
                 )
             }
-            // 死区内圈
-            drawCircle(
-                color = Color.White.copy(alpha = 0.88f),
-                radius = rInner,
-                center = center
-            )
+            // v0.68.22：死区内圈不再画白圆，改由下方七仔 Image 覆盖
         }
+        // v0.68.22：中心七仔 mini——选中某段时跳一下给反应
+        val qizaiRes = if (selectedIndex in modes.indices)
+            com.bobot.ailauncher.R.drawable.meteor_jump
+        else
+            com.bobot.ailauncher.R.drawable.meteor_main
+        val qizaiPop by animateFloatAsState(
+            targetValue = if (selectedIndex in modes.indices) 1.18f else 1f,
+            animationSpec = spring(dampingRatio = 0.5f, stiffness = 500f),
+            label = "qizaiPop"
+        )
+        val rInnerPx2 = with(density) { FAN_R_INNER_DP.dp.toPx() }
+        Image(
+            painter = androidx.compose.ui.res.painterResource(id = qizaiRes),
+            contentDescription = null,
+            modifier = Modifier
+                .offset {
+                    IntOffset(
+                        (centerX - rInnerPx2 * qizaiPop).roundToInt(),
+                        (centerY - rInnerPx2 * qizaiPop).roundToInt()
+                    )
+                }
+                .graphicsLayer {
+                    scaleX = qizaiPop
+                    scaleY = qizaiPop
+                    alpha = fanAlpha
+                }
+                .size((FAN_R_INNER_DP * 2).dp)
+        )
         // v0.68.20：图标 + 文字 overlay（Compose 排版）
         val rOuterPx = with(density) { rOuterDp.dp.toPx() }
         val rInnerPx = with(density) { FAN_R_INNER_DP.dp.toPx() }
@@ -569,12 +659,13 @@ fun BlindCaptureFan(
                 label = "segPop$i"
             )
             key(i) {
-                Column(
+                // v0.68.22：纯文字排版（去图标，段内空间小，字号拉大居中）
+                Box(
                     modifier = Modifier
                         .offset {
                             IntOffset(
-                                (lx - with(density) { 40.dp.toPx() }).roundToInt(),
-                                (ly - with(density) { 32.dp.toPx() }).roundToInt()
+                                (lx - with(density) { 48.dp.toPx() }).roundToInt(),
+                                (ly - with(density) { 24.dp.toPx() }).roundToInt()
                             )
                         }
                         .graphicsLayer {
@@ -582,20 +673,12 @@ fun BlindCaptureFan(
                             scaleY = pop
                             alpha = fanAlpha
                         }
-                        .size(80.dp, 64.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                        .size(96.dp, 48.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = modeIcon(mode),
-                        contentDescription = null,
-                        tint = if (selected) accent else bodyColor,
-                        modifier = Modifier.size(if (isPhoto) 32.dp else 24.dp)
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (mode == BlindMode.CUSTOM) customLabel else mode.label,
-                        fontSize = if (isPhoto) 15.sp else 13.sp,
+                        fontSize = if (isPhoto) 19.sp else 16.sp,
                         fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
                         color = if (selected) titleColor else bodyColor,
                         maxLines = 1,

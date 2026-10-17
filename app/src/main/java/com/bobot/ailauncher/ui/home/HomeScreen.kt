@@ -108,6 +108,42 @@ fun HomeScreen(
     val audioPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> blindCtlRef.value?.onAudioPermissionResult(granted) }
+    // v0.68.22：录音结束 → "转文字"卡片；语音识别 launcher
+    var showTranscriptCard by remember { mutableStateOf(false) }
+    var transcriptText by remember { mutableStateOf<String?>(null) }
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(
+                android.speech.RecognizerIntent.EXTRA_RESULTS
+            )
+            val text = matches?.firstOrNull()?.trim()
+            if (!text.isNullOrEmpty()) {
+                transcriptText = text
+                com.bobot.ailauncher.data.PetRepository.say("听到了：$text")
+            } else {
+                com.bobot.ailauncher.data.PetRepository.say("没听清，再说一遍？")
+            }
+        }
+    }
+    fun startSpeechInput() {
+        try {
+            val intent = android.content.Intent(
+                android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+            ).apply {
+                putExtra(
+                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+                putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说出要记录的内容")
+            }
+            speechLauncher.launch(intent)
+        } catch (_: Exception) {
+            com.bobot.ailauncher.data.PetRepository.say("这台手机不支持语音识别")
+        }
+    }
     val blindCtl = remember {
         BlindCaptureController(
             context = context,
@@ -119,6 +155,8 @@ fun HomeScreen(
             openCustomConfig = { showBlindCustomConfig = true },
             triggerPx = with(density) { 24.dp.toPx() },
             onDiag = { blindDiag = it }, // v0.68.12：诊断浮层
+            // v0.68.22：录音结束 → 弹出"转文字"卡片
+            onRecordingDone = { showTranscriptCard = true; transcriptText = null },
         ).also { blindCtlRef.value = it }
     }
     // v0.68.0：右边缘系统手势豁免（响应 cleanHome 变化）
@@ -282,6 +320,67 @@ fun HomeScreen(
                 // v0.68.20：自定义段显示用户配置的名称
                 customLabel = blindCustomItem?.label?.takeIf { it.isNotBlank() } ?: "自定义",
             )
+        }
+        // v0.68.22：录音结束 → "转文字"卡片（录音+速记结合）
+        if (showTranscriptCard) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.32f)),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .padding(horizontal = 48.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.White)
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "录音已保存到 Music/Recordings",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF333333)
+                    )
+                    androidx.compose.foundation.layout.Spacer(
+                        modifier = Modifier.height(8.dp)
+                    )
+                    if (transcriptText != null) {
+                        Text(
+                            text = transcriptText!!,
+                            fontSize = 16.sp,
+                            color = Color(0xFF111111),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                        androidx.compose.material3.Button(
+                            onClick = {
+                                com.bobot.ailauncher.ui.home.QuickMemoStore.add(
+                                    context, transcriptText!!
+                                )
+                                com.bobot.ailauncher.data.PetRepository.say("已存为速记")
+                                showTranscriptCard = false
+                            }
+                        ) { Text("存为速记") }
+                        androidx.compose.foundation.layout.Spacer(
+                            modifier = Modifier.height(8.dp)
+                        )
+                        androidx.compose.material3.TextButton(
+                            onClick = { startSpeechInput() }
+                        ) { Text("重说一遍") }
+                    } else {
+                        androidx.compose.foundation.layout.Spacer(
+                            modifier = Modifier.height(8.dp)
+                        )
+                        androidx.compose.material3.Button(
+                            onClick = { startSpeechInput() }
+                        ) { Text("转文字记一句") }
+                    }
+                    androidx.compose.material3.TextButton(
+                        onClick = { showTranscriptCard = false }
+                    ) { Text("知道了") }
+                }
+            }
         }
         // v0.68.12：盲操诊断浮层（左上角半透明小字，实时显示状态机状态）
         Box(
