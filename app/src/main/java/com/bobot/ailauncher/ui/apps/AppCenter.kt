@@ -1081,12 +1081,19 @@ fun AppCenterContent(
                 var houseDwellJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                 // v0.68.12（Bob）：房子停留进度 0→1，图标同步放大，引导用户感知"停留会回首页"
                 val dwellProgress = remember { Animatable(0f) }
+                // v0.68.17（Bob）：发散过渡——停留结束后房子猛放大铺满屏再切首页
+                val explodeProgress = remember { Animatable(0f) }
+                var showExplode by remember { mutableStateOf(false) }
                 val stopGlide: () -> Unit = {
                     glideJob?.cancel()
                     glideJob = null
                     houseDwellJob?.cancel()
                     houseDwellJob = null
-                    scope.launch { dwellProgress.snapTo(0f) }
+                    showExplode = false
+                    scope.launch {
+                        dwellProgress.snapTo(0f)
+                        explodeProgress.snapTo(0f)
+                    }
                     // 列表已在拖动中滚到位，松手无需任何操作
                 }
                 // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区
@@ -1127,7 +1134,17 @@ fun AppCenterContent(
                                     1f,
                                     animationSpec = tween(450)
                                 )
+                                // v0.68.17（Bob）：发散主屏——房子从3.5x猛放到铺满屏，再切换消失
+                                showExplode = true
+                                explodeProgress.snapTo(0f)
+                                explodeProgress.animateTo(
+                                    1f,
+                                    animationSpec = tween(280)
+                                )
                                 onHeaderSwipeRightState.value()
+                                showExplode = false
+                                explodeProgress.snapTo(0f)
+                                dwellProgress.snapTo(0f)
                             }
                         }
                         is RailItem.Star -> scope.launch { listState.animateScrollToItem(0) }
@@ -1160,6 +1177,24 @@ fun AppCenterContent(
                     onRelease = { mirrorIndex = null },
                     modifier = Modifier.align(Alignment.CenterStart).fillMaxHeight()
                 )
+                // v0.68.17（Bob）：发散过渡——房子从气泡的3.5x猛放到铺满屏，再切首页消失
+                if (showExplode) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        HouseGlyph(
+                            color = AILauncherColors.Title,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .graphicsLayer {
+                                    val s = 3.5f + explodeProgress.value * 22f
+                                    scaleX = s
+                                    scaleY = s
+                                }
+                        )
+                    }
+                }
                 // v0.41.20（Bob）：右下角眼睛按钮已删除——隐藏分组在主列表末尾，
                 // 直接滚动到底就能看到（未解锁显示锁定占位）。
             }

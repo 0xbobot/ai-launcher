@@ -359,8 +359,8 @@ internal fun WaveRail(
                     // v0.68.6：精致版 HouseGlyph（细描边+圆角+门洞）
                     when (bubbleItem) {
                         RailItem.House -> {
-                            // v0.68.16（Bob）：停留时气泡里的房子逐渐变大，做"即将回首页"的过渡
-                            val bubbleHouseScale = 1f + dwellProgress * 0.8f
+                            // v0.68.17（Bob）：停留时气泡里的房子从1x猛长到3.5x，过渡效果要明显
+                            val bubbleHouseScale = 1f + dwellProgress * 2.5f
                             HouseGlyph(
                                 color = AILauncherColors.Title,
                                 modifier = Modifier
