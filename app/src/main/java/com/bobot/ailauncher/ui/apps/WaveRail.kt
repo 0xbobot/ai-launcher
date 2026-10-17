@@ -499,7 +499,7 @@ private fun EyeOffGlyph(
  * v0.68.6（Bob）：精致版房子——细描边+圆角+门洞，告别实心丑房子。
  */
 @Composable
-private fun HouseGlyph(
+fun HouseGlyph(
     color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
 ) {
