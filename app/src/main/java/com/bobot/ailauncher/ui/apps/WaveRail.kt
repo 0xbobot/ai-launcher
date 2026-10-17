@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -253,10 +254,10 @@ internal fun WaveRail(
                         )
                     } else {
                         val icon = when (item) {
-                            RailItem.House -> androidx.compose.material.icons.Icons.Filled.Home
-                            RailItem.Star -> androidx.compose.material.icons.Icons.Filled.Star
-                            RailItem.Eye -> androidx.compose.material.icons.Icons.Filled.VisibilityOff
-                            is RailItem.Letter -> androidx.compose.material.icons.Icons.Filled.Home
+                            RailItem.House -> Icons.Filled.Home
+                            RailItem.Star -> Icons.Filled.Star
+                            RailItem.Eye -> Icons.Filled.VisibilityOff
+                            is RailItem.Letter -> Icons.Filled.Home
                         }
                         androidx.compose.material3.Icon(
                             imageVector = icon,
@@ -305,10 +306,10 @@ internal fun WaveRail(
                     )
                 } else {
                     val icon = when (bubbleItem) {
-                        RailItem.House -> androidx.compose.material.icons.Icons.Filled.Home
-                        RailItem.Star -> androidx.compose.material.icons.Icons.Filled.Star
-                        RailItem.Eye -> androidx.compose.material.icons.Icons.Filled.VisibilityOff
-                        is RailItem.Letter -> androidx.compose.material.icons.Icons.Filled.Home
+                        RailItem.House -> Icons.Filled.Home
+                        RailItem.Star -> Icons.Filled.Star
+                        RailItem.Eye -> Icons.Filled.VisibilityOff
+                        is RailItem.Letter -> Icons.Filled.Home
                     }
                     androidx.compose.material3.Icon(
                         imageVector = icon,
