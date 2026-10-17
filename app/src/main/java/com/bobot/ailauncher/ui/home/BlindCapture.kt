@@ -48,8 +48,9 @@ import kotlin.math.abs
  * v0.68.0：盲操——不看屏幕快速捕捉瞬间。
  *
  * L 形手势（右边缘）：
- * 1. 触发：右边缘 48dp 内起滑，向左滑过阈值，停留 120ms → 激活
- *    （震动 + 七仔说"拍点什么？"）
+ * 1. 触发：右边缘 48dp 内起滑 → 跟踪；向左滑过阈值后，
+ *    手指速度降到接近 0 并持续 120ms → 激活（震动 + 七仔说"拍点什么？"）
+ *    （直接滑动末端自然减速停顿即触发；快速 flick 无停顿抬手则取消）
  * 2. 选择：按住不放上下滑，模式轨高亮跟随
  *    （每过一格震动 + 七仔报模式名）
  * 3. 确认：松手 → 启动选中模式
@@ -188,6 +189,11 @@ class BlindCaptureController(
     private var dwellJob: Job? = null
     private var idleJob: Job? = null
     private var lastDragDx: Int = Int.MIN_VALUE // 诊断浮层 dragging 去重
+    // v0.68.13：dwell 从"手指停下"开始计时——记录最近一次实质位移的时间；
+    // jitterPx 过滤触摸抖动（3dp）
+    private var lastMoveTime: Long = 0L
+    private var dwellAnchorY: Float = 0f
+    private val jitterPx: Float = 3 * context.resources.displayMetrics.density
 
     private fun cancelJobs() {
         dwellJob?.cancel(); dwellJob = null
@@ -236,6 +242,7 @@ class BlindCaptureController(
         tracking = false
         armed = false
         selecting = false
+        lastMoveTime = 0L
         setUi(BlindUiState.Hidden)
     }
 
@@ -273,46 +280,70 @@ class BlindCaptureController(
         val now = SystemClock.uptimeMillis()
         when {
             !armed && !selecting -> {
-                if (totalX <= -triggerPx && abs(totalX) > abs(totalY) * 1.5f) {
-                    // 左滑到位 → 等待 120ms 停留
-                    armed = true
-                    Log.d(TAG, "armed, waiting dwell")
-                    diagState("dwell…") // v0.68.12：诊断——停留计时中
-                    val y0 = change.position.y
-                    dwellJob = scope.launch {
-                        delay(DWELL_MS)
-                        if (armed && !selecting) activate(y0)
-                    }
-                } else if (abs(totalY) > verticalThresholdPx && abs(totalY) > abs(totalX)) {
-                    // 转为纵向手势，盲操退出
-                    diagState("idle(转纵向退出)") // v0.68.12：诊断
-                    tracking = false
-                } else {
-                    // v0.68.12：诊断——滑动中，显示累计位移（去重，不震动）
-                    val dxInt = totalX.toInt()
-                    if (dxInt != lastDragDx) {
-                        lastDragDx = dxInt
-                        diagText("dragging(dx=$dxInt)")
-                    }
+                // v0.68.13：dwell 从"手指停下"开始计时。进入触发区后，
+                // 每次有实质位移（≥ jitterPx，过滤触摸抖动）就重启 120ms 计时；
+                // 只有手指静止满 120ms 才激活。直接滑动末端自然减速停顿即触发；
+                // 快速 flick（无停顿直接抬手）因 onEnd 取消计时而永不触发。
+                val inTriggerZone = totalX <= -triggerPx && abs(totalX) > abs(totalY) * 1.5f
+                if (!inTriggerZone && dwellJob != null) {
+                    // 离开触发区（回滑）：取消待定的激活，保持跟踪
+                    Log.d(TAG, "dwell cancelled: left trigger zone totalX=$totalX")
+                    dwellJob?.cancel(); dwellJob = null
+                    diagText("dragging(dx=${totalX.toInt()})")
                 }
-            }
-            armed && !selecting -> {
-                // v0.68.6：停留中只要求"手指不离开"——继续左滑不取消，
-                // 只有回滑（向右回到接近起点）或转纵向才取消。
-                // 之前要求单帧位移 < 24dp，自然滑动速度下 dwell 几乎必被取消，
-                // 这就是盲操"滑动没反应"的主因（滑得越快越必取消）。
-                if (totalX > -triggerPx * 0.5f) {
-                    Log.d(TAG, "dwell cancelled: reversed totalX=$totalX")
-                    diagState("dwell取消(回滑)") // v0.68.12：诊断
-                    armed = false
-                    cancelJobs()
-                    tracking = false
-                } else if (abs(totalY) > verticalThresholdPx && abs(totalY) > abs(totalX)) {
-                    Log.d(TAG, "dwell cancelled: turned vertical")
-                    diagState("dwell取消(转纵向)") // v0.68.12：诊断
-                    armed = false
-                    cancelJobs()
-                    tracking = false
+                when {
+                    inTriggerZone -> {
+                        if (drag.getDistance() >= jitterPx) {
+                            // 手指还在动：重启静止计时
+                            lastMoveTime = now
+                            dwellJob?.cancel()
+                            dwellAnchorY = change.position.y
+                            dwellJob = scope.launch {
+                                delay(DWELL_MS)
+                                // 120ms 内再无实质位移 → 手指真的停下了
+                                if (tracking && !armed && !selecting &&
+                                    SystemClock.uptimeMillis() - lastMoveTime >= DWELL_MS
+                                ) {
+                                    armed = true
+                                    activate(dwellAnchorY)
+                                }
+                            }
+                            val dxInt = totalX.toInt()
+                            if (dxInt != lastDragDx) {
+                                lastDragDx = dxInt
+                                diagText("dragging(dx=$dxInt)")
+                            }
+                        } else if (dwellJob == null) {
+                            // 进入触发区时手指已静止（少见）：直接开始计时
+                            Log.d(TAG, "finger still on zone entry, dwell start")
+                            diagState("dwell…") // 诊断——停留计时中
+                            lastMoveTime = now
+                            dwellAnchorY = change.position.y
+                            dwellJob = scope.launch {
+                                delay(DWELL_MS)
+                                if (tracking && !armed && !selecting &&
+                                    SystemClock.uptimeMillis() - lastMoveTime >= DWELL_MS
+                                ) {
+                                    armed = true
+                                    activate(dwellAnchorY)
+                                }
+                            }
+                        }
+                        // else: dwell 计时中且手指静止 → 静静等待，不重启
+                    }
+                    abs(totalY) > verticalThresholdPx && abs(totalY) > abs(totalX) -> {
+                        // 转为纵向手势，盲操退出
+                        diagState("idle(转纵向退出)") // v0.68.12：诊断
+                        tracking = false
+                    }
+                    else -> {
+                        // v0.68.12：诊断——滑动中，显示累计位移（去重，不震动）
+                        val dxInt = totalX.toInt()
+                        if (dxInt != lastDragDx) {
+                            lastDragDx = dxInt
+                            diagText("dragging(dx=$dxInt)")
+                        }
+                    }
                 }
             }
             selecting -> {
@@ -339,6 +370,7 @@ class BlindCaptureController(
      * 手指抬起。返回 true 表示手势被盲操消费，调用方跳过原有纵向逻辑。
      */
     fun onEnd(): Boolean {
+        val wasDwelling = dwellJob != null
         cancelJobs()
         return when {
             selecting -> {
@@ -346,10 +378,10 @@ class BlindCaptureController(
                 reset()
                 true
             }
-            armed || tracking -> {
-                // 停留未完成 / 位移不够：吞掉，不触发纵向
-                // v0.68.12：诊断——区分抬手取消的原因
-                if (armed) diagState("dwell取消(抬手)")
+            tracking -> {
+                // v0.68.13：dwell 未完成（快速 flick 无停顿抬手）或位移不够：
+                // 吞掉，不触发纵向
+                if (wasDwelling) diagState("dwell取消(抬手)")
                 else diagText("idle(抬手,位移不够)")
                 reset()
                 true
