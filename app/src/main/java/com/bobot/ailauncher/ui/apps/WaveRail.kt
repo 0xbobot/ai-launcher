@@ -374,7 +374,7 @@ internal fun WaveRail(
                 else -> 0f
             }
             // 眼睛下拉时边框加粗，给"即将解锁"的视觉提示
-            val bubbleBorderWidth = 2.dp + eyePull * 2.dp
+            val bubbleBorderWidth = 2.dp + 2.dp * eyePull
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
