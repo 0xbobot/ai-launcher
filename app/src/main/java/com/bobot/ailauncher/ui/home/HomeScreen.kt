@@ -237,7 +237,7 @@ fun HomeScreen(
                         change.consume()
                         totalX += dragAmount.x
                         totalY += dragAmount.y
-                        // v0.68.17：盲操跟踪（首页背景任何左滑直接触发扇形）
+                        // v0.68.17：盲操跟踪（首页背景左滑/右滑直接触发扇形，右滑为镜像）
                         blindCtl.onMove(change, dragAmount, totalX, totalY, size)
                     }
                 )
@@ -274,6 +274,7 @@ fun HomeScreen(
             )
         }
         // v0.68.17：扇形选择器（替代纵向模式轨）：以触发点为圆心、左侧 150°
+        // v0.68.28：右滑镜像——扇形朝右展开
         (blindUi as? BlindUiState.Selecting)?.let { s ->
             BlindCaptureFan(
                 centerX = s.centerX,
@@ -281,6 +282,7 @@ fun HomeScreen(
                 selectedIndex = s.modeIndex,
                 // v0.68.20：自定义段显示用户配置的名称
                 customLabel = blindCustomItem?.label?.takeIf { it.isNotBlank() } ?: "自定义",
+                direction = s.direction,
             )
         }
         // v0.68.12：盲操诊断浮层（左上角半透明小字，实时显示状态机状态）

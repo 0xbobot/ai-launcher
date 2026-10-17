@@ -72,6 +72,9 @@ import kotlin.math.sqrt
  * v0.68.20：视觉重构——展开弹性动画、段间分隔线、选中光晕+放大、
  * 图标+文字排版；拍照为最默认操作。
  *
+ * v0.68.28：右滑镜像——首页背景右滑也触发，扇形朝右展开（-75°~+75°），
+ * 角度/伸长动效/取消/圆心钳制全部镜像；七仔中心 mini 不动。
+ *
  * 保留：三重反馈（震动/七仔语音/视觉高亮）、自定义☆槽位、诊断浮层。
  */
 
@@ -83,9 +86,14 @@ enum class BlindMode(val label: String) {
     CUSTOM("自定义"),
 }
 
+/** 扇形方向：LEFT=朝左（左滑触发），RIGHT=朝右（右滑触发，镜像） */
+enum class FanDirection { LEFT, RIGHT }
+
 // 扇形几何（Canvas 角度制：0°=正右方，顺时针为正，y 向下）
 // 左侧 150°：105°（下-左）~ 255°（上-左），index 0 在最上方
+// v0.68.28 右扇镜像：-75°（上-右）~ +75°（下-右），以正右方 0° 为中心
 private const val FAN_START_DEG = 105f
+private const val FAN_START_DEG_RIGHT = -75f
 private const val FAN_SWEEP_DEG = 150f
 private const val FAN_R_OUTER_DP = 148f
 // v0.68.24 方案A：选中段伸长到的外半径（+28dp）
@@ -100,22 +108,49 @@ private const val FAN_EDGE_MARGIN_DP = 12f
 private val FAN_SWEEPS = floatArrayOf(40f, 60f, 28f, 22f)
 
 /** 第 i 段的 (startAngle, sweepAngle)，Canvas 角度制；与命中判定共用 */
-private fun segmentAngles(i: Int): Pair<Float, Float> {
-    var top = FAN_START_DEG + FAN_SWEEP_DEG // 255°，最上方
-    for (j in 0 until i) top -= FAN_SWEEPS[j]
-    return Pair(top - FAN_SWEEPS[i], FAN_SWEEPS[i])
+private fun segmentAngles(
+    i: Int,
+    direction: FanDirection = FanDirection.LEFT,
+): Pair<Float, Float> {
+    if (direction == FanDirection.LEFT) {
+        var top = FAN_START_DEG + FAN_SWEEP_DEG // 255°，最上方
+        for (j in 0 until i) top -= FAN_SWEEPS[j]
+        return Pair(top - FAN_SWEEPS[i], FAN_SWEEPS[i])
+    }
+    // v0.68.28 右扇镜像：-75° 起自上而下累加，拍照 60° 居中（-35°~+25°，0° 落在其中）
+    var top = FAN_START_DEG_RIGHT // -75°，最上方
+    for (j in 0 until i) top += FAN_SWEEPS[j]
+    return Pair(top, FAN_SWEEPS[i])
 }
 
 /** 扇形命中：返回 sector index（0=最上方），-1 = 死区内或扇形外 */
-private fun sectorForIndex(dx: Float, dy: Float, deadZonePx: Float): Int {
+private fun sectorForIndex(
+    dx: Float,
+    dy: Float,
+    deadZonePx: Float,
+    direction: FanDirection = FanDirection.LEFT,
+): Int {
     if (sqrt(dx * dx + dy * dy) < deadZonePx) return -1
     var deg = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
     if (deg < 0f) deg += 360f
-    if (deg < FAN_START_DEG || deg > FAN_START_DEG + FAN_SWEEP_DEG) return -1
-    var top = FAN_START_DEG + FAN_SWEEP_DEG
-    for (i in FAN_SWEEPS.indices) {
-        top -= FAN_SWEEPS[i]
-        if (deg >= top) return i
+    if (direction == FanDirection.LEFT) {
+        if (deg < FAN_START_DEG || deg > FAN_START_DEG + FAN_SWEEP_DEG) return -1
+        var top = FAN_START_DEG + FAN_SWEEP_DEG
+        for (i in FAN_SWEEPS.indices) {
+            top -= FAN_SWEEPS[i]
+            if (deg >= top) return i
+        }
+    } else {
+        // v0.68.28 右扇：-75°~+75°；归一化到 -180°~180° 再判定
+        val degR = if (deg > 180f) deg - 360f else deg
+        if (degR < FAN_START_DEG_RIGHT ||
+            degR > FAN_START_DEG_RIGHT + FAN_SWEEP_DEG
+        ) return -1
+        var top = FAN_START_DEG_RIGHT
+        for (i in FAN_SWEEPS.indices) {
+            if (degR < top + FAN_SWEEPS[i]) return i
+            top += FAN_SWEEPS[i]
+        }
     }
     return FAN_SWEEPS.size - 1
 }
@@ -127,6 +162,8 @@ sealed interface BlindUiState {
         val centerX: Float,
         val centerY: Float,
         val modeIndex: Int,
+        // v0.68.28：扇形方向（右滑镜像）
+        val direction: FanDirection = FanDirection.LEFT,
     ) : BlindUiState
 }
 
@@ -304,6 +341,8 @@ class BlindCaptureController(
 
     private var tracking = false
     private var triggered = false
+    // v0.68.28：扇形方向（左滑=朝左，右滑=朝右镜像）
+    private var fanDir = FanDirection.LEFT
     private var centerX = 0f
     private var centerY = 0f
     private var modeIndex = -1
@@ -367,31 +406,46 @@ class BlindCaptureController(
         if (!tracking) return
         val pos = change.position
         if (!triggered) {
-            // 触发：左滑过阈值且横向主导 → 直接展开扇形（无停留、无边缘要求）
-            if (totalX <= -triggerPx && abs(totalX) > abs(totalY) * 1.5f) {
+            // 触发：左滑/右滑过阈值且横向主导 → 直接展开扇形（无停留、无边缘要求）
+            // v0.68.28：右滑也触发，扇形朝右镜像
+            val leftSwipe = totalX <= -triggerPx && abs(totalX) > abs(totalY) * 1.5f
+            val rightSwipe = totalX >= triggerPx && abs(totalX) > abs(totalY) * 1.5f
+            if (leftSwipe || rightSwipe) {
                 triggered = true
-                // 圆心内移，保证扇形不被屏幕边缘裁掉
-                centerX = pos.x.coerceAtLeast(fanROuterPx + fanMarginPx)
+                fanDir = if (leftSwipe) FanDirection.LEFT else FanDirection.RIGHT
+                // 圆心钳制，保证扇形不被屏幕边缘裁掉（镜像：左扇防左边缘，右扇防右边缘）
+                centerX = if (fanDir == FanDirection.LEFT) {
+                    pos.x.coerceAtLeast(fanROuterPx + fanMarginPx)
+                } else {
+                    val maxX = (size.width - fanROuterPx - fanMarginPx)
+                        .coerceAtLeast(fanMarginPx)
+                    pos.x.coerceAtMost(maxX)
+                }
                 val minY = fanHalfHPx + fanMarginPx
                 val maxY = (size.height - fanHalfHPx - fanMarginPx)
                     .coerceAtLeast(minY)
                 centerY = pos.y.coerceIn(minY, maxY)
                 modeIndex = -1
-                setUi(BlindUiState.Selecting(centerX, centerY, -1))
+                setUi(BlindUiState.Selecting(centerX, centerY, -1, fanDir))
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 PetRepository.say("拍点什么？")
-                diagState("fan展开")
-                Log.d(TAG, "triggered center=($centerX, $centerY)")
+                diagState(if (fanDir == FanDirection.LEFT) "fan展开" else "fan展开(右)")
+                Log.d(TAG, "triggered dir=$fanDir center=($centerX, $centerY)")
             }
             return
         }
-        // 右滑回 → 取消
-        if (pos.x > centerX + cancelBackPx) {
-            diagState("idle(右滑取消)")
+        // 滑回 → 取消（镜像：左扇右滑回取消，右扇左滑回取消）
+        val cancelBack = if (fanDir == FanDirection.LEFT) {
+            pos.x > centerX + cancelBackPx
+        } else {
+            pos.x < centerX - cancelBackPx
+        }
+        if (cancelBack) {
+            diagState("idle(滑回取消)")
             reset()
             return
         }
-        val idx = sectorForIndex(pos.x - centerX, pos.y - centerY, deadZonePx)
+        val idx = sectorForIndex(pos.x - centerX, pos.y - centerY, deadZonePx, fanDir)
         if (idx != modeIndex) {
             modeIndex = idx
             setUi(BlindUiState.Selecting(centerX, centerY, idx))
@@ -551,6 +605,8 @@ fun BlindCaptureFan(
     centerY: Float,
     selectedIndex: Int,
     customLabel: String = "自定义",
+    // v0.68.28：扇形方向（右滑镜像）
+    direction: FanDirection = FanDirection.LEFT,
     modifier: Modifier = Modifier,
 ) {
     val modes = BlindMode.values()
@@ -589,7 +645,7 @@ fun BlindCaptureFan(
             // v0.68.24 方案A：选中光晕已删除，改径向伸长
             // 各段底（每段用自己的半径）
             modes.forEachIndexed { i, mode ->
-                val (s, sw) = segmentAngles(i)
+                val (s, sw) = segmentAngles(i, direction)
                 val selected = i == selectedIndex
                 val rOuter = segRadiiDp[i].value.dp.toPx()
                 if (rOuter < 1f) return@forEachIndexed
@@ -607,11 +663,20 @@ fun BlindCaptureFan(
                 )
             }
             // v0.68.20：段间分隔线（v0.68.24：伸到相邻两段半径较大者）
-            var acc = FAN_START_DEG + FAN_SWEEP_DEG
+            // v0.68.28：右扇镜像——分隔线角度自上而下累加
+            var acc = if (direction == FanDirection.LEFT) {
+                FAN_START_DEG + FAN_SWEEP_DEG
+            } else {
+                FAN_START_DEG_RIGHT
+            }
             val divColor = Color(0xFF8A7B6B).copy(alpha = 0.55f)
             val divW = 2.dp.toPx()
             for (i in 0 until modes.size - 1) {
-                acc -= FAN_SWEEPS[i]
+                acc = if (direction == FanDirection.LEFT) {
+                    acc - FAN_SWEEPS[i]
+                } else {
+                    acc + FAN_SWEEPS[i]
+                }
                 val rad = Math.toRadians(acc.toDouble())
                 val dir = Offset(cos(rad).toFloat(), sin(rad).toFloat())
                 val rMax = maxOf(
@@ -661,7 +726,7 @@ fun BlindCaptureFan(
         // v0.68.24 方案A：文字随段半径走（选中段伸长后文字外移）；选中字号放大
         val rInnerPx = with(density) { FAN_R_INNER_DP.dp.toPx() }
         modes.forEachIndexed { i, mode ->
-            val (s, sw) = segmentAngles(i)
+            val (s, sw) = segmentAngles(i, direction)
             val segRPx = with(density) { segRadiiDp[i].value.dp.toPx() }
             val rMid = (segRPx + rInnerPx) / 2f
             val midRad = Math.toRadians((s + sw / 2).toDouble())
