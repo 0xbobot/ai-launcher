@@ -163,6 +163,7 @@ class BlindCaptureController(
     private val openCustomConfig: () -> Unit,
     private val edgePx: Float,
     private val triggerPx: Float,
+    private val onDiag: (String) -> Unit = {},
 ) {
     companion object {
         private const val TAG = "BlindCapture"
@@ -186,10 +187,23 @@ class BlindCaptureController(
     private var modeIndex = 1 // 默认拍照
     private var dwellJob: Job? = null
     private var idleJob: Job? = null
+    private var lastDragDx: Int = Int.MIN_VALUE // 诊断浮层 dragging 去重
 
     private fun cancelJobs() {
         dwellJob?.cancel(); dwellJob = null
         idleJob?.cancel(); idleJob = null
+    }
+
+    // v0.68.12：诊断——只更新浮层文字，不震动（高频调用如 dragging 用）
+    private fun diagText(s: String) {
+        onDiag(s)
+    }
+
+    // v0.68.12：诊断——状态变化时更新浮层 + 短震动（SegmentTick，区别于模式刻度）
+    private fun diagState(s: String) {
+        onDiag(s)
+        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        Log.d(TAG, "diag: $s")
     }
 
     private fun reset() {
@@ -203,7 +217,18 @@ class BlindCaptureController(
     /** 手势开始：右边缘 24dp 内起滑才跟踪 */
     fun onStart(x: Float, widthPx: Float) {
         cancelJobs()
-        tracking = widthPx > 0f && x >= widthPx - edgePx && cooldownOk()
+        val inEdge = widthPx > 0f && x >= widthPx - edgePx
+        val coolOk = cooldownOk()
+        tracking = inEdge && coolOk
+        lastDragDx = Int.MIN_VALUE
+        // v0.68.12：诊断——显示落点 x 及跟踪与否的原因；
+        // 被拒绝时只更新文字不震动（onStart 对每次滑动都调用，不能每次都震）
+        val msg = "onStart(x=${x.toInt()})" + when {
+            tracking -> ""
+            !inEdge -> "✗非边缘"
+            else -> "✗冷却中"
+        }
+        if (tracking) diagState(msg) else diagText(msg)
         Log.d(TAG, "onStart x=$x width=$widthPx tracking=$tracking")
         armed = false
         selecting = false
@@ -225,6 +250,7 @@ class BlindCaptureController(
                     // 左滑到位 → 等待 120ms 停留
                     armed = true
                     Log.d(TAG, "armed, waiting dwell")
+                    diagState("dwell…") // v0.68.12：诊断——停留计时中
                     val y0 = change.position.y
                     dwellJob = scope.launch {
                         delay(DWELL_MS)
@@ -232,7 +258,15 @@ class BlindCaptureController(
                     }
                 } else if (abs(totalY) > verticalThresholdPx && abs(totalY) > abs(totalX)) {
                     // 转为纵向手势，盲操退出
+                    diagState("idle(转纵向退出)") // v0.68.12：诊断
                     tracking = false
+                } else {
+                    // v0.68.12：诊断——滑动中，显示累计位移（去重，不震动）
+                    val dxInt = totalX.toInt()
+                    if (dxInt != lastDragDx) {
+                        lastDragDx = dxInt
+                        diagText("dragging(dx=$dxInt)")
+                    }
                 }
             }
             armed && !selecting -> {
@@ -242,11 +276,13 @@ class BlindCaptureController(
                 // 这就是盲操"滑动没反应"的主因（滑得越快越必取消）。
                 if (totalX > -triggerPx * 0.5f) {
                     Log.d(TAG, "dwell cancelled: reversed totalX=$totalX")
+                    diagState("dwell取消(回滑)") // v0.68.12：诊断
                     armed = false
                     cancelJobs()
                     tracking = false
                 } else if (abs(totalY) > verticalThresholdPx && abs(totalY) > abs(totalX)) {
                     Log.d(TAG, "dwell cancelled: turned vertical")
+                    diagState("dwell取消(转纵向)") // v0.68.12：诊断
                     armed = false
                     cancelJobs()
                     tracking = false
@@ -255,6 +291,7 @@ class BlindCaptureController(
             selecting -> {
                 // 取消：滑回右边缘
                 if (change.position.x >= size.width - edgePx / 2f) {
+                    diagState("idle(滑回取消)") // v0.68.12：诊断
                     reset()
                     return
                 }
@@ -264,6 +301,7 @@ class BlindCaptureController(
                     modeIndex = idx
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     PetRepository.say(BlindMode.values()[idx].label)
+                    diagState("selecting(mode=${BlindMode.values()[idx].label})") // v0.68.12：诊断
                     resetIdle()
                 }
             }
@@ -283,6 +321,9 @@ class BlindCaptureController(
             }
             armed || tracking -> {
                 // 停留未完成 / 位移不够：吞掉，不触发纵向
+                // v0.68.12：诊断——区分抬手取消的原因
+                if (armed) diagState("dwell取消(抬手)")
+                else diagText("idle(抬手,位移不够)")
                 reset()
                 true
             }
@@ -291,6 +332,7 @@ class BlindCaptureController(
     }
 
     fun onCancel() {
+        diagText("idle(手势取消)") // v0.68.12：诊断
         reset()
     }
 
@@ -304,6 +346,7 @@ class BlindCaptureController(
         selecting = true
         modeIndex = 1 // 默认拍照
         Log.d(TAG, "activated")
+        diagState("armed") // v0.68.12：诊断——已激活
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         PetRepository.say("拍点什么？")
         setUi(BlindUiState.Selecting(modeIndex, fingerY))
@@ -314,7 +357,10 @@ class BlindCaptureController(
         idleJob?.cancel()
         idleJob = scope.launch {
             delay(IDLE_CANCEL_MS)
-            if (selecting) reset() // 3 秒不动 → 静默取消
+            if (selecting) {
+                diagState("idle(3秒超时)") // v0.68.12：诊断
+                reset() // 3 秒不动 → 静默取消
+            }
         }
     }
 
@@ -331,6 +377,7 @@ class BlindCaptureController(
     private fun commit() {
         noteNavigation() // 提交后冷却，防连续误触
         Log.d(TAG, "commit mode=${BlindMode.values()[modeIndex]}")
+        diagState("commit(mode=${BlindMode.values()[modeIndex].label})") // v0.68.12：诊断——已提交
         when (BlindMode.values()[modeIndex]) {
             BlindMode.PHOTO -> launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
             BlindMode.VIDEO -> launchCamera(MediaStore.ACTION_VIDEO_CAPTURE)

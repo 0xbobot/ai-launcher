@@ -35,6 +35,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -91,6 +92,8 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     // v0.68.0：盲操状态
     var blindUi by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
+    // v0.68.12：盲操诊断浮层文字（用户无电脑看 logcat，屏上直接看状态机）
+    var blindDiag by remember { mutableStateOf("idle") }
     // v0.68.6：盲操激活状态上报 MainScreen——选择中时压住右边缘字母快找区，
     // 避免长按（~400ms）与盲操 dwell（120ms）双重触发
     val blindActive = blindUi is BlindUiState.Selecting
@@ -118,6 +121,7 @@ fun HomeScreen(
             openCustomConfig = { showBlindCustomConfig = true },
             edgePx = blindEdgePx,
             triggerPx = with(density) { 24.dp.toPx() },
+            onDiag = { blindDiag = it }, // v0.68.12：诊断浮层
         ).also { blindCtlRef.value = it }
     }
     // v0.68.0：右边缘系统手势豁免（响应 cleanHome 变化）
@@ -289,6 +293,21 @@ fun HomeScreen(
                     .align(Alignment.CenterEnd)
                     .padding(end = 10.dp)
                     .fillMaxHeight(0.62f)
+            )
+        }
+        // v0.68.12：盲操诊断浮层（左上角半透明小字，实时显示状态机状态）
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 8.dp, top = 56.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = "盲操:$blindDiag",
+                fontSize = 11.sp,
+                color = Color.White
             )
         }
         // v0.68.0：盲操自定义☆配置（复用宠物装备添加流程：选应用→选动作→保存）
