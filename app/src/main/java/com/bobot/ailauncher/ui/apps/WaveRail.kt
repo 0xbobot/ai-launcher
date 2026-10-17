@@ -197,24 +197,33 @@ internal fun WaveRail(
             // v0.68.21：眼睛在底部空间有限，阈值缩短到 60dp 不然触发不了
             // v0.68.24（Bob）：房子滑程再缩短，45dp 更跟手
             // v0.68.25（Bob）：放宽检测——从房子中心算起，手指在房子上上移即开始
+            // v0.68.26（Bob）：索引太脆弱（房子行仅 11dp，晃一下就变星星清零）——
+            // 改按 Y 区域判断，给 22dp（约两行）容差
             val houseThresholdPx = with(density) { 45.dp.toPx() }
-            val eyeThresholdPx = with(density) { 60.dp.toPx() }
-            if (items.isNotEmpty() && items[0] is RailItem.House && i == 0) {
+            val eyeThresholdPx = with(density) { 45.dp.toPx() }
+            val tolerancePx = with(density) { 22.dp.toPx() }
+            if (items.isNotEmpty() && items[0] is RailItem.House) {
                 val houseCenterY = railTopPx + rowHpx / 2f
-                onHousePull(
-                    ((houseCenterY - y) / houseThresholdPx).coerceIn(0f, 1.2f)
-                )
+                if (y < houseCenterY + tolerancePx) {
+                    onHousePull(
+                        ((houseCenterY - y) / houseThresholdPx).coerceIn(0f, 1.2f)
+                    )
+                } else {
+                    onHousePull(0f)
+                }
             } else {
                 onHousePull(0f)
             }
             val lastIdx = items.indices.lastOrNull()
-            if (lastIdx != null && items[lastIdx] is RailItem.Eye &&
-                i == lastIdx && y > railTopPx + railHpx
-            ) {
-                onEyePull(
-                    ((y - (railTopPx + railHpx)) / eyeThresholdPx)
-                        .coerceIn(0f, 1.2f)
-                )
+            if (lastIdx != null && items[lastIdx] is RailItem.Eye) {
+                val eyeCenterY = railTopPx + railHpx - rowHpx / 2f
+                if (y > eyeCenterY - tolerancePx) {
+                    onEyePull(
+                        ((y - eyeCenterY) / eyeThresholdPx).coerceIn(0f, 1.2f)
+                    )
+                } else {
+                    onEyePull(0f)
+                }
             } else {
                 onEyePull(0f)
             }
