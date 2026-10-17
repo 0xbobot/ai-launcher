@@ -101,16 +101,16 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(blindActive) {
         onBlindActiveChange(blindActive)
     }
+    // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
+    var showBlindCustomConfig by remember { mutableStateOf(false) }
+    // v0.68.20：自定义☆动作状态——配置保存后刷新扇形显示
+    var blindCustomItem by remember { mutableStateOf(BlindCapturePrefs.load(context)) }
     // v0.68.32：扇形选择状态上报 MainScreen（扇形在 MainScreen 最顶层绘制，盖住 Dock）
     val blindSelecting = blindUi as? BlindUiState.Selecting
     val blindCustomLabel = blindCustomItem?.label?.takeIf { it.isNotBlank() } ?: "自定义"
     androidx.compose.runtime.LaunchedEffect(blindSelecting, blindCustomLabel) {
         onBlindSelectingChange(blindSelecting, blindCustomLabel)
     }
-    // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
-    var showBlindCustomConfig by remember { mutableStateOf(false) }
-    // v0.68.20：自定义☆动作状态——配置保存后刷新扇形显示
-    var blindCustomItem by remember { mutableStateOf(BlindCapturePrefs.load(context)) }
     // v0.68.17：右边缘系统手势豁免宽度（仅用于 setSystemGestureExclusionRects，
     // 盲操触发已改为"任何左滑"，不再依赖边缘区）
     val blindEdgePx = with(density) { 48.dp.toPx() }
