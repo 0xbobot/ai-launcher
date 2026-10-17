@@ -1098,8 +1098,13 @@ fun AppCenterContent(
                     buildList {
                         add(RailItem.House)
                         if (dockApps.isNotEmpty()) add(RailItem.Star)
+                        // v0.68.13（Bob）：图标和字母之间加分隔线，视觉分隔+拉开间距
+                        add(RailItem.Separator)
                         letters.forEach { add(RailItem.Letter(it)) }
-                        if (hiddenApps.isNotEmpty()) add(RailItem.Eye)
+                        if (hiddenApps.isNotEmpty()) {
+                            add(RailItem.Separator)
+                            add(RailItem.Eye)
+                        }
                     }
                 }
                 // 收藏/隐藏时的脉冲目标
@@ -1128,6 +1133,7 @@ fun AppCenterContent(
                         is RailItem.Star -> scope.launch { listState.animateScrollToItem(0) }
                         is RailItem.Eye -> scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
                         is RailItem.Letter -> glideToLetter(item.char)
+                        is RailItem.Separator -> {}
                     }
                 }
                 AppRail(

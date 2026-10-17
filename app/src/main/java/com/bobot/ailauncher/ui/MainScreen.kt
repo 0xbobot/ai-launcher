@@ -229,7 +229,9 @@ private fun HomeHost(
             buildList {
                 add(RailItem.House)
                 add(RailItem.Star)
+                add(RailItem.Separator)
                 ('A'..'Z').forEach { add(RailItem.Letter(it)) }
+                add(RailItem.Separator)
                 add(RailItem.Eye)
             }
         }
@@ -302,6 +304,7 @@ private fun HomeHost(
                                                 onOpenAppDrawer()
                                             }
                                         }
+                                        is RailItem.Separator -> {}
                                     }
                                 }
                             },

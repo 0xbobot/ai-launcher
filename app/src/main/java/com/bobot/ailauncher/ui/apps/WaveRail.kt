@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -70,6 +71,8 @@ internal sealed interface RailItem {
     data object Star : RailItem
     data class Letter(val char: Char) : RailItem
     data object Eye : RailItem
+    // v0.68.13（Bob）：分隔线——图标组和字母组之间的视觉分隔，不可触摸
+    data object Separator : RailItem
 }
 
 /**
@@ -134,6 +137,8 @@ internal fun WaveRail(
     // v0.40.2：字母切换给一记结实的震动——TextHandleMove 在部分机型上几乎无感
     fun emitItem(i: Int) {
         if (i == activeIndex) return
+        // v0.68.13：分隔线不可触摸，滑过时无反应
+        if (items[i] is RailItem.Separator) return
         activeIndex = i
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         onActiveItem(items[i])
@@ -228,6 +233,24 @@ internal fun WaveRail(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             items.forEachIndexed { i, item ->
+                // v0.68.13（Bob）：分隔线——图标组和字母组之间，视觉分隔+拉开间距
+                if (item is RailItem.Separator) {
+                    Box(
+                        modifier = Modifier.weight(0.5f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(14.dp)
+                                .height(1.dp)
+                                .background(
+                                    AILauncherColors.Divider.copy(alpha = 0.6f),
+                                    CircleShape
+                                )
+                        )
+                    }
+                    return@forEachIndexed
+                }
                 val d = if (displayIndex >= 0) (i - displayIndex).toFloat() else 999f
                 // v0.25.7：波浪更宽更平（sigma 4.5），头尾字母也有弧度，更优美
                 // v0.40.2：tween 120→80，波浪响应更快更轻盈
@@ -298,6 +321,7 @@ internal fun WaveRail(
                                 color = AILauncherColors.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
+                            is RailItem.Separator -> {}
                         }
                     }
                 }
@@ -351,6 +375,7 @@ internal fun WaveRail(
                             color = AILauncherColors.Title,
                             modifier = Modifier.size(24.dp)
                         )
+                        is RailItem.Separator -> {}
                     }
                 }
             }
