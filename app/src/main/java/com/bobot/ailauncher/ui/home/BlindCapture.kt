@@ -7,19 +7,48 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,6 +62,7 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -45,12 +75,14 @@ import kotlin.math.sqrt
  *
  * 扇形选择器：
  * 1. 左滑触发 → 以触发点为圆心，左侧展开 150° 扇形菜单（4 段）
- * 2. 4 段从上到下：录像 / 拍照 / 录音 / 自定义
+ * 2. 4 段从上到下：录像 / 拍照 / 录音 / 自定义（拍照 60° 居中加宽）
  * 3. 手指滑入某段 → 高亮 + 震动 tick + 七仔报模式名
- * 4. 松手 → 启动高亮模式；段外松手 → 静默取消；右滑回 → 取消
+ * 4. 松手 → 启动高亮模式；无选择松手 → 拍照（零决策）；右滑回 → 取消
+ *
+ * v0.68.20：视觉重构——展开弹性动画、段间分隔线、选中光晕+放大、
+ * 图标+文字排版；拍照为最默认操作。
  *
  * 保留：三重反馈（震动/七仔语音/视觉高亮）、自定义☆槽位、诊断浮层。
- * 误触时松手即取消，不执行任何动作。
  */
 
 /** 扇形 4 段（从上到下）：录像 / 拍照 / 录音 / 自定义 */
@@ -68,6 +100,33 @@ private const val FAN_SWEEP_DEG = 150f
 private const val FAN_R_OUTER_DP = 148f
 private const val FAN_R_INNER_DP = 46f
 private const val FAN_EDGE_MARGIN_DP = 12f
+
+/**
+ * v0.68.20：4 段不等宽（从上到下：录像/拍照/录音/自定义），总和必须 = 150°。
+ * 拍照 60° 居中加宽（215°~155°，中心 185°，正左方 180° 落在其中）——最顺手。
+ */
+private val FAN_SWEEPS = floatArrayOf(40f, 60f, 28f, 22f)
+
+/** 第 i 段的 (startAngle, sweepAngle)，Canvas 角度制；与命中判定共用 */
+private fun segmentAngles(i: Int): Pair<Float, Float> {
+    var top = FAN_START_DEG + FAN_SWEEP_DEG // 255°，最上方
+    for (j in 0 until i) top -= FAN_SWEEPS[j]
+    return Pair(top - FAN_SWEEPS[i], FAN_SWEEPS[i])
+}
+
+/** 扇形命中：返回 sector index（0=最上方），-1 = 死区内或扇形外 */
+private fun sectorForIndex(dx: Float, dy: Float, deadZonePx: Float): Int {
+    if (sqrt(dx * dx + dy * dy) < deadZonePx) return -1
+    var deg = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+    if (deg < 0f) deg += 360f
+    if (deg < FAN_START_DEG || deg > FAN_START_DEG + FAN_SWEEP_DEG) return -1
+    var top = FAN_START_DEG + FAN_SWEEP_DEG
+    for (i in FAN_SWEEPS.indices) {
+        top -= FAN_SWEEPS[i]
+        if (deg >= top) return i
+    }
+    return FAN_SWEEPS.size - 1
+}
 
 /** 盲操 UI 状态：隐藏 / 扇形选择中（modeIndex=-1 表示无高亮） */
 sealed interface BlindUiState {
@@ -272,22 +331,32 @@ class BlindCaptureController(
             reset()
             return
         }
-        val idx = sectorFor(pos.x - centerX, pos.y - centerY)
+        val idx = sectorForIndex(pos.x - centerX, pos.y - centerY, deadZonePx)
         if (idx != modeIndex) {
             modeIndex = idx
             setUi(BlindUiState.Selecting(centerX, centerY, idx))
             if (idx >= 0) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                PetRepository.say(BlindMode.values()[idx].label)
-                diagState("sector=${BlindMode.values()[idx].label}")
+                PetRepository.say(modeLabel(idx))
+                diagState("sector=${modeLabel(idx)}")
             } else {
                 diagText("sector=无")
             }
         }
     }
 
+    /** 模式显示名：自定义段读用户配置 */
+    private fun modeLabel(idx: Int): String {
+        val mode = BlindMode.values()[idx]
+        return if (mode == BlindMode.CUSTOM) {
+            BlindCapturePrefs.load(context)?.label?.takeIf { it.isNotBlank() }
+                ?: mode.label
+        } else mode.label
+    }
+
     /**
      * 手指抬起。返回 true 表示被盲操消费，调用方跳过原有纵向逻辑。
+     * v0.68.20：无选择松手（快滑）= 拍照，零决策；右滑回取消已在 onMove 处理。
      */
     fun onEnd(): Boolean {
         if (!tracking) return false
@@ -297,9 +366,10 @@ class BlindCaptureController(
         if (wasTriggered) {
             if (idx >= 0) {
                 commit(idx)
-                diagState("commit(${BlindMode.values()[idx].label})")
+                diagState("commit(${modeLabel(idx)})")
             } else {
-                diagText("idle(段外松手取消)")
+                commit(BlindMode.PHOTO.ordinal)
+                diagState("commit(拍照-默认)")
             }
             return true
         }
@@ -315,21 +385,6 @@ class BlindCaptureController(
     fun onAudioPermissionResult(granted: Boolean) {
         if (granted) startAudio()
         else PetRepository.say("没有麦克风权限，录不了音")
-    }
-
-    /**
-     * 扇形命中：返回 sector index（0=最上方），-1 = 死区内或扇形外。
-     * dx/dy 为手指相对圆心的偏移（px，y 向下）。
-     */
-    private fun sectorFor(dx: Float, dy: Float): Int {
-        if (sqrt(dx * dx + dy * dy) < deadZonePx) return -1
-        var deg = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-        if (deg < 0f) deg += 360f
-        if (deg < FAN_START_DEG || deg > FAN_START_DEG + FAN_SWEEP_DEG) return -1
-        // index 0 在最上方（角度大的一端），从上到下：录像/拍照/录音/自定义
-        val n = BlindMode.values().size
-        return ((FAN_START_DEG + FAN_SWEEP_DEG - deg) / (FAN_SWEEP_DEG / n))
-            .toInt().coerceIn(0, n - 1)
     }
 
     private fun commit(idx: Int) {
@@ -391,65 +446,163 @@ class BlindCaptureController(
     }
 }
 
+/** 各模式图标 */
+private fun modeIcon(mode: BlindMode): ImageVector = when (mode) {
+    BlindMode.VIDEO -> Icons.Filled.Videocam
+    BlindMode.PHOTO -> Icons.Filled.PhotoCamera
+    BlindMode.AUDIO -> Icons.Filled.Mic
+    BlindMode.CUSTOM -> Icons.Filled.Star
+}
+
 /**
- * 扇形选择器：以触发点为圆心，左侧展开 150°（4 段从上到下：
- * 录像 / 拍照 / 录音 / 自定义），当前段高亮。
+ * 扇形选择器 v0.68.20 视觉重构：
+ * - 展开弹性动画（半径 spring + 淡入）
+ * - 段间分隔线、选中光晕 + 图标放大
+ * - 图标 + 文字排版（拍照段更大更突出）
+ * - 自定义段显示用户配置的名称
  */
 @Composable
 fun BlindCaptureFan(
     centerX: Float,
     centerY: Float,
     selectedIndex: Int,
+    customLabel: String = "自定义",
     modifier: Modifier = Modifier,
 ) {
     val modes = BlindMode.values()
-    val labelPaint = remember {
-        android.graphics.Paint().apply {
-            textAlign = android.graphics.Paint.Align.CENTER
-            isAntiAlias = true
-        }
-    }
-    val titleArgb = AILauncherColors.Title.toArgb()
-    val bodyArgb = AILauncherColors.Body.toArgb()
-    Canvas(modifier = modifier.fillMaxSize()) {
-        val rOuter = FAN_R_OUTER_DP.dp.toPx()
-        val rInner = FAN_R_INNER_DP.dp.toPx()
-        val rLabel = (rOuter + rInner) / 2f
-        val sweep = FAN_SWEEP_DEG / modes.size
-        val gap = 3f
-        modes.forEachIndexed { i, mode ->
-            val selected = i == selectedIndex
-            // index 0 在最上方：startAngle 从 255° 往下排
-            val start = (FAN_START_DEG + FAN_SWEEP_DEG) - (i + 1) * sweep
-            drawArc(
-                color = if (selected) AILauncherColors.AccentSoft
-                else Color.White.copy(alpha = 0.78f),
-                startAngle = start + gap / 2f,
-                sweepAngle = sweep - gap,
-                useCenter = true,
-                topLeft = Offset(centerX - rOuter, centerY - rOuter),
-                size = Size(rOuter * 2f, rOuter * 2f)
-            )
-            // 段标签画在该段中心
-            val midDeg = start + sweep / 2f
-            val rad = Math.toRadians(midDeg.toDouble())
-            val lx = centerX + cos(rad).toFloat() * rLabel
-            val ly = centerY + sin(rad).toFloat() * rLabel
-            val fs = 14.sp.toPx()
-            labelPaint.apply {
-                textSize = fs
-                isFakeBoldText = selected
-                color = if (selected) titleArgb else bodyArgb
+    val density = LocalDensity.current
+    val accent = AILauncherColors.Accent
+    val accentSoft = AILauncherColors.AccentSoft
+    val titleColor = AILauncherColors.Title
+    val bodyColor = AILauncherColors.Body
+
+    // v0.68.20：展开弹性动画——半径从 0 弹到全尺寸 + 淡入
+    var expanded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { expanded = true }
+    val rOuterDp by animateFloatAsState(
+        targetValue = if (expanded) FAN_R_OUTER_DP else 0f,
+        animationSpec = spring(dampingRatio = 0.68f, stiffness = 280f),
+        label = "fanExpand"
+    )
+    val fanAlpha by animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = tween(160),
+        label = "fanAlpha"
+    )
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(fanAlpha)
+        ) {
+            val rOuter = rOuterDp.dp.toPx()
+            if (rOuter < 1f) return@Canvas
+            val rInner = FAN_R_INNER_DP.dp.toPx()
+            val center = Offset(centerX, centerY)
+            // v0.68.20：选中光晕——底层大一圈的柔光
+            if (selectedIndex in modes.indices) {
+                val (s, sw) = segmentAngles(selectedIndex)
+                drawArc(
+                    color = accent.copy(alpha = 0.30f),
+                    startAngle = s - 2f,
+                    sweepAngle = sw + 4f,
+                    useCenter = true,
+                    topLeft = Offset(centerX - rOuter - 10f, centerY - rOuter - 10f),
+                    size = Size((rOuter + 10f) * 2f, (rOuter + 10f) * 2f)
+                )
             }
-            drawContext.canvas.nativeCanvas.drawText(
-                mode.label, lx, ly + fs * 0.35f, labelPaint
+            // 各段底
+            modes.forEachIndexed { i, mode ->
+                val (s, sw) = segmentAngles(i)
+                val selected = i == selectedIndex
+                drawArc(
+                    color = when {
+                        selected -> accentSoft
+                        mode == BlindMode.PHOTO -> Color.White.copy(alpha = 0.92f)
+                        else -> Color.White.copy(alpha = 0.78f)
+                    },
+                    startAngle = s + 1.5f,
+                    sweepAngle = sw - 3f,
+                    useCenter = true,
+                    topLeft = Offset(centerX - rOuter, centerY - rOuter),
+                    size = Size(rOuter * 2f, rOuter * 2f)
+                )
+            }
+            // v0.68.20：段间分隔线
+            var acc = FAN_START_DEG + FAN_SWEEP_DEG
+            val divColor = Color(0xFF8A7B6B).copy(alpha = 0.55f)
+            val divW = 2.dp.toPx()
+            for (i in 0 until modes.size - 1) {
+                acc -= FAN_SWEEPS[i]
+                val rad = Math.toRadians(acc.toDouble())
+                val dir = Offset(cos(rad).toFloat(), sin(rad).toFloat())
+                drawLine(
+                    color = divColor,
+                    start = center + dir * (rInner + 4f),
+                    end = center + dir * (rOuter - 4f),
+                    strokeWidth = divW,
+                    cap = StrokeCap.Round
+                )
+            }
+            // 死区内圈
+            drawCircle(
+                color = Color.White.copy(alpha = 0.88f),
+                radius = rInner,
+                center = center
             )
         }
-        // 死区内圈（与命中死区半径一致）
-        drawCircle(
-            color = Color.White.copy(alpha = 0.88f),
-            radius = rInner,
-            center = Offset(centerX, centerY)
-        )
+        // v0.68.20：图标 + 文字 overlay（Compose 排版）
+        val rOuterPx = with(density) { rOuterDp.dp.toPx() }
+        val rInnerPx = with(density) { FAN_R_INNER_DP.dp.toPx() }
+        val rMid = (rOuterPx + rInnerPx) / 2f
+        modes.forEachIndexed { i, mode ->
+            val (s, sw) = segmentAngles(i)
+            val midRad = Math.toRadians((s + sw / 2).toDouble())
+            val lx = centerX + cos(midRad).toFloat() * rMid
+            val ly = centerY + sin(midRad).toFloat() * rMid
+            val selected = i == selectedIndex
+            val isPhoto = mode == BlindMode.PHOTO
+            val pop by animateFloatAsState(
+                targetValue = if (selected) 1.22f else 1f,
+                animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
+                label = "segPop$i"
+            )
+            key(i) {
+                Column(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (lx - with(density) { 40.dp.toPx() }).roundToInt(),
+                                (ly - with(density) { 32.dp.toPx() }).roundToInt()
+                            )
+                        }
+                        .graphicsLayer {
+                            scaleX = pop
+                            scaleY = pop
+                            alpha = fanAlpha
+                        }
+                        .size(80.dp, 64.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = modeIcon(mode),
+                        contentDescription = null,
+                        tint = if (selected) accent else bodyColor,
+                        modifier = Modifier.size(if (isPhoto) 32.dp else 24.dp)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (mode == BlindMode.CUSTOM) customLabel else mode.label,
+                        fontSize = if (isPhoto) 15.sp else 13.sp,
+                        fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
+                        color = if (selected) titleColor else bodyColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
     }
 }

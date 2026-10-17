@@ -98,6 +98,8 @@ fun HomeScreen(
     }
     // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
     var showBlindCustomConfig by remember { mutableStateOf(false) }
+    // v0.68.20：自定义☆动作状态——配置保存后刷新扇形显示
+    var blindCustomItem by remember { mutableStateOf(BlindCapturePrefs.load(context)) }
     // v0.68.17：右边缘系统手势豁免宽度（仅用于 setSystemGestureExclusionRects，
     // 盲操触发已改为"任何左滑"，不再依赖边缘区）
     val blindEdgePx = with(density) { 48.dp.toPx() }
@@ -277,6 +279,8 @@ fun HomeScreen(
                 centerX = s.centerX,
                 centerY = s.centerY,
                 selectedIndex = s.modeIndex,
+                // v0.68.20：自定义段显示用户配置的名称
+                customLabel = blindCustomItem?.label?.takeIf { it.isNotBlank() } ?: "自定义",
             )
         }
         // v0.68.12：盲操诊断浮层（左上角半透明小字，实时显示状态机状态）
@@ -306,6 +310,8 @@ fun HomeScreen(
                     onDismiss = { showBlindCustomConfig = false },
                     onSaved = { item ->
                         BlindCapturePrefs.save(context, item)
+                        // v0.68.20：保存后刷新状态，扇形立即显示新名称
+                        blindCustomItem = item
                         showBlindCustomConfig = false
                         PetRepository.say("自定义动作已设置")
                     }

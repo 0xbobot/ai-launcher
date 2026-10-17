@@ -1959,7 +1959,10 @@ private fun PriorityReplyRow(
                     text = "${item.appName} · ${item.title.ifBlank { "新消息" }}",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1C1C1E)
+                    color = Color(0xFF1C1C1E),
+                    // v0.68.20：单行省略，杜绝长标题换行重叠
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 if (expanded) {
@@ -2093,7 +2096,10 @@ private fun openPetItemSession(context: Context, item: PetItem) {
         } else {
             openCallLog(context)
         }
-        if (!ok) {
+        if (ok) {
+            // v0.68.20：点开后从 TODAY 移除（用户已处理）
+            com.bobot.ailauncher.data.PetRepository.removeFiledByPredicate { it.id == item.id }
+        } else {
             com.bobot.ailauncher.data.PetRepository.say("打不开拨号盘")
         }
         return
@@ -2108,9 +2114,9 @@ private fun openPetItemSession(context: Context, item: PetItem) {
         } catch (_: android.app.PendingIntent.CanceledException) {
         } catch (_: Exception) { }
     }
+    var launched = false
     if (!sent) {
         val pkg = item.packageName.ifBlank { "com.ss.android.lark" }
-        var launched = false
         try {
             launched = context.packageManager.getLaunchIntentForPackage(pkg)
                 ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -2119,6 +2125,10 @@ private fun openPetItemSession(context: Context, item: PetItem) {
         if (!launched) {
             com.bobot.ailauncher.data.PetRepository.say("打不开，试试手动打开${item.appName}")
         }
+    }
+    // v0.68.20：成功打开后从 TODAY 移除（复用已读清除逻辑）
+    if (sent || launched) {
+        com.bobot.ailauncher.data.PetRepository.removeFiledByPredicate { it.id == item.id }
     }
 }
 
@@ -2301,6 +2311,8 @@ private fun TodoRow(
                     color = Color(0xFF1C1917),
                     textDecoration = if (completing) TextDecoration.LineThrough else null,
                     maxLines = 1,
+                    // v0.68.20：补省略号，防长文本溢出
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                         .clickable(enabled = !editMode && !completing) {
                             openPetItemSession(context, source)
