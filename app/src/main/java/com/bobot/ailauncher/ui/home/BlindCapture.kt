@@ -705,8 +705,11 @@ fun BlindCaptureFan(
             label = "segR$i"
         )
     }
+    // v0.68.35：整体淡入（段半径走 stagger，此处只做透明度）
+    var fanShown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { fanShown = true }
     val fanAlpha by animateFloatAsState(
-        targetValue = if (expanded) 1f else 0f,
+        targetValue = if (fanShown) 1f else 0f,
         animationSpec = tween(160),
         label = "fanAlpha"
     )
