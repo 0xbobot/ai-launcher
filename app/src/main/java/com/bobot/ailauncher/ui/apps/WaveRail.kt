@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -111,7 +112,10 @@ internal fun WaveRail(
     onHousePull: (Float) -> Unit = {},
     onEyePull: (Float) -> Unit = {},
     // v0.68.19（Bob）：柔和消散进度 0→1（阈值触发后的时间驱动）
-    explodeProgress: Float = 0f
+    explodeProgress: Float = 0f,
+    // v0.68.23（Bob）：主屏 picker 长按后拖拽（避免与桌面手势冲突），统一滑动体验
+    requireLongPress: Boolean = false,
+    onLongPressStart: () -> Unit = {}
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
@@ -185,75 +189,105 @@ internal fun WaveRail(
                 .toInt().coerceIn(items.indices)
         }
 
+        // v0.68.23：抽取拖拽处理，长按/普通两种模式共用
+        fun handleDragY(y: Float) {
+            val i = indexAt(y)
+            emitItem(i)
+            // v0.68.20（Bob）：意向拉拽——房子继续上拉/眼睛继续下拉，进度 0→1
+            // v0.68.21：眼睛在底部空间有限，阈值缩短到 60dp 不然触发不了
+            // v0.68.22（Bob）：房子滑程缩短 1/3，67dp 更跟手
+            val houseThresholdPx = with(density) { 67.dp.toPx() }
+            val eyeThresholdPx = with(density) { 60.dp.toPx() }
+            if (items.isNotEmpty() && items[0] is RailItem.House &&
+                i == 0 && y < railTopPx
+            ) {
+                onHousePull(
+                    ((railTopPx - y) / houseThresholdPx).coerceIn(0f, 1.2f)
+                )
+            } else {
+                onHousePull(0f)
+            }
+            val lastIdx = items.indices.lastOrNull()
+            if (lastIdx != null && items[lastIdx] is RailItem.Eye &&
+                i == lastIdx && y > railTopPx + railHpx
+            ) {
+                onEyePull(
+                    ((y - (railTopPx + railHpx)) / eyeThresholdPx)
+                        .coerceIn(0f, 1.2f)
+                )
+            } else {
+                onEyePull(0f)
+            }
+        }
+
         // 触摸层：点按与纵向拖动
+        // v0.68.23（Bob）：主屏 picker 长按后拖拽，统一滑动体验
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(items, hPx) {
-                    detectTapGestures(onTap = { offset ->
-                        // 点按：直接跳转
-                        val i = indexAt(offset.y)
-                        cancelPendingTapRelease()
-                        activeIndex = -1 // 允许点按重复触发同一字母
-                        emitItem(i)
-                        // v0.41.1：等滚动落定再收波浪——立刻 onRelease 的话，
-                        // 右侧 rail 的 stopGlide 会把刚启动的 animateScrollToItem
-                        // （近距离字母）直接掐掉，导致列表不动、波浪卡住；
-                        // 左侧 rail 的 onRelease 只清 mirrorIndex 不掐任务，所以左侧正常
-                        tapReleaseJob = scope.launch {
-                            delay(500)
-                            activeIndex = -1
-                            onRelease()
-                        }
-                    })
-                }
-                .pointerInput(items, hPx) {
-                    detectVerticalDragGestures(
-                        onDragStart = { offset ->
-                            // 点按后立刻转拖动：掐掉点按的延迟收波浪，拖动接管
+                .pointerInput(items, hPx, requireLongPress) {
+                    if (requireLongPress) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { offset ->
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongPressStart()
+                                cancelPendingTapRelease()
+                                emitItem(indexAt(offset.y))
+                            },
+                            onDrag = { change, _ ->
+                                change.consume()
+                                handleDragY(change.position.y)
+                            },
+                            onDragEnd = {
+                                activeIndex = -1
+                                onRelease()
+                            },
+                            onDragCancel = {
+                                activeIndex = -1
+                                onRelease()
+                            }
+                        )
+                    } else {
+                        detectTapGestures(onTap = { offset ->
+                            // 点按：直接跳转
+                            val i = indexAt(offset.y)
                             cancelPendingTapRelease()
-                            emitItem(indexAt(offset.y))
-                        },
-                        onDragEnd = {
-                            activeIndex = -1
-                            onRelease()
-                        },
-                        onDragCancel = {
-                            activeIndex = -1
-                            onRelease()
-                        },
-                        onVerticalDrag = { change, _ ->
-                            change.consume()
-                            val y = change.position.y
-                            val i = indexAt(y)
+                            activeIndex = -1 // 允许点按重复触发同一字母
                             emitItem(i)
-                            // v0.68.20（Bob）：意向拉拽——房子继续上拉/眼睛继续下拉，进度 0→1
-                            // v0.68.21：眼睛在底部空间有限，阈值缩短到 60dp 不然触发不了
-                            // v0.68.22（Bob）：房子滑程缩短 1/3，67dp 更跟手
-                            val houseThresholdPx = with(density) { 67.dp.toPx() }
-                            val eyeThresholdPx = with(density) { 60.dp.toPx() }
-                            if (items.isNotEmpty() && items[0] is RailItem.House &&
-                                i == 0 && y < railTopPx
-                            ) {
-                                onHousePull(
-                                    ((railTopPx - y) / houseThresholdPx).coerceIn(0f, 1.2f)
-                                )
-                            } else {
-                                onHousePull(0f)
+                            // v0.41.1：等滚动落定再收波浪——立刻 onRelease 的话，
+                            // 右侧 rail 的 stopGlide 会把刚启动的 animateScrollToItem
+                            // （近距离字母）直接掐掉，导致列表不动、波浪卡住；
+                            // 左侧 rail 的 onRelease 只清 mirrorIndex 不掐任务，所以左侧正常
+                            tapReleaseJob = scope.launch {
+                                delay(500)
+                                activeIndex = -1
+                                onRelease()
                             }
-                            val lastIdx = items.indices.lastOrNull()
-                            if (lastIdx != null && items[lastIdx] is RailItem.Eye &&
-                                i == lastIdx && y > railTopPx + railHpx
-                            ) {
-                                onEyePull(
-                                    ((y - (railTopPx + railHpx)) / eyeThresholdPx)
-                                        .coerceIn(0f, 1.2f)
-                                )
-                            } else {
-                                onEyePull(0f)
+                        })
+                    }
+                }
+                .pointerInput(items, hPx, requireLongPress) {
+                    if (!requireLongPress) {
+                        detectVerticalDragGestures(
+                            onDragStart = { offset ->
+                                // 点按后立刻转拖动：掐掉点按的延迟收波浪，拖动接管
+                                cancelPendingTapRelease()
+                                emitItem(indexAt(offset.y))
+                            },
+                            onDragEnd = {
+                                activeIndex = -1
+                                onRelease()
+                            },
+                            onDragCancel = {
+                                activeIndex = -1
+                                onRelease()
+                            },
+                            onVerticalDrag = { change, _ ->
+                                change.consume()
+                                handleDragY(change.position.y)
                             }
-                        }
-                    )
+                        )
+                    }
                 }
         )
 
@@ -366,7 +400,6 @@ internal fun WaveRail(
         // v0.41.0（B 方案）：实心金圆 → 金环（2dp 描边 + 深色字母），更轻
         if (visible && displayIndex >= 0) {
             val idx = displayIndex.coerceIn(items.indices)
-            val rPx = with(density) { 24.dp.toPx() }
             // v0.68.21（Bob）：拉拽放大时金环就淡出，不然图标比圈大很奇怪
             val bubbleRingAlpha = (1f - explodeProgress) * (1f - housePull * 0.9f)
             // v0.68.20：气泡跟随拉拽——眼睛下拉时下移
@@ -384,7 +417,8 @@ internal fun WaveRail(
                     .offset {
                         IntOffset(
                             (dirSign * bubbleOutX).roundToInt(),
-                            (railTopPx + idx * rowHpx + rowHpx / 2f - rPx - hPx / 2f +
+                            // v0.68.23（Bob）：去掉多余的 -rPx，气泡中心对准波浪尖端
+                            (railTopPx + idx * rowHpx + rowHpx / 2f - hPx / 2f +
                                 bubblePullOffsetY).roundToInt()
                         )
                     }
@@ -472,6 +506,10 @@ internal fun AppRail(
     onHousePull: (Float) -> Unit = {},
     onEyePull: (Float) -> Unit = {},
     explodeProgress: Float = 0f,
+    // v0.68.23：主屏 picker 长按后拖拽
+    requireLongPress: Boolean = false,
+    onLongPressStart: () -> Unit = {},
+    visible: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     WaveRail(
@@ -486,6 +524,9 @@ internal fun AppRail(
         onHousePull = onHousePull,
         onEyePull = onEyePull,
         explodeProgress = explodeProgress,
+        requireLongPress = requireLongPress,
+        onLongPressStart = onLongPressStart,
+        visible = visible,
         modifier = modifier.height(400.dp)
     )
 }

@@ -16,6 +16,9 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -221,6 +224,7 @@ private fun HomeHost(
         // 长按震动后选择器浮现；手指一动就由应用中心接管（D3 淡入）；picker 会话在 D3 打开后
         // 继续存活（手势不断），手指不松开可继续滑动；松手后 picker 撤下，D3 自己的 rail 接管
         val haptics = LocalHapticFeedback.current
+        val scope = rememberCoroutineScope()
         var pickerActive by remember { mutableStateOf(false) }
         var pickerIndex by remember { mutableIntStateOf(-1) }
         var d3Opened by remember { mutableStateOf(false) }
@@ -243,89 +247,64 @@ private fun HomeHost(
             UiPrefs.homeRailLetter.value = null
             UiPrefs.d3EnterFromPicker.value = false
         }
-        // 隐形长按区：右边缘，位置/高度与应用中心 rail 一致；
-        // picker 会话期间即使 D3 已打开也不销毁，保证手势连续。
+        // v0.68.23（Bob）：统一用共享 AppRail，长按后拖拽，与应用中心同一套滑动体验
         // v0.68.6：盲操选择中时隐藏，避免重叠区（右边缘 24dp × 底部 400dp）
-        // 长按（~400ms）与盲操同时触发
         if ((dockState != DockState.D3 || pickerActive) && !blindActive) {
-            Box(
+            AppRail(
+                items = homeItems,
+                onActiveItem = { item ->
+                    val i = homeItems.indexOf(item)
+                    pickerIndex = i
+                    when (item) {
+                        is RailItem.House -> {
+                            // 主屏已在首页：高亮 150ms 给反馈再撤下
+                            scope.launch {
+                                delay(150)
+                                dismissPicker()
+                            }
+                        }
+                        is RailItem.Star -> {
+                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.DOCK
+                            if (!d3Opened) {
+                                d3Opened = true
+                                UiPrefs.d3EnterFromPicker.value = true
+                                onOpenAppDrawer()
+                            }
+                        }
+                        is RailItem.Eye -> {
+                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.HIDDEN
+                            if (!d3Opened) {
+                                d3Opened = true
+                                UiPrefs.d3EnterFromPicker.value = true
+                                onOpenAppDrawer()
+                            }
+                        }
+                        is RailItem.Letter -> {
+                            UiPrefs.homeRailLetter.value = item.char
+                            UiPrefs.homeRailTarget.value =
+                                UiPrefs.HomeRailTarget.LETTER
+                            if (!d3Opened) {
+                                d3Opened = true
+                                UiPrefs.d3EnterFromPicker.value = true
+                                onOpenAppDrawer()
+                            }
+                        }
+                        is RailItem.Separator -> {}
+                    }
+                },
+                onRelease = { dismissPicker() },
+                forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
+                requireLongPress = true,
+                onLongPressStart = {
+                    pickerActive = true
+                    pickerIndex = -1
+                    d3Opened = false
+                },
+                visible = pickerActive,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(bottom = 70.dp)
                     .width(56.dp)
-                    .height(400.dp)
-                    .pointerInput(Unit) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                pickerActive = true
-                                pickerIndex = -1
-                                d3Opened = false
-                            },
-                            onDrag = { change, _ ->
-                                change.consume()
-                                // 与 WaveRail.indexAt 同公式：rail 占 85%，居中
-                                val hPx = size.height.toFloat()
-                                val railHpx = hPx * 0.85f
-                                val railTopPx = (hPx - railHpx) / 2f
-                                val i = (((change.position.y - railTopPx) / railHpx) * homeItems.size)
-                                    .toInt().coerceIn(homeItems.indices)
-                                if (i != pickerIndex) {
-                                    pickerIndex = i
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    when (val item = homeItems[i]) {
-                                        is RailItem.House -> {
-                                            // 主屏已在首页：仅撤下选择器
-                                            dismissPicker()
-                                        }
-                                        is RailItem.Star -> {
-                                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.DOCK
-                                            if (!d3Opened) {
-                                                d3Opened = true
-                                                UiPrefs.d3EnterFromPicker.value = true
-                                                onOpenAppDrawer()
-                                            }
-                                        }
-                                        is RailItem.Eye -> {
-                                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.HIDDEN
-                                            if (!d3Opened) {
-                                                d3Opened = true
-                                                UiPrefs.d3EnterFromPicker.value = true
-                                                onOpenAppDrawer()
-                                            }
-                                        }
-                                        is RailItem.Letter -> {
-                                            UiPrefs.homeRailLetter.value = item.char
-                                            UiPrefs.homeRailTarget.value =
-                                                UiPrefs.HomeRailTarget.LETTER
-                                            if (!d3Opened) {
-                                                d3Opened = true
-                                                UiPrefs.d3EnterFromPicker.value = true
-                                                onOpenAppDrawer()
-                                            }
-                                        }
-                                        is RailItem.Separator -> {}
-                                    }
-                                }
-                            },
-                            onDragEnd = { dismissPicker() },
-                            onDragCancel = { dismissPicker() }
-                        )
-                    }
-            )
-        }
-        // 字母选择器：长按后浮现（触摸由长按区接管）；
-        // D3 打开后继续盖在上面，直到松手，保证视觉与手势都连续。
-        // v0.67.13：改用共享 AppRail（RailItem），与应用中心同一套
-        if (pickerActive) {
-            AppRail(
-                items = homeItems,
-                onActiveItem = {},
-                onRelease = {},
-                forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = 70.dp)
             )
         }
         // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
