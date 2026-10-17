@@ -228,12 +228,14 @@ internal fun WaveRail(
                             val i = indexAt(y)
                             emitItem(i)
                             // v0.68.20（Bob）：意向拉拽——房子继续上拉/眼睛继续下拉，进度 0→1
-                            val pullThresholdPx = with(density) { 100.dp.toPx() }
+                            // v0.68.21：眼睛在底部空间有限，阈值缩短到 60dp 不然触发不了
+                            val houseThresholdPx = with(density) { 100.dp.toPx() }
+                            val eyeThresholdPx = with(density) { 60.dp.toPx() }
                             if (items.isNotEmpty() && items[0] is RailItem.House &&
                                 i == 0 && y < railTopPx
                             ) {
                                 onHousePull(
-                                    ((railTopPx - y) / pullThresholdPx).coerceIn(0f, 1.2f)
+                                    ((railTopPx - y) / houseThresholdPx).coerceIn(0f, 1.2f)
                                 )
                             } else {
                                 onHousePull(0f)
@@ -243,7 +245,7 @@ internal fun WaveRail(
                                 i == lastIdx && y > railTopPx + railHpx
                             ) {
                                 onEyePull(
-                                    ((y - (railTopPx + railHpx)) / pullThresholdPx)
+                                    ((y - (railTopPx + railHpx)) / eyeThresholdPx)
                                         .coerceIn(0f, 1.2f)
                                 )
                             } else {
@@ -364,13 +366,14 @@ internal fun WaveRail(
         if (visible && displayIndex >= 0) {
             val idx = displayIndex.coerceIn(items.indices)
             val rPx = with(density) { 24.dp.toPx() }
-            // v0.68.19：消散时金环淡出
-            val bubbleRingAlpha = 1f - explodeProgress
+            // v0.68.21（Bob）：拉拽放大时金环就淡出，不然图标比圈大很奇怪
+            val bubbleRingAlpha = (1f - explodeProgress) * (1f - housePull * 0.9f)
             // v0.68.20：气泡跟随拉拽——房子上拉时上移，眼睛下拉时下移
-            val pullThresholdPx = with(density) { 100.dp.toPx() }
+            val houseOffPx = with(density) { 100.dp.toPx() }
+            val eyeOffPx = with(density) { 60.dp.toPx() }
             val bubblePullOffsetY = when (items.getOrNull(idx)) {
-                is RailItem.House -> -housePull * pullThresholdPx
-                is RailItem.Eye -> eyePull * pullThresholdPx
+                is RailItem.House -> -housePull * houseOffPx
+                is RailItem.Eye -> eyePull * eyeOffPx
                 else -> 0f
             }
             // 眼睛下拉时边框加粗，给"即将解锁"的视觉提示

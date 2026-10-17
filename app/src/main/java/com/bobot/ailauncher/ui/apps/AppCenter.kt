@@ -1082,6 +1082,9 @@ fun AppCenterContent(
                 var eyePull by remember { mutableStateOf(0f) }
                 var housePullCommitted by remember { mutableStateOf(false) }
                 var eyePullCommitted by remember { mutableStateOf(false) }
+                // v0.68.21：触发后需松手才重新 armed，防手指不松连触两次
+                var housePullArmed by remember { mutableStateOf(true) }
+                var eyePullArmed by remember { mutableStateOf(true) }
                 var lastHousePull by remember { mutableStateOf(0f) }
                 var lastEyePull by remember { mutableStateOf(0f) }
                 // v0.68.19（Bob）：柔和消散进度（阈值触发后）
@@ -1097,6 +1100,8 @@ fun AppCenterContent(
                         eyePull = 0f
                         lastEyePull = 0f
                     }
+                    housePullArmed = true
+                    eyePullArmed = true
                     scope.launch { explodeProgress.snapTo(0f) }
                     // 列表已在拖动中滚到位，松手无需任何操作
                 }
@@ -1136,7 +1141,7 @@ fun AppCenterContent(
                 }
                 // v0.68.20（Bob）：房子上拉——手指驱动 0→1，到阈值消散回首页；滑回则反向
                 val onHousePull: (Float) -> Unit = { p ->
-                    if (!housePullCommitted) {
+                    if (!housePullCommitted && housePullArmed) {
                         val cp = p.coerceIn(0f, 1f)
                         housePull = cp
                         if (cp >= 0.5f && lastHousePull < 0.5f) {
@@ -1144,21 +1149,30 @@ fun AppCenterContent(
                         }
                         if (cp >= 1f) {
                             housePullCommitted = true
+                            housePullArmed = false
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             scope.launch {
-                                explodeProgress.snapTo(0f)
-                                explodeProgress.animateTo(
-                                    1f,
-                                    animationSpec = tween(
-                                        450,
-                                        easing = FastOutSlowInEasing
+                                // v0.68.21（Bob）：try-finally 确保任何取消都重置，
+                                // 不然下次滑到房子会残留上次的大小/位置
+                                try {
+                                    explodeProgress.snapTo(0f)
+                                    // pull 状态立即清零，视觉由 explodeProgress 接管
+                                    housePull = 0f
+                                    lastHousePull = 0f
+                                    explodeProgress.animateTo(
+                                        1f,
+                                        animationSpec = tween(
+                                            450,
+                                            easing = FastOutSlowInEasing
+                                        )
                                     )
-                                )
-                                onHeaderSwipeRightState.value()
-                                explodeProgress.snapTo(0f)
-                                housePull = 0f
-                                lastHousePull = 0f
-                                housePullCommitted = false
+                                    onHeaderSwipeRightState.value()
+                                } finally {
+                                    explodeProgress.snapTo(0f)
+                                    housePull = 0f
+                                    lastHousePull = 0f
+                                    housePullCommitted = false
+                                }
                             }
                         }
                         lastHousePull = cp
@@ -1166,7 +1180,7 @@ fun AppCenterContent(
                 }
                 // v0.68.20（Bob）：眼睛下拉——到阈值直接弹生物识别，带动画+震动
                 val onEyePull: (Float) -> Unit = { p ->
-                    if (!eyePullCommitted && !hiddenUnlocked) {
+                    if (!eyePullCommitted && eyePullArmed && !hiddenUnlocked) {
                         val cp = p.coerceIn(0f, 1f)
                         eyePull = cp
                         if (cp >= 0.5f && lastEyePull < 0.5f) {
@@ -1174,6 +1188,7 @@ fun AppCenterContent(
                         }
                         if (cp >= 1f) {
                             eyePullCommitted = true
+                            eyePullArmed = false
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             unlockHiddenApps()
                             eyePull = 0f
