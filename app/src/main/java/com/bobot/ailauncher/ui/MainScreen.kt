@@ -249,7 +249,9 @@ private fun HomeHost(
             d3Opened = false
             pickerHousePull = 0f
             lastPickerHousePull = 0f
-            pickerHouseArmed = true
+            // v0.68.31（Bob）：这里不重 arm——手指可能还没松，
+            // 立刻重 arm 会让 onHousePull 反复触发、密集震动；
+            // 重 arm 只在 onRelease（松手）和 onLongPressStart（新会话）
             UiPrefs.homeRailTarget.value = null
             UiPrefs.homeRailLetter.value = null
             UiPrefs.d3EnterFromPicker.value = false
