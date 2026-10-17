@@ -21,9 +21,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
@@ -93,9 +91,10 @@ import kotlin.math.sqrt
  *
  * 扇形选择器：
  * 1. 左滑/右滑触发 → 以触发点为圆心展开扇形菜单（左扇朝左/右扇朝右镜像）
- * 2. 段从上到下：录像 / 拍照 / 快捷装备段（动态，最多 2 段，
- *    取七仔装备排序前两位）/ 录音（固定最下方）；总角度动态 152°~212°；
- *    拍照 84° 居中加宽 + 边界 ±10° 磁吸——最容易触发
+ * 2. v0.68.38：所有段等宽 36°（Bob 拍板：不用大角度，拍照只占最顺手的位置）；
+ *    段从上到下：录像 / 拍照 / 快捷装备段（动态，最多 2 段，
+ *    取七仔装备排序前两位）/ 录音（固定最下方）；总角度 108°/144°/180°；
+ *    拍照锚定正中方向（左扇 180° / 右扇 0°）+ 边界 ±10° 磁吸——最容易触发
  * 3. 手指滑入某段 → 伸长高亮 + 震动 tick + 七仔报段名（七仔从段外缘探出）
  * 4. 松手 → 启动高亮段；无选择松手 → 拍照（零决策）；快滑（甩）→ 拍照（忽略选择）；
  *    滑回 → 取消
@@ -125,6 +124,10 @@ import kotlin.math.sqrt
  * 快捷段用装备自己的图标，无图标显示标签首字小圆章）；保留七仔语音报段名、
  * 段伸长动效、震动、中心涟漪。
  *
+ * v0.68.38：等宽 36°——拍照 84° 收掉，所有段等宽，拍照只锚定最顺手的位置
+ * （正中方向）；标题竖排分支删除，统一横排 + maxLines=1 + Ellipsis；
+ * 保留磁吸 ±10°、快滑 4500px/s 直拍、毛玻璃+高光、stagger、选中图标、涟漪、语音。
+ *
  * 保留：三重反馈（震动/七仔语音/视觉高亮）、诊断浮层。
  */
 
@@ -148,20 +151,17 @@ sealed interface FanSegment {
 enum class FanDirection { LEFT, RIGHT }
 
 // 扇形几何（Canvas 角度制：0°=正右方，顺时针为正，y 向下）
-// v0.68.36：段顺序 录像 / 拍照 / 快捷段×N / 录音（录音固定最下方，离拍照最远）；
-// 总角度动态：无快捷 152°，1 快捷 182°，2 快捷 212°（超 180°，圆心 Y 钳制按实际
-// 总角度算）；左扇以正左方 180° 为中心，右扇以正右方 0° 为中心；拍照 84° 居中
-// 加宽（上下各 42°），占据最大容错区——最容易触发
+// v0.68.38：所有段等宽 36°（Bob 拍板：不用大角度，拍照只占最顺手的位置）；
+// 段顺序自上而下 录像 / 拍照 / 快捷段×N / 录音；拍照锚定正中方向
+// （左扇 180° / 右扇 0°）；总角度：无快捷 108°，1 快捷 144°，2 快捷 180°；
+// 圆心 Y 钳制按实际总角度算
 private const val FAN_R_OUTER_DP = 120f // v0.68.35：148→120，整体缩小更精致
 // v0.68.24 方案A：选中段伸长到的外半径；v0.68.35：176→140（+20dp）
 private const val FAN_R_OUTER_SELECTED_DP = 140f
 private const val FAN_R_INNER_DP = 46f // 死区内圈不变
 private const val FAN_EDGE_MARGIN_DP = 12f
 
-private const val FAN_SWEEP_VIDEO = 40f
-private const val FAN_SWEEP_PHOTO = 84f // v0.68.36：60°→84°，以正中方向为中心上下各 42°
-private const val FAN_SWEEP_AUDIO = 28f
-private const val FAN_SWEEP_QUICK = 30f
+private const val FAN_SWEEP_SEG = 36f // v0.68.38：所有段等宽 36°
 private const val MAX_QUICK_SEGS = 2
 // v0.68.36：拍照磁吸——落点在拍照边界外 ±10° 内一律吸附为拍照（只影响判定不影响绘制）
 private const val FAN_PHOTO_SNAP_DEG = 10f
@@ -169,72 +169,52 @@ private const val FAN_PHOTO_SNAP_DEG = 10f
 private const val FLING_PHOTO_VELOCITY_PX_S = 4500f
 
 /**
- * v0.68.36：各段扫过角度（动态）——录像 / 拍照 / 快捷段×N / 录音
- * （录音固定最下方，离拍照最远）；绘制与命中判定共用同一套。
- * 总角度：无快捷 152°，1 快捷 182°，2 快捷 212°
+ * v0.68.38：各段扫过角度（等宽 36°）——录像 / 拍照 / 快捷段×N / 录音；
+ * 绘制与命中判定共用同一套。总角度：无快捷 108°，1 快捷 144°，2 快捷 180°
  */
 private fun fanSweeps(quickCount: Int): FloatArray {
     val n = quickCount.coerceIn(0, MAX_QUICK_SEGS)
-    val arr = FloatArray(2 + n + 1)
-    arr[0] = FAN_SWEEP_VIDEO
-    arr[1] = FAN_SWEEP_PHOTO
-    for (k in 0 until n) arr[2 + k] = FAN_SWEEP_QUICK
-    arr[2 + n] = FAN_SWEEP_AUDIO
-    return arr
+    return FloatArray(2 + n + 1) { FAN_SWEEP_SEG }
 }
 
 /**
  * 第 i 段的 (startAngle, sweepAngle)，Canvas 角度制；与命中判定共用。
- * v0.68.36：拍照锚定——拍照段恒为第 1 段，以正中方向（左扇 180° / 右扇 0°）
- * 为中心上下各 42°；录像在上，快捷段与录音依次在下。快捷段再多拍照也不漂移。
+ * v0.68.38：等宽 36°，拍照锚定正中方向（左扇 180° [162,198] / 右扇 0° [-18,18]，
+ * 最顺手的位置）；录像在上，快捷段与录音依次在下。快捷段再多拍照也不漂移。
  */
 private fun segmentAngles(
     i: Int,
     sweeps: FloatArray,
     direction: FanDirection = FanDirection.LEFT,
 ): Pair<Float, Float> {
+    val seg = FAN_SWEEP_SEG
     return if (direction == FanDirection.LEFT) {
-        val photoLo = 180f - FAN_SWEEP_PHOTO / 2f
-        val photoHi = 180f + FAN_SWEEP_PHOTO / 2f
         when (i) {
-            0 -> Pair(photoHi, sweeps[0])
-            1 -> Pair(photoLo, sweeps[1])
-            else -> {
-                var b = photoLo
-                for (j in 2 until i) b -= sweeps[j]
-                Pair(b - sweeps[i], sweeps[i])
-            }
+            0 -> Pair(198f, seg) // 录像 [198,234]（上）
+            1 -> Pair(162f, seg) // 拍照 [162,198]（正中）
+            else -> Pair(126f - (i - 2) * seg, seg) // 快捷0..N-1 / 录音（下）
         }
     } else {
-        // v0.68.28 右扇镜像：拍照以正右方 0° 为中心
-        val photoLo = -FAN_SWEEP_PHOTO / 2f
-        val photoHi = FAN_SWEEP_PHOTO / 2f
+        // 右扇镜像：拍照锚定正右方 0°
         when (i) {
-            0 -> Pair(photoLo - sweeps[0], sweeps[0])
-            1 -> Pair(photoLo, sweeps[1])
-            else -> {
-                var b = photoHi
-                for (j in 2 until i) b += sweeps[j]
-                Pair(b, sweeps[i])
-            }
+            0 -> Pair(-54f, seg) // 录像 [-54,-18]（上）
+            1 -> Pair(-18f, seg) // 拍照 [-18,18]（正中）
+            else -> Pair(18f + (i - 2) * seg, seg) // 快捷0..N-1 / 录音（下）
         }
     }
 }
 
-/** 扇形相对圆心的上下伸展系数（÷R）：拍照锚定正中，快捷段多时向下延伸更多 */
+/** 扇形相对圆心的上下伸展系数（÷R）：v0.68.38 等宽 36°，总角度 108°/144°/180°；
+ * 左扇跨度 [126-36N, 234]，右扇跨度 [-54, 54+36N]（Canvas 角度制） */
 private fun fanVerticalReach(
     sweeps: FloatArray,
     direction: FanDirection,
 ): Pair<Float, Float> {
-    // 连续角度区间 [a0, a1]（canvas 制；本布局不跨 0°/360°）
+    val n = (sweeps.size - 3).coerceAtLeast(0) // 快捷段数
     val (a0, a1) = if (direction == FanDirection.LEFT) {
-        val photoLo = 180f - FAN_SWEEP_PHOTO / 2f
-        val photoHi = 180f + FAN_SWEEP_PHOTO / 2f
-        Pair(photoLo - sweeps.drop(2).sum(), photoHi + sweeps[0])
+        Pair(126f - n * FAN_SWEEP_SEG, 234f)
     } else {
-        val photoLo = -FAN_SWEEP_PHOTO / 2f
-        val photoHi = FAN_SWEEP_PHOTO / 2f
-        Pair(photoLo - sweeps[0], photoHi + sweeps.drop(2).sum())
+        Pair(-54f, 54f + n * FAN_SWEEP_SEG)
     }
     var up = 0f
     var down = 0f
@@ -249,7 +229,8 @@ private fun fanVerticalReach(
 }
 
 /** 扇形命中：返回 sector index（0=最上方），-1 = 死区内或扇形外
- * v0.68.36：拍照磁吸——落点在拍照边界外 ±10° 内一律返回拍照段下标（1） */
+ * v0.68.38：等宽 36°；拍照 [162,198]（左扇）/ [-18,18]（右扇）+ 磁吸 ±10°；
+ * 录像在上，快捷段/录音依次在下 */
 private fun sectorForIndex(
     dx: Float,
     dy: Float,
@@ -260,36 +241,32 @@ private fun sectorForIndex(
     if (sqrt(dx * dx + dy * dy) < deadZonePx) return -1
     var deg = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
     if (deg < 0f) deg += 360f
-    // v0.68.36：拍照锚定正中方向（左扇 180° / 右扇 0°），上下各 42°，恒为第 1 段
+    val seg = FAN_SWEEP_SEG
     return if (direction == FanDirection.LEFT) {
-        val photoLo = 180f - FAN_SWEEP_PHOTO / 2f
-        val photoHi = 180f + FAN_SWEEP_PHOTO / 2f
-        // 拍照磁吸：落点在其边界外 ±10° 内一律吸附为拍照
-        if (deg >= photoLo - FAN_PHOTO_SNAP_DEG && deg <= photoHi + FAN_PHOTO_SNAP_DEG) 1
-        else if (deg >= photoHi) {
-            if (deg <= photoHi + sweeps[0]) 0 else -1 // 录像 / 扇形外
+        // 拍照 [162,198] + 磁吸：落点在其边界外 ±10° 内一律吸附为拍照
+        if (deg >= 162f - FAN_PHOTO_SNAP_DEG && deg <= 198f + FAN_PHOTO_SNAP_DEG) 1
+        else if (deg > 198f) {
+            if (deg <= 234f) 0 else -1 // 录像 [198,234] / 扇形外
         } else {
-            var b = photoLo
+            // 快捷段/录音：index 2..，第 i 段 [126-(i-2)*36, 162-(i-2)*36]
             for (i in 2 until sweeps.size) {
-                if (deg >= b - sweeps[i]) return i
-                b -= sweeps[i]
+                val lo = 126f - (i - 2) * seg
+                if (deg >= lo && deg < lo + seg) return i
             }
             -1 // 扇形外
         }
     } else {
-        // v0.68.28 右扇：归一化到 -180°~180° 再判定
+        // 右扇：归一化到 -180°~180° 再判定
         val degR = if (deg > 180f) deg - 360f else deg
-        val photoLo = -FAN_SWEEP_PHOTO / 2f
-        val photoHi = FAN_SWEEP_PHOTO / 2f
-        // 拍照磁吸（镜像）
-        if (degR >= photoLo - FAN_PHOTO_SNAP_DEG && degR <= photoHi + FAN_PHOTO_SNAP_DEG) 1
-        else if (degR <= photoLo) {
-            if (degR >= photoLo - sweeps[0]) 0 else -1 // 录像 / 扇形外
+        // 拍照 [-18,18] + 磁吸（镜像）
+        if (degR >= -18f - FAN_PHOTO_SNAP_DEG && degR <= 18f + FAN_PHOTO_SNAP_DEG) 1
+        else if (degR < -18f) {
+            if (degR >= -54f) 0 else -1 // 录像 [-54,-18] / 扇形外
         } else {
-            var b = photoHi
+            // 快捷段/录音：index 2..，第 i 段 [18+(i-2)*36, 54+(i-2)*36]
             for (i in 2 until sweeps.size) {
-                if (degR < b + sweeps[i]) return i
-                b += sweeps[i]
+                val lo = 18f + (i - 2) * seg
+                if (degR >= lo && degR < lo + seg) return i
             }
             -1 // 扇形外
         }
@@ -1095,20 +1072,14 @@ fun BlindCaptureFan(
                 label = "segPop$i"
             )
             key(i) {
-                // v0.68.22：纯文字排版（去图标，段内空间小，字号拉大居中）
-                // v0.68.37：窄段（<40°，即录音 28°/快捷 30°）中文标签竖排——
-                // 字保持 upright、沿径向垂直堆叠；非中文或超 4 字 fallback 小一号字号 + 省略
-                val narrow = sw < 40f
-                val vertical = narrow && segLabel.length in 1..4 &&
-                    segLabel.all { it in '\u4e00'..'\u9fff' }
-                val boxW = if (vertical) 36.dp else 96.dp
-                val boxH = if (vertical) 104.dp else 48.dp
+                // v0.68.38：统一横排（等宽 36° 下横排全部放得下，竖排分支删除）；
+                // maxLines=1 + Ellipsis，超长装备名截断
                 Box(
                     modifier = Modifier
                         .offset {
                             IntOffset(
-                                (lx - with(density) { boxW.toPx() } / 2f).roundToInt(),
-                                (ly - with(density) { boxH.toPx() } / 2f).roundToInt()
+                                (lx - with(density) { 96.dp.toPx() } / 2f).roundToInt(),
+                                (ly - with(density) { 48.dp.toPx() } / 2f).roundToInt()
                             )
                         }
                         .graphicsLayer {
@@ -1116,42 +1087,23 @@ fun BlindCaptureFan(
                             scaleY = pop
                             alpha = fanAlpha
                         }
-                        .size(boxW, boxH),
+                        .size(96.dp, 48.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (vertical) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            segLabel.forEach { ch ->
-                                Text(
-                                    text = ch.toString(),
-                                    fontSize = if (selected) 16.sp else 14.sp,
-                                    fontWeight = if (selected) FontWeight.Bold
-                                    else FontWeight.Medium,
-                                    color = if (selected) titleColor else bodyColor,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    } else {
-                        Text(
-                            text = segLabel,
-                            // v0.68.24 方案A：选中放大——拍照 19sp→22sp，其他 16sp→19sp
-                            fontSize = when {
-                                selected && isPhoto -> 22.sp
-                                selected -> 19.sp
-                                isPhoto -> 19.sp
-                                narrow -> 13.sp // v0.68.37：窄段非中文 fallback 小一号
-                                else -> 16.sp
-                            },
-                            fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) titleColor else bodyColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    Text(
+                        text = segLabel,
+                        // 选中放大——拍照 19sp→22sp，其他 16sp→19sp
+                        fontSize = when {
+                            selected && isPhoto -> 22.sp
+                            selected -> 19.sp
+                            isPhoto -> 19.sp
+                            else -> 16.sp
+                        },
+                        fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
+                        color = if (selected) titleColor else bodyColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
