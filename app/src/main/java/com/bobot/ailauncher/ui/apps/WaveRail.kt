@@ -159,6 +159,8 @@ internal fun WaveRail(
         val rowHpx = railHpx / items.size
         val bulgePx = with(density) { 36.dp.toPx() }
         val shiftPx = with(density) { 56.dp.toPx() }
+        // v0.68.15（Bob）：波浪散开时字母纵向也拉开，更灵动不拥挤
+        val spreadPx = with(density) { 7.dp.toPx() }
         // 气泡在靠应用的一侧：明显离开波浪区
         val bubbleOutX = with(density) { 128.dp.toPx() }
 
