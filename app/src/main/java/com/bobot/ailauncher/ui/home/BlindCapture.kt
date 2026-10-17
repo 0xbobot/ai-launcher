@@ -199,11 +199,36 @@ class BlindCaptureController(
         onDiag(s)
     }
 
-    // v0.68.12：诊断——状态变化时更新浮层 + 短震动（KeyboardTick 区别于模式刻度）
+    // v0.68.12：诊断——状态变化时更新浮层 + 50ms 短震动（区别于模式刻度的 TextHandleMove）
     private fun diagState(s: String) {
         onDiag(s)
-        haptics.performHapticFeedback(HapticFeedbackType.KeyboardTap)
+        diagTick()
         Log.d(TAG, "diag: $s")
+    }
+
+    // v0.68.12：50ms 精确短震动（Compose 1.7 的 HapticFeedbackType 只有基础款，
+    // SegmentTick/KeyboardTap 都不存在，改用系统 Vibrator）
+    private fun diagTick() {
+        try {
+            val vib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE)
+                    as android.os.VibratorManager
+                vm.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vib.vibrate(
+                    android.os.VibrationEffect.createOneShot(
+                        50, android.os.VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                vib.vibrate(50)
+            }
+        } catch (_: Exception) { }
     }
 
     private fun reset() {
