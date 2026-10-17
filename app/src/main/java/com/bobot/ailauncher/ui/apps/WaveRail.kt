@@ -106,7 +106,9 @@ internal fun WaveRail(
     pulseTick: Int = 0,
     pulseItem: RailItem? = null,
     // v0.68.12（Bob）：房子停留进度 0→1，图标同步放大，引导用户感知过渡
-    dwellProgress: Float = 0f
+    dwellProgress: Float = 0f,
+    // v0.68.18（Bob）：原地绽放进度 0→1，气泡位置放大铺满
+    explodeProgress: Float = 0f
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
@@ -244,9 +246,10 @@ internal fun WaveRail(
                         Box(
                             modifier = Modifier
                                 .width(14.dp)
-                                .height(1.dp)
+                                .height(1.5.dp)
                                 .background(
-                                    AILauncherColors.Divider.copy(alpha = 0.6f),
+                                    // v0.68.18（Bob）：Divider色太接近背景看不见，改深色低透明
+                                    AILauncherColors.Title.copy(alpha = 0.25f),
                                     CircleShape
                                 )
                         )
@@ -334,6 +337,8 @@ internal fun WaveRail(
         if (visible && displayIndex >= 0) {
             val idx = displayIndex.coerceIn(items.indices)
             val rPx = with(density) { 24.dp.toPx() }
+            // v0.68.18（Bob）：原地绽放——explode 时金环淡出，房子从气泡位置放大铺满
+            val bubbleRingAlpha = 1f - explodeProgress
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -344,7 +349,11 @@ internal fun WaveRail(
                         )
                     }
                     .size(48.dp)
-                    .border(2.dp, AILauncherColors.Accent, CircleShape),
+                    .border(
+                        2.dp,
+                        AILauncherColors.Accent.copy(alpha = bubbleRingAlpha),
+                        CircleShape
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 val bubbleItem = items[idx]
@@ -359,15 +368,20 @@ internal fun WaveRail(
                     // v0.68.6：精致版 HouseGlyph（细描边+圆角+门洞）
                     when (bubbleItem) {
                         RailItem.House -> {
-                            // v0.68.17（Bob）：停留时气泡里的房子从1x猛长到3.5x，过渡效果要明显
-                            val bubbleHouseScale = 1f + dwellProgress * 2.5f
+                            // 停留 1x→2.5x；绽放 2.5x→18x 铺满，结尾轻微淡出更优雅
+                            val dwellScale = 1f + dwellProgress * 1.5f
+                            val explodeScale = 2.5f + explodeProgress * 15.5f
+                            val houseScale =
+                                if (explodeProgress > 0f) explodeScale else dwellScale
+                            val houseAlpha = 1f - explodeProgress * 0.25f
                             HouseGlyph(
                                 color = AILauncherColors.Title,
                                 modifier = Modifier
                                     .size(24.dp)
                                     .graphicsLayer {
-                                        scaleX = bubbleHouseScale
-                                        scaleY = bubbleHouseScale
+                                        scaleX = houseScale
+                                        scaleY = houseScale
+                                        alpha = houseAlpha
                                     }
                             )
                         }
@@ -405,6 +419,8 @@ internal fun AppRail(
     pulseTick: Int = 0,
     pulseItem: RailItem? = null,
     dwellProgress: Float = 0f,
+    // v0.68.18（Bob）：原地绽放——气泡位置放大铺满
+    explodeProgress: Float = 0f,
     modifier: Modifier = Modifier
 ) {
     WaveRail(
@@ -415,6 +431,7 @@ internal fun AppRail(
         pulseTick = pulseTick,
         pulseItem = pulseItem,
         dwellProgress = dwellProgress,
+        explodeProgress = explodeProgress,
         modifier = modifier.height(400.dp)
     )
 }

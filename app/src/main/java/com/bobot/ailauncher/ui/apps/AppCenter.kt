@@ -9,6 +9,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -1081,15 +1082,13 @@ fun AppCenterContent(
                 var houseDwellJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                 // v0.68.12（Bob）：房子停留进度 0→1，图标同步放大，引导用户感知"停留会回首页"
                 val dwellProgress = remember { Animatable(0f) }
-                // v0.68.17（Bob）：发散过渡——停留结束后房子猛放大铺满屏再切首页
+                // v0.68.18（Bob）：原地绽放——气泡位置优雅放大铺满
                 val explodeProgress = remember { Animatable(0f) }
-                var showExplode by remember { mutableStateOf(false) }
                 val stopGlide: () -> Unit = {
                     glideJob?.cancel()
                     glideJob = null
                     houseDwellJob?.cancel()
                     houseDwellJob = null
-                    showExplode = false
                     scope.launch {
                         dwellProgress.snapTo(0f)
                         explodeProgress.snapTo(0f)
@@ -1132,17 +1131,21 @@ fun AppCenterContent(
                                 dwellProgress.snapTo(0f)
                                 dwellProgress.animateTo(
                                     1f,
-                                    animationSpec = tween(450)
+                                    animationSpec = tween(
+                                        450,
+                                        easing = FastOutSlowInEasing
+                                    )
                                 )
-                                // v0.68.17（Bob）：发散主屏——房子从3.5x猛放到铺满屏，再切换消失
-                                showExplode = true
+                                // v0.68.18（Bob）：原地绽放——气泡位置优雅放大铺满再切首页
                                 explodeProgress.snapTo(0f)
                                 explodeProgress.animateTo(
                                     1f,
-                                    animationSpec = tween(280)
+                                    animationSpec = tween(
+                                        500,
+                                        easing = FastOutSlowInEasing
+                                    )
                                 )
                                 onHeaderSwipeRightState.value()
-                                showExplode = false
                                 explodeProgress.snapTo(0f)
                                 dwellProgress.snapTo(0f)
                             }
@@ -1161,6 +1164,7 @@ fun AppCenterContent(
                     pulseTick = flashTick,
                     pulseItem = pulseItem,
                     dwellProgress = dwellProgress.value,
+                    explodeProgress = explodeProgress.value,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(bottom = 70.dp)
@@ -1177,24 +1181,6 @@ fun AppCenterContent(
                     onRelease = { mirrorIndex = null },
                     modifier = Modifier.align(Alignment.CenterStart).fillMaxHeight()
                 )
-                // v0.68.17（Bob）：发散过渡——房子从气泡的3.5x猛放到铺满屏，再切首页消失
-                if (showExplode) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        HouseGlyph(
-                            color = AILauncherColors.Title,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .graphicsLayer {
-                                    val s = 3.5f + explodeProgress.value * 22f
-                                    scaleX = s
-                                    scaleY = s
-                                }
-                        )
-                    }
-                }
                 // v0.41.20（Bob）：右下角眼睛按钮已删除——隐藏分组在主列表末尾，
                 // 直接滚动到底就能看到（未解锁显示锁定占位）。
             }
