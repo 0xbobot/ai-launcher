@@ -7,6 +7,8 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -101,6 +103,12 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(blindActive) {
         onBlindActiveChange(blindActive)
     }
+    // v0.68.34（Bob）：扇形展开时 TODAY 卡片淡出到 0.3（视觉让位，和 Dock 同逻辑）
+    val todayAlpha by animateFloatAsState(
+        targetValue = if (blindActive) 0.3f else 1f,
+        animationSpec = tween(200),
+        label = "todayAlpha",
+    )
     // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
     var showBlindCustomConfig by remember { mutableStateOf(false) }
     // v0.68.20：自定义☆动作状态——配置保存后刷新扇形显示
@@ -269,7 +277,7 @@ fun HomeScreen(
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            PetZone()
+            PetZone(todayCardAlpha = todayAlpha)
         }
         // v0.36.0：无障碍权限引导卡
         panelGuideMode?.let { mode ->

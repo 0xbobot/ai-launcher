@@ -162,7 +162,9 @@ import kotlin.math.roundToInt
 fun PetZone(
     // v0.29.0：升级提醒宠物化
     hasUpgrade: Boolean = false,
-    onUpgradeTap: () -> Unit = {}
+    onUpgradeTap: () -> Unit = {},
+    // v0.68.34（Bob）：扇形展开时 TODAY 卡片淡出到 0.3（视觉让位，和 Dock 同逻辑）
+    todayCardAlpha: Float = 1f
 ) {
     val mood by PetRepository.mood.collectAsState()
     val mouth by PetRepository.mouth.collectAsState()
@@ -667,6 +669,8 @@ fun PetZone(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                // v0.68.34：扇形展开时卡片淡出到 0.3（视觉让位，和 Dock 同逻辑）
+                .graphicsLayer { alpha = todayCardAlpha }
                 .padding(horizontal = 20.dp)
                 // v0.66.6：去掉 -30dp 上移（七仔坐卡上），上下两部分清晰分开；卡片顶部留 8dp 呼吸
                 // v0.66.6：卡片底部留 32dp，与 Dock 拉开距离
