@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +64,7 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.maxOf
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -76,10 +78,12 @@ import kotlin.math.sqrt
  *
  * 扇形选择器：
  * 1. 左滑/右滑触发 → 以触发点为圆心展开扇形菜单（左扇朝左/右扇朝右镜像）
- * 2. 段从上到下：录像 / 拍照 / 录音（固定）+ 快捷装备段（动态，最多 2 段，
- *    取七仔装备排序前两位；总角度 128°~188°）；拍照 60° 居中加宽——最顺手
+ * 2. 段从上到下：录像 / 拍照 / 快捷装备段（动态，最多 2 段，
+ *    取七仔装备排序前两位）/ 录音（固定最下方）；总角度动态 152°~212°；
+ *    拍照 84° 居中加宽 + 边界 ±10° 磁吸——最容易触发
  * 3. 手指滑入某段 → 伸长高亮 + 震动 tick + 七仔报段名（七仔从段外缘探出）
- * 4. 松手 → 启动高亮段；无选择松手 → 拍照（零决策）；滑回 → 取消
+ * 4. 松手 → 启动高亮段；无选择松手 → 拍照（零决策）；快滑（甩）→ 拍照（忽略选择）；
+ *    滑回 → 取消
  *
  * v0.68.20：视觉重构——展开弹性动画、段间分隔线、选中光晕+放大、
  * 图标+文字排版；拍照为最默认操作。
@@ -96,10 +100,14 @@ import kotlin.math.sqrt
  * 1px 高光描边；展开 stagger（25ms/段）；七仔分模式姿态（拍照jump/录像wave/
  * 录音hold/快捷main）+ 旋转探出 + 钻回。
  *
+ * v0.68.36：拍照最容易触发——拍照段 60°→84°（正中方向上下各 42°）；边界磁吸
+ * （落点在拍照边界外 ±10° 内吸附为拍照，只影响判定不影响绘制）；录音固定最下方
+ * （离拍照最远）；快滑覆盖（松手速度超 4500px/s 直接=拍照，忽略段选择）。
+ *
  * 保留：三重反馈（震动/七仔语音/视觉高亮）、诊断浮层。
  */
 
-/** 扇形固定段（从上到下）：录像 / 拍照 / 录音；快捷装备段动态追加 */
+/** 扇形固定段（从上到下）：录像 / 拍照 / 快捷装备段 / 录音（录音固定最下方） */
 enum class BlindMode(val label: String) {
     VIDEO("录像"),
     PHOTO("拍照"),
@@ -119,8 +127,10 @@ sealed interface FanSegment {
 enum class FanDirection { LEFT, RIGHT }
 
 // 扇形几何（Canvas 角度制：0°=正右方，顺时针为正，y 向下）
-// v0.68.35：总角度动态 128°~188°（固定 128° + 快捷段每段 30°×N），左扇以正左方
-// 180° 为中心，右扇以正右方 0° 为中心；拍照 60° 居中加宽，正中方向落在其间——最顺手
+// v0.68.36：段顺序 录像 / 拍照 / 快捷段×N / 录音（录音固定最下方，离拍照最远）；
+// 总角度动态：无快捷 152°，1 快捷 182°，2 快捷 212°（超 180°，圆心 Y 钳制按实际
+// 总角度算）；左扇以正左方 180° 为中心，右扇以正右方 0° 为中心；拍照 84° 居中
+// 加宽（上下各 42°），占据最大容错区——最容易触发
 private const val FAN_R_OUTER_DP = 120f // v0.68.35：148→120，整体缩小更精致
 // v0.68.24 方案A：选中段伸长到的外半径；v0.68.35：176→140（+20dp）
 private const val FAN_R_OUTER_SELECTED_DP = 140f
@@ -128,38 +138,97 @@ private const val FAN_R_INNER_DP = 46f // 死区内圈不变
 private const val FAN_EDGE_MARGIN_DP = 12f
 
 private const val FAN_SWEEP_VIDEO = 40f
-private const val FAN_SWEEP_PHOTO = 60f
+private const val FAN_SWEEP_PHOTO = 84f // v0.68.36：60°→84°，以正中方向为中心上下各 42°
 private const val FAN_SWEEP_AUDIO = 28f
 private const val FAN_SWEEP_QUICK = 30f
 private const val MAX_QUICK_SEGS = 2
+// v0.68.36：拍照磁吸——落点在拍照边界外 ±10° 内一律吸附为拍照（只影响判定不影响绘制）
+private const val FAN_PHOTO_SNAP_DEG = 10f
+// v0.68.36：快滑覆盖阈值——松手速度超此值直接=拍照（"甩"的量级，保守取高；px/s）
+private const val FLING_PHOTO_VELOCITY_PX_S = 4500f
 
-/** 各段扫过角度（动态）：固定 3 段 + 快捷段；绘制与命中判定共用同一套 */
+/**
+ * v0.68.36：各段扫过角度（动态）——录像 / 拍照 / 快捷段×N / 录音
+ * （录音固定最下方，离拍照最远）；绘制与命中判定共用同一套。
+ * 总角度：无快捷 152°，1 快捷 182°，2 快捷 212°
+ */
 private fun fanSweeps(quickCount: Int): FloatArray {
-    val base = floatArrayOf(FAN_SWEEP_VIDEO, FAN_SWEEP_PHOTO, FAN_SWEEP_AUDIO)
     val n = quickCount.coerceIn(0, MAX_QUICK_SEGS)
-    if (n == 0) return base
-    return base + FloatArray(n) { FAN_SWEEP_QUICK }
+    val arr = FloatArray(2 + n + 1)
+    arr[0] = FAN_SWEEP_VIDEO
+    arr[1] = FAN_SWEEP_PHOTO
+    for (k in 0 until n) arr[2 + k] = FAN_SWEEP_QUICK
+    arr[2 + n] = FAN_SWEEP_AUDIO
+    return arr
 }
 
-/** 第 i 段的 (startAngle, sweepAngle)，Canvas 角度制；与命中判定共用 */
+/**
+ * 第 i 段的 (startAngle, sweepAngle)，Canvas 角度制；与命中判定共用。
+ * v0.68.36：拍照锚定——拍照段恒为第 1 段，以正中方向（左扇 180° / 右扇 0°）
+ * 为中心上下各 42°；录像在上，快捷段与录音依次在下。快捷段再多拍照也不漂移。
+ */
 private fun segmentAngles(
     i: Int,
     sweeps: FloatArray,
     direction: FanDirection = FanDirection.LEFT,
 ): Pair<Float, Float> {
-    val total = sweeps.sum()
-    if (direction == FanDirection.LEFT) {
-        var top = 180f + total / 2f // 最上方
-        for (j in 0 until i) top -= sweeps[j]
-        return Pair(top - sweeps[i], sweeps[i])
+    return if (direction == FanDirection.LEFT) {
+        val photoLo = 180f - FAN_SWEEP_PHOTO / 2f
+        val photoHi = 180f + FAN_SWEEP_PHOTO / 2f
+        when (i) {
+            0 -> Pair(photoHi, sweeps[0])
+            1 -> Pair(photoLo, sweeps[1])
+            else -> {
+                var b = photoLo
+                for (j in 2 until i) b -= sweeps[j]
+                Pair(b - sweeps[i], sweeps[i])
+            }
+        }
+    } else {
+        // v0.68.28 右扇镜像：拍照以正右方 0° 为中心
+        val photoLo = -FAN_SWEEP_PHOTO / 2f
+        val photoHi = FAN_SWEEP_PHOTO / 2f
+        when (i) {
+            0 -> Pair(photoLo - sweeps[0], sweeps[0])
+            1 -> Pair(photoLo, sweeps[1])
+            else -> {
+                var b = photoHi
+                for (j in 2 until i) b += sweeps[j]
+                Pair(b, sweeps[i])
+            }
+        }
     }
-    // v0.68.28 右扇镜像：自上而下累加，以正右方 0° 为中心
-    var top = -total / 2f // 最上方
-    for (j in 0 until i) top += sweeps[j]
-    return Pair(top, sweeps[i])
 }
 
-/** 扇形命中：返回 sector index（0=最上方），-1 = 死区内或扇形外 */
+/** 扇形相对圆心的上下伸展系数（÷R）：拍照锚定正中，快捷段多时向下延伸更多 */
+private fun fanVerticalReach(
+    sweeps: FloatArray,
+    direction: FanDirection,
+): Pair<Float, Float> {
+    // 连续角度区间 [a0, a1]（canvas 制；本布局不跨 0°/360°）
+    val (a0, a1) = if (direction == FanDirection.LEFT) {
+        val photoLo = 180f - FAN_SWEEP_PHOTO / 2f
+        val photoHi = 180f + FAN_SWEEP_PHOTO / 2f
+        Pair(photoLo - sweeps.drop(2).sum(), photoHi + sweeps[0])
+    } else {
+        val photoLo = -FAN_SWEEP_PHOTO / 2f
+        val photoHi = FAN_SWEEP_PHOTO / 2f
+        Pair(photoLo - sweeps[0], photoHi + sweeps.drop(2).sum())
+    }
+    var up = 0f
+    var down = 0f
+    val samples = mutableListOf(a0, a1)
+    if (90f in a0..a1) samples.add(90f) // 正下方
+    if (270f in a0..a1) samples.add(270f) // 正上方
+    for (a in samples) {
+        val y = sin(Math.toRadians(a.toDouble())).toFloat() // canvas y 向下：+ 为下
+        if (y < 0f) up = maxOf(up, -y) else down = maxOf(down, y)
+    }
+    return Pair(up, down)
+}
+
+/** 扇形命中：返回 sector index（0=最上方），-1 = 死区内或扇形外
+ * v0.68.36：拍照磁吸——落点在拍照边界外 ±10° 内一律返回拍照段下标（1） */
 private fun sectorForIndex(
     dx: Float,
     dy: Float,
@@ -170,27 +239,40 @@ private fun sectorForIndex(
     if (sqrt(dx * dx + dy * dy) < deadZonePx) return -1
     var deg = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
     if (deg < 0f) deg += 360f
-    val total = sweeps.sum()
-    if (direction == FanDirection.LEFT) {
-        val lo = 180f - total / 2f
-        if (deg < lo || deg > lo + total) return -1
-        var top = lo + total
-        for (i in sweeps.indices) {
-            top -= sweeps[i]
-            if (deg >= top) return i
+    // v0.68.36：拍照锚定正中方向（左扇 180° / 右扇 0°），上下各 42°，恒为第 1 段
+    return if (direction == FanDirection.LEFT) {
+        val photoLo = 180f - FAN_SWEEP_PHOTO / 2f
+        val photoHi = 180f + FAN_SWEEP_PHOTO / 2f
+        // 拍照磁吸：落点在其边界外 ±10° 内一律吸附为拍照
+        if (deg >= photoLo - FAN_PHOTO_SNAP_DEG && deg <= photoHi + FAN_PHOTO_SNAP_DEG) 1
+        else if (deg >= photoHi) {
+            if (deg <= photoHi + sweeps[0]) 0 else -1 // 录像 / 扇形外
+        } else {
+            var b = photoLo
+            for (i in 2 until sweeps.size) {
+                if (deg >= b - sweeps[i]) return i
+                b -= sweeps[i]
+            }
+            -1 // 扇形外
         }
     } else {
         // v0.68.28 右扇：归一化到 -180°~180° 再判定
         val degR = if (deg > 180f) deg - 360f else deg
-        val lo = -total / 2f
-        if (degR < lo || degR > lo + total) return -1
-        var top = lo
-        for (i in sweeps.indices) {
-            if (degR < top + sweeps[i]) return i
-            top += sweeps[i]
+        val photoLo = -FAN_SWEEP_PHOTO / 2f
+        val photoHi = FAN_SWEEP_PHOTO / 2f
+        // 拍照磁吸（镜像）
+        if (degR >= photoLo - FAN_PHOTO_SNAP_DEG && degR <= photoHi + FAN_PHOTO_SNAP_DEG) 1
+        else if (degR <= photoLo) {
+            if (degR >= photoLo - sweeps[0]) 0 else -1 // 录像 / 扇形外
+        } else {
+            var b = photoHi
+            for (i in 2 until sweeps.size) {
+                if (degR < b + sweeps[i]) return i
+                b += sweeps[i]
+            }
+            -1 // 扇形外
         }
     }
-    return sweeps.size - 1
 }
 
 /** 盲操 UI 状态：隐藏 / 扇形选择中（modeIndex=-1 表示无高亮） */
@@ -341,8 +423,6 @@ class BlindCaptureController(
     private val deadZonePx = FAN_R_INNER_DP * density
     private val cancelBackPx = 24f * density
     private val fanROuterPx = FAN_R_OUTER_DP * density
-    // v0.68.35：扇形垂直半高按实际总角度算（含选中伸长），触发时设置，用于圆心 Y 钳制
-    private var fanHalfHPx = 0f
     private val fanMarginPx = FAN_EDGE_MARGIN_DP * density
 
     private var tracking = false
@@ -358,6 +438,8 @@ class BlindCaptureController(
     private var maxRightPx = 0f
     // v0.68.32：底部 Dock 区高度（px，0=无 Dock）——圆心钳制用
     var dockZonePx: Float = 0f
+    // v0.68.36：快滑覆盖——VelocityTracker 记松手速度，超阈值直接=拍照
+    private val velocityTracker = VelocityTracker()
     private var centerX = 0f
     private var centerY = 0f
     private var modeIndex = -1
@@ -403,8 +485,8 @@ class BlindCaptureController(
     }
 
     /**
-     * v0.68.35：本次手势的扇形段 = 固定3段（录像/拍照/录音）+ 七仔装备排序前两位。
-     * 每次触发时读最新装备列表，增删复用七仔装备现有流程。
+     * v0.68.35：本次手势的扇形段 = 录像 / 拍照 / 快捷装备（七仔装备排序前两位）/ 录音。
+     * v0.68.36：录音固定最下方，离拍照最远。每次触发时读最新装备列表。
      */
     private fun buildSegments(): List<FanSegment> {
         val quicks = try {
@@ -415,8 +497,8 @@ class BlindCaptureController(
         return listOf(
             FanSegment.BuiltIn(BlindMode.VIDEO),
             FanSegment.BuiltIn(BlindMode.PHOTO),
-            FanSegment.BuiltIn(BlindMode.AUDIO),
-        ) + quicks.map { FanSegment.Quick(it) }
+        ) + quicks.map { FanSegment.Quick(it) } +
+            listOf(FanSegment.BuiltIn(BlindMode.AUDIO))
     }
 
     /** 手势开始：无条件跟踪（组件已消费的手势到不了这里） */
@@ -426,6 +508,7 @@ class BlindCaptureController(
         modeIndex = -1
         maxLeftPx = 0f
         maxRightPx = 0f
+        velocityTracker.resetTracking()
         diagText("idle(跟踪中)")
         Log.d(TAG, "onStart tracking")
     }
@@ -439,6 +522,8 @@ class BlindCaptureController(
     ) {
         if (!tracking) return
         val pos = change.position
+        // v0.68.36：记录速度（快滑覆盖用）
+        velocityTracker.addPosition(change.uptimeMillis, pos)
         if (!triggered) {
             // 触发：左滑/右滑过阈值且横向主导 → 直接展开扇形（无停留、无边缘要求）
             // v0.68.28：右滑也触发，扇形朝右镜像
@@ -456,10 +541,10 @@ class BlindCaptureController(
                 // v0.68.35：读最新七仔装备，构建本次手势的动态段 + 角度
                 segments = buildSegments()
                 sweeps = fanSweeps(segments.count { it is FanSegment.Quick })
-                val totalSweep = sweeps.sum()
-                // 扇形垂直半高 = sin(总角度/2) × 选中伸长半径，用于圆心 Y 钳制
-                fanHalfHPx = (FAN_R_OUTER_SELECTED_DP *
-                    sin(Math.toRadians(totalSweep / 2.0)).toFloat()) * density
+                // v0.68.36：扇形上下伸展按实际跨度算（拍照锚定正中，快捷多时向下延伸更多）
+                val (upK, downK) = fanVerticalReach(sweeps, fanDir)
+                val upPx = FAN_R_OUTER_SELECTED_DP * upK * density
+                val downPx = FAN_R_OUTER_SELECTED_DP * downK * density
                 // 圆心钳制，保证扇形不被屏幕边缘裁掉（镜像：左扇防左边缘，右扇防右边缘）
                 centerX = if (fanDir == FanDirection.LEFT) {
                     pos.x.coerceAtLeast(fanROuterPx + fanMarginPx)
@@ -468,8 +553,8 @@ class BlindCaptureController(
                         .coerceAtLeast(fanMarginPx)
                     pos.x.coerceAtMost(maxX)
                 }
-                val minY = fanHalfHPx + fanMarginPx
-                val maxY = (size.height - fanHalfHPx - fanMarginPx)
+                val minY = upPx + fanMarginPx
+                val maxY = (size.height - downPx - fanMarginPx)
                     .coerceAtLeast(minY)
                 // v0.68.32：Dock 钳制——触摸点离底部 Dock 区 < 扇形外半径（含选中伸长）
                 // 时，圆心上移到 Dock 上方，保证扇形主体完整可见
@@ -528,27 +613,39 @@ class BlindCaptureController(
     /**
      * 手指抬起。返回 true 表示被盲操消费，调用方跳过原有纵向逻辑。
      * v0.68.20：无选择松手（快滑）= 拍照，零决策；右滑回取消已在 onMove 处理。
+     * v0.68.36：快滑覆盖——松手速度超阈值直接=拍照（快=着急=拍照，忽略段选择）。
      */
     fun onEnd(): Boolean {
         if (!tracking) return false
         val wasTriggered = triggered
         val idx = modeIndex
+        val flingPhoto = try {
+            val v = velocityTracker.calculateVelocity()
+            v.x * v.x + v.y * v.y >=
+                FLING_PHOTO_VELOCITY_PX_S * FLING_PHOTO_VELOCITY_PX_S
+        } catch (_: Exception) { false }
         reset()
         if (wasTriggered) {
-            if (idx >= 0) {
+            val photoIdx = photoIndex()
+            if (flingPhoto && photoIdx >= 0) {
+                commit(photoIdx)
+                diagState("commit(拍照-快滑)")
+            } else if (idx >= 0) {
                 commit(idx)
                 diagState("commit(${segmentLabel(idx)})")
-            } else {
+            } else if (photoIdx >= 0) {
                 // v0.68.35：无选择松手（快滑）= 拍照，零决策
-                val photoIdx = segments.indexOfFirst {
-                    it is FanSegment.BuiltIn && it.mode == BlindMode.PHOTO
-                }
-                if (photoIdx >= 0) commit(photoIdx)
+                commit(photoIdx)
                 diagState("commit(拍照-默认)")
             }
             return true
         }
         return false
+    }
+
+    /** 拍照段下标（动态段列表中查找） */
+    private fun photoIndex(): Int = segments.indexOfFirst {
+        it is FanSegment.BuiltIn && it.mode == BlindMode.PHOTO
     }
 
     fun onCancel() {
@@ -678,7 +775,6 @@ fun BlindCaptureFan(
 ) {
     // 绘制与命中判定共用同一套动态角度
     val sweeps = fanSweeps(segments.count { it is FanSegment.Quick })
-    val totalSweep = sweeps.sum()
     val density = LocalDensity.current
     val selectedFill = Color(0xFFD8CBB6) // v0.68.24 方案A：选中段暖棕底
     val titleColor = AILauncherColors.Title
@@ -686,7 +782,7 @@ fun BlindCaptureFan(
 
     // v0.68.24 方案A：选中段径向伸长——每段外半径独立 spring；
     // v0.68.35：展开 0→120dp，选中该段 120→140dp（+20dp），滑出回弹；
-    // 展开 stagger：每段延迟 25ms 依次绽开（录像→拍照→录音→快捷）
+    // 展开 stagger：每段延迟 25ms 依次绽开（录像→拍照→快捷→录音）
     val segShown = remember { mutableStateMapOf<Int, Boolean>() }
     LaunchedEffect(Unit) {
         segments.indices.forEach { i ->
@@ -777,21 +873,12 @@ fun BlindCaptureFan(
                 )
             }
             // v0.68.20：段间分隔线（v0.68.24：伸到相邻两段半径较大者）
-            // v0.68.28：右扇镜像——分隔线角度自上而下累加
-            // v0.68.35：动态总角度
-            var acc = if (direction == FanDirection.LEFT) {
-                180f + totalSweep / 2f
-            } else {
-                -totalSweep / 2f
-            }
+            // v0.68.36：分隔线角度与 segmentAngles 共用同一套拍照锚定角度
             val divColor = Color(0xFF8A7B6B).copy(alpha = 0.55f)
             val divW = 2.dp.toPx()
             for (i in 0 until segments.size - 1) {
-                acc = if (direction == FanDirection.LEFT) {
-                    acc - sweeps[i]
-                } else {
-                    acc + sweeps[i]
-                }
+                val (bs, bsw) = segmentAngles(i + 1, sweeps, direction)
+                val acc = if (direction == FanDirection.LEFT) bs + bsw else bs
                 val rad = Math.toRadians(acc.toDouble())
                 val dir = Offset(cos(rad).toFloat(), sin(rad).toFloat())
                 val rMax = maxOf(
