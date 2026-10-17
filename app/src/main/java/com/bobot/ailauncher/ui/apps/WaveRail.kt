@@ -303,16 +303,10 @@ internal fun WaveRail(
                                 scaleX = sc
                                 scaleY = sc
                             }
-                        // v0.68.12：房子停留时逐渐放大，提示"停留会回首页"
-                        val houseScale = if (item == RailItem.House && i == displayIndex)
-                            1f + dwellProgress * 0.7f else 1f
                         when (item) {
                             RailItem.House -> HouseGlyph(
                                 color = AILauncherColors.Title.copy(alpha = 0.6f),
-                                modifier = waveMod.graphicsLayer {
-                                    scaleX = houseScale
-                                    scaleY = houseScale
-                                }
+                                modifier = waveMod
                             )
                             // v0.68.8：线条风，与房子同款描边
                             RailItem.Star -> StarGlyph(
@@ -364,10 +358,19 @@ internal fun WaveRail(
                 } else {
                     // v0.68.6：精致版 HouseGlyph（细描边+圆角+门洞）
                     when (bubbleItem) {
-                        RailItem.House -> HouseGlyph(
-                            color = AILauncherColors.Title,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        RailItem.House -> {
+                            // v0.68.16（Bob）：停留时气泡里的房子逐渐变大，做"即将回首页"的过渡
+                            val bubbleHouseScale = 1f + dwellProgress * 0.8f
+                            HouseGlyph(
+                                color = AILauncherColors.Title,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .graphicsLayer {
+                                        scaleX = bubbleHouseScale
+                                        scaleY = bubbleHouseScale
+                                    }
+                            )
+                        }
                         // v0.68.8：线条风，与房子同款描边
                         RailItem.Star -> StarGlyph(
                             color = AILauncherColors.Title,
