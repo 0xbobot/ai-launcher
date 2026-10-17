@@ -199,10 +199,10 @@ class BlindCaptureController(
         onDiag(s)
     }
 
-    // v0.68.12：诊断——状态变化时更新浮层 + 短震动（SegmentTick，区别于模式刻度）
+    // v0.68.12：诊断——状态变化时更新浮层 + 短震动（KeyboardTick 区别于模式刻度）
     private fun diagState(s: String) {
         onDiag(s)
-        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        haptics.performHapticFeedback(HapticFeedbackType.KeyboardTap)
         Log.d(TAG, "diag: $s")
     }
 
