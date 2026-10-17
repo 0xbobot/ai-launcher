@@ -410,7 +410,6 @@ class BlindCaptureController(
     private val setUi: (BlindUiState) -> Unit,
     private val requestAudioPermission: () -> Unit,
     private val triggerPx: Float,
-    private val onDiag: (String) -> Unit = {},
 ) {
     companion object {
         private const val TAG = "BlindCapture"
@@ -442,38 +441,7 @@ class BlindCaptureController(
     private var centerY = 0f
     private var modeIndex = -1
 
-    private fun diagText(s: String) = onDiag(s)
-
-    private fun diagState(s: String) {
-        onDiag(s)
-        diagTick()
-        Log.d(TAG, "diag: $s")
-    }
-
-    // 50ms 精确短震动（Compose 1.7 的 HapticFeedbackType 只有基础款，
-    // 用系统 Vibrator；VIBRATE 为普通权限，安装即授）
-    private fun diagTick() {
-        try {
-            val vib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE)
-                    as android.os.VibratorManager
-                vm.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                context.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vib.vibrate(
-                    android.os.VibrationEffect.createOneShot(
-                        50, android.os.VibrationEffect.DEFAULT_AMPLITUDE
-                    )
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                vib.vibrate(50)
-            }
-        } catch (_: Exception) { }
-    }
+    // v0.68.39：诊断链路已删除（v0.68.12 屏上诊断浮层使命结束）；保留 Log.d 供开发期使用
 
     private fun reset() {
         tracking = false
@@ -507,7 +475,6 @@ class BlindCaptureController(
         maxLeftPx = 0f
         maxRightPx = 0f
         velocityTracker.resetTracking()
-        diagText("idle(跟踪中)")
         Log.d(TAG, "onStart tracking")
     }
 
@@ -569,7 +536,7 @@ class BlindCaptureController(
                 setUi(BlindUiState.Selecting(centerX, centerY, -1, fanDir, segments))
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 PetRepository.say("拍点什么？")
-                diagState(if (fanDir == FanDirection.LEFT) "fan展开" else "fan展开(右)")
+                Log.d(TAG, "diag: fan展开")
                 Log.d(TAG, "triggered dir=$fanDir center=($centerX, $centerY)")
             }
             return
@@ -581,7 +548,7 @@ class BlindCaptureController(
             pos.x < centerX - cancelBackPx
         }
         if (cancelBack) {
-            diagState("idle(滑回取消)")
+            Log.d(TAG, "diag: idle(滑回取消)")
             reset()
             return
         }
@@ -592,9 +559,7 @@ class BlindCaptureController(
             if (idx >= 0) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 PetRepository.say(segmentLabel(idx))
-                diagState("sector=${segmentLabel(idx)}")
-            } else {
-                diagText("sector=无")
+                Log.d(TAG, "diag: sector=${segmentLabel(idx)}")
             }
         }
     }
@@ -627,14 +592,14 @@ class BlindCaptureController(
             val photoIdx = photoIndex()
             if (flingPhoto && photoIdx >= 0) {
                 commit(photoIdx)
-                diagState("commit(拍照-快滑)")
+                Log.d(TAG, "diag: commit(拍照-快滑)")
             } else if (idx >= 0) {
                 commit(idx)
-                diagState("commit(${segmentLabel(idx)})")
+                Log.d(TAG, "diag: commit(${segmentLabel(idx)})")
             } else if (photoIdx >= 0) {
                 // v0.68.35：无选择松手（快滑）= 拍照，零决策
                 commit(photoIdx)
-                diagState("commit(拍照-默认)")
+                Log.d(TAG, "diag: commit(拍照-默认)")
             }
             return true
         }
@@ -647,7 +612,6 @@ class BlindCaptureController(
     }
 
     fun onCancel() {
-        diagText("idle(手势取消)")
         reset()
     }
 

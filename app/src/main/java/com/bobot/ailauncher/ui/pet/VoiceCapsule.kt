@@ -13,6 +13,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.MediaStore
 import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -70,6 +71,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.home.QuickMemoStore
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -93,7 +96,7 @@ import java.util.UUID
  * v0.68.24：语音胶囊。
  *
  * 录音结束 → 音频变成一颗"语音胶囊"，浮在七仔周围（复用装备挂件的环绕语言）。
- * 点胶囊：播放 / 转文字 / 删除 / 分享；长按进入多选 → 合并多段；
+ * 点胶囊：播放 / 转文字 / 删除（v0.68.39 起分享已删）；长按进入多选 → 合并多段；
  * 按天分组列表（今日/昨日/M月d日），点组展开。
  */
 
@@ -374,6 +377,15 @@ fun VoiceCapsules(
     var transcriptTarget by remember { mutableStateOf<String?>(null) }
     var playingUri by remember { mutableStateOf<String?>(null) }
 
+    // v0.68.39：先检测系统语音识别是否可用（豆包手机缺识别引擎，直接调会弹"无法识别"）
+    val speechAvailable = remember {
+        try {
+            SpeechRecognizer.isRecognitionAvailable(context)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     // 转文字：系统语音识别（v0.68.22 既定语义——对着手机再说一遍，转成文字存入胶囊）
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -392,10 +404,17 @@ fun VoiceCapsules(
             } else {
                 PetRepository.say("没听清，再试一次？")
             }
+        } else {
+            // v0.68.39：透出具体失败原因，不再只说"无法识别"
+            PetRepository.say("语音识别没成功，可能是没听到声音或网络问题，再试一次？")
         }
     }
 
     fun startSpeechInput(capsuleId: String) {
+        if (!speechAvailable) {
+            PetRepository.say("这台手机没有系统语音识别，转文字用不了")
+            return
+        }
         transcriptTarget = capsuleId
         try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -406,25 +425,11 @@ fun VoiceCapsules(
             speechLauncher.launch(intent)
         } catch (_: Exception) {
             transcriptTarget = null
-            PetRepository.say("这台手机不支持语音识别")
+            PetRepository.say("这台手机没有系统语音识别，转文字用不了")
         }
     }
 
-    fun shareCapsule(c: VoiceCapsuleStore.Capsule) {
-        try {
-            val send = Intent(Intent.ACTION_SEND).apply {
-                type = "audio/*"
-                putExtra(Intent.EXTRA_STREAM, Uri.parse(c.uri))
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(
-                Intent.createChooser(send, "分享录音")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        } catch (_: Exception) {
-            PetRepository.say("分享失败")
-        }
-    }
+    // v0.68.39：分享已删除（Bob：操作简化为播放/转文字/删除；录音文件在 Music/Recordings 公共目录，真要分享去文件管理器）
 
     fun toggleSelect(id: String) {
         selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
@@ -534,45 +539,71 @@ fun VoiceCapsules(
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
-        // ---- 动作卡 ----
+        // ---- 动作卡：v0.68.39 改为 Dialog bottom sheet（从屏幕底部弹出，不再挡七仔说话气泡）----
         actionFor?.let { c ->
             // 刷新引用（转文字/播放后 store 已变）
             val fresh = capsules.find { it.id == c.id } ?: c
-            CapsuleActionCard(
-                capsule = fresh,
-                playing = playingUri == fresh.uri && CapsulePlayer.isPlaying(fresh.uri),
-                onPlay = {
-                    if (playingUri == fresh.uri && CapsulePlayer.isPlaying(fresh.uri)) {
-                        CapsulePlayer.stop()
-                        playingUri = null
-                    } else {
-                        val ok = CapsulePlayer.toggle(context, fresh.uri)
-                        playingUri = if (ok) fresh.uri else null
-                        if (!ok) PetRepository.say("播放失败")
-                    }
-                },
-                onTranscript = { startSpeechInput(fresh.id) },
-                onSaveMemo = {
-                    val t = fresh.transcript
-                    if (!t.isNullOrBlank()) {
-                        QuickMemoStore.add(context, t)
-                        PetRepository.say("已存为速记")
-                    }
-                },
-                onShare = { shareCapsule(fresh) },
-                onDelete = {
-                    CapsulePlayer.stop()
-                    playingUri = null
-                    VoiceCapsuleStore.remove(context, fresh.id)
-                    actionFor = null
-                    PetRepository.say("胶囊删掉了")
-                },
-                onClose = {
+            Dialog(
+                onDismissRequest = {
                     CapsulePlayer.stop()
                     playingUri = null
                     actionFor = null
+                },
+                properties = DialogProperties(dismissOnClickOutside = true)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) {
+                            CapsulePlayer.stop()
+                            playingUri = null
+                            actionFor = null
+                        },
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    CapsuleActionCard(
+                        capsule = fresh,
+                        playing = playingUri == fresh.uri && CapsulePlayer.isPlaying(fresh.uri),
+                        speechAvailable = speechAvailable,
+                        onPlay = {
+                            if (playingUri == fresh.uri && CapsulePlayer.isPlaying(fresh.uri)) {
+                                CapsulePlayer.stop()
+                                playingUri = null
+                            } else {
+                                val ok = CapsulePlayer.toggle(context, fresh.uri)
+                                playingUri = if (ok) fresh.uri else null
+                                if (!ok) PetRepository.say("播放失败")
+                            }
+                        },
+                        onTranscript = { startSpeechInput(fresh.id) },
+                        onSaveMemo = {
+                            val t = fresh.transcript
+                            if (!t.isNullOrBlank()) {
+                                QuickMemoStore.add(context, t)
+                                PetRepository.say("已存为速记")
+                            }
+                        },
+                        onDelete = {
+                            CapsulePlayer.stop()
+                            playingUri = null
+                            VoiceCapsuleStore.remove(context, fresh.id)
+                            actionFor = null
+                            PetRepository.say("胶囊删掉了")
+                        },
+                        onClose = {
+                            CapsulePlayer.stop()
+                            playingUri = null
+                            actionFor = null
+                        },
+                        modifier = Modifier
+                            .padding(horizontal = 20.dp)
+                            .padding(bottom = 110.dp)
+                    )
                 }
-            )
+            }
         }
         // ---- 按天分组列表 ----
         if (showList) {
@@ -677,118 +708,108 @@ private fun CapsulePill(
     }
 }
 
-/** 点胶囊 → 播放 / 转文字 / 删除 / 分享 */
+/**
+ * 点胶囊 → 播放 / 转文字 / 删除（v0.68.39：分享已删，操作简化）。
+ * 纯卡片，不带遮罩——由调用方的 Dialog 做 bottom sheet 承载（v0.68.39：卡片从底部弹出，不再挡七仔说话）。
+ */
 @Composable
-private fun CapsuleActionCard(
+internal fun CapsuleActionCard(
     capsule: VoiceCapsuleStore.Capsule,
     playing: Boolean,
+    speechAvailable: Boolean,
     onPlay: () -> Unit,
     onTranscript: () -> Unit,
     onSaveMemo: () -> Unit,
-    onShare: () -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.18f))
-            .clickable(
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() }
-            ) { onClose() },
-        contentAlignment = Alignment.Center
+    Column(
+        modifier = modifier
+            .widthIn(max = 340.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White)
+            .clickable(enabled = false, onClick = {})
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 20.dp)
-                .widthIn(max = 300.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color.White)
-                .clickable(enabled = false, onClick = {})
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Text(
+                text = "语音胶囊 · ${fmtDuration(capsule.durationSec)} · ${VoiceCapsuleStore.timeLabel(capsule.time)}",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AILauncherColors.Title
+            )
+            Text(
+                text = "✕",
+                fontSize = 14.sp,
+                color = AILauncherColors.Hint,
+                modifier = Modifier
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() }
+                    ) { onClose() }
+                    .padding(4.dp)
+            )
+        }
+        if (!capsule.transcript.isNullOrBlank()) {
+            Text(
+                text = capsule.transcript,
+                fontSize = 14.sp,
+                color = AILauncherColors.Body,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            TextButton(onClick = onPlay) {
                 Text(
-                    text = "语音胶囊 · ${fmtDuration(capsule.durationSec)} · ${VoiceCapsuleStore.timeLabel(capsule.time)}",
+                    text = if (playing) "停止" else "播放",
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.Title
-                )
-                Text(
-                    text = "✕",
-                    fontSize = 14.sp,
-                    color = AILauncherColors.Hint,
-                    modifier = Modifier
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() }
-                        ) { onClose() }
-                        .padding(4.dp)
+                    color = AILauncherColors.Accent,
+                    fontWeight = FontWeight.Medium
                 )
             }
-            if (!capsule.transcript.isNullOrBlank()) {
-                Text(
-                    text = capsule.transcript,
-                    fontSize = 14.sp,
-                    color = AILauncherColors.Body,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+            TextButton(
+                onClick = {
+                    if (speechAvailable) onTranscript()
+                    else PetRepository.say("这台手机没有系统语音识别，转文字用不了")
+                }
             ) {
-                TextButton(onClick = onPlay) {
-                    Text(
-                        text = if (playing) "停止" else "播放",
-                        fontSize = 13.sp,
-                        color = AILauncherColors.Accent,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                TextButton(onClick = onTranscript) {
-                    Text(
-                        text = "转文字",
-                        fontSize = 13.sp,
-                        color = AILauncherColors.Accent,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                TextButton(onClick = onShare) {
-                    Text(
-                        text = "分享",
-                        fontSize = 13.sp,
-                        color = AILauncherColors.Accent,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                TextButton(onClick = onDelete) {
-                    Text(
-                        text = "删除",
-                        fontSize = 13.sp,
-                        color = Color(0xFFE5484D),
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                Text(
+                    text = "转文字",
+                    fontSize = 13.sp,
+                    // v0.68.39：本机无语音识别引擎时置灰
+                    color = if (speechAvailable) AILauncherColors.Accent else AILauncherColors.Hint,
+                    fontWeight = FontWeight.Medium
+                )
             }
-            if (!capsule.transcript.isNullOrBlank()) {
-                Button(
-                    onClick = onSaveMemo,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AILauncherColors.AccentSoft,
-                        contentColor = AILauncherColors.Title
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(text = "存为速记", fontSize = 13.sp)
-                }
+            TextButton(onClick = onDelete) {
+                Text(
+                    text = "删除",
+                    fontSize = 13.sp,
+                    color = Color(0xFFE5484D),
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+        if (!capsule.transcript.isNullOrBlank()) {
+            Button(
+                onClick = onSaveMemo,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AILauncherColors.AccentSoft,
+                    contentColor = AILauncherColors.Title
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = "存为速记", fontSize = 13.sp)
             }
         }
     }

@@ -93,8 +93,7 @@ fun HomeScreen(
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
     // v0.68.0：盲操状态
     var blindUi by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
-    // v0.68.12：盲操诊断浮层文字（用户无电脑看 logcat，屏上直接看状态机）
-    var blindDiag by remember { mutableStateOf("idle") }
+    // v0.68.39：诊断浮层已删除（v0.68.12 屏上诊断使命结束）
     // v0.68.6：盲操激活状态上报 MainScreen——选择中时压住右边缘字母快找区，
     // 避免长按（~400ms）与盲操 dwell（120ms）双重触发
     val blindActive = blindUi is BlindUiState.Selecting
@@ -132,7 +131,6 @@ fun HomeScreen(
                 audioPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
             },
             triggerPx = with(density) { 24.dp.toPx() },
-            onDiag = { blindDiag = it }, // v0.68.12：诊断浮层
         ).also { blindCtlRef.value = it }
     }
     // v0.68.0：右边缘系统手势豁免（响应 cleanHome 变化）
@@ -291,23 +289,8 @@ fun HomeScreen(
                 }
             )
         }
-        // v0.68.32：扇形选择器已移到 MainScreen 最顶层绘制（盖住 Dock），
-        // 这里只保留诊断浮层
-        // v0.68.12：盲操诊断浮层（左上角半透明小字，实时显示状态机状态）
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(start = 8.dp, top = 56.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-            Text(
-                text = "盲操:$blindDiag",
-                fontSize = 11.sp,
-                color = Color.White
-            )
-        }
+        // v0.68.32：扇形选择器已移到 MainScreen 最顶层绘制（盖住 Dock）
+        // v0.68.39：诊断浮层已删除
     }
 }
 
