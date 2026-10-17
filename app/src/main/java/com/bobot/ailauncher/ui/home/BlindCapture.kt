@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -58,6 +59,14 @@ enum class BlindMode(val label: String) {
     AUDIO("录音"),
     CUSTOM("自定义"),
 }
+
+// 扇形几何（Canvas 角度制：0°=正右方，顺时针为正，y 向下）
+// 左侧 150°：105°（下-左）~ 255°（上-左），index 0 在最上方
+private const val FAN_START_DEG = 105f
+private const val FAN_SWEEP_DEG = 150f
+private const val FAN_R_OUTER_DP = 148f
+private const val FAN_R_INNER_DP = 46f
+private const val FAN_EDGE_MARGIN_DP = 12f
 
 /** 盲操 UI 状态：隐藏 / 扇形选择中（modeIndex=-1 表示无高亮） */
 sealed interface BlindUiState {
@@ -161,13 +170,6 @@ class BlindCaptureController(
 ) {
     companion object {
         private const val TAG = "BlindCapture"
-        // 扇形几何（Canvas 角度制：0°=正右方，顺时针为正，y 向下）
-        // 左侧 150°：105°（下-左）~ 255°（上-左），index 0 在最上方
-        const val FAN_START_DEG = 105f
-        const val FAN_SWEEP_DEG = 150f
-        const val FAN_R_OUTER_DP = 148f
-        const val FAN_R_INNER_DP = 46f
-        const val FAN_EDGE_MARGIN_DP = 12f
     }
 
     private val density = context.resources.displayMetrics.density
