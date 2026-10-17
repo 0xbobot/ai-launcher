@@ -229,6 +229,7 @@ private fun HomeHost(
             pickerIndex = -1
             d3Opened = false
             UiPrefs.homeRailTarget.value = null
+            UiPrefs.homeRailLetter.value = null
             UiPrefs.d3EnterFromPicker.value = false
         }
         // 隐形长按区：右边缘，位置/高度与应用中心 rail 一致；
@@ -265,7 +266,7 @@ private fun HomeHost(
                                             dismissPicker()
                                         }
                                         is RailItem.Star -> {
-                                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.Dock
+                                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.DOCK
                                             if (!d3Opened) {
                                                 d3Opened = true
                                                 UiPrefs.d3EnterFromPicker.value = true
@@ -273,7 +274,7 @@ private fun HomeHost(
                                             }
                                         }
                                         is RailItem.Eye -> {
-                                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.Hidden
+                                            UiPrefs.homeRailTarget.value = UiPrefs.HomeRailTarget.HIDDEN
                                             if (!d3Opened) {
                                                 d3Opened = true
                                                 UiPrefs.d3EnterFromPicker.value = true
@@ -281,8 +282,9 @@ private fun HomeHost(
                                             }
                                         }
                                         is RailItem.Letter -> {
+                                            UiPrefs.homeRailLetter.value = item.char
                                             UiPrefs.homeRailTarget.value =
-                                                UiPrefs.HomeRailTarget.Letter(item.char)
+                                                UiPrefs.HomeRailTarget.LETTER
                                             if (!d3Opened) {
                                                 d3Opened = true
                                                 UiPrefs.d3EnterFromPicker.value = true

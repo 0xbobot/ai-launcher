@@ -285,15 +285,17 @@ fun AppCenterContent(
 
     // v0.67.13（Bob）：主屏 picker 连续驱动——手指不松开时持续跟随滚动
     val homeTarget by UiPrefs.homeRailTarget.collectAsState()
-    LaunchedEffect(homeTarget, letterAnchors) {
-        when (val t = homeTarget) {
-            is UiPrefs.HomeRailTarget.Letter -> {
-                val anchor = letterAnchors[t.char]
-                    ?: letterAnchors.minByOrNull { kotlin.math.abs(it.key - t.char) }?.value
+    val homeLetter by UiPrefs.homeRailLetter.collectAsState()
+    LaunchedEffect(homeTarget, homeLetter, letterAnchors) {
+        when (homeTarget) {
+            UiPrefs.HomeRailTarget.LETTER -> {
+                val c = homeLetter
+                val anchor = c?.let { letterAnchors[it] }
+                    ?: letterAnchors.minByOrNull { kotlin.math.abs(it.key - (c ?: 'A')) }?.value
                 if (anchor != null) listState.scrollToItem(anchor)
             }
-            is UiPrefs.HomeRailTarget.Dock -> listState.scrollToItem(0)
-            is UiPrefs.HomeRailTarget.Hidden -> listState.scrollToItem(hiddenHeaderIndex)
+            UiPrefs.HomeRailTarget.DOCK -> listState.scrollToItem(0)
+            UiPrefs.HomeRailTarget.HIDDEN -> listState.scrollToItem(hiddenHeaderIndex)
             null -> {}
         }
     }
