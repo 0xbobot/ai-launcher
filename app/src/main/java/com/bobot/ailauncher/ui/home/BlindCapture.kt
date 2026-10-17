@@ -8,6 +8,11 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -31,10 +36,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,6 +81,10 @@ import kotlin.math.sqrt
  *
  * v0.68.28：右滑镜像——首页背景右滑也触发，扇形朝右展开（-75°~+75°），
  * 角度/伸长动效/取消/圆心钳制全部镜像；七仔中心 mini 不动。
+ *
+ * v0.68.29 方案C「选中探出」：中心七仔 mini 移除，换成触摸涟漪（极淡圆环）；
+ * 手指滑入某段 → 七仔从该段外缘+36dp 处探出（64dp，wave 姿态，scale spring+淡入）；
+ * 换段 → 七仔位移动画跳到新段外缘；滑出 → 缩回；位置钳制防出屏；左右扇共用镜像逻辑。
  *
  * 保留：三重反馈（震动/七仔语音/视觉高亮）、自定义☆槽位、诊断浮层。
  */
@@ -633,8 +644,34 @@ fun BlindCaptureFan(
         animationSpec = tween(160),
         label = "fanAlpha"
     )
+    // v0.68.29 方案C：中心触摸涟漪（呼吸感圆环，替代七仔 mini）
+    val ripple = rememberInfiniteTransition(label = "ripple")
+    val rippleR by ripple.animateFloat(
+        initialValue = 0.82f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "rippleR"
+    )
+    val rippleA by ripple.animateFloat(
+        initialValue = 0.34f,
+        targetValue = 0.10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "rippleA"
+    )
 
-    Box(modifier = modifier.fillMaxSize()) {
+    // v0.68.29 方案C：探出七仔位置钳制需要屏幕尺寸
+    var screenSize by remember { mutableStateOf(IntSize.Zero) }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .onGloballyPositioned { screenSize = it.size }
+    ) {
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
@@ -692,36 +729,89 @@ fun BlindCaptureFan(
                     cap = StrokeCap.Round
                 )
             }
-            // v0.68.22：死区内圈不再画白圆，改由下方七仔 Image 覆盖
+            // v0.68.29 方案C：中心触摸涟漪（极淡圆环，表示手指落点）
+            drawCircle(
+                color = Color.White.copy(alpha = 0.45f),
+                radius = rInner * 0.55f,
+                center = center
+            )
+            drawCircle(
+                color = Color(0xFF8A7B6B).copy(alpha = rippleA),
+                radius = (rInner * rippleR).coerceAtLeast(1f),
+                center = center,
+                style = Stroke(width = 2.dp.toPx())
+            )
         }
-        // v0.68.22：中心七仔 mini——选中某段时跳一下给反应
-        val qizaiRes = if (selectedIndex in modes.indices)
-            com.bobot.ailauncher.R.drawable.meteor_jump
-        else
-            com.bobot.ailauncher.R.drawable.meteor_main
-        val qizaiPop by animateFloatAsState(
-            targetValue = if (selectedIndex in modes.indices) 1.18f else 1f,
-            animationSpec = spring(dampingRatio = 0.5f, stiffness = 500f),
-            label = "qizaiPop"
+        // v0.68.29 方案C「选中探出」：七仔从选中段外缘+36dp 处探出报模式；
+        // 换段位移动画跳过去，滑出缩回；位置钳制防出屏；左右扇镜像共用
+        val hasSel = selectedIndex in modes.indices
+        val probeSizeDp = 64.dp
+        val probeSizePx = with(density) { probeSizeDp.toPx() }
+        val probeGapPx = with(density) { 36.dp.toPx() }
+        val probeEdgePx = with(density) { 40.dp.toPx() }
+        val probeRaw = if (hasSel) {
+            val (ps, psw) = segmentAngles(selectedIndex, direction)
+            val pRad = Math.toRadians((ps + psw / 2).toDouble())
+            val pR = with(density) { segRadiiDp[selectedIndex].value.dp.toPx() } +
+                probeGapPx
+            Offset(
+                centerX + cos(pRad).toFloat() * pR,
+                centerY + sin(pRad).toFloat() * pR
+            )
+        } else null
+        val probeClamped = probeRaw?.let {
+            Offset(
+                it.x.coerceIn(
+                    probeEdgePx,
+                    (screenSize.width - probeEdgePx).coerceAtLeast(probeEdgePx)
+                ),
+                it.y.coerceIn(
+                    probeEdgePx,
+                    (screenSize.height - probeEdgePx).coerceAtLeast(probeEdgePx)
+                )
+            )
+        }
+        // 无选中时锚点停留上次位置（缩回原地，下次从该处探出）
+        var probeAnchor by remember { mutableStateOf(Offset(centerX, centerY)) }
+        LaunchedEffect(probeClamped) {
+            if (probeClamped != null) probeAnchor = probeClamped
+        }
+        val probeOffset by animateOffsetAsState(
+            targetValue = probeClamped ?: probeAnchor,
+            animationSpec = spring(dampingRatio = 0.62f, stiffness = 380f),
+            label = "probeOffset"
         )
-        val rInnerPx2 = with(density) { FAN_R_INNER_DP.dp.toPx() }
-        Image(
-            painter = androidx.compose.ui.res.painterResource(id = qizaiRes),
-            contentDescription = null,
-            modifier = Modifier
-                .offset {
-                    IntOffset(
-                        (centerX - rInnerPx2 * qizaiPop).roundToInt(),
-                        (centerY - rInnerPx2 * qizaiPop).roundToInt()
-                    )
-                }
-                .graphicsLayer {
-                    scaleX = qizaiPop
-                    scaleY = qizaiPop
-                    alpha = fanAlpha
-                }
-                .size((FAN_R_INNER_DP * 2).dp)
+        val probeScale by animateFloatAsState(
+            targetValue = if (hasSel) 1f else 0f,
+            animationSpec = spring(dampingRatio = 0.55f, stiffness = 480f),
+            label = "probeScale"
         )
+        val probeAlpha by animateFloatAsState(
+            targetValue = if (hasSel) 1f else 0f,
+            animationSpec = tween(150),
+            label = "probeAlpha"
+        )
+        if (probeAlpha > 0.01f) {
+            Image(
+                painter = androidx.compose.ui.res.painterResource(
+                    id = com.bobot.ailauncher.R.drawable.meteor_wave
+                ),
+                contentDescription = null,
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            (probeOffset.x - probeSizePx * probeScale / 2f).roundToInt(),
+                            (probeOffset.y - probeSizePx * probeScale / 2f).roundToInt()
+                        )
+                    }
+                    .graphicsLayer {
+                        scaleX = probeScale
+                        scaleY = probeScale
+                        alpha = (probeAlpha * fanAlpha).coerceIn(0f, 1f)
+                    }
+                    .size(probeSizeDp)
+            )
+        }
         // v0.68.20：图标 + 文字 overlay（Compose 排版）
         // v0.68.24 方案A：文字随段半径走（选中段伸长后文字外移）；选中字号放大
         val rInnerPx = with(density) { FAN_R_INNER_DP.dp.toPx() }
