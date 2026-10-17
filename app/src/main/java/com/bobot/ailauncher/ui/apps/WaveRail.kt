@@ -196,13 +196,13 @@ internal fun WaveRail(
             // v0.68.20（Bob）：意向拉拽——房子继续上拉/眼睛继续下拉，进度 0→1
             // v0.68.21：眼睛在底部空间有限，阈值缩短到 60dp 不然触发不了
             // v0.68.24（Bob）：房子滑程再缩短，45dp 更跟手
+            // v0.68.25（Bob）：放宽检测——从房子中心算起，手指在房子上上移即开始
             val houseThresholdPx = with(density) { 45.dp.toPx() }
             val eyeThresholdPx = with(density) { 60.dp.toPx() }
-            if (items.isNotEmpty() && items[0] is RailItem.House &&
-                i == 0 && y < railTopPx
-            ) {
+            if (items.isNotEmpty() && items[0] is RailItem.House && i == 0) {
+                val houseCenterY = railTopPx + rowHpx / 2f
                 onHousePull(
-                    ((railTopPx - y) / houseThresholdPx).coerceIn(0f, 1.2f)
+                    ((houseCenterY - y) / houseThresholdPx).coerceIn(0f, 1.2f)
                 )
             } else {
                 onHousePull(0f)
@@ -401,7 +401,7 @@ internal fun WaveRail(
         if (visible && displayIndex >= 0) {
             val idx = displayIndex.coerceIn(items.indices)
             // v0.68.21（Bob）：拉拽放大时金环就淡出，不然图标比圈大很奇怪
-            val bubbleRingAlpha = (1f - explodeProgress) * (1f - housePull * 0.9f)
+            val bubbleRingAlpha = 1f - housePull * 0.9f
             // v0.68.24（Bob）：房子上拉时气泡跟着手向上跑，一边跑一边变大
             val houseOffPx = with(density) { 45.dp.toPx() }
             val eyeOffPx = with(density) { 60.dp.toPx() }
@@ -443,12 +443,8 @@ internal fun WaveRail(
                     // v0.68.6：精致版 HouseGlyph（细描边+圆角+门洞）
                     when (bubbleItem) {
                         RailItem.House -> {
-                            // v0.68.20（Bob）：手势驱动——上拉 1x→2.5x；消散 2.5x→8x 同时淡出
-                            val pullScale = 1f + housePull * 1.5f
-                            val dissolveScale = 2.5f + explodeProgress * 5.5f
-                            val houseScale =
-                                if (explodeProgress > 0f) dissolveScale else pullScale
-                            val houseAlpha = 1f - explodeProgress * explodeProgress
+                            // v0.68.25（Bob）：上拉 1x→2.5x 跟手；消散段先去掉，到阈值直接回主页
+                            val houseScale = 1f + housePull * 1.5f
                             HouseGlyph(
                                 color = AILauncherColors.Title,
                                 modifier = Modifier
@@ -456,7 +452,6 @@ internal fun WaveRail(
                                     .graphicsLayer {
                                         scaleX = houseScale
                                         scaleY = houseScale
-                                        alpha = houseAlpha
                                     }
                             )
                         }

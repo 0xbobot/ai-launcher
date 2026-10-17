@@ -16,9 +16,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -235,7 +232,6 @@ private fun HomeHost(
         var pickerHousePull by remember { mutableStateOf(0f) }
         var pickerHouseArmed by remember { mutableStateOf(true) }
         var lastPickerHousePull by remember { mutableStateOf(0f) }
-        val pickerExplode = remember { Animatable(0f) }
         // v0.67.13：房子/收藏/字母/隐藏都在一条导航里（与应用中心 rail 一致）
         val homeItems = remember {
             buildList {
@@ -302,7 +298,6 @@ private fun HomeHost(
                     pickerHousePull = 0f
                     lastPickerHousePull = 0f
                     pickerHouseArmed = true
-                    scope.launch { pickerExplode.snapTo(0f) }
                     dismissPicker()
                 },
                 forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
@@ -325,24 +320,11 @@ private fun HomeHost(
                         if (cp >= 1f) {
                             pickerHouseArmed = false
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            scope.launch {
-                                try {
-                                    pickerExplode.snapTo(0f)
-                                    pickerHousePull = 0f
-                                    pickerExplode.animateTo(
-                                        1f,
-                                        animationSpec = tween(450, easing = FastOutSlowInEasing)
-                                    )
-                                } finally {
-                                    pickerExplode.snapTo(0f)
-                                    dismissPicker()
-                                }
-                            }
+                            dismissPicker()
                         }
                         lastPickerHousePull = cp
                     }
                 },
-                explodeProgress = pickerExplode.value,
                 visible = pickerActive,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)

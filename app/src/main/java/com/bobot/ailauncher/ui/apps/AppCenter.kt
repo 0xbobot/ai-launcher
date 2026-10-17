@@ -1087,8 +1087,6 @@ fun AppCenterContent(
                 var eyePullArmed by remember { mutableStateOf(true) }
                 var lastHousePull by remember { mutableStateOf(0f) }
                 var lastEyePull by remember { mutableStateOf(0f) }
-                // v0.68.19（Bob）：柔和消散进度（阈值触发后）
-                val explodeProgress = remember { Animatable(0f) }
                 val stopGlide: () -> Unit = {
                     glideJob?.cancel()
                     glideJob = null
@@ -1102,7 +1100,6 @@ fun AppCenterContent(
                     }
                     housePullArmed = true
                     eyePullArmed = true
-                    scope.launch { explodeProgress.snapTo(0f) }
                     // 列表已在拖动中滚到位，松手无需任何操作
                 }
                 // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区
@@ -1139,7 +1136,8 @@ fun AppCenterContent(
                         is RailItem.Separator -> {}
                     }
                 }
-                // v0.68.20（Bob）：房子上拉——手指驱动 0→1，到阈值消散回首页；滑回则反向
+                // v0.68.20（Bob）：房子上拉——手指驱动 0→1，到阈值直接回首页；滑回则反向
+                // v0.68.25（Bob）：消散段先去掉，到阈值直接回主页
                 val onHousePull: (Float) -> Unit = { p ->
                     if (!housePullCommitted && housePullArmed) {
                         val cp = p.coerceIn(0f, 1f)
@@ -1151,29 +1149,10 @@ fun AppCenterContent(
                             housePullCommitted = true
                             housePullArmed = false
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            scope.launch {
-                                // v0.68.21（Bob）：try-finally 确保任何取消都重置，
-                                // 不然下次滑到房子会残留上次的大小/位置
-                                try {
-                                    explodeProgress.snapTo(0f)
-                                    // pull 状态立即清零，视觉由 explodeProgress 接管
-                                    housePull = 0f
-                                    lastHousePull = 0f
-                                    explodeProgress.animateTo(
-                                        1f,
-                                        animationSpec = tween(
-                                            450,
-                                            easing = FastOutSlowInEasing
-                                        )
-                                    )
-                                    onHeaderSwipeRightState.value()
-                                } finally {
-                                    explodeProgress.snapTo(0f)
-                                    housePull = 0f
-                                    lastHousePull = 0f
-                                    housePullCommitted = false
-                                }
-                            }
+                            housePull = 0f
+                            lastHousePull = 0f
+                            housePullCommitted = false
+                            onHeaderSwipeRightState.value()
                         }
                         lastHousePull = cp
                     }
@@ -1209,7 +1188,7 @@ fun AppCenterContent(
                     eyePull = eyePull,
                     onHousePull = onHousePull,
                     onEyePull = onEyePull,
-                    explodeProgress = explodeProgress.value,
+
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(bottom = 70.dp)
