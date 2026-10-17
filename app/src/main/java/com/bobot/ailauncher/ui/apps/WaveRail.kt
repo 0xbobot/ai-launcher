@@ -282,6 +282,8 @@ internal fun WaveRail(
                             modifier = Modifier.graphicsLayer {
                                 // 高斯波浪：越靠近手指越大；波浪整体再往拇指反方向避让
                                 translationX = dirSign * bulgePx * g + waveShiftX * g
+                                // v0.68.14（Bob）：纵向散开，更灵动不拥挤
+                                translationY = d * spreadPx * g
                                 val sc = (1f + g) * pulse
                                 scaleX = sc
                                 scaleY = sc
@@ -293,6 +295,8 @@ internal fun WaveRail(
                             .size(14.dp)
                             .graphicsLayer {
                                 translationX = dirSign * bulgePx * g + waveShiftX * g
+                                // v0.68.14：纵向散开
+                                translationY = d * spreadPx * g
                                 val sc = (1f + g) * pulse
                                 scaleX = sc
                                 scaleY = sc
