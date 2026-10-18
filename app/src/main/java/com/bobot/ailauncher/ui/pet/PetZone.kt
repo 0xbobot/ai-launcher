@@ -2469,7 +2469,7 @@ private fun weatherSceneFor(desc: String?): QizaiScene = when (desc) {
 
 // v0.48.0：日程——从 v0.31.0 移除的 HomeScreen 日历逻辑迁回，由七仔统一呈现
 // v0.58.0：加 description 字段，用于提取在线会议链接
-internal data class CalEvent(
+data class CalEvent(
     val title: String,
     val begin: Long,
     val end: Long,
