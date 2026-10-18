@@ -652,6 +652,7 @@ fun AppCenterContent(
                 totalCount = azApps.size,
                 onLaunch = ::launchApp,
                 onLongPress = { popupApp = it },
+                onOpenSettings = onOpenSettings,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)

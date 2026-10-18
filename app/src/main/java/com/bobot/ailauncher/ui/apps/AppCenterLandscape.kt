@@ -60,6 +60,7 @@ fun AppCenterLandscape(
     totalCount: Int,
     onLaunch: (AppInfo) -> Unit,
     onLongPress: (AppInfo) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -68,30 +69,38 @@ fun AppCenterLandscape(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val rowH = 68.dp
-        val topBarH = 56.dp
-        // 一列能排的 item 数（Header 占 1 格）
-        val rowsPerCol = ((maxHeight - topBarH - 16.dp) / rowH).toInt().coerceAtLeast(4)
+        // maxHeight 已是顶栏之外的剩余高度，直接算（Bob：竖向空间没算好）
+        //  header 占 24.dp，约 0.35 行；首列可用 rowsPerCol，续列可用 rowsPerCol+1（无头）
+        val rowsPerCol = ((maxHeight - 8.dp) / rowH).toInt().coerceAtLeast(4)
 
-        // 按字母切列：每个字母从新列顶部开始（Bob：ABC 都要从顶部开始，不穿插）
-        // 字母内超长则续列（带续列头）
+        // 按字母切列：每个字母从新列顶部开始（Bob）
+        // 首列：[头 24.dp][应用...]；续列：无头，应用直接从顶部开始
         val columns = remember(azGroups, rowsPerCol) {
             val cols = mutableListOf<MutableList<FlowItem>>()
             var cur = mutableListOf<FlowItem>()
-            var curCount = 0
+            var curUsedDp = 0.dp  // 当前列已用高度（dp）
+            val headerH = 24.dp
+            fun colCap(hasHeader: Boolean): Int {
+                // 有头：头占 24.dp，剩余排应用；无头：全排应用
+                val avail = maxHeight - 8.dp - (if (hasHeader) headerH else 0.dp)
+                return (avail / rowH).toInt().coerceAtLeast(1)
+            }
             fun flush() {
-                if (cur.isNotEmpty()) { cols.add(cur); cur = mutableListOf(); curCount = 0 }
+                if (cur.isNotEmpty()) { cols.add(cur); cur = mutableListOf() }
             }
             azGroups.forEach { (letter, apps) ->
-                // 新字母：先结束当前列（保证字母从顶部开始）
-                flush()
-                cur.add(FlowItem.Header(letter)); curCount = 1
+                flush()  // 新字母新起一列
+                cur.add(FlowItem.Header(letter))
+                var cap = colCap(hasHeader = true)
+                var count = 0
                 apps.forEach { app ->
-                    if (curCount >= rowsPerCol) {
+                    if (count >= cap) {
                         flush()
-                        // 续列：重复字母头（小字标注续）
-                        cur.add(FlowItem.Header(letter, continued = true)); curCount = 1
+                        // 续列：无头，应用直接顶头排
+                        cap = colCap(hasHeader = false)
+                        count = 0
                     }
-                    cur.add(FlowItem.App(app)); curCount++
+                    cur.add(FlowItem.App(app)); count++
                 }
             }
             flush()
@@ -102,7 +111,7 @@ fun AppCenterLandscape(
             val map = mutableMapOf<Char, Int>()
             columns.forEachIndexed { colIdx, col ->
                 col.forEach { item ->
-                    if (item is FlowItem.Header && !item.continued && !map.containsKey(item.letter)) {
+                    if (item is FlowItem.Header && !map.containsKey(item.letter)) {
                         map[item.letter] = colIdx
                     }
                 }
@@ -179,6 +188,17 @@ fun AppCenterLandscape(
                         )
                     }
                     Spacer(modifier = Modifier.weight(1f))
+                    // 设置齿轮（Bob：横屏时竖屏的齿轮拿掉，放这里）
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Filled.Settings,
+                        contentDescription = "设置",
+                        tint = AILauncherColors.Hint,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .clickable { onOpenSettings() }
+                            .padding(2.dp)
+                    )
                 }
                 // 应用竖排流（单向横滚，不嵌套）
                 LazyRow(
@@ -202,14 +222,15 @@ fun AppCenterLandscape(
                             columns[idx].forEach { item ->
                                 when (item) {
                                     is FlowItem.Header -> {
+                                        // Bob：字母头紧凑，占第一格（24.dp）；续列无头
                                         Text(
-                                            text = if (item.continued) "${item.letter} · 续" else item.letter.toString(),
+                                            text = item.letter.toString(),
                                             fontFamily = FontFamily.Serif,
-                                            fontSize = if (item.continued) 14.sp else 20.sp,
+                                            fontSize = 16.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = AILauncherColors.Title.copy(alpha = if (item.continued) 0.25f else 0.4f),
+                                            color = AILauncherColors.Title.copy(alpha = 0.45f),
                                             modifier = Modifier
-                                                .height(36.dp)
+                                                .height(24.dp)
                                                 .padding(start = 8.dp)
                                                 .wrapContentHeight(Alignment.CenterVertically)
                                         )
@@ -315,6 +336,6 @@ private fun LetterRail(
 }
 
 private sealed interface FlowItem {
-    data class Header(val letter: Char, val continued: Boolean = false) : FlowItem
+    data class Header(val letter: Char) : FlowItem
     data class App(val app: AppInfo) : FlowItem
 }
