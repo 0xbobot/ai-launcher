@@ -127,7 +127,8 @@ import kotlin.math.sqrt
  * 顺序 下方1/上方1/下方2/上方2）；录像/录音预设段作废；语音胶囊全家桶删除
  * （VoiceCapsule.kt、BlindAudioRecorder、QuickMemoStore、转文字）；
  * 0 装备时左滑/右滑直接拍照（不展开扇形），七仔引导一次；
- * 段标签外移到外圈约 100dp（18sp，拍照 19sp 加粗）。
+ * 段标签外移到外圈约 95dp（v0.68.41：14sp，拍照 15sp 加粗；径向旋转，
+ * 文字方向跟扇形同角度）。
  *
  * 保留：三重反馈（震动/七仔语音/视觉高亮）。
  */
@@ -151,7 +152,9 @@ private const val FAN_R_OUTER_SELECTED_DP = 140f
 private const val FAN_R_INNER_DP = 46f // 死区内圈不变
 private const val FAN_EDGE_MARGIN_DP = 12f
 // v0.68.40：段标签外移半径（效果图确认：外圈约 100dp，手指盖不住）
-private const val FAN_LABEL_R_DP = 100f
+// v0.68.41：100→95（标签径向旋转后半长约 21~28dp，径向跨度约 67~123dp，
+// 不进 46dp 死区、基本不出 120dp 外缘）
+private const val FAN_LABEL_R_DP = 95f
 
 private const val FAN_SWEEP_SEG = 36f // v0.68.38：所有段等宽 36°
 private const val MAX_QUICK_SEGS = 4 // v0.68.40：2→4（录像/录音预设作废，装备成唯一其他段）
@@ -513,20 +516,8 @@ class BlindCaptureController(
      * v0.68.22：找系统自带相机包名——query 所有能处理该 action 的应用，
      * 优先选 system app（用户手机自带相机），避免调起三方相机。
      */
-    private fun findSystemCameraPackage(action: String): String? {
-        return try {
-            val pm = context.packageManager
-            val infos = pm.queryIntentActivities(
-                Intent(action), PackageManager.MATCH_DEFAULT_ONLY
-            )
-            if (infos.isEmpty()) return null
-            infos.firstOrNull {
-                it.activityInfo.applicationInfo.flags and
-                    android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0
-            }?.activityInfo?.packageName
-                ?: infos.first().activityInfo.packageName
-        } catch (_: Exception) { null }
-    }
+    private fun findSystemCameraPackage(action: String): String? =
+        findSystemCameraPackageName(context, action)
 
     private fun launchCamera(action: String) {
         try {
@@ -545,23 +536,57 @@ class BlindCaptureController(
 
 }
 
+/** v0.68.22：找系统自带相机包名（顶层函数，controller 与指示器图标共用） */
+private fun findSystemCameraPackageName(context: Context, action: String): String? {
+    return try {
+        val pm = context.packageManager
+        val infos = pm.queryIntentActivities(
+            Intent(action), PackageManager.MATCH_DEFAULT_ONLY
+        )
+        if (infos.isEmpty()) return null
+        infos.firstOrNull {
+            it.activityInfo.applicationInfo.flags and
+                android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0
+        }?.activityInfo?.packageName
+            ?: infos.first().activityInfo.packageName
+    } catch (_: Exception) { null }
+}
+
 /** v0.68.37：选中段外缘跟随的线稿小图标（替代方案C七仔探出）
  * v0.68.40：拍照用 Material Outlined 相机线稿（深暖灰）；快捷段用装备自己的图标，
- * 无图标时显示标签首字小圆章。 */
+ * 无图标时显示标签首字小圆章。
+ * v0.68.41：拍照改用本机相机 App 的真实图标（拿不到时 fallback 线稿）。 */
 @Composable
 private fun FanIndicatorIcon(seg: FanSegment) {
     val iconTint = Color(0xFF6B6259) // 深暖灰
+    val context = LocalContext.current
     when (seg) {
         is FanSegment.Photo -> {
-            Icon(
-                imageVector = Icons.Outlined.PhotoCamera,
-                contentDescription = "拍照",
-                tint = iconTint,
-                modifier = Modifier.size(32.dp)
-            )
+            val bitmap = remember {
+                try {
+                    findSystemCameraPackageName(context, MediaStore.ACTION_IMAGE_CAPTURE)
+                        ?.let { context.packageManager.getApplicationIcon(it) }
+                        ?.toFanImageBitmap()
+                } catch (_: Exception) { null }
+            }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = "拍照",
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Outlined.PhotoCamera,
+                    contentDescription = "拍照",
+                    tint = iconTint,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
         }
         is FanSegment.Quick -> {
-            val context = LocalContext.current
             val bitmap = remember(seg.item.packageName, seg.item.shortcutId) {
                 try {
                     val d: Drawable? = if (seg.item.shortcutId != null) {
@@ -845,11 +870,15 @@ fun BlindCaptureFan(
         }
         // v0.68.20：图标 + 文字 overlay（Compose 排版）
         // v0.68.40：标签外移到外圈约 100dp（效果图确认，手指盖不住）；圆心不动；
-        // 18sp（拍照 19sp 加粗），横排 + maxLines=1 + Ellipsis
+        // v0.68.41：14sp（拍照 15sp 加粗）；标签径向旋转——文字方向跟扇形同角度，
+        // α = centerAngle − θ_mid（左扇 180°/右扇 0°），绕标签自身中心旋转，
+        // α 天然落在 ±90° 内，文字永远不会倒过来；选中指示器图标不旋转
         val rLabelPx = with(density) { FAN_LABEL_R_DP.dp.toPx() }
+        val centerDeg = if (direction == FanDirection.LEFT) 180f else 0f
         segments.forEachIndexed { i, seg ->
             val (s, sw) = segmentAngles(i, sweeps, direction)
-            val midRad = Math.toRadians((s + sw / 2).toDouble())
+            val midDeg = s + sw / 2f
+            val midRad = Math.toRadians(midDeg.toDouble())
             val lx = centerX + cos(midRad).toFloat() * rLabelPx
             val ly = centerY + sin(midRad).toFloat() * rLabelPx
             val selected = i == selectedIndex
@@ -865,7 +894,8 @@ fun BlindCaptureFan(
             )
             key(i) {
                 // v0.68.38：统一横排（等宽 36° 下横排全部放得下，竖排分支删除）；
-                // maxLines=1 + Ellipsis，超长装备名截断
+                // maxLines=1 + Ellipsis，超长装备名截断；
+                // v0.68.41：rotationZ 径向旋转（文字跟扇形同角度）
                 Box(
                     modifier = Modifier
                         .offset {
@@ -877,6 +907,7 @@ fun BlindCaptureFan(
                         .graphicsLayer {
                             scaleX = pop
                             scaleY = pop
+                            rotationZ = centerDeg - midDeg
                             alpha = fanAlpha
                         }
                         .size(96.dp, 48.dp),
@@ -884,8 +915,8 @@ fun BlindCaptureFan(
                 ) {
                     Text(
                         text = segLabel,
-                        // v0.68.40：18sp（拍照 19sp 加粗）；选中靠 pop 缩放反馈
-                        fontSize = if (isPhoto) 19.sp else 18.sp,
+                        // v0.68.41：14sp（拍照 15sp 加粗，更精致）；选中靠 pop 缩放反馈
+                        fontSize = if (isPhoto) 15.sp else 14.sp,
                         fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
                         color = if (selected) titleColor else bodyColor,
                         maxLines = 1,
