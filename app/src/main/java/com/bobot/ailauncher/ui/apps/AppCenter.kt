@@ -665,6 +665,19 @@ fun AppCenterContent(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
+        // v0.68.62（Bob）：横屏双栏——左索引右网格，竖屏用原单列
+        if (isLandscapeAc) {
+            AppCenterLandscape(
+                azGroups = azGroups,
+                letters = letters,
+                totalCount = azApps.size,
+                onLaunch = ::launchApp,
+                onLongPress = { popupApp = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            )
+        } else {
         // ---- 单列表：分类区在上，A-Z 列表直接在下 ----
         // v0.41.8：clipToBounds——悬停字母被顶走时不画出列表区域，不会跑到搜索栏上面（Bob）
         Box(
@@ -1357,6 +1370,7 @@ fun AppCenterContent(
         )
     }
     } // Box
+    } // else 竖屏单列
 }
 
 /**

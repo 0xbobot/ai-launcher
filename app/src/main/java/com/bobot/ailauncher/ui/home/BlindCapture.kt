@@ -22,7 +22,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -57,7 +56,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -277,8 +275,6 @@ sealed interface BlindUiState {
         val direction: FanDirection = FanDirection.LEFT,
         // v0.68.35：动态段列表（固定3段 + 快捷装备段）
         val segments: List<FanSegment> = emptyList(),
-        // v0.68.62：扇形内长按删除——某快捷段停留 500ms 即 arm（抖动+×），松手进 Editing
-        val deleteArmed: Int = -1,
     ) : BlindUiState
     /** v0.68.42：收起中——扇形播 120ms 内收+淡出，播完 UI 回调 onDismissFinished */
     data class Dismissing(
@@ -289,14 +285,6 @@ sealed interface BlindUiState {
     ) : BlindUiState
     /** v0.68.42：拍照快门闪——白闪 80ms + 咔嚓震感后进相机 */
     data object PhotoFlash : BlindUiState
-    /** v0.68.62：扇形内编辑——长按某快捷段 500ms 后松手，扇形钉住，点×删除，点别处取消 */
-    data class Editing(
-        val centerX: Float,
-        val centerY: Float,
-        val direction: FanDirection = FanDirection.LEFT,
-        val segments: List<FanSegment> = emptyList(),
-        val armedIndex: Int = -1,
-    ) : BlindUiState
 }
 
 /**
@@ -337,9 +325,6 @@ class BlindCaptureController(
     private var centerX = 0f
     private var centerY = 0f
     private var modeIndex = -1
-    // v0.68.62：扇形内长按删除——某快捷段停留 500ms 即 arm，松手进 Editing 钉住
-    private var dwellStartMs = 0L
-    private var deleteArmed = -1
 
     // v0.68.39：诊断链路已删除（v0.68.12 屏上诊断浮层使命结束）；保留 Log.d 供开发期使用
 
@@ -384,7 +369,7 @@ class BlindCaptureController(
             val prefs = context.getSharedPreferences("blind_prefs", Context.MODE_PRIVATE)
             if (!prefs.getBoolean("zero_quick_guided", false)) {
                 prefs.edit().putBoolean("zero_quick_guided", true).apply()
-                PetRepository.say("左滑现在只拍照片，去设置页的快捷装备里加你想要的功能")
+                PetRepository.say("左滑现在只拍照片，去七仔装备里加你想要的功能")
             }
         } catch (_: Exception) { }
     }
@@ -396,10 +381,6 @@ class BlindCaptureController(
         modeIndex = -1
         maxLeftPx = 0f
         maxRightPx = 0f
-        // v0.68.62：清掉上次 Editing 的残留态（MainScreen 侧直接 Hidden 时 HomeScreen 副本可能还停在 Editing）
-        deleteArmed = -1
-        dwellStartMs = 0L
-        setUi(BlindUiState.Hidden)
         velocityTracker.resetTracking()
         Log.d(TAG, "onStart tracking")
     }
@@ -467,7 +448,6 @@ class BlindCaptureController(
                 }
                 modeIndex = -1
                 setUi(BlindUiState.Selecting(centerX, centerY, -1, fanDir, segments))
-                dwellStartMs = change.uptimeMillis
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 PetRepository.say("拍点什么？")
                 Log.d(TAG, "diag: fan展开")
@@ -489,23 +469,12 @@ class BlindCaptureController(
         val idx = sectorForIndex(pos.x - centerX, pos.y - centerY, deadZonePx, sweeps, fanDir)
         if (idx != modeIndex) {
             modeIndex = idx
-            deleteArmed = -1
-            dwellStartMs = change.uptimeMillis
             setUi(BlindUiState.Selecting(centerX, centerY, idx, fanDir, segments))
             if (idx >= 0) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 PetRepository.say(segmentLabel(idx))
                 Log.d(TAG, "diag: sector=${segmentLabel(idx)}")
             }
-        } else if (idx >= 0 && deleteArmed < 0 &&
-            segments.getOrNull(idx) is FanSegment.Quick &&
-            change.uptimeMillis - dwellStartMs >= 500L
-        ) {
-            // v0.68.62：快捷段停留 500ms → arm 删除（抖动+×），松手后钉住可点×
-            deleteArmed = idx
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            setUi(BlindUiState.Selecting(centerX, centerY, idx, fanDir, segments, deleteArmed = idx))
-            Log.d(TAG, "diag: deleteArmed=$idx")
         }
     }
 
@@ -533,17 +502,6 @@ class BlindCaptureController(
                 FLING_PHOTO_VELOCITY_PX_S * FLING_PHOTO_VELOCITY_PX_S
         } catch (_: Exception) { false }
         if (wasTriggered) {
-            // v0.68.62：arm 了删除 → 松手不进执行，进 Editing 钉住（点×删 / 点别处取消）
-            if (deleteArmed >= 0) {
-                val armed = deleteArmed
-                tracking = false
-                triggered = false
-                modeIndex = -1
-                deleteArmed = -1
-                setUi(BlindUiState.Editing(centerX, centerY, fanDir, segments, armed))
-                Log.d(TAG, "diag: editing(armed=$armed)")
-                return true
-            }
             // v0.68.40：拍照永远是 index 0
             val seg = segments.getOrNull(idx)
             if (flingPhoto || idx < 0 || seg is FanSegment.Photo) {
@@ -749,10 +707,6 @@ fun BlindCaptureFan(
     direction: FanDirection = FanDirection.LEFT,
     // v0.68.42：收起中——播 120ms 内收+淡出
     dismiss: Boolean = false,
-    // v0.68.62：扇形内删除——armed 段抖动+×；编辑态点×删（onDeleteQuick）、点别处取消（onEditTapOutside）
-    deleteArmedIndex: Int = -1,
-    onDeleteQuick: ((QuickActionItem) -> Unit)? = null,
-    onEditTapOutside: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // 绘制与命中判定共用同一套动态角度
@@ -823,43 +777,10 @@ fun BlindCaptureFan(
 
     // v0.68.29 方案C：探出七仔位置钳制需要屏幕尺寸
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
-    // v0.68.62：armed 段抖动（±7° 往复），只在有 armed 段时建 transition
-    val wobbleDeg: Float = if (deleteArmedIndex >= 0) {
-        val wobbleT = rememberInfiniteTransition(label = "armedWobble")
-        wobbleT.animateFloat(
-            initialValue = -7f,
-            targetValue = 7f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(280),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "wobble"
-        ).value
-    } else 0f
     Box(
         modifier = modifier
             .fillMaxSize()
             .onGloballyPositioned { screenSize = it.size }
-            // v0.68.62：编辑态点×删除 / 点别处取消（手势态只做 × 展示，不装点击）
-            .pointerInput(deleteArmedIndex, onDeleteQuick, onEditTapOutside) {
-                if (deleteArmedIndex < 0 || onDeleteQuick == null) return@pointerInput
-                detectTapGestures { tap ->
-                    val armed = segments.getOrNull(deleteArmedIndex) as? FanSegment.Quick
-                    val (bs, bsw) = segmentAngles(deleteArmedIndex, sweeps, direction)
-                    val bRad = Math.toRadians((bs + bsw / 2).toDouble())
-                    val bRpx = with(density) { (FAN_R_OUTER_SELECTED_DP + 14f).dp.toPx() }
-                    val bx = centerX + cos(bRad).toFloat() * bRpx
-                    val by = centerY + sin(bRad).toFloat() * bRpx
-                    val hitR = with(density) { 28.dp.toPx() }
-                    val dx = tap.x - bx
-                    val dy = tap.y - by
-                    if (armed != null && dx * dx + dy * dy <= hitR * hitR) {
-                        onDeleteQuick(armed.item)
-                    } else {
-                        onEditTapOutside?.invoke()
-                    }
-                }
-            }
             // v0.68.42：收起内收——以扇形圆心为轴缩放+淡出
             .graphicsLayer {
                 val sc = 1f - 0.18f * dismissT
@@ -1076,9 +997,7 @@ fun BlindCaptureFan(
                         .graphicsLayer {
                             scaleX = pop
                             scaleY = pop
-                            // v0.68.62：armed 段抖动（±7° 往复，暗示可删）
-                            rotationZ = midDeg - centerDeg +
-                                (if (i == deleteArmedIndex) wobbleDeg else 0f)
+                            rotationZ = midDeg - centerDeg
                             alpha = fanAlpha * (1f - dismissT) *
                                 (if (selected) 1f else 0.6f)
                         }
@@ -1095,45 +1014,6 @@ fun BlindCaptureFan(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-            }
-        }
-        // v0.68.62：armed 段的 × 徽标（选中段外缘 +14dp，22dp 红底白×，pop 出现）
-        if (deleteArmedIndex in segments.indices) {
-            val (bs, bsw) = segmentAngles(deleteArmedIndex, sweeps, direction)
-            val bRad = Math.toRadians((bs + bsw / 2).toDouble())
-            val bRpx = with(density) { (FAN_R_OUTER_SELECTED_DP + 14f).dp.toPx() }
-            val bx = centerX + cos(bRad).toFloat() * bRpx
-            val by = centerY + sin(bRad).toFloat() * bRpx
-            val badgePop by animateFloatAsState(
-                targetValue = 1f,
-                animationSpec = spring(dampingRatio = 0.5f, stiffness = 900f),
-                label = "badgePop"
-            )
-            val badgeHalfPx = with(density) { 11.dp.toPx() }
-            Box(
-                modifier = Modifier
-                    .offset {
-                        IntOffset(
-                            (bx - badgeHalfPx).roundToInt(),
-                            (by - badgeHalfPx).roundToInt()
-                        )
-                    }
-                    .graphicsLayer {
-                        scaleX = badgePop
-                        scaleY = badgePop
-                        alpha = fanAlpha * (1f - dismissT)
-                    }
-                    .size(22.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFFF3B30)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "×",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
             }
         }
     }
