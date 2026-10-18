@@ -2,6 +2,7 @@ package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
 import androidx.core.graphics.drawable.toBitmap
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
