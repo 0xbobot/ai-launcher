@@ -59,6 +59,10 @@ import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlin.math.abs
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.sp
 
 /**
  * 上拉 Dock（v0.14：手势签名纠正为「左滑=多，右滑=少」，横线手柄彻底去掉）。
@@ -251,6 +255,33 @@ fun PullUpDock(
                         },
                         label = "dockContent"
                     ) { s ->
+                        // v0.68.34（Bob）：杂志页脚式 Dock 刊头——发丝线 + "常用" + "上滑展开"
+                        // 人体工学：刊头纯展示，图标 56dp 触摸目标不变，上滑手势不变
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            HorizontalDivider(
+                                color = AILauncherColors.Divider,
+                                thickness = 1.dp,
+                                modifier = Modifier.padding(horizontal = 28.dp)
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 28.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TrackedFooterText(text = "常用", color = AILauncherColors.Accent)
+                                Text(
+                                    text = if (s == DockState.D2) "下滑收起" else "上滑展开",
+                                    fontSize = 11.sp,
+                                    letterSpacing = 2.sp,
+                                    color = AILauncherColors.Title.copy(alpha = 0.4f)
+                                )
+                            }
+                        }
                         if (s == DockState.D2) {
                             DockGrid10(
                                 apps = top10,
@@ -449,5 +480,21 @@ private fun DockIconButton(
             expanded = menuApp == app,
             onDismiss = onDismissMenu
         )
+    }
+}
+
+/** v0.68.34：页脚刊头字距文本 */
+@Composable
+private fun TrackedFooterText(text: String, color: androidx.compose.ui.graphics.Color) {
+    Row {
+        text.forEach { ch ->
+            androidx.compose.material3.Text(
+                text = ch.toString(),
+                fontSize = 11.sp,
+                color = color,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+        }
     }
 }

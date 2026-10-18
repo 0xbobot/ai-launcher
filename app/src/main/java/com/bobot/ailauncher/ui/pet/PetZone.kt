@@ -35,7 +35,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -119,7 +122,10 @@ import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.core.pet.PetState
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.OtaUpdater
+import com.bobot.ailauncher.ui.home.CoverHero
+import com.bobot.ailauncher.ui.home.NextUpStrip
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.coverPaletteFor
 import com.bobot.ailauncher.ui.theme.GlassTextShadow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -163,8 +169,13 @@ fun PetZone(
     // v0.29.0：升级提醒宠物化
     hasUpgrade: Boolean = false,
     onUpgradeTap: () -> Unit = {},
-    // v0.68.34（Bob）：扇形展开时 TODAY 卡片淡出到 0.3（视觉让位，和 Dock 同逻辑）
-    todayCardAlpha: Float = 1f
+    // v0.68.34（Bob）：封面模式——杂志风主屏（hero + 紧凑条），替代默认宠物舞台布局
+    coverMode: Boolean = false,
+    // v0.68.34：简报标题/下个会议上抛（封面 hero 用）
+    onSummaryChange: (String) -> Unit = {},
+    onNextEventChange: (CalEvent?) -> Unit = {},
+    // v0.68.34：纯数据模式——只跑数据 effect、上报，不渲染 UI（封面模式用）
+    dataOnly: Boolean = false
 ) {
     val mood by PetRepository.mood.collectAsState()
     val mouth by PetRepository.mouth.collectAsState()
@@ -393,6 +404,50 @@ fun PetZone(
 
     // v0.56.0 M1：眨眼已移入 PetView（8 秒 ± 3 秒随机），此处删除旧定时器
 
+    // v0.68.34：封面模式状态（hero 标题/下个会议）
+    var coverSummary by remember { mutableStateOf("难得清闲") }
+    var coverNextEvent by remember { mutableStateOf<CalEvent?>(null) }
+    val coverPalette = remember {
+        coverPaletteFor(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
+    }
+
+    // v0.68.34（Bob）：封面模式——杂志 hero + 紧凑条；TodaySection 只跑数据不上 UI
+    if (coverMode) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            CoverHero(
+                summary = coverSummary,
+                weatherDesc = weatherDesc,
+                palette = coverPalette,
+                petSlot = {
+                    PetView(
+                        mood = mood,
+                        mouth = mouth,
+                        blinking = blinking,
+                        sleepy = petState == PetState.SLEEPY,
+                        jellyTick = jellyTick,
+                        scene = demoScene,
+                        onSceneDone = { demoScene = QizaiScene.NONE },
+                        modifier = Modifier.size(120.dp)
+                    )
+                }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            NextUpStrip(
+                summary = coverSummary,
+                nextEvent = coverNextEvent,
+                palette = coverPalette,
+                onMeetingTap = { e -> remindMeeting(e, "cover") }
+            )
+        }
+        // 数据源：只跑 effect、上报，不渲染
+        TodaySection(
+            dataOnly = true,
+            resumeTick = resumeTick,
+            onMeetingRemind = { e, tag -> remindMeeting(e, tag) },
+            onSummaryChange = { coverSummary = it },
+            onNextEventChange = { coverNextEvent = it }
+        )
+    } else {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -647,7 +702,14 @@ fun PetZone(
                         .padding(horizontal = 9.dp, vertical = 7.dp)
                 )
             }
-        // v0.68.40：语音胶囊已删除（Bob：太重了，全清）
+            // v0.68.24：语音胶囊——录音变成胶囊浮在七仔周围（装备挂件环绕语言）；
+            // 装备面板展开时隐藏，避免与装备槽位重叠
+            VoiceCapsules(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = petTop),
+                hidden = showQuickPanel || panelCollapsing,
+            )
         }
         // v0.67.1：AI Capsule 模态卡已删除——会议/重要信息不再弹窗，
         // 只走七仔说话 + TODAY 卡片 + 视觉动效（产品原则）
@@ -662,8 +724,6 @@ fun PetZone(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                // v0.68.34：扇形展开时卡片淡出到 0.3（视觉让位，和 Dock 同逻辑）
-                .graphicsLayer { alpha = todayCardAlpha }
                 .padding(horizontal = 20.dp)
                 // v0.66.6：去掉 -30dp 上移（七仔坐卡上），上下两部分清晰分开；卡片顶部留 8dp 呼吸
                 // v0.66.6：卡片底部留 32dp，与 Dock 拉开距离
@@ -728,6 +788,7 @@ fun PetZone(
                 )
             }
         }
+    }
     }
 }
 
@@ -1101,7 +1162,10 @@ private fun TodaySection(
     // v0.67.6：resumeTick 由 PetZone 传入（onResume 观察器上提）
     resumeTick: Int = 0,
     // v0.67.6：会议提醒回调（省电原则：一次性任务；实际提醒逻辑在 PetZone 的 remindMeeting）
-    onMeetingRemind: (CalEvent, String) -> Unit = { _, _ -> }
+    onMeetingRemind: (CalEvent, String) -> Unit = { _, _ -> },
+    // v0.68.34：简报标题/下个会议上抛（封面 hero 用）
+    onSummaryChange: (String) -> Unit = {},
+    onNextEventChange: (CalEvent?) -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -1286,6 +1350,11 @@ private fun TodaySection(
         if (nowM < effEnd) 1 else 0
     } else 0
     val summaryText = AiInsight.buildSummary(replyMsgs.size, meetingCount)
+    // v0.68.34：上抛给封面 hero
+    LaunchedEffect(summaryText) { onSummaryChange(summaryText) }
+    LaunchedEffect(nextEvent) { onNextEventChange(nextEvent) }
+    // v0.68.34：纯数据模式——effect 已跑完，直接返回不渲染
+    if (dataOnly) return
     // v0.63.0：空态判断——P0/P1/P2/P4 任一有内容即非空
     val hasAnyContent = (TodaySection.MSG in visibleSections && (replyMsgs.isNotEmpty() || normalMsgs.isNotEmpty())) ||
         meetingCount > 0 ||
@@ -2409,7 +2478,7 @@ private fun weatherSceneFor(desc: String?): QizaiScene = when (desc) {
 
 // v0.48.0：日程——从 v0.31.0 移除的 HomeScreen 日历逻辑迁回，由七仔统一呈现
 // v0.58.0：加 description 字段，用于提取在线会议链接
-private data class CalEvent(
+internal data class CalEvent(
     val title: String,
     val begin: Long,
     val end: Long,

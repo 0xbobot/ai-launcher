@@ -485,8 +485,8 @@ fun AppCenterContent(
             .fillMaxSize()
             .statusBarsPadding()
     ) {
-        // ---- Header（v0.41.0 B 方案·呼吸感）：去大标题，搜索收成一条细线 + 设置齿轮 ----
-        // 顶栏下滑 → D2；顶栏右滑 → 回记住的 Dock 档（手势签名：右滑=更少）
+        // ---- Header（v0.68.34 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----
+        // v0.41.0 的"去大标题"被新版取代；顶栏下滑 → D2；顶栏右滑 → 回记住的 Dock 档
         val headThreshPx = with(density) { 80.dp.toPx() }
         Column(
             modifier = Modifier.pointerInput(Unit) {
@@ -506,10 +506,32 @@ fun AppCenterContent(
                 )
             }
         ) {
+            // v0.68.34（Bob）：杂志刊头
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 28.dp, end = 12.dp, top = 8.dp)
+            ) {
+                MastheadKicker(text = "INDEX · 应用索引")
+                Text(
+                    text = "全部应用",
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 32.sp,
+                    letterSpacing = 2.sp,
+                    color = AILauncherColors.Title
+                )
+                Text(
+                    text = "${azApps.size} 款 · 右侧滑字母直达",
+                    fontSize = 12.sp,
+                    color = AILauncherColors.Hint,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 12.dp, top = 20.dp)
+                    .padding(start = 20.dp, end = 12.dp, top = 12.dp)
                     .pointerInput(Unit) {
                         // 顶栏右滑 → 回到记住的 Dock 行数（手势签名：右滑=更少）
                         var accumX = 0f
@@ -829,9 +851,9 @@ fun AppCenterContent(
                                 Text(
                                     text = letter.toString(),
                                     fontFamily = FontFamily.Serif,
-                                    fontSize = 40.sp,
-                                    // v0.41.8：弱化（Bob：太显眼），22% → 14%
-                                    color = AILauncherColors.Title.copy(alpha = 0.14f),
+                                    fontSize = 56.sp,
+                                    // v0.68.34（Bob）：杂志章节感——放大加深（40sp/14% → 56sp/20%）
+                                    color = AILauncherColors.Title.copy(alpha = 0.20f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
                                         .padding(start = 20.dp)
@@ -1015,8 +1037,8 @@ fun AppCenterContent(
                     Text(
                         text = sl.toString(),
                         fontFamily = FontFamily.Serif,
-                        fontSize = 40.sp,
-                        color = AILauncherColors.Title.copy(alpha = 0.14f),
+                        fontSize = 56.sp,
+                        color = AILauncherColors.Title.copy(alpha = 0.20f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 20.dp, top = 12.dp)
@@ -1353,3 +1375,19 @@ private fun rememberPullDownConnection(
 
 
 
+
+/** v0.68.34：刊头字距 kicker（金色） */
+@Composable
+private fun MastheadKicker(text: String) {
+    Row(modifier = Modifier.padding(bottom = 6.dp)) {
+        text.forEach { ch ->
+            androidx.compose.material3.Text(
+                text = ch.toString(),
+                fontSize = 11.sp,
+                color = AILauncherColors.Accent,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+        }
+    }
+}

@@ -33,6 +33,38 @@ object AILauncherColors {
     val Grabber = Color(0xFF1F1D1A).copy(alpha = 0.28f) // 玻璃上的拖动手柄
 }
 
+/**
+ * v0.68.34（Bob）：杂志封面时段配色——暖纸底不动，色温随晨/午/夜微调。
+ * 晨版偏亮、午版标准、夜版压暗偏暖。一天内也有变化，封面不腻。
+ */
+data class CoverPalette(
+    val background: Color,
+    val title: Color,
+    val body: Color,
+    val divider: Color
+)
+
+fun coverPaletteFor(hour: Int): CoverPalette = when (hour) {
+    in 6..11 -> CoverPalette( // 晨版：偏亮
+        background = Color(0xFFF7F5F1),
+        title = Color(0xFF1F1D1A),
+        body = Color(0xFF5C5852),
+        divider = Color(0xFFE8E2D9)
+    )
+    in 12..17 -> CoverPalette( // 午版：标准
+        background = Color(0xFFF4F2EE),
+        title = Color(0xFF1F1D1A),
+        body = Color(0xFF5C5852),
+        divider = Color(0xFFE8E2D9)
+    )
+    else -> CoverPalette( // 夜版：压暗偏暖
+        background = Color(0xFFE9E0D2),
+        title = Color(0xFF1F1D1A),
+        body = Color(0xFF5C5852),
+        divider = Color(0xFFDCD2C0)
+    )
+}
+
 /** 壁纸上悬浮文字的投影，保证在任意壁纸上可读（配合 TextStyle(color = White, shadow = …) 使用） */
 val GlassTextShadow = Shadow(
     offset = Offset(0f, 3f),
