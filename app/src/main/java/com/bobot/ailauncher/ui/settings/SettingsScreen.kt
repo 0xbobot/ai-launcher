@@ -64,6 +64,7 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.interaction.MutableInteractionSource
 
 /**
  * 设置页（v0.57.0 重构）：
@@ -119,25 +120,26 @@ fun SettingsScreen(
     ) {
         item {
             // v0.68.45：杂志刊头——和应用中心完全一致（28.dp 左 / 8.dp 顶 / 同款 kicker / 32.sp 宋体）
-            // 返回按钮嵌在 kicker 行内，不占刊头高度
+            // v0.68.46：返回做成 kicker 的一部分（‹ CONFIG）——整行可点，无独立按钮，刊头干净
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 28.dp, end = 12.dp, top = 8.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .offset(x = (-8).dp)
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回",
-                            tint = AILauncherColors.Title
-                        )
-                    }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                        onClick = onBack
+                    )
+                ) {
+                    Text(
+                        text = "‹ ",
+                        fontSize = 14.sp,
+                        color = AILauncherColors.Accent,
+                        fontWeight = FontWeight.Bold
+                    )
                     com.bobot.ailauncher.ui.apps.MastheadKicker(text = "CONFIG · 设置")
                 }
                 Text(
