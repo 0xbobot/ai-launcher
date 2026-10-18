@@ -63,6 +63,7 @@ import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 
 /**
  * 设置页（v0.57.0 重构）：
@@ -108,45 +109,45 @@ fun SettingsScreen(
 
     LazyColumn(
         // v0.61.1：和应用中心一样的半透明背景（GlassCardStrong，白 88%）
+        // v0.68.45：contentPadding 归零，各 item 自带 padding——刊头和应用中心像素对齐
         modifier = Modifier.fillMaxSize()
             .background(AILauncherColors.GlassCardStrong)
             .statusBarsPadding()
             .then(swipeUpToHome),
-        contentPadding = PaddingValues(20.dp),
+        contentPadding = PaddingValues(0.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Column {
-                // v0.68.45（走查）：杂志刊头——和应用中心统一
-                Row {
-                    "CONFIG · 设置".forEach { ch ->
-                        Text(
-                            text = ch.toString(),
-                            fontSize = 11.sp,
-                            color = AILauncherColors.Accent,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
+            // v0.68.45：杂志刊头——和应用中心完全一致（28.dp 左 / 8.dp 顶 / 同款 kicker / 32.sp 宋体）
+            // 返回按钮嵌在 kicker 行内，不占刊头高度
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 28.dp, end = 12.dp, top = 8.dp)
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .offset(x = (-8).dp)
+                    ) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回",
                             tint = AILauncherColors.Title
                         )
                     }
-                    Text(
-                        text = "设置",
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 32.sp,
-                        letterSpacing = 2.sp,
-                        color = AILauncherColors.Title
-                    )
+                    com.bobot.ailauncher.ui.apps.MastheadKicker(text = "CONFIG · 设置")
                 }
+                Text(
+                    text = "设置",
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 32.sp,
+                    letterSpacing = 2.sp,
+                    color = AILauncherColors.Title
+                )
             }
         }
 
@@ -156,7 +157,9 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.clickable { llmExpanded = !llmExpanded }
+                modifier = Modifier
+                    .padding(horizontal = 20.dp)
+                    .clickable { llmExpanded = !llmExpanded }
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -333,6 +336,7 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.padding(horizontal = 20.dp),
                 onClick = { onCardClick?.invoke() }
             ) {
                 Row(

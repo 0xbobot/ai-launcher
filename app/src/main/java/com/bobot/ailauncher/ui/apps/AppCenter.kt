@@ -471,6 +471,14 @@ fun AppCenterContent(
     // 同一时间只有一个应用生效
     var revealedHidePkg by remember { mutableStateOf<String?>(null) }
 
+    // v0.68.45（Bob）：列表一滚动就收起滑动行——白卡跟着滚看上去像 bug
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
+            expandedActionsPkg = null
+            revealedHidePkg = null
+        }
+    }
+
     // v0.35.0：首次左滑新手引导——只展示一次，之后不再打扰
     var showActionsGuide by remember { mutableStateOf(false) }
     LaunchedEffect(expandedActionsPkg) {
@@ -1381,9 +1389,9 @@ private fun rememberPullDownConnection(
 
 
 
-/** v0.68.44：刊头字距 kicker（金色） */
+/** v0.68.44：刊头字距 kicker（金色）；v0.68.45：给设置页共用 */
 @Composable
-private fun MastheadKicker(text: String) {
+internal fun MastheadKicker(text: String) {
     Row(modifier = Modifier.padding(bottom = 6.dp)) {
         text.forEach { ch ->
             androidx.compose.material3.Text(

@@ -406,32 +406,74 @@ fun PetZone(
     }
 
     // v0.68.44（Bob）：封面模式——杂志 hero + 紧凑条；TodaySection 只跑数据不上 UI
+    // v0.68.45：恢复点七仔快捷面板（Bob：快捷服务别删）；无会议时紧凑条隐藏（Bob：别和 hero 重复）
     if (coverMode) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            CoverHero(
-                summary = coverSummary,
-                weatherDesc = weatherDesc ?: "",
-                palette = coverPalette,
-                petSlot = {
-                    PetView(
-                        mood = mood,
-                        mouth = mouth,
-                        blinking = blinking,
-                        sleepy = petState == PetState.SLEEPY,
-                        jellyTick = jellyTick,
-                        scene = demoScene,
-                        onSceneDone = { demoScene = QizaiScene.NONE },
-                        modifier = Modifier.size(120.dp)
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                CoverHero(
+                    summary = coverSummary,
+                    weatherDesc = weatherDesc ?: "",
+                    palette = coverPalette,
+                    petSlot = {
+                        Box(
+                            modifier = Modifier
+                                .size(120.dp)
+                                .combinedClickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    onClick = {
+                                        // 和原版一致：点七仔展开/收起快捷面板
+                                        if (hasUpgrade) onUpgradeTap()
+                                        else {
+                                            jellyTick++
+                                            PetRepository.setMoodHappyBrief()
+                                            if (showQuickPanel && !panelCollapsing) {
+                                                panelCollapsing = true
+                                            } else if (!showQuickPanel) {
+                                                showQuickPanel = true
+                                            }
+                                        }
+                                    }
+                                )
+                        ) {
+                            PetView(
+                                mood = mood,
+                                mouth = mouth,
+                                blinking = blinking,
+                                sleepy = petState == PetState.SLEEPY,
+                                jellyTick = jellyTick,
+                                scene = demoScene,
+                                onSceneDone = { demoScene = QizaiScene.NONE },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                // 有会议才显示——无会时 hero 已有"难得清闲"，不重复
+                if (coverNextEvent != null) {
+                    NextUpStrip(
+                        summary = coverSummary,
+                        nextEvent = coverNextEvent,
+                        palette = coverPalette,
+                        onMeetingTap = { e -> remindMeeting(e, "cover") }
                     )
                 }
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            NextUpStrip(
-                summary = coverSummary,
-                nextEvent = coverNextEvent,
-                palette = coverPalette,
-                onMeetingTap = { e -> remindMeeting(e, "cover") }
-            )
+            }
+            // 快捷面板：定位在 hero 宠物附近
+            if (showQuickPanel || panelCollapsing) {
+                QizaiEquipment(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 150.dp, end = 4.dp),
+                    onLaunch = { if (!panelCollapsing) panelCollapsing = true },
+                    collapsing = panelCollapsing,
+                    onCollapseDone = {
+                        panelCollapsing = false
+                        showQuickPanel = false
+                    }
+                )
+            }
         }
         // 数据源：只跑 effect、上报，不渲染
         TodaySection(
