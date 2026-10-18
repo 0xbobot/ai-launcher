@@ -121,6 +121,7 @@ import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.home.CoverHero
 import com.bobot.ailauncher.ui.home.NextUpStrip
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.coverPaletteFor
 import com.bobot.ailauncher.ui.theme.GlassTextShadow
 import kotlinx.coroutines.launch
@@ -738,7 +739,7 @@ fun PetZone(
                                 with(density) { 34.dp.toPx() }.roundToInt()
                             )
                         }
-                        .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
+                        .background(AILauncherColors.Card.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
                         .padding(horizontal = 9.dp, vertical = 7.dp)
                 )
             }
@@ -880,7 +881,7 @@ fun PetPresentedCard() {
         val masked = cur.cat == PetCat.PRIV && !armed
         Card(
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.92f)),
+            colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card.copy(alpha = 0.92f)),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
             modifier = Modifier
                 .fillMaxWidth()
@@ -908,14 +909,14 @@ fun PetPresentedCard() {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "${cur.cat.tabEmoji} ${cur.appName}",
-                        fontSize = 10.5.sp,
+                        style = AILauncherType.Caption,
                         fontWeight = FontWeight.ExtraBold,
                         color = cur.cat.color,
                         modifier = Modifier.weight(1f)
                     )
                     Text(
                         text = cur.cat.cnName,
-                        fontSize = 10.5.sp,
+                        style = AILauncherType.Caption,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                         modifier = Modifier
@@ -958,8 +959,8 @@ fun PetPresentedCard() {
                 }
                 Text(
                     text = if (armed) "选一个操作，或右滑收回" else "左滑 → 更多操作 · 右滑 → 记入 Today",
-                    fontSize = 10.5.sp,
-                    color = Color(0xFFA0A0AD),
+                    style = AILauncherType.Caption,
+                    color = AILauncherColors.Hint,
                     modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
                 )
             }
@@ -1092,7 +1093,7 @@ private fun SpeechBubble(
             }
             Card(
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
                 modifier = Modifier
                     .widthIn(max = 240.dp)
@@ -1546,7 +1547,7 @@ private fun TodaySection(
                         text = summaryText,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1C1C1E),
+                        color = AILauncherColors.Title,
                         maxLines = 1
                     )
                     Spacer(modifier = Modifier.height(2.dp))
@@ -1554,7 +1555,7 @@ private fun TodaySection(
                         // v0.65.3：空态副标题按时间段区分（C 方案）；有内容时保持"七仔帮你看完了"
                         text = if (!hasAnyContent) emptySubtitle else "七仔帮你看完了",
                         fontSize = 13.sp,
-                        color = Color(0xFF8E8E93)
+                        color = AILauncherColors.Hint
                     )
                 }
             }
@@ -1609,7 +1610,7 @@ private fun TodaySection(
                     Text(
                         text = "$weatherEmoji ${wf.temp}°",
                         fontSize = 13.sp,
-                        color = Color(0xFF57534E),
+                        color = AILauncherColors.Body,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -1632,16 +1633,18 @@ private fun TodaySection(
                         val vis = section in visibleSections
                         TextButton(
                             onClick = { toggleSection(section, !vis) },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            // v0.68.66：设计评审 P0 —— 触控热区扩大（原 6×2dp 点不中）
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(
                                     imageVector = if (vis) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                     contentDescription = label,
-                                    tint = if (vis) Color(0xFF57534E) else Color(0xFFD6D3D1),
+                                    // v0.68.66：设计评审 P1 —— iOS 色值 → 主题色
+                                    tint = if (vis) AILauncherColors.Body else AILauncherColors.Hint,
                                     modifier = Modifier.size(18.dp)
                                 )
-                                Text(text = label, fontSize = 10.sp, color = Color(0xFF8E8E93))
+                                Text(text = label, style = AILauncherType.Caption, color = AILauncherColors.Hint)
                             }
                         }
                     }
@@ -1651,17 +1654,18 @@ private fun TodaySection(
                             weatherVisible = nv
                             TodayPrefs.saveWeatherVisible(context, nv)
                         },
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        // v0.68.66：设计评审 P0 —— 触控热区扩大
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         // v0.62.2：统一用 Material Icons
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
                                 imageVector = if (weatherVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                 contentDescription = if (weatherVisible) "隐藏天气" else "显示天气",
-                                tint = if (weatherVisible) Color(0xFF57534E) else Color(0xFFD6D3D1),
+                                tint = if (weatherVisible) AILauncherColors.Body else AILauncherColors.Hint,
                                 modifier = Modifier.size(18.dp)
                             )
-                            Text(text = "天气", fontSize = 10.sp, color = Color(0xFF8E8E93))
+                            Text(text = "天气", style = AILauncherType.Caption, color = AILauncherColors.Hint)
                         }
                     }
                     // v0.64.2：恢复智能排序（仅用户拖过顺序后显示）
@@ -1671,9 +1675,10 @@ private fun TodaySection(
                                 userGroupOrder = null
                                 TodayPrefs.saveUserOrder(context, null)
                             },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            // v0.68.66：设计评审 P0 —— 触控热区扩大
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                         ) {
-                            Text(text = "恢复智能排序", fontSize = 10.sp, color = Color(0xFF3B82F6))
+                            Text(text = "恢复智能排序", style = AILauncherType.Caption, color = AILauncherColors.Accent)
                         }
                     }
                 }
@@ -1789,7 +1794,7 @@ private fun TodaySection(
                                             text = e.title.ifBlank { "（无标题）" },
                                             fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF1C1C1E)
+                                            color = AILauncherColors.Title
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
@@ -1819,7 +1824,7 @@ private fun TodaySection(
                                                 ),
                                                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp)
                                             ) {
-                                                Text(text = "加入会议", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                                                Text(text = "加入会议", style = AILauncherType.Headline)
                                             }
                                         }
                                     }
@@ -1961,10 +1966,10 @@ private fun TodaySection(
                 Text(
                     text = "🎉 有新版本 ${availUpdate.versionName}",
                     fontSize = 13.sp,
-                    color = Color(0xFF1C1C1E),
+                    color = AILauncherColors.Title,
                     modifier = Modifier.weight(1f)
                 )
-                Text(text = "›", fontSize = 16.sp, color = Color(0xFFC7C7CC))
+                Text(text = "›", style = AILauncherType.Headline, color = AILauncherColors.Hint)
             }
             Spacer(modifier = Modifier.height(4.dp))
         }
@@ -2070,7 +2075,7 @@ private fun PriorityReplyRow(
                     text = "${item.appName} · ${item.title.ifBlank { "新消息" }}",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1C1C1E),
+                    color = AILauncherColors.Title,
                     // v0.68.20：单行省略，杜绝长标题换行重叠
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -2084,7 +2089,7 @@ private fun PriorityReplyRow(
                                 text = kp,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = Color(0xFF1C1C1E),
+                                color = AILauncherColors.Title,
                                 modifier = Modifier.padding(bottom = 2.dp)
                             )
                         }
@@ -2128,7 +2133,7 @@ private fun PriorityReplyRow(
                 enabled = !editMode,
                 shape = RoundedCornerShape(99.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1C1C1E),
+                    containerColor = AILauncherColors.Title,
                     contentColor = Color.White
                 ),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
@@ -2313,9 +2318,8 @@ private fun NormalMessageRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.appName,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF1C1C1E),
+                    style = AILauncherType.Headline,
+                    color = AILauncherColors.Title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -2392,11 +2396,11 @@ private fun TodoRow(
                         .size(22.dp)
                         .border(
                             2.dp,
-                            if (completing) Color(0xFF22C55E) else Color(0xFFD6D3D1),
+                            if (completing) AILauncherColors.Success else AILauncherColors.Hint,
                             RoundedCornerShape(99.dp)
                         )
                         .background(
-                            if (completing) Color(0xFF22C55E).copy(alpha = 0.15f)
+                            if (completing) AILauncherColors.Success.copy(alpha = 0.15f)
                             else Color.Transparent,
                             RoundedCornerShape(99.dp)
                         )
@@ -2410,16 +2414,15 @@ private fun TodoRow(
                     contentAlignment = Alignment.Center
                 ) {
                     if (completing) {
-                        Text(text = "✓", fontSize = 12.sp, color = Color(0xFF22C55E))
+                        Text(text = "✓", style = AILauncherType.Caption, color = AILauncherColors.Success)
                     }
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 // v0.67.7：正文可点——"看原文"，直达来源消息会话
                 Text(
                     text = todo.action,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF1C1917),
+                    style = AILauncherType.Headline,
+                    color = AILauncherColors.Title,
                     textDecoration = if (completing) TextDecoration.LineThrough else null,
                     maxLines = 1,
                     // v0.68.20：补省略号，防长文本溢出
@@ -2433,8 +2436,8 @@ private fun TodoRow(
                 Text(
                     text = todo.deadline,
                     fontSize = 13.sp,
-                    color = if (todo.deadline.contains("今天")) Color(0xFFFF9500)
-                            else Color(0xFF8E8E93)
+                    color = if (todo.deadline.contains("今天")) AILauncherColors.Accent
+                            else AILauncherColors.Hint
                 )
             }
         }

@@ -133,6 +133,9 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.bobot.ailauncher.ui.island.IslandToasts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 
 /**
  * 应用中心（v0.22，PRD 重设计方向）：D3 全屏单列表，只干一件事——最快找到应用。
@@ -160,6 +163,9 @@ fun AppCenterContent(
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
     var refreshTick by remember { mutableIntStateOf(0) }
+    // v0.68.66：设计评审 P2 —— 列表 stagger 入场（仅首屏 12 项，避免 300+ 应用动画掉帧）
+    var listEnter by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { listEnter = true }
     // v0.55.2（Bob）：监听应用安装/卸载，刷新列表
     DisposableEffect(context) {
         val receiver = object : android.content.BroadcastReceiver() {
@@ -713,7 +719,17 @@ fun AppCenterContent(
                             )
                         }
                     } else {
-                        items(results, key = { "s:${it.packageName}" }) { app ->
+                        itemsIndexed(results, key = { _, it -> "s:${it.packageName}" }) { index, app ->
+                            // v0.68.66：stagger 入场——前 12 项级联淡入上滑（每项 40ms 延迟）
+                            val staggerDelay = if (index < 12) index * 40 else 0
+                            AnimatedVisibility(
+                                visible = listEnter,
+                                enter = fadeIn(animationSpec = tween(300, delayMillis = staggerDelay)) +
+                                        slideInVertically(
+                                            animationSpec = tween(300, delayMillis = staggerDelay),
+                                            initialOffsetY = { it / 3 }
+                                        )
+                            ) {
                             // v0.68.53（Bob）：生长式——长按行直接在下方展开快捷卡，
                             // 同一张圆角卡（20.dp），不重复图标标题，像从行里长出来
                             val isPopupExpanded = popupApp?.packageName == app.packageName
@@ -778,6 +794,7 @@ fun AppCenterContent(
                                     )
                                 }
                             }
+                            } // AnimatedVisibility
                         }
                     }
                     item { Spacer(modifier = Modifier.height(24.dp)) }
@@ -1389,7 +1406,7 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
     ) {
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
             modifier = Modifier
                 .padding(horizontal = 36.dp)
                 .clickable(enabled = false, onClick = {})
