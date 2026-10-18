@@ -503,6 +503,8 @@ fun AppCenterContent(
         // ---- Header（v0.68.44 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----
         // 顶栏下滑 → D2；顶栏右滑 → 回记住的 Dock 档（手势签名：右滑=更少）
         val headThreshPx = with(density) { 80.dp.toPx() }
+        // v0.68.61（Bob）：横屏检测
+        val isLandscapeAc = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         Column(
             modifier = Modifier.pointerInput(Unit) {
                 var accumY = 0f
@@ -521,6 +523,29 @@ fun AppCenterContent(
                 )
             }
         ) {
+            // v0.68.61（Bob）：横屏紧凑头 vs 竖屏杂志刊头
+            if (isLandscapeAc) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 28.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "INDEX · 全部应用",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp,
+                        color = AILauncherColors.Accent
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "${azApps.size} 款",
+                        fontSize = 12.sp,
+                        color = AILauncherColors.Hint
+                    )
+                }
+            } else {
             // v0.68.44（Bob）：杂志刊头
             Column(
                 modifier = Modifier
@@ -543,6 +568,7 @@ fun AppCenterContent(
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
+            }  // else 竖屏刊头结束
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -898,7 +924,8 @@ fun AppCenterContent(
                     itemsIndexed(apps, key = { _, app -> "a:${app.packageName}" }) { index, app ->
                         // v0.41.7：行级 padding（列表不再统一 padding）
                         Box(modifier = Modifier.fillMaxWidth()) {
-                            if (index == 0) {
+                            // v0.68.61：横屏隐藏幽灵字母（省竖向空间，不乱）
+                            if (index == 0 && !isLandscapeAc) {
                                 Text(
                                     text = letter.toString(),
                                     fontFamily = FontFamily.Serif,
@@ -1112,7 +1139,7 @@ fun AppCenterContent(
                             .padding(start = 20.dp, top = 12.dp)
                             .size(36.dp)
                     )
-                } else if (sl != null) {
+                } else if (sl != null && !isLandscapeAc) {
                     Text(
                         text = sl.toString(),
                         fontFamily = FontFamily.Serif,
