@@ -529,7 +529,6 @@ private fun HomeHost(
                 )
                 if (showAddSheet) {
                     QuickActionAddFlow(
-                        bottomSheet = true,
                         onDismiss = { showAddSheet = false },
                         onSaved = { item ->
                             val full = QuickActionsPrefs.load(ctx).toMutableList()
