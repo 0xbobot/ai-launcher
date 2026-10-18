@@ -1,8 +1,12 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -176,5 +180,98 @@ fun AppPopupMenu(
             colors = MenuDefaults.itemColors(textColor = Color(0xFFD16A6A)),
             contentPadding = MenuDefaults.DropdownMenuItemContentPadding
         )
+    }
+}
+
+/**
+ * v0.68.53（Bob）：内联生长式快捷菜单——无头（不重复图标标题）、无 DropdownMenu，
+ * 直接嵌在应用行下方的圆角卡里，像从行里长出来。
+ */
+@Composable
+fun AppShortcutInline(
+    app: AppInfo,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val shortcuts = remember(app.packageName) {
+        loadAppShortcuts(context, app.packageName)
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        // 金线分隔（与行内容区分，但同一张卡）
+        androidx.compose.material3.HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            color = AILauncherColors.Divider
+        )
+        // 系统快捷方式
+        shortcuts.forEach { s ->
+            val icon = remember(s.id) { loadShortcutIcon(context, app.packageName, s.id) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        launchAppShortcut(context, app.packageName, s.id)
+                        onDismiss()
+                    }
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                if (icon != null) {
+                    AppIconImage(
+                        drawable = icon,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+                Text(
+                    text = s.shortLabel?.toString().orEmpty().ifBlank { "快捷方式" },
+                    fontSize = 14.sp,
+                    color = AILauncherColors.Title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        // 卸载
+        androidx.compose.material3.HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            color = AILauncherColors.Divider
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    try {
+                        val intent = Intent(
+                            Intent.ACTION_DELETE,
+                            android.net.Uri.parse("package:${app.packageName}")
+                        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                        context.startActivity(intent)
+                    } catch (_: Exception) {
+                        IslandToasts.show("无法卸载")
+                    }
+                    onDismiss()
+                }
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Delete,
+                contentDescription = null,
+                tint = Color(0xFFD16A6A),
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = "卸载",
+                fontSize = 14.sp,
+                color = Color(0xFFD16A6A)
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
     }
 }

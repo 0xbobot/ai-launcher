@@ -27,6 +27,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.animateContentSize
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -673,13 +675,24 @@ fun AppCenterContent(
                         }
                     } else {
                         items(results, key = { "s:${it.packageName}" }) { app ->
-                            // v0.40.0：每行自带弹窗锚点——长按弹出真菜单（与 Dock 同一套），
-                            // 位置跟图标走：行在上面时菜单弹到下方（DropdownMenu 自动翻转）
-                            // v0.41.7：行级 padding（列表不再统一 padding）
-                            Box(
+                            // v0.68.53（Bob）：生长式——长按行直接在下方展开快捷卡，
+                            // 同一张圆角卡（20.dp），不重复图标标题，像从行里长出来
+                            val isPopupExpanded = popupApp?.packageName == app.packageName
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 72.dp, end = 64.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(
+                                        if (isPopupExpanded) AILauncherColors.Card
+                                        else Color.Transparent
+                                    )
+                                    .animateContentSize(
+                                        animationSpec = tween(
+                                            durationMillis = com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                                            easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                                        )
+                                    )
                             ) {
                                 AppRow(
                                     app = app,
@@ -709,11 +722,22 @@ fun AppCenterContent(
                                         }
                                     }
                                 )
-                                AppPopupMenu(
-                                    app = app,
-                                    expanded = popupApp?.packageName == app.packageName,
-                                    onDismiss = { popupApp = null }
-                                )
+                                AnimatedVisibility(
+                                    visible = isPopupExpanded,
+                                    enter = expandVertically(
+                                        animationSpec = tween(
+                                            durationMillis = com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                                            easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                                        )
+                                    ) + fadeIn(),
+                                    exit = shrinkVertically() +
+                                        fadeOut()
+                                ) {
+                                    AppShortcutInline(
+                                        app = app,
+                                        onDismiss = { popupApp = null }
+                                    )
+                                }
                             }
                         }
                     }
@@ -754,10 +778,17 @@ fun AppCenterContent(
                                     .padding(start = 20.dp)
                                     .size(36.dp)
                             )
-                            Box(
+                            // v0.68.53（Bob）：生长式
+                            val isPopupExpandedX = popupApp?.packageName == app.packageName
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 72.dp, end = 64.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(
+                                        if (isPopupExpandedX) AILauncherColors.Card
+                                        else Color.Transparent
+                                    )
                             ) {
                             AppRow(
                                 app = app,
@@ -786,11 +817,18 @@ fun AppCenterContent(
                                     }
                                 }
                             )
-                            AppPopupMenu(
-                                app = app,
-                                expanded = popupApp?.packageName == app.packageName,
-                                onDismiss = { popupApp = null }
-                            )
+                            AnimatedVisibility(
+                                visible = isPopupExpandedX,
+                                enter = expandVertically() +
+                                    fadeIn(),
+                                exit = shrinkVertically() +
+                                    fadeOut()
+                            ) {
+                                AppShortcutInline(
+                                    app = app,
+                                    onDismiss = { popupApp = null }
+                                )
+                            }
                             }
                             // v0.41.34（Bob）：拖动手柄——简洁三横线，Hint 色 18dp，无背景；
                             // 按住上下拖动排序，松手保存（不再去设置里调）
@@ -872,10 +910,17 @@ fun AppCenterContent(
                                         .padding(start = 20.dp)
                                 )
                             }
-                            Box(
+                            // v0.68.53（Bob）：生长式
+                            val isPopupExpandedX = popupApp?.packageName == app.packageName
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 72.dp, end = 64.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(
+                                        if (isPopupExpandedX) AILauncherColors.Card
+                                        else Color.Transparent
+                                    )
                             ) {
                             AppRow(
                                 app = app,
@@ -893,11 +938,18 @@ fun AppCenterContent(
                                         else expandedActionsPkg
                                 }
                             )
-                            AppPopupMenu(
-                                app = app,
-                                expanded = popupApp?.packageName == app.packageName,
-                                onDismiss = { popupApp = null }
-                            )
+                            AnimatedVisibility(
+                                visible = isPopupExpandedX,
+                                enter = expandVertically() +
+                                    fadeIn(),
+                                exit = shrinkVertically() +
+                                    fadeOut()
+                            ) {
+                                AppShortcutInline(
+                                    app = app,
+                                    onDismiss = { popupApp = null }
+                                )
+                            }
                         }
                         }
                     }
@@ -969,10 +1021,17 @@ fun AppCenterContent(
                                         .padding(start = 20.dp)
                                         .size(36.dp)
                                 )
-                                Box(
+                                // v0.68.53（Bob）：生长式
+                                val isPopupExpandedX = popupApp?.packageName == app.packageName
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(start = 72.dp, end = 64.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(
+                                            if (isPopupExpandedX) AILauncherColors.Card
+                                            else Color.Transparent
+                                        )
                                 ) {
                                 AppRow(
                                     app = app,
@@ -1003,11 +1062,18 @@ fun AppCenterContent(
                                         }
                                     }
                                 )
-                                AppPopupMenu(
-                                    app = app,
-                                    expanded = popupApp?.packageName == app.packageName,
-                                    onDismiss = { popupApp = null }
-                                )
+                                AnimatedVisibility(
+                                    visible = isPopupExpandedX,
+                                    enter = expandVertically() +
+                                        fadeIn(),
+                                    exit = shrinkVertically() +
+                                        fadeOut()
+                                ) {
+                                    AppShortcutInline(
+                                        app = app,
+                                        onDismiss = { popupApp = null }
+                                    )
+                                }
                                 }
                             }
                         }
