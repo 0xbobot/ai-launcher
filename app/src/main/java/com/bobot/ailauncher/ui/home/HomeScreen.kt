@@ -116,13 +116,6 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(blindFanState) {
         onBlindSelectingChange(blindFanState)
     }
-    val isDismissing = blindUi is BlindUiState.Dismissing
-    androidx.compose.runtime.LaunchedEffect(isDismissing) {
-        if (isDismissing) {
-            delay(160)
-            blindCtl.onDismissFinished()
-        }
-    }
     // v0.68.17：右边缘系统手势豁免宽度（仅用于 setSystemGestureExclusionRects，
     // 盲操触发已改为"任何左滑"，不再依赖边缘区）
     val blindEdgePx = with(density) { 48.dp.toPx() }
@@ -136,6 +129,14 @@ fun HomeScreen(
         )
     }
     // v0.68.0：右边缘系统手势豁免（响应 cleanHome 变化）
+    // v0.68.42：收起动画 160ms 后通知 controller 收尾（动画本身 120ms，留余量）
+    val isDismissing = blindUi is BlindUiState.Dismissing
+    androidx.compose.runtime.LaunchedEffect(isDismissing) {
+        if (isDismissing) {
+            delay(160)
+            blindCtl.onDismissFinished()
+        }
+    }
     var homeSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     androidx.compose.runtime.LaunchedEffect(cleanHome, homeSize) {
         // 干净桌面时豁免右边缘系统手势（桌面上系统返回是空操作）；
