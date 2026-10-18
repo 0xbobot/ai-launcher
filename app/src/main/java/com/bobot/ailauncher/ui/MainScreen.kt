@@ -73,6 +73,9 @@ fun MainScreen() {
     var dockState by remember {
         mutableStateOf(if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1)
     }
+    // v0.68.50：深色模式——系统主题 → 全局颜色 State
+    AILauncherColors.isDark = androidx.compose.foundation.isSystemInDarkTheme()
+
     // v0.26.6：返回键处理——D3（应用中心）返回主页，首页不做事
     // 用 BackHandler 拦截，避免系统默认行为导致页面刷新/重建
     // v0.68.51（Bob）：只在 home 路由启用——设置页用系统默认返回（popBackStack）

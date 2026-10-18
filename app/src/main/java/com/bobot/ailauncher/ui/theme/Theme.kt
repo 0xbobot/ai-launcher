@@ -5,6 +5,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
@@ -16,33 +19,25 @@ import androidx.compose.ui.unit.dp
  * 深色中文排版 / sparkle AI 点缀
  */
 object AILauncherColors {
-    // v0.68.50：深色自适应——所有颜色按系统深色模式切换
-    val Background: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFF1A1815) else Color(0xFFF4F2EE)
-    val Card: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFF2A2723) else Color(0xFFFFFFFF)
-    val Title: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFF4F2EE) else Color(0xFF1F1D1A)
-    val Body: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFB8B2A8) else Color(0xFF5C5852)
-    val Hint: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFF6B6560) else Color(0xFFA8A29A)
+    // v0.68.50：深色自适应——MainScreen 按系统主题设置，全局 State 驱动重组
+    // 用 State 而非 @Composable getter：非 composable 上下文（MaterialTheme 等）也能编译
+    var isDark: Boolean by androidx.compose.runtime.mutableStateOf(false)
+
+    val Background: Color get() = if (isDark) Color(0xFF1A1815) else Color(0xFFF4F2EE)
+    val Card: Color get() = if (isDark) Color(0xFF2A2723) else Color(0xFFFFFFFF)
+    val Title: Color get() = if (isDark) Color(0xFFF4F2EE) else Color(0xFF1F1D1A)
+    val Body: Color get() = if (isDark) Color(0xFFB8B2A8) else Color(0xFF5C5852)
+    val Hint: Color get() = if (isDark) Color(0xFF6B6560) else Color(0xFFA8A29A)
     val Accent: Color = Color(0xFFC9A227)      // sparkle 金（深浅通用）
-    val AccentSoft: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFF3A3226) else Color(0xFFF6ECD4)
+    val AccentSoft: Color get() = if (isDark) Color(0xFF3A3226) else Color(0xFFF6ECD4)
     val Success: Color = Color(0xFF4C9A52)     // 成功绿（深浅通用）
-    val Divider: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFF3A362F) else Color(0xFFE8E2D9)
+    val Divider: Color get() = if (isDark) Color(0xFF3A362F) else Color(0xFFE8E2D9)
 
     // ---- 玻璃拟态（v0.11）：半透明底色 + 系统壁纸透出；API 31+ 叠加 Window 真实背景模糊 ----
-    val GlassCard: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0x8C1A1815) else Color(0x8CFFFFFF)
-    val GlassCardStrong: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xE01A1815) else Color(0xE0FFFFFF)
-    val GlassBorder: Color
-        @Composable get() = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0x801A1815) else Color(0x80FFFFFF)
-    val Grabber: Color
-        @Composable get() = (if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFF4F2EE) else Color(0xFF1F1D1A)).copy(alpha = 0.28f)
+    val GlassCard: Color get() = if (isDark) Color(0x8C1A1815) else Color(0x8CFFFFFF)
+    val GlassCardStrong: Color get() = if (isDark) Color(0xE01A1815) else Color(0xE0FFFFFF)
+    val GlassBorder: Color get() = if (isDark) Color(0x801A1815) else Color(0x80FFFFFF)
+    val Grabber: Color get() = (if (isDark) Color(0xFFF4F2EE) else Color(0xFF1F1D1A)).copy(alpha = 0.28f)
 }
 
 /**
@@ -56,10 +51,9 @@ data class CoverPalette(
     val divider: Color
 )
 
-@Composable
 fun coverPaletteFor(hour: Int): CoverPalette {
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
-    if (isDark) {
+    // v0.68.50：深色用 AILauncherColors.isDark（全局 State，MainScreen 设置）
+    if (AILauncherColors.isDark) {
         // 深色：暖黑底 + 米白字，时段只做轻微明暗变化
         return when (hour) {
             in 6..11 -> CoverPalette(
