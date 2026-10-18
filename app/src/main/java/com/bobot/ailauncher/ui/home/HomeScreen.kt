@@ -84,9 +84,6 @@ fun HomeScreen(
     onBlindSelectingChange: (BlindUiState) -> Unit = { },
     // v0.68.32：底部 Dock 区高度（dp），用于扇形圆心钳制
     blindDockZoneDp: Float = 0f,
-    // v0.68.64：把 controller 交给 MainScreen——退出编辑态时调 exitEditMode()
-    // 清钉住并同步状态（MainScreen 直接 Hidden 会导致 HomeScreen 副本残留）
-    onBlindController: (BlindCaptureController) -> Unit = {},
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -99,8 +96,7 @@ fun HomeScreen(
     // v0.68.39：诊断浮层已删除（v0.68.12 屏上诊断使命结束）
     // v0.68.6：盲操激活状态上报 MainScreen——选择中时压住右边缘字母快找区，
     // 避免长按（~400ms）与盲操 dwell（120ms）双重触发
-    // v0.68.62：编辑态也算激活（扇形钉住时 TODAY 保持淡出、边缘字母区保持压住）
-    val blindActive = blindUi is BlindUiState.Selecting || blindUi is BlindUiState.Editing
+    val blindActive = blindUi is BlindUiState.Selecting
     androidx.compose.runtime.LaunchedEffect(blindActive) {
         onBlindActiveChange(blindActive)
     }
@@ -131,14 +127,6 @@ fun HomeScreen(
             setUi = { blindUi = it },
             triggerPx = with(density) { 24.dp.toPx() },
         )
-    }
-    // v0.68.64：编辑钉住时手势层移交扇形自身（点×/＋/拖拽），controller 不再接管 down/move/up
-    androidx.compose.runtime.LaunchedEffect(blindUi) {
-        blindCtl.editPinned = blindUi is BlindUiState.Editing
-    }
-    // v0.68.64：上报 controller（MainScreen 退出编辑态时清钉住）
-    androidx.compose.runtime.LaunchedEffect(blindCtl) {
-        onBlindController(blindCtl)
     }
     // v0.68.0：右边缘系统手势豁免（响应 cleanHome 变化）
     // v0.68.42：收起动画 160ms 后通知 controller 收尾（动画本身 120ms，留余量）

@@ -157,15 +157,6 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * 宠物区：桌台（宠物本体/ding/思考点/sort-tag/carry）。
  * 放在首页顶栏下方。
  */
-// v0.68.62：点七仔打招呼轮替（快捷面板已砍，点七仔只陪伴+说话）
-private var petTapGreetIdx = 0
-private val petTapGreetings = listOf("在呢", "我在", "找我有事？", "今天想做什么？")
-private fun petTapGreeting(): String {
-    val s = petTapGreetings[petTapGreetIdx % petTapGreetings.size]
-    petTapGreetIdx++
-    return s
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PetZone(
@@ -355,7 +346,10 @@ fun PetZone(
     )
     // v0.50.0：Today 直接放首屏（不再用 Bottom Sheet）
     var speechVisible by remember { mutableStateOf(false) }
-    // v0.68.62：快捷面板已砍（Bob：连面板一起砍）——执行面只剩盲操扇形，管理进设置页
+    // v0.65.5：七仔装备——点七仔展开/收起环绕的快捷图标（无容器拟物化）
+    var showQuickPanel by remember { mutableStateOf(false) }
+    // v0.66.6：收起时先播反向摇摆动画，再真正移除（panelCollapsing 期间保持挂载）
+    var panelCollapsing by remember { mutableStateOf(false) }
     LaunchedEffect(speech?.id) {
         val s = speech
         if (s != null) {
@@ -433,12 +427,16 @@ fun PetZone(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
-                                        // v0.68.62：快捷面板已砍——点七仔只陪伴+说话
+                                        // 和原版一致：点七仔展开/收起快捷面板
                                         if (hasUpgrade) onUpgradeTap()
                                         else {
                                             jellyTick++
                                             PetRepository.setMoodHappyBrief()
-                                            PetRepository.say(petTapGreeting())
+                                            if (showQuickPanel && !panelCollapsing) {
+                                                panelCollapsing = true
+                                            } else if (!showQuickPanel) {
+                                                showQuickPanel = true
+                                            }
                                         }
                                     }
                                 )
@@ -454,7 +452,19 @@ fun PetZone(
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
-                        // v0.68.62：装备环已砍（Bob：连面板一起砍）——七仔旁保持干净
+                        // 装备环：220.dp 以七仔为中心，四周溢出 50.dp 环绕
+                        // 右上 pet，环左移 40.dp 让右腰装备不飞出屏幕
+                        if (showQuickPanel || panelCollapsing) {
+                            QizaiEquipment(
+                                modifier = Modifier.offset(x = (-40).dp),
+                                onLaunch = { if (!panelCollapsing) panelCollapsing = true },
+                                collapsing = panelCollapsing,
+                                onCollapseDone = {
+                                    panelCollapsing = false
+                                    showQuickPanel = false
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -565,8 +575,22 @@ fun PetZone(
             // v0.51.2：会议临近黄条已删（Capsule 已覆盖，避免重复）
             // v0.47.0：七仔说话气泡——统一信息区（Mii 风+游戏化），有话就弹出来
             // v0.64.5：编辑模式下点气泡退出编辑模式
-            // v0.68.62：快捷面板已砍——七仔说话气泡不再让位，直接显示
-            if (speech != null) {
+            // v0.65.5：七仔装备——拟物化快捷方式，无容器，图标像武器一样挂在七仔周围
+            // v0.65.2：快捷面板打开时优先显示，普通说话气泡让位
+            // v0.66.6：panelCollapsing 期间保持挂载，播完反向摇摆才移除
+            if (showQuickPanel || panelCollapsing) {
+                QizaiEquipment(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = petTop), // v0.66.8：随七仔，七仔在上 1/3 区域偏下
+                    onLaunch = { if (!panelCollapsing) panelCollapsing = true },
+                    collapsing = panelCollapsing,
+                    onCollapseDone = {
+                        panelCollapsing = false
+                        showQuickPanel = false
+                    }
+                )
+            } else if (speech != null) {
                 SpeechBubble(
                     text = speech!!.text,
                     visible = speechVisible,
@@ -632,12 +656,17 @@ fun PetZone(
                             // v0.50.0：Today 已在首屏，点按宠物只做果冻反馈
                             // 场景改由真实事件触发（天气/通知/日程）
                             // v0.56.0 M2：开心表情，不说话
-                            // v0.68.62：快捷面板已砍——点七仔只陪伴+说话
+                            // v0.65.5：点七仔展开/收起装备（环绕的快捷图标）
+                            // v0.66.6：收起时先播反向摇摆（panelCollapsing），播完才真正移除
                             if (hasUpgrade) onUpgradeTap()
                             else {
                                 jellyTick++
                                 PetRepository.setMoodHappyBrief()
-                                PetRepository.say(petTapGreeting())
+                                if (showQuickPanel && !panelCollapsing) {
+                                    panelCollapsing = true
+                                } else if (!showQuickPanel) {
+                                    showQuickPanel = true
+                                }
                             }
                         },
                         onLongClick = {
