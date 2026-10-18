@@ -1,7 +1,6 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -131,6 +130,7 @@ import kotlin.math.exp
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * 应用中心（v0.22，PRD 重设计方向）：D3 全屏单列表，只干一件事——最快找到应用。
@@ -430,7 +430,7 @@ fun AppCenterContent(
                 ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
             if (intent != null) context.startActivity(intent)
         } catch (_: Exception) {
-            Toast.makeText(context, "「${app.label}」暂不可用", Toast.LENGTH_SHORT).show()
+            IslandToasts.show("「${app.label}」暂不可用")
         }
     }
 
@@ -438,29 +438,29 @@ fun AppCenterContent(
     fun hideApp(app: AppInfo) {
         HiddenApps.hide(context, app.packageName)
         UiPrefs.flashRail("eye")
-        Toast.makeText(context, "已隐藏「${app.label}」", Toast.LENGTH_SHORT).show()
+        IslandToasts.show("已隐藏「${app.label}」")
     }
     // v0.41.18：从隐藏分组恢复显示
     fun unhideApp(app: AppInfo) {
         HiddenApps.unhide(context, app.packageName)
-        Toast.makeText(context, "「${app.label}」已恢复显示", Toast.LENGTH_SHORT).show()
+        IslandToasts.show("「${app.label}」已恢复显示")
     }
     // v0.41.18：解锁隐藏分组——触发面部/指纹，通过后展开
     fun unlockHiddenApps() {
         val activity = context as? FragmentActivity
         if (activity == null) {
-            Toast.makeText(context, "无法启动验证", Toast.LENGTH_SHORT).show()
+            IslandToasts.show("无法启动验证")
             return
         }
         if (!BiometricAuth.canAuthenticate(context)) {
-            Toast.makeText(context, "请先在系统设置中录入指纹或面容", Toast.LENGTH_LONG).show()
+            IslandToasts.show("请先在系统设置中录入指纹或面容")
             return
         }
         BiometricAuth.authenticate(
             activity = activity,
             onSuccess = { hiddenUnlocked = true },
             onFail = {
-                Toast.makeText(context, "验证未通过", Toast.LENGTH_SHORT).show()
+                IslandToasts.show("验证未通过")
             }
         )
     }

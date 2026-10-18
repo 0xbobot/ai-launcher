@@ -26,6 +26,7 @@ import com.bobot.ailauncher.ui.MainScreen
 import com.bobot.ailauncher.ui.onboarding.OnboardingNav
 import com.bobot.ailauncher.ui.theme.AILauncherTheme
 import kotlinx.coroutines.launch
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 class MainActivity : FragmentActivity() {
 
@@ -204,14 +205,10 @@ class MainActivity : FragmentActivity() {
                     // 简单起见，发一个本地事件让 MainScreen 显示
                     checkUpdateResult.value = info
                 } else {
-                    android.widget.Toast.makeText(
-                        this@MainActivity, "已是最新版本", android.widget.Toast.LENGTH_SHORT
-                    ).show()
+                    IslandToasts.show("已是最新版本")
                 }
             } catch (_: Exception) {
-                android.widget.Toast.makeText(
-                    this@MainActivity, "检查失败，请稍后重试", android.widget.Toast.LENGTH_SHORT
-                ).show()
+                IslandToasts.show("检查失败，请稍后重试")
             }
         }
     }

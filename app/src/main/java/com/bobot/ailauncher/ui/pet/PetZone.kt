@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.CallLog
 import android.view.HapticFeedbackConstants
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -152,6 +151,7 @@ import java.util.Calendar
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * 宠物区：桌台（宠物本体/ding/思考点/sort-tag/carry）。
@@ -1016,7 +1016,7 @@ private fun onPetAction(
     when (label) {
         "复制验证码" -> {
             clipboard.setText(AnnotatedString(item.text))
-            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+            IslandToasts.show("已复制")
         }
         "打开应用" -> {
             openAppForPet(context, item.packageName, item.appName)
@@ -1029,7 +1029,7 @@ private fun onPetAction(
 /** 打开应用（计入常用统计）；日程类没有包名则只 toast */
 private fun openAppForPet(context: Context, packageName: String, appName: String) {
     if (packageName.isBlank()) {
-        Toast.makeText(context, "「$appName」", Toast.LENGTH_SHORT).show()
+        IslandToasts.show("「$appName」")
         return
     }
     try {
@@ -1039,10 +1039,10 @@ private fun openAppForPet(context: Context, packageName: String, appName: String
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
         } else {
-            Toast.makeText(context, "无法打开「$appName」", Toast.LENGTH_SHORT).show()
+            IslandToasts.show("无法打开「$appName」")
         }
     } catch (_: Exception) {
-        Toast.makeText(context, "无法打开「$appName」", Toast.LENGTH_SHORT).show()
+        IslandToasts.show("无法打开「$appName」")
     }
 }
 

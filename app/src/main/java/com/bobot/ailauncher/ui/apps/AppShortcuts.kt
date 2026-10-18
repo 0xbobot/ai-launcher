@@ -6,7 +6,7 @@ import android.content.pm.LauncherApps
 import android.content.pm.ShortcutInfo
 import android.graphics.drawable.Drawable
 import android.os.Process
-import android.widget.Toast
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * v0.39.0：应用快捷方式公共 helpers。
@@ -55,7 +55,7 @@ internal fun launchAppShortcut(context: Context, packageName: String, shortcutId
         val lm = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
         lm.startShortcut(packageName, shortcutId, null, null, Process.myUserHandle())
     } catch (_: Exception) {
-        Toast.makeText(context, "无法启动快捷方式", Toast.LENGTH_SHORT).show()
+        IslandToasts.show("无法启动快捷方式")
     }
 }
 
@@ -68,6 +68,6 @@ internal fun openAppDetailsPage(context: Context, packageName: String) {
         ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
         context.startActivity(intent)
     } catch (_: Exception) {
-        Toast.makeText(context, "无法打开应用信息", Toast.LENGTH_SHORT).show()
+        IslandToasts.show("无法打开应用信息")
     }
 }

@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -57,6 +56,7 @@ import com.bobot.ailauncher.ui.home.BlindUiState
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * v0.14 导航：单页桌面（能力页已移除，左滑/右滑只剩卡片手势语义：左=多/右=少）。
@@ -200,7 +200,7 @@ private fun HomeHost(
     // v0.15 宠物整理员：toast 事件 → 系统 Toast
     LaunchedEffect(Unit) {
         PetRepository.toast.collect { msg ->
-            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            IslandToasts.show(msg)
         }
     }
     // v0.68.6：盲操激活中（上报自 HomeScreen）——选择中时压住右边缘字母快找区，
@@ -445,5 +445,7 @@ private fun HomeHost(
             )
             BlindUiState.Hidden -> { }
         }
+        // v0.68.48（Bob）：灵动岛 Toast 宿主——最顶层，黑胶囊置顶
+        com.bobot.ailauncher.ui.island.IslandToastHost()
     }
 }

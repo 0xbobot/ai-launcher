@@ -1,7 +1,6 @@
 package com.bobot.ailauncher.ui.settings
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -65,6 +64,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * 设置页（v0.57.0 重构）：
@@ -237,7 +237,7 @@ fun SettingsScreen(
                                 if (testing) return@Button
                                 persist()
                                 if (apiKey.isBlank()) {
-                                    Toast.makeText(context, "请先填写大模型 Key", Toast.LENGTH_SHORT).show()
+                                    IslandToasts.show("请先填写大模型 Key")
                                     return@Button
                                 }
                                 testing = true
@@ -248,11 +248,7 @@ fun SettingsScreen(
                                         model.ifBlank { LlmConfig.DEFAULT_MODEL }
                                     )
                                     testing = false
-                                    Toast.makeText(
-                                        context,
-                                        err ?: "连接成功，七仔变聪明了",
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                    IslandToasts.show(err ?: "连接成功，七仔变聪明了")
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -288,7 +284,7 @@ fun SettingsScreen(
                                 OtaUpdater.markInstallPrompted(context)
                             }
                         } else {
-                            Toast.makeText(context, "安装包不完整，重新下载", Toast.LENGTH_SHORT).show()
+                            IslandToasts.show("安装包不完整，重新下载")
                             OtaDownloader.resetIfNotDownloading()
                             updateInfo?.let { OtaDownloader.start(context, it) }
                         }
@@ -305,9 +301,7 @@ fun SettingsScreen(
                                             updateInfo = r.info
                                             OtaDownloader.start(context, r.info)
                                         }
-                                        else -> Toast.makeText(
-                                            context, "检查失败，请稍后再试", Toast.LENGTH_SHORT
-                                        ).show()
+                                        else -> IslandToasts.show("检查失败，请稍后再试")
                                     }
                                     checking = false
                                 }
@@ -324,9 +318,9 @@ fun SettingsScreen(
                             when (val r = OtaUpdater.checkForUpdateResult(context)) {
                                 is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
                                 OtaCheckResult.UpToDate ->
-                                    Toast.makeText(context, "已经是最新版本了", Toast.LENGTH_SHORT).show()
+                                    IslandToasts.show("已经是最新版本了")
                                 OtaCheckResult.Failed ->
-                                    Toast.makeText(context, "检查失败，请稍后再试", Toast.LENGTH_SHORT).show()
+                                    IslandToasts.show("检查失败，请稍后再试")
                             }
                             checking = false
                         }
@@ -398,7 +392,7 @@ fun SettingsScreen(
                                                 ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                                                 context.startActivity(intent)
                                             } catch (_: Exception) {
-                                                Toast.makeText(context, "无法打开浏览器", Toast.LENGTH_SHORT).show()
+                                                IslandToasts.show("无法打开浏览器")
                                             }
                                         },
                                         contentPadding = PaddingValues(0.dp)

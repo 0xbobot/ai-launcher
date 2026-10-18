@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.Settings
-import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.util.rebindListener
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /** 检测本应用是否已被设为默认桌面 */
 fun isDefaultLauncher(context: Context): Boolean {
@@ -187,7 +187,7 @@ private fun StepDefaultLauncher(onNext: () -> Unit, onSkip: () -> Unit) {
             if (isDefaultLauncher(context)) {
                 onNext()
             } else {
-                Toast.makeText(context, "还没检测到，请先在设置中完成", Toast.LENGTH_SHORT).show()
+                IslandToasts.show("还没检测到，请先在设置中完成")
             }
         }) {
             Text("下一步", color = AILauncherColors.Title)
@@ -240,7 +240,7 @@ private fun StepNotificationAccess(onNext: () -> Unit, onSkip: () -> Unit) {
                 rebindListener(context)
                 onNext()
             } else {
-                Toast.makeText(context, "还没检测到，请先在设置中开启", Toast.LENGTH_SHORT).show()
+                IslandToasts.show("还没检测到，请先在设置中开启")
             }
         }) {
             Text("下一步", color = AILauncherColors.Title)

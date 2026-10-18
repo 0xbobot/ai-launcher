@@ -1,7 +1,6 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
@@ -33,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * v0.39.0：Dock 长按 → 真弹窗快捷菜单（Material3 DropdownMenu）。
@@ -169,7 +169,7 @@ fun AppPopupMenu(
                     ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                     context.startActivity(intent)
                 } catch (_: Exception) {
-                    Toast.makeText(context, "无法卸载", Toast.LENGTH_SHORT).show()
+                    IslandToasts.show("无法卸载")
                 }
                 onDismiss()
             },

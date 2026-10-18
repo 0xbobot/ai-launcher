@@ -2,7 +2,6 @@ package com.bobot.ailauncher.ui.apps
 
 import android.content.Context
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
@@ -63,6 +62,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * 上拉 Dock（v0.14：手势签名纠正为「左滑=多，右滑=少」，横线手柄彻底去掉）。
@@ -129,9 +129,9 @@ fun PullUpDock(
                 .getLaunchIntentForPackage(app.packageName)
                 ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
             if (intent != null) context.startActivity(intent)
-            else Toast.makeText(context, "无法打开「${app.label}」", Toast.LENGTH_SHORT).show()
+            else IslandToasts.show("无法打开「${app.label}」")
         } catch (_: Exception) {
-            Toast.makeText(context, "无法打开「${app.label}」", Toast.LENGTH_SHORT).show()
+            IslandToasts.show("无法打开「${app.label}」")
         }
     }
 

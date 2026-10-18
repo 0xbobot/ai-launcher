@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.ui.apps
 
-import android.widget.Toast
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -65,6 +64,7 @@ import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * 应用行（从已删除的 AllAppsScreen.kt 迁移，v0.22 分类取消后去掉"移到分组"）。
@@ -101,16 +101,16 @@ internal fun AppRow(
         if (app.packageName in cur) {
             cur.remove(app.packageName)
             UiPrefs.setDockPinned(context, cur)
-            Toast.makeText(context, "已从 Dock 移出", Toast.LENGTH_SHORT).show()
+            IslandToasts.show("已从 Dock 移出")
         } else {
             if (cur.size >= 10) {
-                Toast.makeText(context, "Dock 最多置顶 10 个", Toast.LENGTH_SHORT).show()
+                IslandToasts.show("Dock 最多置顶 10 个")
                 return
             }
             cur.add(app.packageName)
             UiPrefs.setDockPinned(context, cur)
             UiPrefs.flashRail("star")
-            Toast.makeText(context, "已加到 Dock", Toast.LENGTH_SHORT).show()
+            IslandToasts.show("已加到 Dock")
         }
     }
 

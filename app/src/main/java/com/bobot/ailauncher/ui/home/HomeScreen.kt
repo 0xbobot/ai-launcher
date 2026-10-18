@@ -4,7 +4,6 @@ import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
 import android.provider.Settings
-import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -55,6 +54,7 @@ import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.util.rebindListener
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * v0.27.0：重建的极简主页——只留宠物。
@@ -184,7 +184,7 @@ fun HomeScreen(
             val now = System.currentTimeMillis()
             if (now - hintShownAt.value > 2000) {
                 hintShownAt.value = now
-                Toast.makeText(context, "请在无障碍设置中开启 AI 桌面，以使用下滑手势", Toast.LENGTH_LONG).show()
+                IslandToasts.show("请在无障碍设置中开启 AI 桌面，以使用下滑手势")
                 goAccessibilitySettings()
             }
         }

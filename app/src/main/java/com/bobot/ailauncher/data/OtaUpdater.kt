@@ -8,7 +8,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
-import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.bobot.ailauncher.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +19,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 /** OTA 版本信息（来自 https://bobot.is-a.dev/ai-launcher/update.json） */
 data class OtaInfo(
@@ -240,7 +240,7 @@ object OtaUpdater {
      */
     fun promptInstall(context: Context, apkFile: File): Boolean {
         if (!context.packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(context, "请允许安装未知应用，开完回来会自动弹出安装", Toast.LENGTH_LONG).show()
+            IslandToasts.show("请允许安装未知应用，开完回来会自动弹出安装")
             val intent = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:${context.packageName}")
