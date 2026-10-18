@@ -255,35 +255,15 @@ fun PullUpDock(
                         },
                         label = "dockContent"
                     ) { s ->
-                        // v0.68.44（Bob）：杂志页脚式 Dock 刊头——发丝线 + "常用" + "上滑展开"
-                        // 人体工学：刊头纯展示，图标 56dp 触摸目标不变，上滑手势不变
-                        // 注意：AnimatedContent 内多子项会重叠，必须包一层 Column 纵排
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                        // v0.68.57（Bob）：去线去字——Dock 只要圆角卡 + 图标，
+                        // 不要分隔线、"常用"、"上滑展开/下滑收起"提示
                         Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(AILauncherColors.GlassCard)
+                                .padding(vertical = 16.dp)
                         ) {
-                            HorizontalDivider(
-                                color = AILauncherColors.Divider,
-                                thickness = 1.dp,
-                                modifier = Modifier.padding(horizontal = 28.dp)
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 28.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                TrackedFooterText(text = "常用", color = AILauncherColors.Accent)
-                                Text(
-                                    text = if (s == DockState.D2) "下滑收起" else "上滑展开",
-                                    fontSize = 11.sp,
-                                    letterSpacing = 2.sp,
-                                    color = AILauncherColors.Title.copy(alpha = 0.4f)
-                                )
-                            }
-                        }
                         if (s == DockState.D2) {
                             DockGrid10(
                                 apps = top10,
