@@ -46,10 +46,17 @@ fun CoverHero(
     petSlot: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    when (coverTemplateFor()) {
-        CoverTemplate.HEADLINE -> CoverHeroHeadline(summary, weatherDesc, palette, petSlot, modifier)
-        CoverTemplate.MINIMAL -> CoverHeroMinimal(summary, weatherDesc, palette, petSlot, modifier)
-        CoverTemplate.GIANT_TIME -> CoverHeroGiantTime(summary, weatherDesc, palette, petSlot, modifier)
+    // v0.68.60（Bob）：横屏优先——统一紧凑横排，不跟 Dock 抢竖向空间
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
+        if (maxWidth > maxHeight) {
+            CoverHeroLandscape(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
+        } else {
+            when (coverTemplateFor()) {
+                CoverTemplate.HEADLINE -> CoverHeroHeadline(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
+                CoverTemplate.MINIMAL -> CoverHeroMinimal(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
+                CoverTemplate.GIANT_TIME -> CoverHeroGiantTime(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
+            }
+        }
     }
 }
 
@@ -396,6 +403,75 @@ fun CoverHeroMinimal(
                 color = palette.title.copy(alpha = 0.6f))
             Spacer(modifier = Modifier.height(32.dp))
             // 七仔居中
+            petSlot()
+        }
+    }
+}
+
+/**
+ * v0.68.60（Bob）：横屏统一紧凑布局——横排，不跟 Dock 抢竖向空间。
+ * 左：日期刊头 + 时间（64.sp）+ 标题 + 天气；右：七仔。
+ */
+@Composable
+fun CoverHeroLandscape(
+    summary: String,
+    weatherDesc: String,
+    palette: CoverPalette,
+    petSlot: @Composable () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var timeText by remember { mutableStateOf(currentTimeText()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            delay(60_000L - (now % 60_000L) + 200L)
+            timeText = currentTimeText()
+        }
+    }
+    val dateText = remember { currentDateText() }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 32.dp, start = 28.dp, end = 28.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            TrackedText(
+                text = dateText,
+                fontSize = 12.sp,
+                tracking = 4.dp,
+                color = palette.title.copy(alpha = 0.45f)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val parts = timeText.split(":")
+                Text(
+                    text = "${parts.getOrElse(0) { "--" }}:${parts.getOrElse(1) { "--" }}",
+                    fontSize = 64.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-2).sp,
+                    color = palette.title,
+                    lineHeight = 64.sp
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = summary,
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = palette.title,
+                    maxLines = 2
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = weatherDesc,
+                fontSize = 14.sp,
+                color = palette.title.copy(alpha = 0.6f)
+            )
+        }
+        Box(modifier = Modifier.padding(start = 24.dp)) {
             petSlot()
         }
     }
