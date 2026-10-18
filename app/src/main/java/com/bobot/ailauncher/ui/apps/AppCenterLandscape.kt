@@ -14,14 +14,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
@@ -43,9 +47,11 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
 
 /**
- * v0.68.64（Bob）：横屏应用中心 v2——平滑滚动版。
- * 左 A-Z 索引，点字母平滑滚动到分组（animateScrollToItem），不替换内容。
- * 右 3 列网格，组头跨列。
+ * v0.68.65（Bob）：横屏应用中心 v3——按 Bob 想法重做。
+ * - 左：A-Z 全高字母数列（占满高度，无顶栏分割）
+ * - 顶：紧凑搜索（居中 480dp，不占满宽）+ INDEX·款数
+ * - 主：横向滑动，每字母一列（240dp），列内应用纵排，列可独立纵滚
+ * - 点字母 → 横向平滑滚动到对应列
  */
 @Composable
 fun AppCenterLandscape(
@@ -57,54 +63,32 @@ fun AppCenterLandscape(
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    val gridState = rememberLazyGridState()
-
-    // 构建扁平列表：[(header, letter), (app, app), ...]，记录每个字母的起始 index
-    val flatItems = remember(azGroups) {
-        val list = mutableListOf<GridItem>()
-        azGroups.forEach { (letter, apps) ->
-            list.add(GridItem.Header(letter))
-            apps.forEach { app -> list.add(GridItem.App(app)) }
-        }
-        list
-    }
-    val letterToIndex = remember(flatItems) {
-        val map = mutableMapOf<Char, Int>()
-        flatItems.forEachIndexed { idx, item ->
-            if (item is GridItem.Header && !map.containsKey(item.letter)) {
-                map[item.letter] = idx
-            }
-        }
-        map
-    }
-
+    val rowState = rememberLazyListState()
     var selectedLetter by remember { mutableStateOf<Char?>(null) }
 
+    // 字母 → LazyRow item index
+    val letterToIndex = remember(azGroups) {
+        azGroups.mapIndexed { idx, (letter, _) -> letter to idx }.toMap()
+    }
+
     Row(modifier = modifier.fillMaxSize()) {
-        // 左：A-Z 索引
+        // 左：A-Z 全高数列
         Column(
             modifier = Modifier
-                .width(96.dp)
+                .width(80.dp)
                 .fillMaxHeight()
+                .background(AILauncherColors.Background)
                 .verticalScroll(rememberScrollState())
-                .padding(vertical = 16.dp),
+                .padding(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Text(
-                text = "INDEX",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp,
-                color = AILauncherColors.Accent,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
             letters.forEach { letter ->
                 val isSel = letter == selectedLetter
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .clip(CircleShape)
                         .background(
                             if (isSel) AILauncherColors.Accent.copy(alpha = 0.18f)
                             else Color.Transparent
@@ -112,9 +96,7 @@ fun AppCenterLandscape(
                         .clickable {
                             selectedLetter = letter
                             letterToIndex[letter]?.let { idx ->
-                                scope.launch {
-                                    gridState.animateScrollToItem(idx)
-                                }
+                                scope.launch { rowState.animateScrollToItem(idx) }
                             }
                         },
                     contentAlignment = Alignment.Center
@@ -128,25 +110,27 @@ fun AppCenterLandscape(
                 }
             }
         }
+        // 分隔线
         Box(
             modifier = Modifier
                 .fillMaxHeight()
                 .width(1.dp)
                 .background(AILauncherColors.Divider)
         )
-        // 右：3 列网格
+        // 右：内容区
         Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            // 紧凑顶栏：标题 + 居中搜索（不占满宽）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 10.dp),
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "INDEX · 全部应用",
-                    fontSize = 14.sp,
+                    text = "INDEX",
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
+                    letterSpacing = 3.sp,
                     color = AILauncherColors.Accent
                 )
                 Spacer(modifier = Modifier.width(10.dp))
@@ -155,68 +139,91 @@ fun AppCenterLandscape(
                     fontSize = 12.sp,
                     color = AILauncherColors.Hint
                 )
+                Spacer(modifier = Modifier.weight(1f))
+                // 紧凑搜索框（480dp，不占满）
+                Row(
+                    modifier = Modifier
+                        .width(480.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color.White.copy(alpha = 0.7f))
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = AILauncherColors.Hint,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "搜索应用",
+                        fontSize = 14.sp,
+                        color = AILauncherColors.Hint
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
             }
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                state = gridState,
+            // 横向字母列
+            LazyRow(
+                state = rowState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 items(
-                    count = flatItems.size,
-                    key = { idx ->
-                        when (val it = flatItems[idx]) {
-                            is GridItem.Header -> "h:${it.letter}"
-                            is GridItem.App -> "a:${it.app.packageName}"
-                        }
-                    },
-                    span = { idx ->
-                        if (flatItems[idx] is GridItem.Header) GridItemSpan(maxLineSpan)
-                        else GridItemSpan(1)
-                    }
+                    count = azGroups.size,
+                    key = { idx -> "col:${azGroups[idx].first}" }
                 ) { idx ->
-                    when (val item = flatItems[idx]) {
-                        is GridItem.Header -> {
-                            Text(
-                                text = item.letter.toString(),
-                                fontFamily = FontFamily.Serif,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = AILauncherColors.Title.copy(alpha = 0.35f),
-                                modifier = Modifier.padding(
-                                    start = 12.dp, top = 12.dp, bottom = 4.dp
-                                )
+                    val (letter, apps) = azGroups[idx]
+                    // 每字母一列（240dp宽），列内可纵滚
+                    Column(
+                        modifier = Modifier
+                            .width(240.dp)
+                            .fillMaxHeight()
+                    ) {
+                        Text(
+                            text = letter.toString(),
+                            fontFamily = FontFamily.Serif,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AILauncherColors.Title.copy(alpha = 0.4f),
+                            modifier = Modifier.padding(
+                                start = 8.dp, bottom = 8.dp
                             )
-                        }
-                        is GridItem.App -> {
-                            val app = item.app
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .clickable { onLaunch(app) }
-                                    .padding(10.dp)
-                            ) {
-                                AppIconImage(
-                                    drawable = app.icon,
-                                    contentDescription = null,
+                        )
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(apps, key = { it.packageName }) { app ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(RoundedCornerShape(11.dp))
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = app.label.toString(),
-                                    fontSize = 14.sp,
-                                    color = AILauncherColors.Title,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { onLaunch(app) }
+                                        .padding(8.dp)
+                                ) {
+                                    AppIconImage(
+                                        drawable = app.icon,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = app.label.toString(),
+                                        fontSize = 14.sp,
+                                        color = AILauncherColors.Title,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
                         }
                     }
@@ -225,9 +232,4 @@ fun AppCenterLandscape(
             Spacer(modifier = Modifier.height(12.dp))
         }
     }
-}
-
-private sealed interface GridItem {
-    data class Header(val letter: Char) : GridItem
-    data class App(val app: AppInfo) : GridItem
 }
