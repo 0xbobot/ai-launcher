@@ -945,8 +945,11 @@ fun BlindCaptureFan(
         // v0.68.20：图标 + 文字 overlay（Compose 排版）
         // v0.68.40：标签外移到外圈约 100dp（效果图确认，手指盖不住）；圆心不动；
         // v0.68.41：14sp（拍照 15sp 加粗）；标签径向旋转——文字方向跟扇形同角度，
-        // α = centerAngle − θ_mid（左扇 180°/右扇 0°），绕标签自身中心旋转，
-        // α 天然落在 ±90° 内，文字永远不会倒过来；选中指示器图标不旋转
+        // α = midDeg − centerAngle（左扇 180°/右扇 0°，Canvas 角度制 y 向下），
+        // 绕标签自身中心旋转，α 天然落在 ±90° 内，文字永远不会倒过来；
+        // v0.68.43 根因修复：之前写成 centerAngle − midDeg 符号反了，
+        // 每段标签都以镜像方向倾斜（bobot 该 ＼ 被画成 ／），看着像没生效；
+        // 选中指示器图标不旋转
         val rLabelPx = with(density) { FAN_LABEL_R_DP.dp.toPx() }
         val centerDeg = if (direction == FanDirection.LEFT) 180f else 0f
         segments.forEachIndexed { i, seg ->
@@ -994,7 +997,7 @@ fun BlindCaptureFan(
                         .graphicsLayer {
                             scaleX = pop
                             scaleY = pop
-                            rotationZ = centerDeg - midDeg
+                            rotationZ = midDeg - centerDeg
                             alpha = fanAlpha * (1f - dismissT) *
                                 (if (selected) 1f else 0.6f)
                         }
