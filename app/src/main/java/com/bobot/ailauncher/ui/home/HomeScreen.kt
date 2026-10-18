@@ -317,7 +317,7 @@ private fun PanelPermissionGuide(
     ) {
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
             modifier = Modifier
                 .padding(horizontal = 36.dp)
                 .clickable(enabled = false, onClick = {})
