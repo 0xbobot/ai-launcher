@@ -218,7 +218,21 @@ private fun HomeHost(
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // v0.32.0：全透明——去掉渐隐罩，壁纸直接透出（Bob）
+        // v0.68.50（Bob）：罩纱——暖纸渐变罩在系统壁纸上，调和壁纸与 UI 色调
+        // 顶部 75% 不透明（hero 文字可读），底部 45%（透出壁纸氛围）
+        // v0.32.0 的"全透明"作废：杂志风需要纸面统一
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            com.bobot.ailauncher.ui.theme.AILauncherColors.Background.copy(alpha = 0.75f),
+                            com.bobot.ailauncher.ui.theme.AILauncherColors.Background.copy(alpha = 0.45f)
+                        )
+                    )
+                )
+        )
         // 单页桌面：只有首页；v0.16 首页上滑直达 D3，不再经 D1
         // v0.31.0：首屏只留 Dock（Bob）
         // v0.68.6：cleanHome 传入 HomeScreen——D3 应用中心打开时取消右边缘

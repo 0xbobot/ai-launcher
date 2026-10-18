@@ -43,6 +43,16 @@ fun CoverHero(
     petSlot: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // v0.68.50：响应式——按屏宽缩放，基准 400.dp，小屏不溢出
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 56.dp, start = 28.dp, end = 16.dp)
+    ) {
+        val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
+        val timeSize = (104 * scale).sp
+        val titleSize = (44 * scale).sp
+        val petTopPad = (190 * scale).dp
     // v0.68.34： live 时间，每分钟整点刷新（轻量协程，无轮询浪费）
     var timeText by remember { mutableStateOf(currentTimeText()) }
     LaunchedEffect(Unit) {
@@ -55,84 +65,139 @@ fun CoverHero(
     val dateText = remember { currentDateText() }
     val daypartLine = remember { daypartLine() }
 
+    // v0.68.50：入场动画——kicker 先现，时间上滑，标题 stagger 80ms
+    var entered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(50)
+        entered = true
+    }
+    val mt = com.bobot.ailauncher.ui.theme.MotionTokens
+
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 56.dp, start = 28.dp, end = 16.dp)
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // 刊头日期
-            TrackedText(
-                text = dateText,
-                fontSize = 12.sp,
-                tracking = 4.dp,
-                color = palette.title.copy(alpha = 0.45f)
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            // 金线
-            Box(
-                modifier = Modifier
-                    .width(44.dp)
-                    .height(3.dp)
-                    .background(AILauncherColors.Accent)
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            // 巨型时间（冒号金色点睛）
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val parts = timeText.split(":")
-                Text(
-                    text = parts.getOrElse(0) { "--" },
-                    fontSize = 104.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-4).sp,
-                    color = palette.title,
-                    lineHeight = 104.sp
+            androidx.compose.animation.AnimatedVisibility(
+                visible = entered,
+                enter = androidx.compose.animation.fadeIn(
+                    animationSpec = androidx.compose.animation.core.tween(mt.Fast, easing = mt.Easing)
                 )
-                Text(
-                    text = ":",
-                    fontSize = 104.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AILauncherColors.Accent,
-                    lineHeight = 104.sp
-                )
-                Text(
-                    text = parts.getOrElse(1) { "--" },
-                    fontSize = 104.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-4).sp,
-                    color = palette.title,
-                    lineHeight = 104.sp
+            ) {
+                TrackedText(
+                    text = dateText,
+                    fontSize = 12.sp,
+                    tracking = 4.dp,
+                    color = palette.title.copy(alpha = 0.45f)
                 )
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            // 金线
+            androidx.compose.animation.AnimatedVisibility(
+                visible = entered,
+                enter = androidx.compose.animation.fadeIn(
+                    animationSpec = androidx.compose.animation.core.tween(mt.Fast, easing = mt.Easing)
+                ) + androidx.compose.animation.expandHorizontally(
+                    animationSpec = androidx.compose.animation.core.tween(mt.Medium, easing = mt.Easing)
+                )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(44.dp)
+                        .height(3.dp)
+                        .background(AILauncherColors.Accent)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            // 巨型时间（冒号金色点睛）——上滑入场
+            androidx.compose.animation.AnimatedVisibility(
+                visible = entered,
+                enter = androidx.compose.animation.slideInVertically(
+                    animationSpec = androidx.compose.animation.core.tween(mt.Slow, easing = mt.Easing)
+                ) { it / 3 } + androidx.compose.animation.fadeIn(
+                    animationSpec = androidx.compose.animation.core.tween(mt.Slow, easing = mt.Easing)
+                )
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val parts = timeText.split(":")
+                    Text(
+                        text = parts.getOrElse(0) { "--" },
+                        fontSize = timeSize,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-4).sp,
+                        color = palette.title,
+                        lineHeight = timeSize
+                    )
+                    Text(
+                        text = ":",
+                        fontSize = timeSize,
+                        fontWeight = FontWeight.Bold,
+                        color = AILauncherColors.Accent,
+                        lineHeight = timeSize
+                    )
+                    Text(
+                        text = parts.getOrElse(1) { "--" },
+                        fontSize = timeSize,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-4).sp,
+                        color = palette.title,
+                        lineHeight = timeSize
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(8.dp))
-            // 简报标题（宋体）
-            Text(
-                text = summary,
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.Bold,
-                fontSize = 44.sp,
-                lineHeight = 54.sp,
-                letterSpacing = 2.sp,
-                color = palette.title,
-                maxLines = 3
-            )
+            // 简报标题（宋体）——stagger 80ms
+            var titleEntered by remember { mutableStateOf(false) }
+            LaunchedEffect(entered) {
+                if (entered) {
+                    delay(80)
+                    titleEntered = true
+                }
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = titleEntered,
+                enter = androidx.compose.animation.slideInVertically(
+                    animationSpec = androidx.compose.animation.core.tween(mt.Medium, easing = mt.Easing)
+                ) { it / 4 } + androidx.compose.animation.fadeIn(
+                    animationSpec = androidx.compose.animation.core.tween(mt.Medium, easing = mt.Easing)
+                )
+            ) {
+                Text(
+                    text = summary,
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = titleSize,
+                    lineHeight = (titleSize.value + 10).sp,
+                    letterSpacing = 2.sp,
+                    color = palette.title,
+                    maxLines = 3
+                )
+            }
             Spacer(modifier = Modifier.height(12.dp))
             // 副行：天气 + 时段
-            Text(
-                text = listOf(weatherDesc, daypartLine).filter { it.isNotBlank() }.joinToString(" · "),
-                fontSize = 15.sp,
-                lineHeight = 28.sp,
-                color = palette.title.copy(alpha = 0.6f)
-            )
+            androidx.compose.animation.AnimatedVisibility(
+                visible = titleEntered,
+                enter = androidx.compose.animation.fadeIn(
+                    animationSpec = androidx.compose.animation.core.tween(mt.Medium, easing = mt.Easing)
+                )
+            ) {
+                Text(
+                    text = listOf(weatherDesc, daypartLine).filter { it.isNotBlank() }.joinToString(" · "),
+                    fontSize = 15.sp,
+                    lineHeight = 28.sp,
+                    color = palette.title.copy(alpha = 0.6f)
+                )
+            }
         }
         // 七仔在右侧（调用方传入 PetView）
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 190.dp)
+                .padding(top = petTopPad)
         ) {
             petSlot()
         }
+    }
     }
 }
 
