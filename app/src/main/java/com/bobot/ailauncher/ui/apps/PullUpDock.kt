@@ -351,10 +351,10 @@ private fun FullAppsOverlay(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            // v0.25.7：玻璃半透明——壁纸透出，frosted glass 效果
-            // v0.41.2：72% 太透，壁纸把字都 wash out 了（Bob）→ 用主题的
-            // 全屏抽屉 token（白 88%，列表可读性），还留一点壁纸氛围
-            .background(AILauncherColors.GlassCardStrong)
+            // v0.68.68：D3 用实底——半透明 GlassCardStrong 会让壁纸颜色透出来
+            //（深色横屏时最左侧蓝条）；AppCenterContent 自己有实底背景，
+            // 这里用实底确保边缘无缝
+            .background(AILauncherColors.Background)
     ) {
         AppCenterContent(
             onOpenSettings = onOpenSettings,
