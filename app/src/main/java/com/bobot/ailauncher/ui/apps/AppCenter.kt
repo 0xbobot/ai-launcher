@@ -495,16 +495,16 @@ fun AppCenterContent(
             // v0.68.45（走查）：实底纸面——之前透明，主屏大时间透过来盖住列表
             .background(AILauncherColors.Background)
     ) {
-    Column(
+    androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
     ) {
+        // v0.68.69（Bob）：横屏检测改用 BoxWithConstraints（configuration.orientation 不可靠）
+        val isLandscapeAc = maxWidth > maxHeight
         // ---- Header（v0.68.44 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----
         // 顶栏下滑 → D2；顶栏右滑 → 回记住的 Dock 档（手势签名：右滑=更少）
         val headThreshPx = with(density) { 80.dp.toPx() }
-        // v0.68.61（Bob）：横屏检测
-        val isLandscapeAc = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         Column(
             modifier = Modifier.pointerInput(Unit) {
                 var accumY = 0f
