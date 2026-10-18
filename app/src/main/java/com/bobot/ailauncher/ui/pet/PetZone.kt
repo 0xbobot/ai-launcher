@@ -410,7 +410,7 @@ fun PetZone(
         Column(modifier = Modifier.fillMaxWidth()) {
             CoverHero(
                 summary = coverSummary,
-                weatherDesc = weatherDesc,
+                weatherDesc = weatherDesc ?: "",
                 palette = coverPalette,
                 petSlot = {
                     PetView(
