@@ -5,8 +5,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateOffsetAsState
@@ -46,7 +49,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -62,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.apps.loadShortcutIcon
@@ -150,7 +154,7 @@ private const val FAN_R_OUTER_DP = 120f // v0.68.35：148→120，整体缩小�
 // v0.68.24 方案A：选中段伸长到的外半径；v0.68.35：176→140（+20dp）
 private const val FAN_R_OUTER_SELECTED_DP = 140f
 private const val FAN_R_INNER_DP = 46f // 死区内圈不变
-private const val FAN_EDGE_MARGIN_DP = 12f
+private const val FAN_EDGE_MARGIN_DP = 16f // v0.68.42：12→16（曲面屏边缘安全边距）
 // v0.68.40：段标签外移半径（效果图确认：外圈约 100dp，手指盖不住）
 // v0.68.41：100→95（标签径向旋转后半长约 21~28dp，径向跨度约 67~123dp，
 // 不进 46dp 死区、基本不出 120dp 外缘）
@@ -272,6 +276,15 @@ sealed interface BlindUiState {
         // v0.68.35：动态段列表（固定3段 + 快捷装备段）
         val segments: List<FanSegment> = emptyList(),
     ) : BlindUiState
+    /** v0.68.42：收起中——扇形播 120ms 内收+淡出，播完 UI 回调 onDismissFinished */
+    data class Dismissing(
+        val centerX: Float,
+        val centerY: Float,
+        val direction: FanDirection = FanDirection.LEFT,
+        val segments: List<FanSegment> = emptyList(),
+    ) : BlindUiState
+    /** v0.68.42：拍照快门闪——白闪 80ms + 咔嚓震感后进相机 */
+    data object PhotoFlash : BlindUiState
 }
 
 /**
@@ -315,10 +328,24 @@ class BlindCaptureController(
 
     // v0.68.39：诊断链路已删除（v0.68.12 屏上诊断浮层使命结束）；保留 Log.d 供开发期使用
 
-    private fun reset() {
+    /**
+     * v0.68.42：收起——扇形已展开时走 Dismissing（120ms 内收+淡出动画，
+     * 替代瞬间消失），动画播完 UI 回调 onDismissFinished；未展开直接 Hidden。
+     */
+    private fun dismissFan() {
+        val wasTriggered = triggered
         tracking = false
         triggered = false
         modeIndex = -1
+        if (wasTriggered) {
+            setUi(BlindUiState.Dismissing(centerX, centerY, fanDir, segments))
+        } else {
+            setUi(BlindUiState.Hidden)
+        }
+    }
+
+    /** v0.68.42：收起动画播完，UI 侧回调收尾 */
+    fun onDismissFinished() {
         setUi(BlindUiState.Hidden)
     }
 
@@ -390,7 +417,7 @@ class BlindCaptureController(
                 if (segments.size == 1) {
                     launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
                     guideZeroQuickOnce()
-                    reset()
+                    dismissFan()
                     return
                 }
                 // v0.68.36：扇形上下伸展按实际跨度算（拍照锚定正中，快捷多时向下延伸更多）
@@ -436,7 +463,7 @@ class BlindCaptureController(
         }
         if (cancelBack) {
             Log.d(TAG, "diag: idle(滑回取消)")
-            reset()
+            dismissFan()
             return
         }
         val idx = sectorForIndex(pos.x - centerX, pos.y - centerY, deadZonePx, sweeps, fanDir)
@@ -474,27 +501,44 @@ class BlindCaptureController(
             v.x * v.x + v.y * v.y >=
                 FLING_PHOTO_VELOCITY_PX_S * FLING_PHOTO_VELOCITY_PX_S
         } catch (_: Exception) { false }
-        reset()
         if (wasTriggered) {
             // v0.68.40：拍照永远是 index 0
-            if (flingPhoto) {
-                commit(0)
-                Log.d(TAG, "diag: commit(拍照-快滑)")
-            } else if (idx >= 0) {
+            val seg = segments.getOrNull(idx)
+            if (flingPhoto || idx < 0 || seg is FanSegment.Photo) {
+                // v0.68.42：拍照 signature——白闪 80ms + 咔嚓震感 → 进相机
+                commitPhotoWithFlash()
+                Log.d(TAG, "diag: commit(拍照-快门闪)")
+            } else {
+                dismissFan()
                 commit(idx)
                 Log.d(TAG, "diag: commit(${segmentLabel(idx)})")
-            } else {
-                // v0.68.20：无选择松手（快滑）= 拍照，零决策
-                commit(0)
-                Log.d(TAG, "diag: commit(拍照-默认)")
             }
             return true
         }
+        dismissFan()
         return false
     }
 
     fun onCancel() {
-        reset()
+        dismissFan()
+    }
+
+    // v0.68.42：快门闪 token——80ms 内又有新手势则旧 flash 回调作废
+    private var flashToken = 0
+
+    /** v0.68.42：拍照快门闪——白闪 80ms + 强短震（咔嚓感）→ 再进系统相机 */
+    private fun commitPhotoWithFlash() {
+        tracking = false
+        triggered = false
+        modeIndex = -1
+        setUi(BlindUiState.PhotoFlash)
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        val t = ++flashToken
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (t != flashToken) return@postDelayed
+            launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
+            setUi(BlindUiState.Hidden)
+        }, 80L)
     }
 
     /** v0.68.40：拍照（系统唯一预设）/ 快捷装备段（复用 launchQuickAction） */
@@ -661,23 +705,28 @@ fun BlindCaptureFan(
     segments: List<FanSegment>,
     // v0.68.28：扇形方向（右滑镜像）
     direction: FanDirection = FanDirection.LEFT,
+    // v0.68.42：收起中——播 120ms 内收+淡出
+    dismiss: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     // 绘制与命中判定共用同一套动态角度
     val sweeps = fanSweeps(segments.count { it is FanSegment.Quick })
     val density = LocalDensity.current
-    val selectedFill = Color(0xFFD8CBB6) // v0.68.24 方案A：选中段暖棕底
+    // v0.68.42：选中段暖金 #D9A05B alpha 0.85（替代暖棕 #D8CBB6，克制的记忆色）
+    val selectedFill = Color(0xFFD9A05B).copy(alpha = 0.85f)
+    val goldRipple = Color(0xFFD9A05B)
     val titleColor = AILauncherColors.Title
     val bodyColor = AILauncherColors.Body
 
     // v0.68.24 方案A：选中段径向伸长——每段外半径独立 spring；
     // v0.68.35：展开 0→120dp，选中该段 120→140dp（+20dp），滑出回弹；
-    // 展开 stagger：每段延迟 25ms 依次绽开（拍照→快捷段）
+    // v0.68.42：展开 stagger 改非线性级联 0/18/32/42/48ms（was 等距 25ms）
     val segShown = remember { mutableStateMapOf<Int, Boolean>() }
+    val staggerDelays = remember { listOf(0L, 18L, 32L, 42L, 48L) }
     LaunchedEffect(Unit) {
         segments.indices.forEach { i ->
             launch {
-                delay(i * 25L)
+                delay(staggerDelays.getOrElse(i) { 48L })
                 segShown[i] = true
             }
         }
@@ -698,6 +747,12 @@ fun BlindCaptureFan(
         targetValue = if (fanShown) 1f else 0f,
         animationSpec = tween(160),
         label = "fanAlpha"
+    )
+    // v0.68.42：收起 120ms 内收+淡出（替代瞬间消失）
+    val dismissT by animateFloatAsState(
+        targetValue = if (dismiss) 1f else 0f,
+        animationSpec = tween(120),
+        label = "dismissT"
     )
     // v0.68.29 方案C：中心触摸涟漪（呼吸感圆环，替代七仔 mini）
     val ripple = rememberInfiniteTransition(label = "ripple")
@@ -726,6 +781,19 @@ fun BlindCaptureFan(
         modifier = modifier
             .fillMaxSize()
             .onGloballyPositioned { screenSize = it.size }
+            // v0.68.42：收起内收——以扇形圆心为轴缩放+淡出
+            .graphicsLayer {
+                val sc = 1f - 0.18f * dismissT
+                scaleX = sc
+                scaleY = sc
+                alpha = 1f - dismissT
+                val w = screenSize.width.coerceAtLeast(1)
+                val h = screenSize.height.coerceAtLeast(1)
+                transformOrigin = TransformOrigin(
+                    (centerX / w).coerceIn(0f, 1f),
+                    (centerY / h).coerceIn(0f, 1f)
+                )
+            }
     ) {
         Canvas(
             modifier = Modifier
@@ -735,63 +803,63 @@ fun BlindCaptureFan(
             val rInner = FAN_R_INNER_DP.dp.toPx()
             val center = Offset(centerX, centerY)
             // v0.68.24 方案A：选中光晕已删除，改径向伸长
-            // v0.68.35：毛玻璃质感——段底半透明白 + 外缘 1px 高光描边；选中段保留暖棕
-            // 各段底（每段用自己的半径）
+            // v0.68.35：毛玻璃质感——段底半透明白 + 外缘 1px 高光描边；选中段暖金
+            // v0.68.42：段间 2dp 分隔线删除，改 4dp 气隙（±1.4°，透背景）；
+            // 未选中段整体透明度 0.6；选中段柔和投影（HW 安全：两层错位暗弧）
+            val gapHalf = 1.4f
             segments.forEachIndexed { i, _ ->
                 val (s, sw) = segmentAngles(i, sweeps, direction)
                 val selected = i == selectedIndex
                 val rOuter = segRadiiDp[i].value.dp.toPx()
                 if (rOuter < 1f) return@forEachIndexed
+                val segAlpha = if (selected) 1f else 0.6f
+                if (selected) {
+                    val shColor = Color(0xFF6E5A3E)
+                    drawArc(
+                        color = shColor.copy(alpha = 0.14f),
+                        startAngle = s + gapHalf,
+                        sweepAngle = sw - gapHalf * 2,
+                        useCenter = true,
+                        topLeft = Offset(centerX - rOuter - 4f, centerY - rOuter + 10f),
+                        size = Size((rOuter + 4f) * 2f, (rOuter + 4f) * 2f)
+                    )
+                    drawArc(
+                        color = shColor.copy(alpha = 0.10f),
+                        startAngle = s + gapHalf,
+                        sweepAngle = sw - gapHalf * 2,
+                        useCenter = true,
+                        topLeft = Offset(centerX - rOuter - 8f, centerY - rOuter + 18f),
+                        size = Size((rOuter + 8f) * 2f, (rOuter + 8f) * 2f)
+                    )
+                }
                 drawArc(
                     color = if (selected) selectedFill
-                    else Color.White.copy(alpha = 0.55f),
-                    startAngle = s + 1.5f,
-                    sweepAngle = sw - 3f,
+                    else Color.White.copy(alpha = 0.55f * segAlpha),
+                    startAngle = s + gapHalf,
+                    sweepAngle = sw - gapHalf * 2,
                     useCenter = true,
                     topLeft = Offset(centerX - rOuter, centerY - rOuter),
                     size = Size(rOuter * 2f, rOuter * 2f)
                 )
                 // 1px 高光描边（外缘弧线）
                 drawArc(
-                    color = Color.White.copy(alpha = 0.5f),
-                    startAngle = s + 1.5f,
-                    sweepAngle = sw - 3f,
+                    color = Color.White.copy(alpha = 0.5f * segAlpha),
+                    startAngle = s + gapHalf,
+                    sweepAngle = sw - gapHalf * 2,
                     useCenter = false,
                     topLeft = Offset(centerX - rOuter, centerY - rOuter),
                     size = Size(rOuter * 2f, rOuter * 2f),
                     style = Stroke(width = 1.dp.toPx())
                 )
             }
-            // v0.68.20：段间分隔线（v0.68.24：伸到相邻两段半径较大者）
-            // v0.68.36：分隔线角度与 segmentAngles 共用同一套拍照锚定角度
-            val divColor = Color(0xFF8A7B6B).copy(alpha = 0.55f)
-            val divW = 2.dp.toPx()
-            for (i in 0 until segments.size - 1) {
-                val (bs, bsw) = segmentAngles(i + 1, sweeps, direction)
-                val acc = if (direction == FanDirection.LEFT) bs + bsw else bs
-                val rad = Math.toRadians(acc.toDouble())
-                val dir = Offset(cos(rad).toFloat(), sin(rad).toFloat())
-                val rMax = maxOf(
-                    segRadiiDp[i].value,
-                    segRadiiDp[i + 1].value
-                ).dp.toPx()
-                if (rMax < 1f) continue
-                drawLine(
-                    color = divColor,
-                    start = center + dir * (rInner + 4f),
-                    end = center + dir * (rMax - 4f),
-                    strokeWidth = divW,
-                    cap = StrokeCap.Round
-                )
-            }
-            // v0.68.29 方案C：中心触摸涟漪（极淡圆环，表示手指落点）
+            // v0.68.29 方案C：中心触摸涟漪（v0.68.42：改暖金，与选中段呼应）
             drawCircle(
-                color = Color.White.copy(alpha = 0.45f),
+                color = goldRipple.copy(alpha = 0.16f),
                 radius = rInner * 0.55f,
                 center = center
             )
             drawCircle(
-                color = Color(0xFF8A7B6B).copy(alpha = rippleA),
+                color = goldRipple.copy(alpha = rippleA),
                 radius = (rInner * rippleR).coerceAtLeast(1f),
                 center = center,
                 style = Stroke(width = 2.dp.toPx())
@@ -837,18 +905,24 @@ fun BlindCaptureFan(
             animationSpec = spring(dampingRatio = 0.62f, stiffness = 380f),
             label = "indOffset"
         )
-        val indScale by animateFloatAsState(
-            targetValue = if (hasSel) 1f else 0.8f,
-            animationSpec = spring(dampingRatio = 0.6f, stiffness = 420f),
-            label = "indScale"
-        )
-        val indAlpha by animateFloatAsState(
-            targetValue = if (hasSel) 1f else 0f,
-            animationSpec = tween(150),
-            label = "indAlpha"
-        )
+        // v0.68.42：选中图标 pop（0.6→1 overshoot，替代淡入）；换段重播一次
+        val indScaleAnim = remember { Animatable(0.6f) }
+        val indAlphaAnim = remember { Animatable(0f) }
+        LaunchedEffect(hasSel, selectedIndex) {
+            if (hasSel) {
+                indScaleAnim.snapTo(0.6f)
+                launch { indAlphaAnim.animateTo(1f, tween(100)) }
+                indScaleAnim.animateTo(
+                    1f,
+                    spring(dampingRatio = 0.45f, stiffness = 1100f)
+                )
+            } else {
+                launch { indAlphaAnim.animateTo(0f, tween(100)) }
+                indScaleAnim.snapTo(0.6f)
+            }
+        }
         val indSeg = segments.getOrNull(selectedIndex)
-        if (indAlpha > 0.01f && indSeg != null) {
+        if (indAlphaAnim.value > 0.01f && indSeg != null) {
             Box(
                 modifier = Modifier
                     .offset {
@@ -858,9 +932,9 @@ fun BlindCaptureFan(
                         )
                     }
                     .graphicsLayer {
-                        scaleX = indScale
-                        scaleY = indScale
-                        alpha = (indAlpha * fanAlpha).coerceIn(0f, 1f)
+                        scaleX = indScaleAnim.value
+                        scaleY = indScaleAnim.value
+                        alpha = (indAlphaAnim.value * fanAlpha).coerceIn(0f, 1f)
                     }
                     .size(indSizeDp),
                 contentAlignment = Alignment.Center
@@ -892,10 +966,23 @@ fun BlindCaptureFan(
                 animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
                 label = "segPop$i"
             )
+            // v0.68.42：选中段字号 +2sp 过渡（14→16sp，拍照 15→17sp）
+            val targetSize = when {
+                selected && isPhoto -> 17f
+                selected -> 16f
+                isPhoto -> 15f
+                else -> 14f
+            }
+            val sizeAnim by animateFloatAsState(
+                targetValue = targetSize,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 500f),
+                label = "segSize$i"
+            )
             key(i) {
                 // v0.68.38：统一横排（等宽 36° 下横排全部放得下，竖排分支删除）；
                 // maxLines=1 + Ellipsis，超长装备名截断；
-                // v0.68.41：rotationZ 径向旋转（文字跟扇形同角度）
+                // v0.68.41：rotationZ 径向旋转（文字跟扇形同角度）；
+                // v0.68.42：letterSpacing 0.08em；未选中段透明度 0.6
                 Box(
                     modifier = Modifier
                         .offset {
@@ -908,15 +995,16 @@ fun BlindCaptureFan(
                             scaleX = pop
                             scaleY = pop
                             rotationZ = centerDeg - midDeg
-                            alpha = fanAlpha
+                            alpha = fanAlpha * (1f - dismissT) *
+                                (if (selected) 1f else 0.6f)
                         }
                         .size(96.dp, 48.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = segLabel,
-                        // v0.68.41：14sp（拍照 15sp 加粗，更精致）；选中靠 pop 缩放反馈
-                        fontSize = if (isPhoto) 15.sp else 14.sp,
+                        fontSize = sizeAnim.sp,
+                        letterSpacing = 0.08.em,
                         fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
                         color = if (selected) titleColor else bodyColor,
                         maxLines = 1,

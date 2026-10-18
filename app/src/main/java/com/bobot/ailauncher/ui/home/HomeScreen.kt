@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import kotlinx.coroutines.delay
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.PanelAccessibilityService
@@ -79,7 +80,8 @@ fun HomeScreen(
     onBlindActiveChange: (Boolean) -> Unit = {},
     // v0.68.32：扇形选择状态上报 MainScreen（扇形绘制层级提到 Dock 之上）
     // v0.68.35：Selecting 自带动态段列表，不再传自定义标签
-    onBlindSelectingChange: (BlindUiState.Selecting?) -> Unit = { },
+    // v0.68.42：上报全状态（Selecting/Dismissing/PhotoFlash 共用顶层绘制）
+    onBlindSelectingChange: (BlindUiState) -> Unit = { },
     // v0.68.32：底部 Dock 区高度（dp），用于扇形圆心钳制
     blindDockZoneDp: Float = 0f,
 ) {
@@ -108,9 +110,18 @@ fun HomeScreen(
     // v0.68.35：旧"自定义☆"固定槽位已作废——扇形快捷段直接读七仔装备列表，
     // 增删复用七仔装备长按/+ 流程，不再需要扇形侧配置弹窗
     // v0.68.32：扇形选择状态上报 MainScreen（扇形在 MainScreen 最顶层绘制，盖住 Dock）
-    val blindSelecting = blindUi as? BlindUiState.Selecting
-    androidx.compose.runtime.LaunchedEffect(blindSelecting) {
-        onBlindSelectingChange(blindSelecting)
+    // v0.68.42：上报全状态（Selecting/Dismissing/PhotoFlash）；收起动画 160ms 后通知
+    // controller 收尾（动画本身 120ms，留余量）
+    val blindFanState = blindUi
+    androidx.compose.runtime.LaunchedEffect(blindFanState) {
+        onBlindSelectingChange(blindFanState)
+    }
+    val isDismissing = blindUi is BlindUiState.Dismissing
+    androidx.compose.runtime.LaunchedEffect(isDismissing) {
+        if (isDismissing) {
+            delay(160)
+            blindCtl.onDismissFinished()
+        }
     }
     // v0.68.17：右边缘系统手势豁免宽度（仅用于 setSystemGestureExclusionRects，
     // 盲操触发已改为"任何左滑"，不再依赖边缘区）
