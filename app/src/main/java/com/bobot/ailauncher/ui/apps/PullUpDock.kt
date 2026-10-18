@@ -12,12 +12,15 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -172,11 +175,26 @@ fun PullUpDock(
                 val dockBottomPadPx = with(density) { 16.dp.toPx() }
                 // v0.27.1：去底（Bob 选一）——图标直接浮在壁纸上，无卡片无阴影
                 // v0.57.0：长按 Dock → 隐藏（与 D1 右滑并存）
+                // v0.68.58（Bob）：Dock 默认无背景——按压时才显示圆角底（触摸反馈）
+                val dockPressSource = remember { MutableInteractionSource() }
+                val dockPressed by dockPressSource.collectIsPressedAsState()
+                val dockBgAlpha by animateFloatAsState(
+                    targetValue = if (dockPressed) 1f else 0f,
+                    animationSpec = tween(
+                        durationMillis = com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                        easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                    ),
+                    label = "dockBg"
+                )
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(AILauncherColors.GlassCard.copy(alpha = 0.55f * dockBgAlpha))
                         .combinedClickable(
+                            interactionSource = dockPressSource,
+                            indication = null,  // 用背景显隐做反馈，不要水波纹
                             onClick = {},
                             onLongClick = { onHideDockRequestState.value() }
                         )
@@ -255,13 +273,10 @@ fun PullUpDock(
                         },
                         label = "dockContent"
                     ) { s ->
-                        // v0.68.57（Bob）：去线去字——Dock 只要圆角卡 + 图标，
-                        // 不要分隔线、"常用"、"上滑展开/下滑收起"提示
+                        // v0.68.58（Bob）：内容无背景——背景只在按压时显示（外层控制）
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(28.dp))
-                                .background(AILauncherColors.GlassCard)
                                 .padding(vertical = 16.dp)
                         ) {
                         if (s == DockState.D2) {
