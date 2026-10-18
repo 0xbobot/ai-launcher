@@ -54,6 +54,7 @@ import com.bobot.ailauncher.ui.apps.RailItem
 import com.bobot.ailauncher.ui.apps.WaveRail
 import com.bobot.ailauncher.ui.components.UpdateDialog
 import com.bobot.ailauncher.ui.home.BlindCaptureFan
+import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
 import com.bobot.ailauncher.ui.home.BlindUiState
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
@@ -452,6 +453,8 @@ private fun HomeHost(
                 selectedIndex = s.modeIndex,
                 segments = s.segments,
                 direction = s.direction,
+                // v0.68.62：长按 arm 后手指还按着——只展示抖动+×，不可点（松手才进 Editing）
+                deleteArmedIndex = s.deleteArmed,
                 modifier = Modifier.zIndex(100f),
             )
             is BlindUiState.Dismissing -> BlindCaptureFan(
@@ -463,6 +466,28 @@ private fun HomeHost(
                 dismiss = true,
                 modifier = Modifier.zIndex(100f),
             )
+            // v0.68.62：扇形内编辑——扇形钉住，点×删装备（数据层直写），点别处取消
+            is BlindUiState.Editing -> {
+                val ctx = LocalContext.current
+                BlindCaptureFan(
+                    centerX = s.centerX,
+                    centerY = s.centerY,
+                    selectedIndex = s.armedIndex,
+                    segments = s.segments,
+                    direction = s.direction,
+                    deleteArmedIndex = s.armedIndex,
+                    onDeleteQuick = { item ->
+                        QuickActionsPrefs.save(
+                            ctx,
+                            QuickActionsPrefs.load(ctx).filter { it.id != item.id }
+                        )
+                        PetRepository.say("已删除")
+                        blindFanState = BlindUiState.Hidden
+                    },
+                    onEditTapOutside = { blindFanState = BlindUiState.Hidden },
+                    modifier = Modifier.zIndex(100f),
+                )
+            }
             is BlindUiState.PhotoFlash -> Box(
                 modifier = Modifier
                     .fillMaxSize()

@@ -96,7 +96,8 @@ fun HomeScreen(
     // v0.68.39：诊断浮层已删除（v0.68.12 屏上诊断使命结束）
     // v0.68.6：盲操激活状态上报 MainScreen——选择中时压住右边缘字母快找区，
     // 避免长按（~400ms）与盲操 dwell（120ms）双重触发
-    val blindActive = blindUi is BlindUiState.Selecting
+    // v0.68.62：编辑态也算激活（扇形钉住时 TODAY 保持淡出、边缘字母区保持压住）
+    val blindActive = blindUi is BlindUiState.Selecting || blindUi is BlindUiState.Editing
     androidx.compose.runtime.LaunchedEffect(blindActive) {
         onBlindActiveChange(blindActive)
     }
