@@ -90,6 +90,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -495,14 +496,14 @@ fun AppCenterContent(
             // v0.68.45（走查）：实底纸面——之前透明，主屏大时间透过来盖住列表
             .background(AILauncherColors.Background)
     ) {
+    // v0.68.70（Bob）：横屏判断改用量实际尺寸（LocalConfiguration 也不可靠）
+    var isLandscapeAc by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
+            .onSizeChanged { size -> isLandscapeAc = size.width > size.height }
     ) {
-        // v0.68.69（Bob）：横屏检测用 LocalConfiguration（configuration.orientation 不可靠）
-        val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-        val isLandscapeAc = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         // ---- Header（v0.68.44 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----
         // 顶栏下滑 → D2；顶栏右滑 → 回记住的 Dock 档（手势签名：右滑=更少）
         val headThreshPx = with(density) { 80.dp.toPx() }
