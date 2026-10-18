@@ -5,8 +5,6 @@ import android.graphics.Rect
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -117,21 +115,14 @@ fun HomeScreen(
     // v0.68.17：右边缘系统手势豁免宽度（仅用于 setSystemGestureExclusionRects，
     // 盲操触发已改为"任何左滑"，不再依赖边缘区）
     val blindEdgePx = with(density) { 48.dp.toPx() }
-    // holder 打破 launcher 回调 ↔ controller 的循环引用
-    val blindCtlRef = remember { mutableStateOf<BlindCaptureController?>(null) }
-    val audioPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> blindCtlRef.value?.onAudioPermissionResult(granted) }
+    // holder 打破 launcher 回调 ↔ controller 的循环引用（v0.68.40：录音删除后不再需要）
     val blindCtl = remember {
         BlindCaptureController(
             context = context,
             haptics = haptics,
             setUi = { blindUi = it },
-            requestAudioPermission = {
-                audioPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-            },
             triggerPx = with(density) { 24.dp.toPx() },
-        ).also { blindCtlRef.value = it }
+        )
     }
     // v0.68.0：右边缘系统手势豁免（响应 cleanHome 变化）
     var homeSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }

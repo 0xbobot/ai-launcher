@@ -5,8 +5,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
-import android.media.MediaRecorder
-import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.compose.animation.core.animateFloat
@@ -27,9 +25,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.PhotoCamera
-import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -67,14 +63,12 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.apps.loadShortcutIcon
 import com.bobot.ailauncher.ui.pet.QuickActionItem
 import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
 import com.bobot.ailauncher.ui.pet.launchQuickAction
 import com.bobot.ailauncher.ui.theme.AILauncherColors
-import java.io.File
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -128,22 +122,19 @@ import kotlin.math.sqrt
  * （正中方向）；标题竖排分支删除，统一横排 + maxLines=1 + Ellipsis；
  * 保留磁吸 ±10°、快滑 4500px/s 直拍、毛玻璃+高光、stagger、选中图标、涟漪、语音。
  *
- * 保留：三重反馈（震动/七仔语音/视觉高亮）、诊断浮层。
+ * v0.68.40（Bob 拍板）：系统只默认放相机——扇形 = 拍照（唯一系统预设，
+ * 36°，锚定正中）+ 快捷装备段（36°/段，最多 4 段，取七仔装备排序前 4，
+ * 顺序 下方1/上方1/下方2/上方2）；录像/录音预设段作废；语音胶囊全家桶删除
+ * （VoiceCapsule.kt、BlindAudioRecorder、QuickMemoStore、转文字）；
+ * 0 装备时左滑/右滑直接拍照（不展开扇形），七仔引导一次；
+ * 段标签外移到外圈约 100dp（18sp，拍照 19sp 加粗）。
+ *
+ * 保留：三重反馈（震动/七仔语音/视觉高亮）。
  */
 
-/** 扇形固定段（从上到下）：录像 / 拍照 / 快捷装备段 / 录音（录音固定最下方） */
-enum class BlindMode(val label: String) {
-    VIDEO("录像"),
-    PHOTO("拍照"),
-    AUDIO("录音"),
-}
-
-/**
- * v0.68.35：扇形段动态化——固定 3 段（录像/拍照/录音）+ 用户快捷装备段（最多 2 段，
- * 取七仔装备列表排序前两位）。增删复用七仔装备现有流程，扇形每次展开时读最新列表。
- */
+/** 扇形段：拍照（系统唯一预设）+ 用户快捷装备段 */
 sealed interface FanSegment {
-    data class BuiltIn(val mode: BlindMode) : FanSegment
+    data object Photo : FanSegment
     data class Quick(val item: QuickActionItem) : FanSegment
 }
 
@@ -151,36 +142,40 @@ sealed interface FanSegment {
 enum class FanDirection { LEFT, RIGHT }
 
 // 扇形几何（Canvas 角度制：0°=正右方，顺时针为正，y 向下）
-// v0.68.38：所有段等宽 36°（Bob 拍板：不用大角度，拍照只占最顺手的位置）；
-// 段顺序自上而下 录像 / 拍照 / 快捷段×N / 录音；拍照锚定正中方向
-// （左扇 180° / 右扇 0°）；总角度：无快捷 108°，1 快捷 144°，2 快捷 180°；
-// 圆心 Y 钳制按实际总角度算
+// v0.68.40：拍照（唯一预设，36°）+ 快捷装备段（36°/段，最多 4 段，取排序前 4）；
+// 拍照锚定正中方向（左扇 180° / 右扇 0°）；快捷槽位顺序：下方1/上方1/下方2/上方2；
+// 总角度：1+0段=36°，1+4段=180°；圆心 Y 钳制按实际跨度算
 private const val FAN_R_OUTER_DP = 120f // v0.68.35：148→120，整体缩小更精致
 // v0.68.24 方案A：选中段伸长到的外半径；v0.68.35：176→140（+20dp）
 private const val FAN_R_OUTER_SELECTED_DP = 140f
 private const val FAN_R_INNER_DP = 46f // 死区内圈不变
 private const val FAN_EDGE_MARGIN_DP = 12f
+// v0.68.40：段标签外移半径（效果图确认：外圈约 100dp，手指盖不住）
+private const val FAN_LABEL_R_DP = 100f
 
 private const val FAN_SWEEP_SEG = 36f // v0.68.38：所有段等宽 36°
-private const val MAX_QUICK_SEGS = 2
+private const val MAX_QUICK_SEGS = 4 // v0.68.40：2→4（录像/录音预设作废，装备成唯一其他段）
+/** v0.68.40：快捷槽位角度（Canvas 坐标，startAngle），顺序 下方1/上方1/下方2/上方2 */
+private val QUICK_SLOTS_LEFT = listOf(126f, 198f, 90f, 234f)
+private val QUICK_SLOTS_RIGHT = listOf(18f, -54f, 54f, -90f)
 // v0.68.36：拍照磁吸——落点在拍照边界外 ±10° 内一律吸附为拍照（只影响判定不影响绘制）
 private const val FAN_PHOTO_SNAP_DEG = 10f
 // v0.68.36：快滑覆盖阈值——松手速度超此值直接=拍照（"甩"的量级，保守取高；px/s）
 private const val FLING_PHOTO_VELOCITY_PX_S = 4500f
 
 /**
- * v0.68.38：各段扫过角度（等宽 36°）——录像 / 拍照 / 快捷段×N / 录音；
- * 绘制与命中判定共用同一套。总角度：无快捷 108°，1 快捷 144°，2 快捷 180°
+ * v0.68.40：各段扫过角度（等宽 36°）——拍照 + 快捷段×N（N≤4）；
+ * 绘制与命中判定共用同一套。总角度：36°×(1+N)
  */
 private fun fanSweeps(quickCount: Int): FloatArray {
     val n = quickCount.coerceIn(0, MAX_QUICK_SEGS)
-    return FloatArray(2 + n + 1) { FAN_SWEEP_SEG }
+    return FloatArray(1 + n) { FAN_SWEEP_SEG }
 }
 
 /**
  * 第 i 段的 (startAngle, sweepAngle)，Canvas 角度制；与命中判定共用。
- * v0.68.38：等宽 36°，拍照锚定正中方向（左扇 180° [162,198] / 右扇 0° [-18,18]，
- * 最顺手的位置）；录像在上，快捷段与录音依次在下。快捷段再多拍照也不漂移。
+ * v0.68.40：index 0 = 拍照（锚定正中方向：左扇 [162,198] / 右扇 [-18,18]）；
+ * index 1..N = 快捷装备（槽位顺序 下方1/上方1/下方2/上方2）。
  */
 private fun segmentAngles(
     i: Int,
@@ -188,49 +183,40 @@ private fun segmentAngles(
     direction: FanDirection = FanDirection.LEFT,
 ): Pair<Float, Float> {
     val seg = FAN_SWEEP_SEG
-    return if (direction == FanDirection.LEFT) {
-        when (i) {
-            0 -> Pair(198f, seg) // 录像 [198,234]（上）
-            1 -> Pair(162f, seg) // 拍照 [162,198]（正中）
-            else -> Pair(126f - (i - 2) * seg, seg) // 快捷0..N-1 / 录音（下）
-        }
-    } else {
-        // 右扇镜像：拍照锚定正右方 0°
-        when (i) {
-            0 -> Pair(-54f, seg) // 录像 [-54,-18]（上）
-            1 -> Pair(-18f, seg) // 拍照 [-18,18]（正中）
-            else -> Pair(18f + (i - 2) * seg, seg) // 快捷0..N-1 / 录音（下）
-        }
+    if (i == 0) {
+        return if (direction == FanDirection.LEFT) Pair(162f, seg)
+        else Pair(-18f, seg)
     }
+    val slots = if (direction == FanDirection.LEFT) QUICK_SLOTS_LEFT else QUICK_SLOTS_RIGHT
+    val s = slots.getOrElse(i - 1) { slots.last() }
+    return Pair(s, seg)
 }
 
-/** 扇形相对圆心的上下伸展系数（÷R）：v0.68.38 等宽 36°，总角度 108°/144°/180°；
- * 左扇跨度 [126-36N, 234]，右扇跨度 [-54, 54+36N]（Canvas 角度制） */
+/** 扇形相对圆心的上下伸展系数（÷R）：v0.68.40 按实际段角度采样计算 */
 private fun fanVerticalReach(
     sweeps: FloatArray,
     direction: FanDirection,
 ): Pair<Float, Float> {
-    val n = (sweeps.size - 3).coerceAtLeast(0) // 快捷段数
-    val (a0, a1) = if (direction == FanDirection.LEFT) {
-        Pair(126f - n * FAN_SWEEP_SEG, 234f)
-    } else {
-        Pair(-54f, 54f + n * FAN_SWEEP_SEG)
-    }
     var up = 0f
     var down = 0f
-    val samples = mutableListOf(a0, a1)
-    if (90f in a0..a1) samples.add(90f) // 正下方
-    if (270f in a0..a1) samples.add(270f) // 正上方
-    for (a in samples) {
-        val y = sin(Math.toRadians(a.toDouble())).toFloat() // canvas y 向下：+ 为下
-        if (y < 0f) up = maxOf(up, -y) else down = maxOf(down, y)
+    fun norm360(a: Float): Float = ((a % 360f) + 360f) % 360f
+    for (i in sweeps.indices) {
+        val (s, sw) = segmentAngles(i, sweeps, direction)
+        val angles = mutableListOf(s, s + sw / 2f, s + sw)
+        // Canvas 坐标：90°=正下方极值，270°=正上方极值
+        if (norm360(90f) in norm360(s)..norm360(s + sw)) angles.add(90f)
+        if (norm360(270f) in norm360(s)..norm360(s + sw)) angles.add(270f)
+        for (a in angles) {
+            val y = sin(Math.toRadians(a.toDouble())).toFloat() // canvas y 向下：+ 为下
+            if (y < 0f) up = maxOf(up, -y) else down = maxOf(down, y)
+        }
     }
     return Pair(up, down)
 }
 
-/** 扇形命中：返回 sector index（0=最上方），-1 = 死区内或扇形外
- * v0.68.38：等宽 36°；拍照 [162,198]（左扇）/ [-18,18]（右扇）+ 磁吸 ±10°；
- * 录像在上，快捷段/录音依次在下 */
+/** 扇形命中：返回 sector index（0=拍照），-1 = 死区内或扇形外
+ * v0.68.40：拍照 [162,198]（左扇）/ [-18,18]（右扇）+ 磁吸 ±10° 优先；
+ * 快捷段按槽位顺序 下方1/上方1/下方2/上方2 */
 private fun sectorForIndex(
     dx: Float,
     dy: Float,
@@ -244,14 +230,13 @@ private fun sectorForIndex(
     val seg = FAN_SWEEP_SEG
     return if (direction == FanDirection.LEFT) {
         // 拍照 [162,198] + 磁吸：落点在其边界外 ±10° 内一律吸附为拍照
-        if (deg >= 162f - FAN_PHOTO_SNAP_DEG && deg <= 198f + FAN_PHOTO_SNAP_DEG) 1
-        else if (deg > 198f) {
-            if (deg <= 234f) 0 else -1 // 录像 [198,234] / 扇形外
-        } else {
-            // 快捷段/录音：index 2..，第 i 段 [126-(i-2)*36, 162-(i-2)*36]
-            for (i in 2 until sweeps.size) {
-                val lo = 126f - (i - 2) * seg
-                if (deg >= lo && deg < lo + seg) return i
+        if (deg >= 162f - FAN_PHOTO_SNAP_DEG && deg <= 198f + FAN_PHOTO_SNAP_DEG) 0
+        else {
+            // 快捷槽位：下方1 [126,162] / 上方1 [198,234] / 下方2 [90,126] / 上方2 [234,270]
+            val n = (sweeps.size - 1).coerceAtLeast(0)
+            for (j in 0 until minOf(n, QUICK_SLOTS_LEFT.size)) {
+                val lo = QUICK_SLOTS_LEFT[j]
+                if (deg >= lo && deg < lo + seg) return j + 1
             }
             -1 // 扇形外
         }
@@ -259,14 +244,13 @@ private fun sectorForIndex(
         // 右扇：归一化到 -180°~180° 再判定
         val degR = if (deg > 180f) deg - 360f else deg
         // 拍照 [-18,18] + 磁吸（镜像）
-        if (degR >= -18f - FAN_PHOTO_SNAP_DEG && degR <= 18f + FAN_PHOTO_SNAP_DEG) 1
-        else if (degR < -18f) {
-            if (degR >= -54f) 0 else -1 // 录像 [-54,-18] / 扇形外
-        } else {
-            // 快捷段/录音：index 2..，第 i 段 [18+(i-2)*36, 54+(i-2)*36]
-            for (i in 2 until sweeps.size) {
-                val lo = 18f + (i - 2) * seg
-                if (degR >= lo && degR < lo + seg) return i
+        if (degR >= -18f - FAN_PHOTO_SNAP_DEG && degR <= 18f + FAN_PHOTO_SNAP_DEG) 0
+        else {
+            // 快捷槽位：下方1 [18,54] / 上方1 [-54,-18] / 下方2 [54,90] / 上方2 [-90,-54]
+            val n = (sweeps.size - 1).coerceAtLeast(0)
+            for (j in 0 until minOf(n, QUICK_SLOTS_RIGHT.size)) {
+                val lo = QUICK_SLOTS_RIGHT[j]
+                if (degR >= lo && degR < lo + seg) return j + 1
             }
             -1 // 扇形外
         }
@@ -288,127 +272,12 @@ sealed interface BlindUiState {
 }
 
 /**
- * App 内极简录音（MediaRecorder）。
- * v0.68.22：改存 MediaStore 公共目录 Music/Recordings/，用户在文件管理器/音乐 App 可找到。
- * （Android 10+ 用 RELATIVE_PATH，无需 WRITE_EXTERNAL_STORAGE 权限）
- */
-object BlindAudioRecorder {
-    var isRecording: Boolean = false
-        private set
-    // v0.68.24：录音时长（生成语音胶囊时显示）
-    var lastDurationSec: Int = 0
-        private set
-    private var recorder: MediaRecorder? = null
-    private var outPfd: android.os.ParcelFileDescriptor? = null
-    private var outUri: android.net.Uri? = null
-    private var startMs: Long = 0L
-
-    fun start(context: Context): Boolean {
-        if (isRecording) return true
-        return try {
-            // v0.68.22：MediaStore 公共目录
-            val values = android.content.ContentValues().apply {
-                put(MediaStore.Audio.Media.DISPLAY_NAME, "rec_${System.currentTimeMillis()}.m4a")
-                put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
-                put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/Recordings")
-            }
-            val uri = context.contentResolver.insert(
-                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values
-            ) ?: return false
-            val pfd = context.contentResolver.openFileDescriptor(uri, "w") ?: run {
-                context.contentResolver.delete(uri, null, null)
-                return false
-            }
-            val r = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }
-            r.setAudioSource(MediaRecorder.AudioSource.MIC)
-            r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            r.setOutputFile(pfd.fileDescriptor)
-            r.prepare()
-            r.start()
-            startMs = System.currentTimeMillis()
-            recorder = r
-            outPfd = pfd
-            outUri = uri
-            isRecording = true
-            true
-        } catch (_: Exception) {
-            try { recorder?.release() } catch (_: Exception) { }
-            try { outPfd?.close() } catch (_: Exception) { }
-            outUri?.let { try { context.contentResolver.delete(it, null, null) } catch (_: Exception) { } }
-            recorder = null
-            outPfd = null
-            outUri = null
-            isRecording = false
-            false
-        }
-    }
-
-    /** 停止并返回 MediaStore Uri（可空）；同时结算本次时长 */
-    fun stop(context: Context): android.net.Uri? {
-        val uri = outUri
-        if (startMs > 0) {
-            lastDurationSec =
-                ((System.currentTimeMillis() - startMs) / 1000).toInt().coerceAtLeast(1)
-            startMs = 0L
-        }
-        try { recorder?.stop() } catch (_: Exception) { }
-        try { recorder?.release() } catch (_: Exception) { }
-        try { outPfd?.close() } catch (_: Exception) { }
-        recorder = null
-        outPfd = null
-        outUri = null
-        isRecording = false
-        return uri
-    }
-}
-
-/** 速记备忘存储（SharedPreferences JSON 列表） */
-object QuickMemoStore {
-    private const val PREFS = "quick_memo_prefs"
-    private const val KEY_MEMOS = "memos_json"
-
-    data class Memo(val text: String, val time: Long)
-
-    fun all(context: Context): List<Memo> {
-        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_MEMOS, null) ?: return emptyList()
-        return try {
-            val arr = org.json.JSONArray(raw)
-            List(arr.length()) { i ->
-                val o = arr.getJSONObject(i)
-                Memo(o.getString("text"), o.getLong("time"))
-            }
-        } catch (_: Exception) { emptyList() }
-    }
-
-    fun add(context: Context, text: String) {
-        val list = all(context).toMutableList()
-        list.add(0, Memo(text, System.currentTimeMillis()))
-        // 只保留最近 50 条
-        val trimmed = list.take(50)
-        val arr = org.json.JSONArray()
-        trimmed.forEach { m ->
-            arr.put(org.json.JSONObject().put("text", m.text).put("time", m.time))
-        }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(KEY_MEMOS, arr.toString()).apply()
-    }
-}
-
-/**
  * 盲操手势状态机。由 HomeScreen 的 pointerInput 转发事件驱动（UI 线程）。
  */
 class BlindCaptureController(
     private val context: Context,
     private val haptics: HapticFeedback,
     private val setUi: (BlindUiState) -> Unit,
-    private val requestAudioPermission: () -> Unit,
     private val triggerPx: Float,
 ) {
     companion object {
@@ -451,8 +320,9 @@ class BlindCaptureController(
     }
 
     /**
-     * v0.68.35：本次手势的扇形段 = 录像 / 拍照 / 快捷装备（七仔装备排序前两位）/ 录音。
-     * v0.68.36：录音固定最下方，离拍照最远。每次触发时读最新装备列表。
+     * v0.68.40：本次手势的扇形段 = 拍照（系统唯一预设）+ 快捷装备
+     * （七仔装备排序前 4，槽位顺序 下方1/上方1/下方2/上方2）。
+     * 每次触发时读最新装备列表。
      */
     private fun buildSegments(): List<FanSegment> {
         val quicks = try {
@@ -460,11 +330,18 @@ class BlindCaptureController(
         } catch (_: Exception) {
             emptyList()
         }
-        return listOf(
-            FanSegment.BuiltIn(BlindMode.VIDEO),
-            FanSegment.BuiltIn(BlindMode.PHOTO),
-        ) + quicks.map { FanSegment.Quick(it) } +
-            listOf(FanSegment.BuiltIn(BlindMode.AUDIO))
+        return listOf(FanSegment.Photo) + quicks.map { FanSegment.Quick(it) }
+    }
+
+    /** v0.68.40：0 装备引导（只说一次） */
+    private fun guideZeroQuickOnce() {
+        try {
+            val prefs = context.getSharedPreferences("blind_prefs", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("zero_quick_guided", false)) {
+                prefs.edit().putBoolean("zero_quick_guided", true).apply()
+                PetRepository.say("左滑现在只拍照片，去七仔装备里加你想要的功能")
+            }
+        } catch (_: Exception) { }
     }
 
     /** 手势开始：无条件跟踪（组件已消费的手势到不了这里） */
@@ -503,9 +380,16 @@ class BlindCaptureController(
             if (leftSwipe || rightSwipe) {
                 triggered = true
                 fanDir = if (leftSwipe) FanDirection.LEFT else FanDirection.RIGHT
-                // v0.68.35：读最新七仔装备，构建本次手势的动态段 + 角度
+                // v0.68.40：读最新七仔装备，构建本次手势的动态段 + 角度
                 segments = buildSegments()
                 sweeps = fanSweeps(segments.count { it is FanSegment.Quick })
+                // v0.68.40：0 装备——不展开扇形，直接拍照；七仔引导一次
+                if (segments.size == 1) {
+                    launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
+                    guideZeroQuickOnce()
+                    reset()
+                    return
+                }
                 // v0.68.36：扇形上下伸展按实际跨度算（拍照锚定正中，快捷多时向下延伸更多）
                 val (upK, downK) = fanVerticalReach(sweeps, fanDir)
                 val upPx = FAN_R_OUTER_SELECTED_DP * upK * density
@@ -564,10 +448,10 @@ class BlindCaptureController(
         }
     }
 
-    /** v0.68.35：段显示名——快捷段读装备短标签 */
+    /** v0.68.40：段显示名——拍照 / 快捷段读装备短标签 */
     private fun segmentLabel(idx: Int): String {
         return when (val s = segments.getOrNull(idx)) {
-            is FanSegment.BuiltIn -> s.mode.label
+            is FanSegment.Photo -> "拍照"
             is FanSegment.Quick -> s.item.label.takeIf { it.isNotBlank() } ?: "快捷"
             null -> ""
         }
@@ -589,16 +473,16 @@ class BlindCaptureController(
         } catch (_: Exception) { false }
         reset()
         if (wasTriggered) {
-            val photoIdx = photoIndex()
-            if (flingPhoto && photoIdx >= 0) {
-                commit(photoIdx)
+            // v0.68.40：拍照永远是 index 0
+            if (flingPhoto) {
+                commit(0)
                 Log.d(TAG, "diag: commit(拍照-快滑)")
             } else if (idx >= 0) {
                 commit(idx)
                 Log.d(TAG, "diag: commit(${segmentLabel(idx)})")
-            } else if (photoIdx >= 0) {
-                // v0.68.35：无选择松手（快滑）= 拍照，零决策
-                commit(photoIdx)
+            } else {
+                // v0.68.20：无选择松手（快滑）= 拍照，零决策
+                commit(0)
                 Log.d(TAG, "diag: commit(拍照-默认)")
             }
             return true
@@ -606,32 +490,17 @@ class BlindCaptureController(
         return false
     }
 
-    /** 拍照段下标（动态段列表中查找） */
-    private fun photoIndex(): Int = segments.indexOfFirst {
-        it is FanSegment.BuiltIn && it.mode == BlindMode.PHOTO
-    }
-
     fun onCancel() {
         reset()
     }
 
-    /** 录音权限结果回调 */
-    fun onAudioPermissionResult(granted: Boolean) {
-        if (granted) startAudio()
-        else PetRepository.say("没有麦克风权限，录不了音")
-    }
-
+    /** v0.68.40：拍照（系统唯一预设）/ 快捷装备段（复用 launchQuickAction） */
     private fun commit(idx: Int) {
         when (val s = segments.getOrNull(idx)) {
-            is FanSegment.BuiltIn -> {
-                Log.d(TAG, "commit mode=${s.mode}")
-                when (s.mode) {
-                    BlindMode.PHOTO -> launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
-                    BlindMode.VIDEO -> launchCamera(MediaStore.ACTION_VIDEO_CAPTURE)
-                    BlindMode.AUDIO -> toggleAudio()
-                }
+            is FanSegment.Photo -> {
+                Log.d(TAG, "commit photo")
+                launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
             }
-            // v0.68.35：快捷装备段——松手启动该快捷方式（复用 launchQuickAction）
             is FanSegment.Quick -> {
                 Log.d(TAG, "commit quick=${s.item.label}")
                 launchQuickAction(context, s.item)
@@ -674,58 +543,19 @@ class BlindCaptureController(
         }
     }
 
-    private fun toggleAudio() {
-        if (BlindAudioRecorder.isRecording) {
-            val uri = BlindAudioRecorder.stop(context)
-            val durSec = BlindAudioRecorder.lastDurationSec
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            // v0.68.24：录音结束 → 生成语音胶囊（浮在七仔周围）
-            if (uri != null) {
-                com.bobot.ailauncher.ui.pet.VoiceCapsuleStore.add(
-                    context, uri.toString(), durSec
-                )
-                PetRepository.say("录音变成胶囊啦，点它可以播放或转文字")
-            } else {
-                PetRepository.say("录音保存失败了")
-            }
-        } else if (hasAudioPermission()) {
-            startAudio()
-        } else {
-            requestAudioPermission()
-        }
-    }
-
-    private fun hasAudioPermission(): Boolean =
-        ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-
-    private fun startAudio() {
-        val ok = BlindAudioRecorder.start(context)
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        if (ok) PetRepository.say("开始录音了，再做一次手势停止")
-        else PetRepository.say("录音启动失败")
-    }
-
 }
 
 /** v0.68.37：选中段外缘跟随的线稿小图标（替代方案C七仔探出）
- * 录像/拍照/录音用 Material Outlined 线稿（深暖灰）；快捷段用装备自己的图标，
+ * v0.68.40：拍照用 Material Outlined 相机线稿（深暖灰）；快捷段用装备自己的图标，
  * 无图标时显示标签首字小圆章。 */
 @Composable
 private fun FanIndicatorIcon(seg: FanSegment) {
     val iconTint = Color(0xFF6B6259) // 深暖灰
     when (seg) {
-        is FanSegment.BuiltIn -> {
-            val iv = when (seg.mode) {
-                BlindMode.VIDEO -> Icons.Outlined.Videocam
-                BlindMode.PHOTO -> Icons.Outlined.PhotoCamera
-                BlindMode.AUDIO -> Icons.Outlined.Mic
-            }
+        is FanSegment.Photo -> {
             Icon(
-                imageVector = iv,
-                contentDescription = seg.mode.label,
+                imageVector = Icons.Outlined.PhotoCamera,
+                contentDescription = "拍照",
                 tint = iconTint,
                 modifier = Modifier.size(32.dp)
             )
@@ -817,7 +647,7 @@ fun BlindCaptureFan(
 
     // v0.68.24 方案A：选中段径向伸长——每段外半径独立 spring；
     // v0.68.35：展开 0→120dp，选中该段 120→140dp（+20dp），滑出回弹；
-    // 展开 stagger：每段延迟 25ms 依次绽开（录像→拍照→快捷→录音）
+    // 展开 stagger：每段延迟 25ms 依次绽开（拍照→快捷段）
     val segShown = remember { mutableStateMapOf<Int, Boolean>() }
     LaunchedEffect(Unit) {
         segments.indices.forEach { i ->
@@ -1014,20 +844,18 @@ fun BlindCaptureFan(
             }
         }
         // v0.68.20：图标 + 文字 overlay（Compose 排版）
-        // v0.68.24 方案A：文字随段半径走（选中段伸长后文字外移）；选中字号放大
-        // v0.68.35：纯文字（快捷段显示装备短标签，无图标）
-        val rInnerPx = with(density) { FAN_R_INNER_DP.dp.toPx() }
+        // v0.68.40：标签外移到外圈约 100dp（效果图确认，手指盖不住）；圆心不动；
+        // 18sp（拍照 19sp 加粗），横排 + maxLines=1 + Ellipsis
+        val rLabelPx = with(density) { FAN_LABEL_R_DP.dp.toPx() }
         segments.forEachIndexed { i, seg ->
             val (s, sw) = segmentAngles(i, sweeps, direction)
-            val segRPx = with(density) { segRadiiDp[i].value.dp.toPx() }
-            val rMid = (segRPx + rInnerPx) / 2f
             val midRad = Math.toRadians((s + sw / 2).toDouble())
-            val lx = centerX + cos(midRad).toFloat() * rMid
-            val ly = centerY + sin(midRad).toFloat() * rMid
+            val lx = centerX + cos(midRad).toFloat() * rLabelPx
+            val ly = centerY + sin(midRad).toFloat() * rLabelPx
             val selected = i == selectedIndex
-            val isPhoto = seg is FanSegment.BuiltIn && seg.mode == BlindMode.PHOTO
+            val isPhoto = seg is FanSegment.Photo
             val segLabel = when (seg) {
-                is FanSegment.BuiltIn -> seg.mode.label
+                is FanSegment.Photo -> "拍照"
                 is FanSegment.Quick -> seg.item.label.takeIf { it.isNotBlank() } ?: "快捷"
             }
             val pop by animateFloatAsState(
@@ -1056,13 +884,8 @@ fun BlindCaptureFan(
                 ) {
                     Text(
                         text = segLabel,
-                        // 选中放大——拍照 19sp→22sp，其他 16sp→19sp
-                        fontSize = when {
-                            selected && isPhoto -> 22.sp
-                            selected -> 19.sp
-                            isPhoto -> 19.sp
-                            else -> 16.sp
-                        },
+                        // v0.68.40：18sp（拍照 19sp 加粗）；选中靠 pop 缩放反馈
+                        fontSize = if (isPhoto) 19.sp else 18.sp,
                         fontWeight = if (selected || isPhoto) FontWeight.Bold else FontWeight.Medium,
                         color = if (selected) titleColor else bodyColor,
                         maxLines = 1,

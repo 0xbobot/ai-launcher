@@ -17,8 +17,6 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 日历：首页「今日日程」卡片 -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
-    <!-- 录音：意图框语音输入 -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- v0.68.12：盲操诊断浮层状态变化短震动（50ms，普通权限安装即授） -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 取全量应用列表：个人侧载应用，无上架政策顾虑；launcher 必备（Android 11+ 包可见性过滤） -->

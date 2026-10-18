@@ -647,14 +647,7 @@ fun PetZone(
                         .padding(horizontal = 9.dp, vertical = 7.dp)
                 )
             }
-            // v0.68.24：语音胶囊——录音变成胶囊浮在七仔周围（装备挂件环绕语言）；
-            // 装备面板展开时隐藏，避免与装备槽位重叠
-            VoiceCapsules(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = petTop),
-                hidden = showQuickPanel || panelCollapsing,
-            )
+        // v0.68.40：语音胶囊已删除（Bob：太重了，全清）
         }
         // v0.67.1：AI Capsule 模态卡已删除——会议/重要信息不再弹窗，
         // 只走七仔说话 + TODAY 卡片 + 视觉动效（产品原则）
