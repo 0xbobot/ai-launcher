@@ -22,6 +22,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -38,6 +41,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -46,9 +50,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -56,6 +63,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -137,10 +145,12 @@ import kotlin.math.sqrt
  * 保留：三重反馈（震动/七仔语音/视觉高亮）。
  */
 
-/** 扇形段：拍照（系统唯一预设）+ 用户快捷装备段 */
+/** 扇形段：拍照（系统唯一预设）+ 用户快捷装备段 + 空槽位 */
 sealed interface FanSegment {
     data object Photo : FanSegment
     data class Quick(val item: QuickActionItem) : FanSegment
+    /** v0.68.64：空槽位"＋"（编辑态/0装备扇形里的虚线段，点开添加） */
+    data object AddSlot : FanSegment
 }
 
 /** 扇形方向：LEFT=朝左（左滑触发），RIGHT=朝右（右滑触发，镜像） */
@@ -161,7 +171,8 @@ private const val FAN_EDGE_MARGIN_DP = 16f // v0.68.42：12→16（曲面屏边�
 private const val FAN_LABEL_R_DP = 95f
 
 private const val FAN_SWEEP_SEG = 36f // v0.68.38：所有段等宽 36°
-private const val MAX_QUICK_SEGS = 4 // v0.68.40：2→4（录像/录音预设作废，装备成唯一其他段）
+// v0.68.40：2→4（录像/录音预设作废，装备成唯一其他段）；v0.68.64：internal（MainScreen 编辑态读写用）
+internal const val MAX_QUICK_SEGS = 4
 /** v0.68.40：快捷槽位角度（Canvas 坐标，startAngle），顺序 下方1/上方1/下方2/上方2 */
 private val QUICK_SLOTS_LEFT = listOf(126f, 198f, 90f, 234f)
 private val QUICK_SLOTS_RIGHT = listOf(18f, -54f, 54f, -90f)
@@ -285,6 +296,16 @@ sealed interface BlindUiState {
     ) : BlindUiState
     /** v0.68.42：拍照快门闪——白闪 80ms + 咔嚓震感后进相机 */
     data object PhotoFlash : BlindUiState
+    /** v0.68.62：扇形内编辑——长按某快捷段 500ms 后松手，扇形钉住，点×删除，点别处取消
+     * v0.68.64：升级为完整编辑模式——停留 800ms 整扇钉住（手指可松开）；
+     * 装备段×删除、拖动换位、空槽位＋添加、点扇形外退出；openAddSheet=经＋段点入时自动弹添加表 */
+    data class Editing(
+        val centerX: Float,
+        val centerY: Float,
+        val direction: FanDirection = FanDirection.LEFT,
+        val segments: List<FanSegment> = emptyList(),
+        val openAddSheet: Boolean = false,
+    ) : BlindUiState
 }
 
 /**
@@ -325,6 +346,12 @@ class BlindCaptureController(
     private var centerX = 0f
     private var centerY = 0f
     private var modeIndex = -1
+    // v0.68.62：扇形内长按删除——某快捷段停留 500ms 即 arm，松手进 Editing 钉住
+    // v0.68.64：500ms arm 作废，改 800ms 整扇钉住进完整编辑模式（见 enterEditMode）
+    private var dwellStartMs = 0L
+    /** v0.68.64：编辑钉住时手势层移交扇形自身（点×/＋/拖拽由 MainScreen 侧处理），
+     * controller 不再接管 down/move/up（HomeScreen 侧 LaunchedEffect 同步） */
+    var editPinned = false
 
     // v0.68.39：诊断链路已删除（v0.68.12 屏上诊断浮层使命结束）；保留 Log.d 供开发期使用
 
@@ -349,6 +376,15 @@ class BlindCaptureController(
         setUi(BlindUiState.Hidden)
     }
 
+    /** v0.68.64：MainScreen 侧退出编辑（点扇形外）时调用——清钉住并同步双端状态 */
+    fun exitEditMode() {
+        editPinned = false
+        tracking = false
+        triggered = false
+        modeIndex = -1
+        setUi(BlindUiState.Hidden)
+    }
+
     /**
      * v0.68.40：本次手势的扇形段 = 拍照（系统唯一预设）+ 快捷装备
      * （七仔装备排序前 4，槽位顺序 下方1/上方1/下方2/上方2）。
@@ -363,24 +399,68 @@ class BlindCaptureController(
         return listOf(FanSegment.Photo) + quicks.map { FanSegment.Quick(it) }
     }
 
-    /** v0.68.40：0 装备引导（只说一次） */
+    /** v0.68.40：0 装备引导（只说一次）
+     * v0.68.64：文案改指扇形＋段（不再藏设置页） */
     private fun guideZeroQuickOnce() {
         try {
             val prefs = context.getSharedPreferences("blind_prefs", Context.MODE_PRIVATE)
             if (!prefs.getBoolean("zero_quick_guided", false)) {
                 prefs.edit().putBoolean("zero_quick_guided", true).apply()
-                PetRepository.say("左滑现在只拍照片，去七仔装备里加你想要的功能")
+                PetRepository.say("点+把你常用的放进来")
+            }
+        } catch (_: Exception) { }
+    }
+
+    /** v0.68.64：编辑态段 = 拍照 + 装备前4 + 空槽位补到4段 */
+    private fun buildEditSegments(): List<FanSegment> {
+        val quicks = try {
+            QuickActionsPrefs.load(context).take(MAX_QUICK_SEGS)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val list = mutableListOf<FanSegment>(FanSegment.Photo)
+        list += quicks.map { FanSegment.Quick(it) }
+        repeat((MAX_QUICK_SEGS - quicks.size).coerceAtLeast(0)) {
+            list += FanSegment.AddSlot
+        }
+        return list
+    }
+
+    /** v0.68.64：进编辑模式——整扇钉住，手势层移交扇形自身（editPinned） */
+    private fun enterEditMode(openAddSheet: Boolean) {
+        tracking = false
+        triggered = false
+        modeIndex = -1
+        editPinned = true
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        guideEditOnce()
+        setUi(BlindUiState.Editing(centerX, centerY, fanDir, buildEditSegments(), openAddSheet))
+        Log.d(TAG, "diag: editMode(openAddSheet=$openAddSheet)")
+    }
+
+    /** v0.68.64：编辑模式引导（只说一次） */
+    private fun guideEditOnce() {
+        try {
+            val prefs = context.getSharedPreferences("blind_prefs", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("fan_edit_guided", false)) {
+                prefs.edit().putBoolean("fan_edit_guided", true).apply()
+                PetRepository.say("编辑模式，拖动换位，点×删除，点+添加")
             }
         } catch (_: Exception) { }
     }
 
     /** 手势开始：无条件跟踪（组件已消费的手势到不了这里） */
     fun onStart() {
+        // v0.68.64：编辑钉住时新手势不接管（扇形自身处理交互）
+        if (editPinned) return
         tracking = true
         triggered = false
         modeIndex = -1
         maxLeftPx = 0f
         maxRightPx = 0f
+        // v0.68.62：清掉上次 Editing 的残留态（MainScreen 侧直接 Hidden 时 HomeScreen 副本可能还停在 Editing）
+        dwellStartMs = 0L
+        setUi(BlindUiState.Hidden)
         velocityTracker.resetTracking()
         Log.d(TAG, "onStart tracking")
     }
@@ -412,14 +492,13 @@ class BlindCaptureController(
                 fanDir = if (leftSwipe) FanDirection.LEFT else FanDirection.RIGHT
                 // v0.68.40：读最新七仔装备，构建本次手势的动态段 + 角度
                 segments = buildSegments()
-                sweeps = fanSweeps(segments.count { it is FanSegment.Quick })
-                // v0.68.40：0 装备——不展开扇形，直接拍照；七仔引导一次
-                if (segments.size == 1) {
-                    launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
-                    guideZeroQuickOnce()
-                    dismissFan()
-                    return
+                // v0.68.64：0 装备——展开两段扇形（拍照 + ⊕），不再直接拍照；
+                // 快滑仍直拍（onEnd 的 flingPhoto 分支）；七仔引导一次
+                val isZeroQuick = segments.size == 1
+                if (isZeroQuick) {
+                    segments = listOf(FanSegment.Photo, FanSegment.AddSlot)
                 }
+                sweeps = fanSweeps(segments.size - 1)
                 // v0.68.36：扇形上下伸展按实际跨度算（拍照锚定正中，快捷多时向下延伸更多）
                 val (upK, downK) = fanVerticalReach(sweeps, fanDir)
                 val upPx = FAN_R_OUTER_SELECTED_DP * upK * density
@@ -448,8 +527,10 @@ class BlindCaptureController(
                 }
                 modeIndex = -1
                 setUi(BlindUiState.Selecting(centerX, centerY, -1, fanDir, segments))
+                dwellStartMs = change.uptimeMillis
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                PetRepository.say("拍点什么？")
+                if (isZeroQuick) guideZeroQuickOnce()
+                else PetRepository.say("拍点什么？")
                 Log.d(TAG, "diag: fan展开")
                 Log.d(TAG, "triggered dir=$fanDir center=($centerX, $centerY)")
             }
@@ -469,20 +550,25 @@ class BlindCaptureController(
         val idx = sectorForIndex(pos.x - centerX, pos.y - centerY, deadZonePx, sweeps, fanDir)
         if (idx != modeIndex) {
             modeIndex = idx
+            dwellStartMs = change.uptimeMillis
             setUi(BlindUiState.Selecting(centerX, centerY, idx, fanDir, segments))
             if (idx >= 0) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 PetRepository.say(segmentLabel(idx))
                 Log.d(TAG, "diag: sector=${segmentLabel(idx)}")
             }
+        } else if (change.uptimeMillis - dwellStartMs >= 800L) {
+            // v0.68.64：停留 800ms → 整扇钉住进完整编辑模式（取代 500ms 删除 arm）
+            enterEditMode(openAddSheet = false)
         }
     }
 
-    /** v0.68.40：段显示名——拍照 / 快捷段读装备短标签 */
+    /** v0.68.40：段显示名——拍照 / 快捷段读装备短标签；v0.68.64：＋段 */
     private fun segmentLabel(idx: Int): String {
         return when (val s = segments.getOrNull(idx)) {
             is FanSegment.Photo -> "拍照"
             is FanSegment.Quick -> s.item.label.takeIf { it.isNotBlank() } ?: "快捷"
+            is FanSegment.AddSlot -> "添加"
             null -> ""
         }
     }
@@ -492,7 +578,9 @@ class BlindCaptureController(
      * v0.68.20：无选择松手（快滑）= 拍照，零决策；右滑回取消已在 onMove 处理。
      * v0.68.36：快滑覆盖——松手速度超阈值直接=拍照（快=着急=拍照，忽略段选择）。
      */
+    /** v0.68.64：编辑钉住时手势层不接管（扇形自身处理点×/＋/拖拽） */
     fun onEnd(): Boolean {
+        if (editPinned) return true
         if (!tracking) return false
         val wasTriggered = triggered
         val idx = modeIndex
@@ -502,12 +590,16 @@ class BlindCaptureController(
                 FLING_PHOTO_VELOCITY_PX_S * FLING_PHOTO_VELOCITY_PX_S
         } catch (_: Exception) { false }
         if (wasTriggered) {
-            // v0.68.40：拍照永远是 index 0
+            // v0.68.64：＋段（只有 0 装备扇形有）→ 进编辑态并自动弹出添加表；
+            // 快滑优先（>4500px/s 仍直接拍照，不进添加）
             val seg = segments.getOrNull(idx)
             if (flingPhoto || idx < 0 || seg is FanSegment.Photo) {
                 // v0.68.42：拍照 signature——白闪 80ms + 咔嚓震感 → 进相机
                 commitPhotoWithFlash()
                 Log.d(TAG, "diag: commit(拍照-快门闪)")
+            } else if (seg is FanSegment.AddSlot) {
+                enterEditMode(openAddSheet = true)
+                Log.d(TAG, "diag: edit(+段点入)")
             } else {
                 dismissFan()
                 commit(idx)
@@ -520,6 +612,8 @@ class BlindCaptureController(
     }
 
     fun onCancel() {
+        // v0.68.64：编辑钉住时取消手势不杀扇形
+        if (editPinned) return
         dismissFan()
     }
 
@@ -552,6 +646,8 @@ class BlindCaptureController(
                 Log.d(TAG, "commit quick=${s.item.label}")
                 launchQuickAction(context, s.item)
             }
+            // v0.68.64：＋段不走 commit（onEnd 直接进编辑+弹添加表）
+            is FanSegment.AddSlot -> Unit
             null -> Unit
         }
     }
@@ -668,6 +764,8 @@ private fun FanIndicatorIcon(seg: FanSegment) {
                 }
             }
         }
+        // v0.68.64：＋段不画跟随图标（编辑态无选中指示器，不会走到）
+        is FanSegment.AddSlot -> Unit
     }
 }
 
@@ -707,10 +805,19 @@ fun BlindCaptureFan(
     direction: FanDirection = FanDirection.LEFT,
     // v0.68.42：收起中——播 120ms 内收+淡出
     dismiss: Boolean = false,
+    // v0.68.64：完整编辑模式——整扇钉住：装备段×删除（onDeleteQuick 按快捷位置索引）、
+    // 空槽位＋添加（onAddSlot）、拖动换位（onEditReorder 按快捷位置索引）、
+    // 点扇形外退出（onEditTapOutside）；拍照段钉死（无×、不可拖）。非编辑态这些回调全 null
+    editMode: Boolean = false,
+    onDeleteQuick: ((quickIndex: Int) -> Unit)? = null,
+    onAddSlot: (() -> Unit)? = null,
+    onEditReorder: ((fromQuick: Int, toQuick: Int) -> Unit)? = null,
+    onEditTapOutside: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // 绘制与命中判定共用同一套动态角度
-    val sweeps = fanSweeps(segments.count { it is FanSegment.Quick })
+    // v0.68.64：非拍照段都算（快捷＋空槽位），绘制/命中一致
+    val sweeps = fanSweeps(segments.size - 1)
     val density = LocalDensity.current
     // v0.68.42：选中段暖金 #D9A05B alpha 0.85（替代暖棕 #D8CBB6，克制的记忆色）
     val selectedFill = Color(0xFFD9A05B).copy(alpha = 0.85f)
@@ -775,12 +882,117 @@ fun BlindCaptureFan(
         label = "rippleA"
     )
 
+    // v0.68.64：编辑态回调/段列表经 rememberUpdatedState 取最新——pointerInput
+    // key 只跟 editMode，拖拽中途换位重组不重启手势（链式换位不断）；命中按位置
+    // 索引，删除时 MainScreen 按索引取最新列表，保证引用不脏
+    val segmentsState = rememberUpdatedState(segments)
+    val onDeleteQuickState = rememberUpdatedState(onDeleteQuick)
+    val onAddSlotState = rememberUpdatedState(onAddSlot)
+    val onEditReorderState = rememberUpdatedState(onEditReorder)
+    val onEditTapOutsideState = rememberUpdatedState(onEditTapOutside)
     // v0.68.29 方案C：探出七仔位置钳制需要屏幕尺寸
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
+    // v0.68.62：armed 段抖动（±7° 往复），只在有 armed 段时建 transition
+    // v0.68.64：编辑态所有装备段抖动（iOS 式，暗示可编辑）；拍照段钉死不抖
+    val wobbleDeg: Float = if (editMode) {
+        val wobbleT = rememberInfiniteTransition(label = "armedWobble")
+        wobbleT.animateFloat(
+            initialValue = -7f,
+            targetValue = 7f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(280),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "wobble"
+        ).value
+    } else 0f
     Box(
         modifier = modifier
             .fillMaxSize()
             .onGloballyPositioned { screenSize = it.size }
+            // v0.68.64：编辑态手势——点×删除 / 点＋添加 / 装备段拖动换位 /
+            // 点扇形外空白退出；手势态（Selecting）不装点击
+            // key 只跟 editMode：回调与段列表经 rememberUpdatedState 取最新，
+            // 拖拽换位引起重组不重启手势，链式换位不断
+            .pointerInput(editMode) {
+                if (!editMode) return@pointerInput
+                val touchSlopPx = viewConfiguration.touchSlop
+                val deadPx = with(density) { FAN_R_INNER_DP.dp.toPx() }
+                val badgeRpx = with(density) { (FAN_R_OUTER_SELECTED_DP + 14f).dp.toPx() }
+                val badgeHitR = with(density) { 28.dp.toPx() }
+                // 每手势取一次快照（位置索引：换位不改变槽位布局，快照持续有效）
+                while (true) {
+                    awaitEachGesture {
+                        val segs = segmentsState.value
+                        val sweepsNow = fanSweeps(segs.size - 1)
+                        fun badgeCenter(segIdx: Int): Offset {
+                            val (bs, bsw) = segmentAngles(segIdx, sweepsNow, direction)
+                            val bRad = Math.toRadians((bs + bsw / 2).toDouble())
+                            return Offset(
+                                centerX + cos(bRad).toFloat() * badgeRpx,
+                                centerY + sin(bRad).toFloat() * badgeRpx
+                            )
+                        }
+                        fun quickIndexAt(pos: Offset): Int? {
+                            val dx = pos.x - centerX
+                            val dy = pos.y - centerY
+                            if (sqrt(dx * dx + dy * dy) < deadPx) return null
+                            val i = sectorForIndex(dx, dy, deadPx, sweepsNow, direction)
+                            return if (segs.getOrNull(i) is FanSegment.Quick) i - 1 else null
+                        }
+                        fun handleEditTap(pos: Offset) {
+                            // 1. × 徽标（所有装备段）→ 按位置索引删（MainScreen 取最新列表）
+                            val quickCount = segs.count { it is FanSegment.Quick }
+                            for (k in 0 until quickCount) {
+                                val bc = badgeCenter(k + 1)
+                                val dx = pos.x - bc.x
+                                val dy = pos.y - bc.y
+                                if (dx * dx + dy * dy <= badgeHitR * badgeHitR) {
+                                    onDeleteQuickState.value?.invoke(k)
+                                    return
+                                }
+                            }
+                            // 2. ＋槽位
+                            val dx = pos.x - centerX
+                            val dy = pos.y - centerY
+                            if (sqrt(dx * dx + dy * dy) >= deadPx) {
+                                val i = sectorForIndex(dx, dy, deadPx, sweepsNow, direction)
+                                if (segs.getOrNull(i) is FanSegment.AddSlot) {
+                                    onAddSlotState.value?.invoke()
+                                    return
+                                }
+                            }
+                            // 3. 扇形外空白 → 退出编辑
+                            onEditTapOutsideState.value?.invoke()
+                        }
+                        val down = awaitFirstDown()
+                        var dragQuick: Int? = null
+                        var slopPassed = false
+                        var finished = false
+                        while (!finished) {
+                            val event = awaitPointerEvent()
+                            for (change in event.changes) {
+                                if (change.id != down.id) continue
+                                val pos = change.position
+                                if (!slopPassed) {
+                                    if ((pos - down.position).getDistance() > touchSlopPx) {
+                                        slopPassed = true
+                                        dragQuick = quickIndexAt(pos)
+                                    }
+                                } else if (dragQuick != null) {
+                                    val q = quickIndexAt(pos)
+                                    if (q != null && q != dragQuick) {
+                                        onEditReorderState.value?.invoke(dragQuick, q)
+                                        dragQuick = q
+                                    }
+                                }
+                                if (!change.pressed) finished = true
+                            }
+                        }
+                        if (!slopPassed) handleEditTap(down.position)
+                    }
+                }
+            }
             // v0.68.42：收起内收——以扇形圆心为轴缩放+淡出
             .graphicsLayer {
                 val sc = 1f - 0.18f * dismissT
@@ -807,11 +1019,58 @@ fun BlindCaptureFan(
             // v0.68.42：段间 2dp 分隔线删除，改 4dp 气隙（±1.4°，透背景）；
             // 未选中段整体透明度 0.6；选中段柔和投影（HW 安全：两层错位暗弧）
             val gapHalf = 1.4f
-            segments.forEachIndexed { i, _ ->
+            segments.forEachIndexed { i, seg ->
                 val (s, sw) = segmentAngles(i, sweeps, direction)
-                val selected = i == selectedIndex
                 val rOuter = segRadiiDp[i].value.dp.toPx()
                 if (rOuter < 1f) return@forEachIndexed
+                // v0.68.64：空槽位——虚线楔形（无填充，点＋添加）
+                if (seg is FanSegment.AddSlot) {
+                    val a0r = Math.toRadians((s + gapHalf).toDouble())
+                    val a1r = Math.toRadians((s + sw - gapHalf).toDouble())
+                    val dashPath = Path().apply {
+                        moveTo(
+                            centerX + cos(a0r).toFloat() * rInner,
+                            centerY + sin(a0r).toFloat() * rInner
+                        )
+                        lineTo(
+                            centerX + cos(a0r).toFloat() * rOuter,
+                            centerY + sin(a0r).toFloat() * rOuter
+                        )
+                        arcTo(
+                            rect = Rect(
+                                centerX - rOuter, centerY - rOuter,
+                                centerX + rOuter, centerY + rOuter
+                            ),
+                            startAngleDegrees = s + gapHalf,
+                            sweepAngleDegrees = sw - gapHalf * 2,
+                            forceMoveTo = false
+                        )
+                        lineTo(
+                            centerX + cos(a1r).toFloat() * rInner,
+                            centerY + sin(a1r).toFloat() * rInner
+                        )
+                        arcTo(
+                            rect = Rect(
+                                centerX - rInner, centerY - rInner,
+                                centerX + rInner, centerY + rInner
+                            ),
+                            startAngleDegrees = s + sw - gapHalf,
+                            sweepAngleDegrees = -(sw - gapHalf * 2),
+                            forceMoveTo = false
+                        )
+                        close()
+                    }
+                    drawPath(
+                        path = dashPath,
+                        color = Color(0xFFAAA093),
+                        style = Stroke(
+                            width = 2.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                        )
+                    )
+                    return@forEachIndexed
+                }
+                val selected = i == selectedIndex
                 val segAlpha = if (selected) 1f else 0.6f
                 if (selected) {
                     val shColor = Color(0xFF6E5A3E)
@@ -960,17 +1219,22 @@ fun BlindCaptureFan(
             val ly = centerY + sin(midRad).toFloat() * rLabelPx
             val selected = i == selectedIndex
             val isPhoto = seg is FanSegment.Photo
+            val isAdd = seg is FanSegment.AddSlot
             val segLabel = when (seg) {
                 is FanSegment.Photo -> "拍照"
                 is FanSegment.Quick -> seg.item.label.takeIf { it.isNotBlank() } ?: "快捷"
+                // v0.68.64：空槽位"＋"（不旋转，灰色）
+                is FanSegment.AddSlot -> "+"
             }
             val pop by animateFloatAsState(
                 targetValue = if (selected) 1.22f else 1f,
                 animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
                 label = "segPop$i"
             )
-            // v0.68.42：选中段字号 +2sp 过渡（14→16sp，拍照 15→17sp）
+            // v0.68.42：选中段字号 +2sp 过渡（14→16sp，拍照 15→17sp）；
+            // v0.68.64：＋段固定 22sp
             val targetSize = when {
+                isAdd -> 22f
                 selected && isPhoto -> 17f
                 selected -> 16f
                 isPhoto -> 15f
@@ -997,7 +1261,11 @@ fun BlindCaptureFan(
                         .graphicsLayer {
                             scaleX = pop
                             scaleY = pop
-                            rotationZ = midDeg - centerDeg
+                            // v0.68.62：armed 段抖动（±7° 往复，暗示可删）
+                            // v0.68.64：编辑态所有装备段抖动；拍照段钉死不抖；＋段不转
+                            rotationZ = if (isAdd) 0f
+                            else midDeg - centerDeg +
+                                (if (editMode && seg is FanSegment.Quick) wobbleDeg else 0f)
                             alpha = fanAlpha * (1f - dismissT) *
                                 (if (selected) 1f else 0.6f)
                         }
@@ -1013,6 +1281,52 @@ fun BlindCaptureFan(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+            }
+        }
+        // v0.68.62：armed 段的 × 徽标（选中段外缘 +14dp，22dp 红底白×，pop 出现）
+        // v0.68.64：编辑态所有装备段右上角 × 徽标（拍照段钉死无×，＋段无×）
+        if (editMode) {
+            val quickCount = segments.count { it is FanSegment.Quick }
+            for (k in 0 until quickCount) {
+                val segIdx = k + 1
+                val (bs, bsw) = segmentAngles(segIdx, sweeps, direction)
+                val bRad = Math.toRadians((bs + bsw / 2).toDouble())
+                val bRpx = with(density) { (FAN_R_OUTER_SELECTED_DP + 14f).dp.toPx() }
+                val bx = centerX + cos(bRad).toFloat() * bRpx
+                val by = centerY + sin(bRad).toFloat() * bRpx
+                key("badge$segIdx") {
+                    val badgePop by animateFloatAsState(
+                        targetValue = 1f,
+                        animationSpec = spring(dampingRatio = 0.5f, stiffness = 900f),
+                        label = "badgePop$segIdx"
+                    )
+                    val badgeHalfPx = with(density) { 11.dp.toPx() }
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(
+                                    (bx - badgeHalfPx).roundToInt(),
+                                    (by - badgeHalfPx).roundToInt()
+                                )
+                            }
+                            .graphicsLayer {
+                                scaleX = badgePop
+                                scaleY = badgePop
+                                alpha = fanAlpha * (1f - dismissT)
+                            }
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFFF3B30)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "×",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
                 }
             }
         }

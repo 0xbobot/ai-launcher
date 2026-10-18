@@ -53,8 +53,13 @@ import com.bobot.ailauncher.ui.apps.PullUpDock
 import com.bobot.ailauncher.ui.apps.RailItem
 import com.bobot.ailauncher.ui.apps.WaveRail
 import com.bobot.ailauncher.ui.components.UpdateDialog
+import com.bobot.ailauncher.ui.home.BlindCaptureController
 import com.bobot.ailauncher.ui.home.BlindCaptureFan
 import com.bobot.ailauncher.ui.home.BlindUiState
+import com.bobot.ailauncher.ui.home.FanSegment
+import com.bobot.ailauncher.ui.home.MAX_QUICK_SEGS
+import com.bobot.ailauncher.ui.pet.QuickActionAddFlow
+import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -221,6 +226,8 @@ private fun HomeHost(
     // v0.68.32：扇形全状态（上报自 HomeScreen）——扇形在最顶层绘制，盖住 Dock
     // v0.68.42：Selecting/Dismissing/PhotoFlash 共用顶层
     var blindFanState by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
+    // v0.68.64：controller 引用（HomeScreen 上报；退出编辑态时调 exitEditMode 清钉住）
+    var blindCtlRef by remember { mutableStateOf<BlindCaptureController?>(null) }
     // v0.68.35：旧自定义标签已作废——段列表自带于 Selecting.segments
     // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位），收起后恢复
     val dockAlpha by animateFloatAsState(
@@ -259,6 +266,8 @@ private fun HomeHost(
             onBlindSelectingChange = { s ->
                 blindFanState = s
             },
+            // v0.68.64：拿 controller 引用（退出编辑态时清钉住）
+            onBlindController = { blindCtlRef = it },
             blindDockZoneDp = when (dockState) {
                 DockState.D1 -> 112f
                 DockState.D2 -> 144f
@@ -463,6 +472,78 @@ private fun HomeHost(
                 dismiss = true,
                 modifier = Modifier.zIndex(100f),
             )
+            is BlindUiState.Editing -> {
+                val ctx = LocalContext.current
+                val haptics = LocalHapticFeedback.current
+                var editSegs by remember(s) { mutableStateOf(s.segments) }
+                var showAddSheet by remember(s) { mutableStateOf(false) }
+                fun refreshEditSegs() {
+                    val quicks = try {
+                        QuickActionsPrefs.load(ctx).take(MAX_QUICK_SEGS)
+                    } catch (_: Exception) { emptyList() }
+                    val list = mutableListOf<FanSegment>(FanSegment.Photo)
+                    list += quicks.map { FanSegment.Quick(it) }
+                    repeat((MAX_QUICK_SEGS - quicks.size).coerceAtLeast(0)) {
+                        list += FanSegment.AddSlot
+                    }
+                    editSegs = list
+                }
+                // 经＋段点入时自动弹出添加表
+                LaunchedEffect(s) { if (s.openAddSheet) showAddSheet = true }
+                BlindCaptureFan(
+                    centerX = s.centerX,
+                    centerY = s.centerY,
+                    selectedIndex = -1,
+                    segments = editSegs,
+                    direction = s.direction,
+                    editMode = true,
+                    onDeleteQuick = { qi ->
+                        // v0.68.64：按位置索引取最新列表（手势快照只定位置，引用不脏）
+                        (editSegs.getOrNull(qi + 1) as? FanSegment.Quick)?.item?.let { item ->
+                            QuickActionsPrefs.save(
+                                ctx,
+                                QuickActionsPrefs.load(ctx).filter { it.id != item.id }
+                            )
+                            refreshEditSegs()
+                            PetRepository.say("已删除")
+                        }
+                    },
+                    onAddSlot = { showAddSheet = true },
+                    onEditReorder = { from, to ->
+                        val full = QuickActionsPrefs.load(ctx).toMutableList()
+                        if (from in full.indices && to in full.indices && from != to) {
+                            val item = full.removeAt(from)
+                            full.add(to, item)
+                            QuickActionsPrefs.save(ctx, full)
+                            refreshEditSegs()
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        }
+                    },
+                    onEditTapOutside = {
+                        PetRepository.say("记住了")
+                        // v0.68.64：经 controller 退出（清 editPinned 并同步双端状态，
+                        // 直接 Hidden 会导致 HomeScreen 副本残留、下次左滑无反应）
+                        blindCtlRef?.exitEditMode()
+                    },
+                    modifier = Modifier.zIndex(100f),
+                )
+                if (showAddSheet) {
+                    QuickActionAddFlow(
+                        bottomSheet = true,
+                        onDismiss = { showAddSheet = false },
+                        onSaved = { item ->
+                            val full = QuickActionsPrefs.load(ctx).toMutableList()
+                            val at = editSegs.count { it is FanSegment.Quick }
+                                .coerceIn(0, full.size)
+                            full.add(at, item)
+                            QuickActionsPrefs.save(ctx, full)
+                            refreshEditSegs()
+                            showAddSheet = false
+                            PetRepository.say("已添加")
+                        }
+                    )
+                }
+            }
             is BlindUiState.PhotoFlash -> Box(
                 modifier = Modifier
                     .fillMaxSize()
