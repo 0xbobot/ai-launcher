@@ -407,17 +407,22 @@ fun PetZone(
 
     // v0.68.44（Bob）：封面模式——杂志 hero + 紧凑条；TodaySection 只跑数据不上 UI
     // v0.68.45：恢复点七仔快捷面板（Bob：快捷服务别删）；无会议时紧凑条隐藏（Bob：别和 hero 重复）
+    // v0.68.47：装备环包进宠物槽位、以宠物为中心（Bob：散落不优雅）
     if (coverMode) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                CoverHero(
-                    summary = coverSummary,
-                    weatherDesc = weatherDesc ?: "",
-                    palette = coverPalette,
-                    petSlot = {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            CoverHero(
+                summary = coverSummary,
+                weatherDesc = weatherDesc ?: "",
+                palette = coverPalette,
+                petSlot = {
+                    Box(
+                        modifier = Modifier.size(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // 七仔本体（可点）
                         Box(
                             modifier = Modifier
-                                .size(120.dp)
+                                .fillMaxSize()
                                 .combinedClickable(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
@@ -447,31 +452,30 @@ fun PetZone(
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
+                        // 装备环：220.dp 以七仔为中心，四周溢出 50.dp 环绕
+                        // 右上 pet，环左移 40.dp 让右腰装备不飞出屏幕
+                        if (showQuickPanel || panelCollapsing) {
+                            QizaiEquipment(
+                                modifier = Modifier.offset(x = (-40).dp),
+                                onLaunch = { if (!panelCollapsing) panelCollapsing = true },
+                                collapsing = panelCollapsing,
+                                onCollapseDone = {
+                                    panelCollapsing = false
+                                    showQuickPanel = false
+                                }
+                            )
+                        }
                     }
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                // 有会议才显示——无会时 hero 已有"难得清闲"，不重复
-                if (coverNextEvent != null) {
-                    NextUpStrip(
-                        summary = coverSummary,
-                        nextEvent = coverNextEvent,
-                        palette = coverPalette,
-                        onMeetingTap = { e -> remindMeeting(e, "cover") }
-                    )
                 }
-            }
-            // 快捷面板：定位在 hero 宠物附近
-            if (showQuickPanel || panelCollapsing) {
-                QizaiEquipment(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 150.dp, end = 4.dp),
-                    onLaunch = { if (!panelCollapsing) panelCollapsing = true },
-                    collapsing = panelCollapsing,
-                    onCollapseDone = {
-                        panelCollapsing = false
-                        showQuickPanel = false
-                    }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            // 有会议才显示——无会时 hero 已有"难得清闲"，不重复
+            if (coverNextEvent != null) {
+                NextUpStrip(
+                    summary = coverSummary,
+                    nextEvent = coverNextEvent,
+                    palette = coverPalette,
+                    onMeetingTap = { e -> remindMeeting(e, "cover") }
                 )
             }
         }
