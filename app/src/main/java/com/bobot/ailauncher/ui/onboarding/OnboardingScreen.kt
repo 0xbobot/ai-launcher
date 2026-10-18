@@ -166,7 +166,7 @@ private fun StepDefaultLauncher(onNext: () -> Unit, onSkip: () -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "把 AI桌面 设为默认，才能替代系统桌面，接管你的 Home 键。",
-            fontSize = 15.sp,
+            fontSize = 16.sp,
             color = AILauncherColors.Body,
             textAlign = TextAlign.Center
         )
@@ -216,7 +216,7 @@ private fun StepNotificationAccess(onNext: () -> Unit, onSkip: () -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "「正在进行时」需要读取通知，才能把会议、快递、消息主动浮上来。",
-            fontSize = 15.sp,
+            fontSize = 16.sp,
             color = AILauncherColors.Body,
             textAlign = TextAlign.Center
         )
@@ -269,7 +269,7 @@ private fun StepDone(onFinish: () -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "意图入口、正在进行时、能力视图都已准备好。\n按 Home 键，随时回到你的 AI 空间。",
-            fontSize = 15.sp,
+            fontSize = 16.sp,
             color = AILauncherColors.Body,
             textAlign = TextAlign.Center
         )

@@ -660,7 +660,7 @@ private fun FanIndicatorIcon(seg: FanSegment) {
                 ) {
                     Text(
                         text = seg.item.label.firstOrNull()?.toString() ?: "快",
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
                         color = iconTint,
                         maxLines = 1

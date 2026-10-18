@@ -145,3 +145,16 @@ object MotionTokens {
     val SpringStiff = androidx.compose.animation.core.Spring.StiffnessMedium
     val SpringDamp = 0.85f
 }
+
+/**
+ * v0.68.59（Bob）：六档字阶——严格收敛，全 App 只用这 6 档。
+ * Caption 12 / Body 14 / Subtitle 16 / Title 20 / Headline 32 / Display 104
+ */
+object TypeScale {
+    val Caption = 12
+    val Body = 14
+    val Subtitle = 16
+    val Title = 20
+    val Headline = 32
+    val Display = 104
+}

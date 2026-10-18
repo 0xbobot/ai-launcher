@@ -172,7 +172,7 @@ private fun BatteryGuardDialog(
                     ) {
                         Text(
                             text = "去开省电模式",
-                            fontSize = 15.sp,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
                             color = Color.White,
                             modifier = Modifier.padding(vertical = 4.dp)

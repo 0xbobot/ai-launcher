@@ -332,7 +332,7 @@ fun QizaiEquipment(
                 if (showEquipHint) {
                     Text(
                         text = "这些是我的小装备，点一下就能用",
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         color = Color(0xFF8A837C),
                         textAlign = TextAlign.Center,
                         modifier = Modifier
@@ -381,7 +381,7 @@ fun QizaiEquipment(
                             .border(1.5.dp, Color(0xFFAEAEB2), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = "+", fontSize = 18.sp, color = Color(0xFFAEAEB2))
+                        Text(text = "+", fontSize = 20.sp, color = Color(0xFFAEAEB2))
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(

@@ -306,7 +306,7 @@ internal fun AppRow(
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = app.label.toString(),
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     color = AILauncherColors.Title.copy(alpha = contentAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

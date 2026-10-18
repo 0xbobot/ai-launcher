@@ -1001,7 +1001,7 @@ fun AppCenterContent(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     text = "点击解锁查看",
-                                    fontSize = 15.sp,
+                                    fontSize = 16.sp,
                                     color = AILauncherColors.Title
                                 )
                                 }
@@ -1462,7 +1462,7 @@ internal fun MastheadKicker(text: String) {
         text.forEach { ch ->
             androidx.compose.material3.Text(
                 text = ch.toString(),
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 color = AILauncherColors.Accent,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
             )

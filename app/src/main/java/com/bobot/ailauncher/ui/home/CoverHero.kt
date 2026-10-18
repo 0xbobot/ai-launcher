@@ -32,11 +32,29 @@ import java.util.Locale
 
 /**
  * v0.68.34（Bob）：杂志封面 hero——主屏顶层编辑区。
+ * v0.68.59：3 模板轮换——按日期哈希每天切换。
  * 版式 A「时间巨像」：日期刊头 + 金线 + 巨型时间 + 宋体简报标题 + 天气副行，七仔在右侧。
+ * 版式 B「头条简报」：标题是主角，时间退居副行。
+ * 版式 C「留白时刻」：极简居中，时间唯一巨像。
  * 纯展示（无交互），人体工学：不占用拇指区，无需点按。
  */
 @Composable
 fun CoverHero(
+    summary: String,
+    weatherDesc: String,
+    palette: CoverPalette,
+    petSlot: @Composable () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    when (coverTemplateFor()) {
+        CoverTemplate.HEADLINE -> CoverHeroHeadline(summary, weatherDesc, palette, petSlot, modifier)
+        CoverTemplate.MINIMAL -> CoverHeroMinimal(summary, weatherDesc, palette, petSlot, modifier)
+        CoverTemplate.GIANT_TIME -> CoverHeroGiantTime(summary, weatherDesc, palette, petSlot, modifier)
+    }
+}
+
+@Composable
+fun CoverHeroGiantTime(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
@@ -51,8 +69,10 @@ fun CoverHero(
     ) {
         val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
         val timeSize = (104 * scale).sp
-        val titleSize = (44 * scale).sp
+        val titleSize = (32 * scale).sp  // v0.68.59：字阶收敛 44→32
         val petTopPad = (190 * scale).dp
+        val isLandscape = maxWidth > maxHeight
+        // v0.68.59：横屏双栏——时间左，标题/七仔右
     // v0.68.34： live 时间，每分钟整点刷新（轻量协程，无轮询浪费）
     var timeText by remember { mutableStateOf(currentTimeText()) }
     LaunchedEffect(Unit) {
@@ -183,7 +203,7 @@ fun CoverHero(
             ) {
                 Text(
                     text = listOf(weatherDesc, daypartLine).filter { it.isNotBlank() }.joinToString(" · "),
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     lineHeight = 28.sp,
                     color = palette.title.copy(alpha = 0.6f)
                 )
@@ -238,5 +258,145 @@ private fun daypartLine(): String {
         in 12..17 -> "适合出门走走"
         in 18..22 -> "晚上好好放松"
         else -> "好好休息"
+    }
+}
+
+/**
+ * v0.68.59（Bob）：每日封面 3 模板轮换。
+ * A 时间巨像（现有）/ B 头条简报 / C 留白时刻，按日期哈希每天轮换。
+ */
+enum class CoverTemplate { GIANT_TIME, HEADLINE, MINIMAL }
+
+fun coverTemplateFor(): CoverTemplate {
+    val day = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+    return CoverTemplate.values()[day % 3]
+}
+
+/**
+ * 模板 B「头条简报」：标题是主角，时间退居副行。
+ * 刊头 HEADLINE + 宋体大标题 + 时间/天气副行。
+ */
+@Composable
+fun CoverHeroHeadline(
+    summary: String,
+    weatherDesc: String,
+    palette: CoverPalette,
+    petSlot: @Composable () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var timeText by remember { mutableStateOf(currentTimeText()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            delay(60_000L - (now % 60_000L) + 200L)
+            timeText = currentTimeText()
+        }
+    }
+    val dateText = remember { currentDateText() }
+
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        modifier = modifier.fillMaxWidth().padding(top = 56.dp, start = 28.dp, end = 16.dp)
+    ) {
+        val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
+        val titleSize = (32 * scale).sp
+        val isLandscape = maxWidth > maxHeight
+
+        if (isLandscape) {
+            // 横屏：左右双栏
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    TrackedText(text = "HEADLINE · 头条", fontSize = 12.sp, tracking = 4.dp,
+                        color = AILauncherColors.Accent)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
+                        fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
+                        color = palette.title, maxLines = 3)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = "$timeText · $weatherDesc", fontSize = 16.sp,
+                        color = palette.title.copy(alpha = 0.6f))
+                }
+                Box(modifier = Modifier.padding(start = 16.dp)) { petSlot() }
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    TrackedText(text = "HEADLINE · 头条", fontSize = 12.sp, tracking = 4.dp,
+                        color = AILauncherColors.Accent)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(modifier = Modifier.width(44.dp).height(3.dp)
+                        .background(AILauncherColors.Accent))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
+                        fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
+                        letterSpacing = 2.sp, color = palette.title, maxLines = 4)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(text = "$timeText · $weatherDesc", fontSize = 16.sp,
+                        color = palette.title.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TrackedText(text = dateText, fontSize = 12.sp, tracking = 4.dp,
+                        color = palette.title.copy(alpha = 0.45f))
+                }
+                Box(modifier = Modifier.align(Alignment.TopEnd)
+                    .padding(top = (140 * scale).dp)) { petSlot() }
+            }
+        }
+    }
+}
+
+/**
+ * 模板 C「留白时刻」：极简居中，大量留白，时间是唯一的巨像。
+ * 无宋体标题，只有时间和一句天气，七仔更突出。
+ */
+@Composable
+fun CoverHeroMinimal(
+    summary: String,
+    weatherDesc: String,
+    palette: CoverPalette,
+    petSlot: @Composable () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var timeText by remember { mutableStateOf(currentTimeText()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            delay(60_000L - (now % 60_000L) + 200L)
+            timeText = currentTimeText()
+        }
+    }
+
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        modifier = modifier.fillMaxWidth().padding(top = 80.dp, start = 28.dp, end = 28.dp)
+    ) {
+        val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
+        val timeSize = (104 * scale).sp
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 居中巨型时间
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val parts = timeText.split(":")
+                Text(text = parts.getOrElse(0) { "--" }, fontSize = timeSize,
+                    fontWeight = FontWeight.Bold, letterSpacing = (-4).sp,
+                    color = palette.title, lineHeight = timeSize)
+                Text(text = ":", fontSize = timeSize, fontWeight = FontWeight.Bold,
+                    color = AILauncherColors.Accent, lineHeight = timeSize)
+                Text(text = parts.getOrElse(1) { "--" }, fontSize = timeSize,
+                    fontWeight = FontWeight.Bold, letterSpacing = (-4).sp,
+                    color = palette.title, lineHeight = timeSize)
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            // 金线（居中短线）
+            Box(modifier = Modifier.width(32.dp).height(2.dp)
+                .background(AILauncherColors.Accent))
+            Spacer(modifier = Modifier.height(24.dp))
+            // 一句天气
+            Text(text = weatherDesc, fontSize = 16.sp,
+                color = palette.title.copy(alpha = 0.6f))
+            Spacer(modifier = Modifier.height(32.dp))
+            // 七仔居中
+            petSlot()
+        }
     }
 }

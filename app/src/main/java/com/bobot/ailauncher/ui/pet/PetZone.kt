@@ -727,7 +727,7 @@ fun PetZone(
                 val density = LocalDensity.current
                 Text(
                     text = carryText.orEmpty(),
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = Color(0xFF333333),
                     modifier = Modifier
                         .align(Alignment.Center)
@@ -1819,7 +1819,7 @@ private fun TodaySection(
                                                 ),
                                                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp)
                                             ) {
-                                                Text(text = "加入会议", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                                Text(text = "加入会议", fontSize = 16.sp, fontWeight = FontWeight.Medium)
                                             }
                                         }
                                     }
@@ -2313,7 +2313,7 @@ private fun NormalMessageRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.appName,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
                     color = Color(0xFF1C1C1E),
                     maxLines = 1,
@@ -2417,7 +2417,7 @@ private fun TodoRow(
                 // v0.67.7：正文可点——"看原文"，直达来源消息会话
                 Text(
                     text = todo.action,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
                     color = Color(0xFF1C1917),
                     textDecoration = if (completing) TextDecoration.LineThrough else null,

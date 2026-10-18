@@ -488,7 +488,7 @@ private fun TrackedFooterText(text: String, color: androidx.compose.ui.graphics.
         text.forEach { ch ->
             androidx.compose.material3.Text(
                 text = ch.toString(),
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 color = color,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
             )

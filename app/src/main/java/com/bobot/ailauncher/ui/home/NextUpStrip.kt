@@ -66,7 +66,7 @@ fun NextUpStrip(
             Row {
                 TrackedText(
                     text = kicker,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     tracking = 3.dp,
                     color = AILauncherColors.Accent
                 )
@@ -76,7 +76,7 @@ fun NextUpStrip(
                 text = title,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
+                fontSize = 20.sp,
                 lineHeight = 27.sp,
                 color = palette.title,
                 maxLines = 2
