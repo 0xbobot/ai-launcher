@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.CoverPalette
@@ -64,7 +65,7 @@ fun CoverHero(
             TrackedText(
                 text = dateText,
                 fontSize = 12.sp,
-                tracking = 4.sp,
+                tracking = 4.dp,
                 color = palette.title.copy(alpha = 0.45f)
             )
             Spacer(modifier = Modifier.height(10.dp))
@@ -140,7 +141,7 @@ fun CoverHero(
 fun TrackedText(
     text: String,
     fontSize: androidx.compose.ui.unit.TextUnit,
-    tracking: androidx.compose.ui.unit.TextUnit,
+    tracking: androidx.compose.ui.unit.Dp,
     color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier
 ) {

@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.pet.CalEvent
@@ -66,7 +67,7 @@ fun NextUpStrip(
                 TrackedText(
                     text = kicker,
                     fontSize = 11.sp,
-                    tracking = 3.sp,
+                    tracking = 3.dp,
                     color = AILauncherColors.Accent
                 )
             }
