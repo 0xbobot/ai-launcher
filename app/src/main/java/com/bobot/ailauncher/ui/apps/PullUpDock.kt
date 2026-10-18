@@ -255,7 +255,7 @@ fun PullUpDock(
                         },
                         label = "dockContent"
                     ) { s ->
-                        // v0.68.34（Bob）：杂志页脚式 Dock 刊头——发丝线 + "常用" + "上滑展开"
+                        // v0.68.44（Bob）：杂志页脚式 Dock 刊头——发丝线 + "常用" + "上滑展开"
                         // 人体工学：刊头纯展示，图标 56dp 触摸目标不变，上滑手势不变
                         Column(
                             modifier = Modifier.fillMaxWidth(),
@@ -483,7 +483,7 @@ private fun DockIconButton(
     }
 }
 
-/** v0.68.34：页脚刊头字距文本 */
+/** v0.68.44：页脚刊头字距文本 */
 @Composable
 private fun TrackedFooterText(text: String, color: androidx.compose.ui.graphics.Color) {
     Row {

@@ -5,8 +5,8 @@ import android.graphics.Rect
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -47,13 +47,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import kotlinx.coroutines.delay
 import com.bobot.ailauncher.data.NotificationRepository
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.PanelAccessibilityService
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
-import com.bobot.ailauncher.ui.pet.QuickActionAddFlow
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.util.rebindListener
 
@@ -79,9 +78,10 @@ fun HomeScreen(
     onOpenAppDrawer: () -> Unit,
     cleanHome: Boolean = true,
     onBlindActiveChange: (Boolean) -> Unit = {},
-    // v0.68.32：扇形选择状态上报 MainScreen（扇形绘制层级提到 Dock 之上）；
-    // String = 自定义段标签
-    onBlindSelectingChange: (BlindUiState.Selecting?, String) -> Unit = { _, _ -> },
+    // v0.68.32：扇形选择状态上报 MainScreen（扇形绘制层级提到 Dock 之上）
+    // v0.68.35：Selecting 自带动态段列表，不再传自定义标签
+    // v0.68.42：上报全状态（Selecting/Dismissing/PhotoFlash 共用顶层绘制）
+    onBlindSelectingChange: (BlindUiState) -> Unit = { },
     // v0.68.32：底部 Dock 区高度（dp），用于扇形圆心钳制
     blindDockZoneDp: Float = 0f,
 ) {
@@ -93,46 +93,50 @@ fun HomeScreen(
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
     // v0.68.0：盲操状态
     var blindUi by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
-    // v0.68.12：盲操诊断浮层文字（用户无电脑看 logcat，屏上直接看状态机）
-    var blindDiag by remember { mutableStateOf("idle") }
+    // v0.68.39：诊断浮层已删除（v0.68.12 屏上诊断使命结束）
     // v0.68.6：盲操激活状态上报 MainScreen——选择中时压住右边缘字母快找区，
     // 避免长按（~400ms）与盲操 dwell（120ms）双重触发
     val blindActive = blindUi is BlindUiState.Selecting
     androidx.compose.runtime.LaunchedEffect(blindActive) {
         onBlindActiveChange(blindActive)
     }
+    // v0.68.34（Bob）：扇形展开时 TODAY 卡片淡出到 0.3（视觉让位，和 Dock 同逻辑）
+    val todayAlpha by animateFloatAsState(
+        targetValue = if (blindActive) 0.3f else 1f,
+        animationSpec = tween(200),
+        label = "todayAlpha",
+    )
     // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
-    var showBlindCustomConfig by remember { mutableStateOf(false) }
-    // v0.68.20：自定义☆动作状态——配置保存后刷新扇形显示
-    var blindCustomItem by remember { mutableStateOf(BlindCapturePrefs.load(context)) }
+    // v0.68.35：旧"自定义☆"固定槽位已作废——扇形快捷段直接读七仔装备列表，
+    // 增删复用七仔装备长按/+ 流程，不再需要扇形侧配置弹窗
     // v0.68.32：扇形选择状态上报 MainScreen（扇形在 MainScreen 最顶层绘制，盖住 Dock）
-    val blindSelecting = blindUi as? BlindUiState.Selecting
-    val blindCustomLabel = blindCustomItem?.label?.takeIf { it.isNotBlank() } ?: "自定义"
-    androidx.compose.runtime.LaunchedEffect(blindSelecting, blindCustomLabel) {
-        onBlindSelectingChange(blindSelecting, blindCustomLabel)
+    // v0.68.42：上报全状态（Selecting/Dismissing/PhotoFlash）；收起动画 160ms 后通知
+    // controller 收尾（动画本身 120ms，留余量）
+    val blindFanState = blindUi
+    androidx.compose.runtime.LaunchedEffect(blindFanState) {
+        onBlindSelectingChange(blindFanState)
     }
     // v0.68.17：右边缘系统手势豁免宽度（仅用于 setSystemGestureExclusionRects，
     // 盲操触发已改为"任何左滑"，不再依赖边缘区）
     val blindEdgePx = with(density) { 48.dp.toPx() }
-    // holder 打破 launcher 回调 ↔ controller 的循环引用
-    val blindCtlRef = remember { mutableStateOf<BlindCaptureController?>(null) }
-    val audioPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> blindCtlRef.value?.onAudioPermissionResult(granted) }
+    // holder 打破 launcher 回调 ↔ controller 的循环引用（v0.68.40：录音删除后不再需要）
     val blindCtl = remember {
         BlindCaptureController(
             context = context,
             haptics = haptics,
             setUi = { blindUi = it },
-            requestAudioPermission = {
-                audioPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-            },
-            openCustomConfig = { showBlindCustomConfig = true },
             triggerPx = with(density) { 24.dp.toPx() },
-            onDiag = { blindDiag = it }, // v0.68.12：诊断浮层
-        ).also { blindCtlRef.value = it }
+        )
     }
     // v0.68.0：右边缘系统手势豁免（响应 cleanHome 变化）
+    // v0.68.42：收起动画 160ms 后通知 controller 收尾（动画本身 120ms，留余量）
+    val isDismissing = blindUi is BlindUiState.Dismissing
+    androidx.compose.runtime.LaunchedEffect(isDismissing) {
+        if (isDismissing) {
+            delay(160)
+            blindCtl.onDismissFinished()
+        }
+    }
     var homeSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     androidx.compose.runtime.LaunchedEffect(cleanHome, homeSize) {
         // 干净桌面时豁免右边缘系统手势（桌面上系统返回是空操作）；
@@ -262,14 +266,15 @@ fun HomeScreen(
         // v0.43.0 的七仔场景改的是一段从未被调用的代码，所以真机上看不到。
         // v0.65.8：顶部对齐（之前居中导致宠物上方大量空白）——七仔贴近状态栏下方，
         // TODAY 卡片和应用图标整体上移，首屏显示更多内容。
-        // v0.68.34（Bob）：封面模式——杂志 hero + 紧凑条（人体工学：纯展示区无交互，不占拇指区）
         Column(
             modifier = Modifier
-                .fillMaxSize(),
+                .fillMaxSize()
+                .padding(top = 16.dp),
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            PetZone(coverMode = true)
+            // v0.68.44（Bob）：杂志封面模式
+            PetZone(todayCardAlpha = todayAlpha, coverMode = true)
         }
         // v0.36.0：无障碍权限引导卡
         panelGuideMode?.let { mode ->
@@ -288,43 +293,8 @@ fun HomeScreen(
                 }
             )
         }
-        // v0.68.32：扇形选择器已移到 MainScreen 最顶层绘制（盖住 Dock），
-        // 这里只保留诊断浮层
-        // v0.68.12：盲操诊断浮层（左上角半透明小字，实时显示状态机状态）
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(start = 8.dp, top = 56.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-            Text(
-                text = "盲操:$blindDiag",
-                fontSize = 11.sp,
-                color = Color.White
-            )
-        }
-        // v0.68.0：盲操自定义☆配置（复用宠物装备添加流程：选应用→选动作→保存）
-        if (showBlindCustomConfig) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.32f)),
-                contentAlignment = Alignment.Center
-            ) {
-                QuickActionAddFlow(
-                    onDismiss = { showBlindCustomConfig = false },
-                    onSaved = { item ->
-                        BlindCapturePrefs.save(context, item)
-                        // v0.68.20：保存后刷新状态，扇形立即显示新名称
-                        blindCustomItem = item
-                        showBlindCustomConfig = false
-                        PetRepository.say("自定义动作已设置")
-                    }
-                )
-            }
-        }
+        // v0.68.32：扇形选择器已移到 MainScreen 最顶层绘制（盖住 Dock）
+        // v0.68.39：诊断浮层已删除
     }
 }
 

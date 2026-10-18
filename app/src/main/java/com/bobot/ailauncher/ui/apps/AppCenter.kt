@@ -485,8 +485,8 @@ fun AppCenterContent(
             .fillMaxSize()
             .statusBarsPadding()
     ) {
-        // ---- Header（v0.68.34 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----
-        // v0.41.0 的"去大标题"被新版取代；顶栏下滑 → D2；顶栏右滑 → 回记住的 Dock 档
+        // ---- Header（v0.68.44 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----
+        // 顶栏下滑 → D2；顶栏右滑 → 回记住的 Dock 档（手势签名：右滑=更少）
         val headThreshPx = with(density) { 80.dp.toPx() }
         Column(
             modifier = Modifier.pointerInput(Unit) {
@@ -506,7 +506,7 @@ fun AppCenterContent(
                 )
             }
         ) {
-            // v0.68.34（Bob）：杂志刊头
+            // v0.68.44（Bob）：杂志刊头
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -852,7 +852,7 @@ fun AppCenterContent(
                                     text = letter.toString(),
                                     fontFamily = FontFamily.Serif,
                                     fontSize = 56.sp,
-                                    // v0.68.34（Bob）：杂志章节感——放大加深（40sp/14% → 56sp/20%）
+                                    // v0.68.44（Bob）：杂志章节感——放大加深
                                     color = AILauncherColors.Title.copy(alpha = 0.20f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
@@ -1376,7 +1376,7 @@ private fun rememberPullDownConnection(
 
 
 
-/** v0.68.34：刊头字距 kicker（金色） */
+/** v0.68.44：刊头字距 kicker（金色） */
 @Composable
 private fun MastheadKicker(text: String) {
     Row(modifier = Modifier.padding(bottom = 6.dp)) {

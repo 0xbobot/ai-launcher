@@ -45,19 +45,19 @@ data class CoverPalette(
 )
 
 fun coverPaletteFor(hour: Int): CoverPalette = when (hour) {
-    in 6..11 -> CoverPalette( // 晨版：偏亮
+    in 6..11 -> CoverPalette(
         background = Color(0xFFF7F5F1),
         title = Color(0xFF1F1D1A),
         body = Color(0xFF5C5852),
         divider = Color(0xFFE8E2D9)
     )
-    in 12..17 -> CoverPalette( // 午版：标准
+    in 12..17 -> CoverPalette(
         background = Color(0xFFF4F2EE),
         title = Color(0xFF1F1D1A),
         body = Color(0xFF5C5852),
         divider = Color(0xFFE8E2D9)
     )
-    else -> CoverPalette( // 夜版：压暗偏暖
+    else -> CoverPalette(
         background = Color(0xFFE9E0D2),
         title = Color(0xFF1F1D1A),
         body = Color(0xFF5C5852),
