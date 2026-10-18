@@ -83,7 +83,7 @@ fun IslandToastHost(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .statusBarsPadding()
+            // v0.68.51（Bob）：用状态栏区域——灵动岛就长在状态栏里，不在它下面
             .padding(top = 8.dp),
         contentAlignment = Alignment.TopCenter
     ) {

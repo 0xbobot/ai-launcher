@@ -75,7 +75,9 @@ fun MainScreen() {
     }
     // v0.26.6：返回键处理——D3（应用中心）返回主页，首页不做事
     // 用 BackHandler 拦截，避免系统默认行为导致页面刷新/重建
-    androidx.activity.compose.BackHandler(enabled = true) {
+    // v0.68.51（Bob）：只在 home 路由启用——设置页用系统默认返回（popBackStack）
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    androidx.activity.compose.BackHandler(enabled = currentRoute == "home") {
         if (dockState == DockState.D3) {
             // 应用中心返回主页
             val target = if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1
@@ -129,7 +131,8 @@ fun MainScreen() {
     val effectiveDockState = if (dockVisible || dockState == DockState.D3) dockState
     else DockState.Hidden
 
-    NavHost(navController = navController, startDestination = "home") {
+    Box(modifier = Modifier.fillMaxSize()) {
+        NavHost(navController = navController, startDestination = "home") {
         composable("home") {
             HomeHost(
                 dockState = effectiveDockState,
@@ -166,6 +169,10 @@ fun MainScreen() {
                 onBack = { navController.popBackStack() }
             )
         }
+    }
+    // v0.68.51（Bob）：灵动岛 Toast 宿主——移到 NavHost 外，最顶层
+    // 之前在 home 路由内，切到设置页时宿主被 dispose，toast 看不到
+    IslandToastHost()
     }
 }
 
@@ -459,7 +466,5 @@ private fun HomeHost(
             )
             BlindUiState.Hidden -> { }
         }
-        // v0.68.48（Bob）：灵动岛 Toast 宿主——最顶层，黑胶囊置顶
-        com.bobot.ailauncher.ui.island.IslandToastHost()
     }
 }
