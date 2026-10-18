@@ -173,9 +173,7 @@ fun PetZone(
     coverMode: Boolean = false,
     // v0.68.34：简报标题/下个会议上抛（封面 hero 用）
     onSummaryChange: (String) -> Unit = {},
-    onNextEventChange: (CalEvent?) -> Unit = {},
-    // v0.68.34：纯数据模式——只跑数据 effect、上报，不渲染 UI（封面模式用）
-    dataOnly: Boolean = false
+    onNextEventChange: (CalEvent?) -> Unit = {}
 ) {
     val mood by PetRepository.mood.collectAsState()
     val mouth by PetRepository.mouth.collectAsState()
@@ -1165,7 +1163,9 @@ private fun TodaySection(
     onMeetingRemind: (CalEvent, String) -> Unit = { _, _ -> },
     // v0.68.34：简报标题/下个会议上抛（封面 hero 用）
     onSummaryChange: (String) -> Unit = {},
-    onNextEventChange: (CalEvent?) -> Unit = {}
+    onNextEventChange: (CalEvent?) -> Unit = {},
+    // v0.68.34：纯数据模式——只跑数据 effect、上报，不渲染 UI（封面模式用）
+    dataOnly: Boolean = false
 ) {
     val context = LocalContext.current
     val view = LocalView.current
