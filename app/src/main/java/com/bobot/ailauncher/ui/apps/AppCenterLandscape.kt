@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -148,7 +149,7 @@ fun AppCenterLandscape(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(topBarH)
+                        .height(56.dp)
                         .padding(horizontal = 24.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -190,7 +191,7 @@ fun AppCenterLandscape(
                     Spacer(modifier = Modifier.weight(1f))
                     // 设置齿轮（Bob：横屏时竖屏的齿轮拿掉，放这里）
                     Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Filled.Settings,
+                        imageVector = Icons.Filled.Settings,
                         contentDescription = "设置",
                         tint = AILauncherColors.Hint,
                         modifier = Modifier
