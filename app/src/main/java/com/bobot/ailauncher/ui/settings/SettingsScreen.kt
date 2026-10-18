@@ -157,7 +157,7 @@ fun SettingsScreen(
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
@@ -330,7 +330,7 @@ fun SettingsScreen(
 
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier.padding(horizontal = 20.dp),
                 onClick = { onCardClick?.invoke() }
