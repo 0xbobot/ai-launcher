@@ -10,6 +10,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -522,29 +523,8 @@ fun AppCenterContent(
                 )
             }
         ) {
-            // v0.68.61（Bob）：横屏紧凑头 vs 竖屏杂志刊头
-            if (isLandscapeAc) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 28.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "INDEX · 全部应用",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp,
-                        color = AILauncherColors.Accent
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "${azApps.size} 款",
-                        fontSize = 12.sp,
-                        color = AILauncherColors.Hint
-                    )
-                }
-            } else {
+            // v0.68.66（Bob）：横屏时顶栏+搜索全由 AppCenterLandscape 提供，这里只留竖屏
+            if (!isLandscapeAc) {
             // v0.68.44（Bob）：杂志刊头
             Column(
                 modifier = Modifier
@@ -662,7 +642,7 @@ fun AppCenterContent(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-        }
+            }  // if (!isLandscapeAc) 竖屏顶栏+搜索结束
 
         // v0.68.62（Bob）：横屏双栏——左索引右网格，竖屏用原单列
         if (isLandscapeAc) {
@@ -1388,7 +1368,7 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
     ) {
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             modifier = Modifier
                 .padding(horizontal = 36.dp)
                 .clickable(enabled = false, onClick = {})

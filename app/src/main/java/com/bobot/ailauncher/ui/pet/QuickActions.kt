@@ -74,8 +74,6 @@ import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.apps.loadAppShortcuts
 import com.bobot.ailauncher.ui.apps.loadShortcutIcon
-import com.bobot.ailauncher.ui.theme.AILauncherColors
-import com.bobot.ailauncher.ui.theme.AILauncherType
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -388,8 +386,8 @@ fun QizaiEquipment(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "添加",
-                        style = AILauncherType.Caption,
-                        color = AILauncherColors.Title,
+                        fontSize = 10.sp,
+                        color = Color(0xFF3A352F),
                         maxLines = 1,
                         modifier = Modifier
                             .zIndex(1f)
@@ -414,8 +412,8 @@ fun QizaiEquipment(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "收起",
-                        style = AILauncherType.Caption,
-                        color = AILauncherColors.Title,
+                        fontSize = 10.sp,
+                        color = Color(0xFF3A352F),
                         maxLines = 1,
                         modifier = Modifier
                             .zIndex(1f)
