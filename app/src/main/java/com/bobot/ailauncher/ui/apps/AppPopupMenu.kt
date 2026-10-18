@@ -63,7 +63,7 @@ fun AppPopupMenu(
         onDismissRequest = onDismiss,
         modifier = modifier.widthIn(min = 208.dp, max = 300.dp),
         shape = RoundedCornerShape(20.dp),
-        containerColor = AILauncherColors.Card,
+        containerColor = Color.White,
         tonalElevation = 0.dp,
         shadowElevation = 8.dp
     ) {

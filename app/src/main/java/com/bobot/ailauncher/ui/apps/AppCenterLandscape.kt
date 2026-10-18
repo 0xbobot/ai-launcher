@@ -66,32 +66,43 @@ fun AppCenterLandscape(
     val rowState = rememberLazyListState()
     var selectedLetter by remember { mutableStateOf<Char?>(null) }
 
-    // 扁平流：Header + Apps，逐字母拼接
-    val flatFlow = remember(azGroups) {
-        val list = mutableListOf<FlowItem>()
-        azGroups.forEach { (letter, apps) ->
-            list.add(FlowItem.Header(letter))
-            apps.forEach { app -> list.add(FlowItem.App(app)) }
-        }
-        list
-    }
-
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val rowH = 62.dp
+        val rowH = 68.dp
         val topBarH = 56.dp
         // 一列能排的 item 数（Header 占 1 格）
         val rowsPerCol = ((maxHeight - topBarH - 16.dp) / rowH).toInt().coerceAtLeast(4)
 
-        // 切列
-        val columns = remember(flatFlow, rowsPerCol) {
-            flatFlow.chunked(rowsPerCol)
+        // 按字母切列：每个字母从新列顶部开始（Bob：ABC 都要从顶部开始，不穿插）
+        // 字母内超长则续列（带续列头）
+        val columns = remember(azGroups, rowsPerCol) {
+            val cols = mutableListOf<MutableList<FlowItem>>()
+            var cur = mutableListOf<FlowItem>()
+            var curCount = 0
+            fun flush() {
+                if (cur.isNotEmpty()) { cols.add(cur); cur = mutableListOf(); curCount = 0 }
+            }
+            azGroups.forEach { (letter, apps) ->
+                // 新字母：先结束当前列（保证字母从顶部开始）
+                flush()
+                cur.add(FlowItem.Header(letter)); curCount = 1
+                apps.forEach { app ->
+                    if (curCount >= rowsPerCol) {
+                        flush()
+                        // 续列：重复字母头（小字标注续）
+                        cur.add(FlowItem.Header(letter, continued = true)); curCount = 1
+                    }
+                    cur.add(FlowItem.App(app)); curCount++
+                }
+            }
+            flush()
+            cols.map { it.toList() }
         }
-        // 字母 → 列索引
+        // 字母 → 列索引（取该字母首次出现的列）
         val letterToCol = remember(columns) {
             val map = mutableMapOf<Char, Int>()
             columns.forEachIndexed { colIdx, col ->
                 col.forEach { item ->
-                    if (item is FlowItem.Header && !map.containsKey(item.letter)) {
+                    if (item is FlowItem.Header && !item.continued && !map.containsKey(item.letter)) {
                         map[item.letter] = colIdx
                     }
                 }
@@ -192,11 +203,11 @@ fun AppCenterLandscape(
                                 when (item) {
                                     is FlowItem.Header -> {
                                         Text(
-                                            text = item.letter.toString(),
+                                            text = if (item.continued) "${item.letter} · 续" else item.letter.toString(),
                                             fontFamily = FontFamily.Serif,
-                                            fontSize = 20.sp,
+                                            fontSize = if (item.continued) 14.sp else 20.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = AILauncherColors.Title.copy(alpha = 0.4f),
+                                            color = AILauncherColors.Title.copy(alpha = if (item.continued) 0.25f else 0.4f),
                                             modifier = Modifier
                                                 .height(36.dp)
                                                 .padding(start = 8.dp)
@@ -218,8 +229,8 @@ fun AppCenterLandscape(
                                                 drawable = app.icon,
                                                 contentDescription = null,
                                                 modifier = Modifier
-                                                    .size(42.dp)
-                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .size(48.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
                                             )
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Text(
@@ -304,6 +315,6 @@ private fun LetterRail(
 }
 
 private sealed interface FlowItem {
-    data class Header(val letter: Char) : FlowItem
+    data class Header(val letter: Char, val continued: Boolean = false) : FlowItem
     data class App(val app: AppInfo) : FlowItem
 }
