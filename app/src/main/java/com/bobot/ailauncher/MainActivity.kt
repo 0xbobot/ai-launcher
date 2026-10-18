@@ -51,6 +51,8 @@ class MainActivity : FragmentActivity() {
         CapabilityRegistry.load(this)
         // v0.15 宠物整理员：初始化（亲密度持久化等）
         PetRepository.init(this)
+        // v0.68.56（Bob）：B 方案——灵动岛系统通知通道初始化
+        com.bobot.ailauncher.ui.island.IslandToasts.init(this)
         // v0.40.0：低电量守护不再用前台服务（常驻通知打扰），BatteryGuard 跟随进程生命周期；
         // LauncherApp.onCreate 已注册，这里幂等再保一次
         com.bobot.ailauncher.data.BatteryGuard.ensureStarted(this)

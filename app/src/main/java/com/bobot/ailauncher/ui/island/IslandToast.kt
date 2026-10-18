@@ -52,11 +52,25 @@ object IslandToasts {
     private var dismissJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main)
 
+    // v0.68.56：B 方案——系统通知通道需要 Context，MainActivity 初始化时注入
+    @Volatile private var appContext: android.content.Context? = null
+    fun init(context: android.content.Context) {
+        appContext = context.applicationContext
+    }
+
     /**
      * 显示灵动岛 Toast。任意线程可调（data 层也能用，不需要 Context）。
+     * v0.68.56（Bob）：B 方案——优先走系统通知（真·灵动岛），
+     * 发不出（无权限/异常）才回落到应用内黑胶囊。
      * 新 Toast 会顶掉旧的，2.5 秒后自动收起。
      */
     fun show(text: String, icon: ImageVector? = null, durationMs: Long = 2500) {
+        // 先试系统通道
+        val ctx = appContext
+        if (ctx != null && IslandNotification.show(ctx, text)) {
+            return  // 系统接管了，不显示应用内 pill
+        }
+        // 回落：应用内黑胶囊
         dismissJob?.cancel()
         _current.value = IslandToast(text, icon)
         dismissJob = scope.launch {
@@ -68,6 +82,7 @@ object IslandToasts {
     fun dismiss() {
         dismissJob?.cancel()
         _current.value = null
+        appContext?.let { IslandNotification.cancel(it) }
     }
 }
 
@@ -83,7 +98,9 @@ fun IslandToastHost(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            // v0.68.51（Bob）：用状态栏区域——灵动岛就长在状态栏里，不在它下面
+            // v0.68.56：回落到状态栏下方——B 方案走系统通道时这里不显示，
+            // 只有无通知权限时才用应用内 pill，必须干净不重叠
+            .statusBarsPadding()
             .padding(top = 8.dp),
         contentAlignment = Alignment.TopCenter
     ) {
