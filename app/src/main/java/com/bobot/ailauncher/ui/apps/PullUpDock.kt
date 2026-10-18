@@ -257,6 +257,8 @@ fun PullUpDock(
                     ) { s ->
                         // v0.68.44（Bob）：杂志页脚式 Dock 刊头——发丝线 + "常用" + "上滑展开"
                         // 人体工学：刊头纯展示，图标 56dp 触摸目标不变，上滑手势不变
+                        // 注意：AnimatedContent 内多子项会重叠，必须包一层 Column 纵排
+                        Column(modifier = Modifier.fillMaxWidth()) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -298,6 +300,7 @@ fun PullUpDock(
                                 onLongPress = { popupApp = it },
                                 onDismissMenu = { popupApp = null }
                             )
+                        }
                         }
                     }
                 }

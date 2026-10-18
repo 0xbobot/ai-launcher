@@ -479,7 +479,12 @@ fun AppCenterContent(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            // v0.68.45（走查）：实底纸面——之前透明，主屏大时间透过来盖住列表
+            .background(AILauncherColors.Background)
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()

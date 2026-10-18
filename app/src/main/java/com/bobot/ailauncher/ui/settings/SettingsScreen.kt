@@ -62,6 +62,7 @@ import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.width
 
 /**
  * 设置页（v0.57.0 重构）：
@@ -115,20 +116,37 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "返回",
-                        tint = AILauncherColors.Title
+            Column {
+                // v0.68.45（走查）：杂志刊头——和应用中心统一
+                Row {
+                    "CONFIG · 设置".forEach { ch ->
+                        Text(
+                            text = ch.toString(),
+                            fontSize = 11.sp,
+                            color = AILauncherColors.Accent,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                            tint = AILauncherColors.Title
+                        )
+                    }
+                    Text(
+                        text = "设置",
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 32.sp,
+                        letterSpacing = 2.sp,
+                        color = AILauncherColors.Title
                     )
                 }
-                Text(
-                    text = "设置",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AILauncherColors.Title
-                )
             }
         }
 
