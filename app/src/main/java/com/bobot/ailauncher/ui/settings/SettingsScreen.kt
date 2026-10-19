@@ -30,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -68,7 +69,7 @@ import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * 设置页（v0.57.0 重构）：
- * - 只剩两项：让七仔更聪明（收起）/ 关于
+ * - 只剩三项：让七仔更聪明（收起）/ 关于 / 接收测试版更新（v0.68.80）
  * - 电量守护默认开启，不设开关；Dock 显示纯手势；排序默认智能
  * - 文案全部用户视角
  */
@@ -434,6 +435,47 @@ fun SettingsScreen(
                     }
                 }
             }
+        }
+
+        // v0.68.80：测试版开关——开启后可收到 prerelease 测试版推送
+        item {
+            var betaOptIn by remember { mutableStateOf(OtaUpdater.isBetaOptIn(context)) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.padding(horizontal = 20.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "接收测试版更新",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.Title
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "开启后可收到测试版推送，适合尝鲜；默认只收正式版",
+                            fontSize = 13.sp,
+                            color = AILauncherColors.Hint
+                        )
+                    }
+                    Switch(
+                        checked = betaOptIn,
+                        onCheckedChange = {
+                            betaOptIn = it
+                            OtaUpdater.setBetaOptIn(context, it)
+                        }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 }

@@ -27,7 +27,8 @@ data class OtaInfo(
     val versionName: String,
     val apkUrl: String,
     val changelog: String,
-    val forceUpdate: Boolean = false
+    val forceUpdate: Boolean = false,
+    val prerelease: Boolean = false // v0.68.80：测试版标记（publish-ota 的 prerelease 输入写入）
 )
 
 /** OTA 检查结果：设置页手动检查需要区分"无更新"和"检查失败" */
@@ -49,6 +50,8 @@ object OtaUpdater {
     private const val KEY_INSTALL_PROMPTED = "install_prompted"
     private const val KEY_TARGET_VERSION = "target_version"
     private const val KEY_LAST_RUN_VERSION = "last_run_version"
+    // v0.68.80：测试版开关（prerelease 包只推给 opt-in 用户）
+    private const val KEY_BETA_OPT_IN = "beta_opt_in"
     // v0.65.6：下载完整性——只有 verified 完整的包才允许安装。
     // 背景：锁屏中断下载后残留 partial 文件，shouldPromptInstall 误判为已下好，
     // onResume 直接弹安装 → "解析程序包时出现问题"。
@@ -93,16 +96,21 @@ object OtaUpdater {
                     }
                     val apkUrl = json.optString("apkUrl", "")
                     if (apkUrl.isBlank()) return@withContext OtaCheckResult.Failed
-                    OtaCheckResult.UpdateAvailable(
-                        OtaInfo(
-                            versionCode = remoteCode,
-                            versionName = json.optString("versionName", ""),
-                            apkUrl = apkUrl,
-                            changelog = json.optString("changelog", "")
-                                .ifBlank { "常规更新与问题修复" },
-                            forceUpdate = json.optBoolean("forceUpdate", false)
-                        )
+                    val info = OtaInfo(
+                        versionCode = remoteCode,
+                        versionName = json.optString("versionName", ""),
+                        apkUrl = apkUrl,
+                        changelog = json.optString("changelog", "")
+                            .ifBlank { "常规更新与问题修复" },
+                        forceUpdate = json.optBoolean("forceUpdate", false),
+                        prerelease = json.optBoolean("prerelease", false)
                     )
+                    // v0.68.80：测试版只推给开了"接收测试版"开关的用户；
+                    // 未开启则视为无更新（正式版用户不受测试包打扰）
+                    if (info.prerelease && !isBetaOptIn(context)) {
+                        return@withContext OtaCheckResult.UpToDate
+                    }
+                    OtaCheckResult.UpdateAvailable(info)
                 }
             } catch (e: IOException) {
                 OtaCheckResult.Failed
@@ -115,6 +123,21 @@ object OtaUpdater {
     fun shouldAutoCheck(context: Context): Boolean {
         val last = prefs(context).getLong(KEY_LAST_CHECK, 0L)
         return System.currentTimeMillis() - last > CHECK_INTERVAL_MS
+    }
+
+    /**
+     * v0.68.80：是否接收测试版（prerelease）更新，默认 false。
+     * 开启后，update.json 里 prerelease=true 的包才会进入更新流程；
+     * 关闭后自动清掉当前展示的测试版（TODAY 卡片行不残留）。
+     */
+    fun isBetaOptIn(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_BETA_OPT_IN, false)
+
+    fun setBetaOptIn(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_BETA_OPT_IN, value).apply()
+        if (!value && latestAvailable.value?.prerelease == true) {
+            latestAvailable.value = null
+        }
     }
 
     fun markChecked(context: Context) {

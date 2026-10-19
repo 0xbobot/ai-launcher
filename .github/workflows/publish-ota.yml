@@ -1,8 +1,8 @@
 name: Publish OTA
 
 # 手动发布 OTA 更新：把最新一次构建成功的 APK 发到 GitHub Releases，
-# update.json（schema 不变，只换 apkUrl）推到 Bob 的 GitHub Pages 站
-#（bobot.is-a.dev/ai-launcher/），App 端自动检查更新。
+# update.json 推到 Bob 的 GitHub Pages 站（bobot.is-a.dev/ai-launcher/），
+# App 端自动检查更新。
 #
 # 需要在仓库 Settings > Secrets 中配置：
 #   PAGES_DEPLOY_TOKEN — 对 clawbobot/clawbobot.github.io 有 Contents 读写权限的
@@ -10,9 +10,11 @@ name: Publish OTA
 # GITHUB_TOKEN 需要 contents: write 权限（本 job 已声明）用于创建 Release。
 #
 # 兼容性：
-# - update.json 的 schema 一个字段都不变，只换 apkUrl 的值；
-#   老版本 App 照常用新 update.json 升级（OkHttp 默认跟随 releases/download 的 302）。
-# - workflow_dispatch 接口不变（另一会话照常用），新增 prerelease 输入给测试包。
+# - update.json 的 schema 新增 prerelease 字段（v0.68.80），老版本 App 用
+#   optBoolean 默认 false 解析，照常升级不受影响；
+#   APK 照走 GitHub Releases 直链（OkHttp 默认跟随 releases/download 的 302）。
+# - workflow_dispatch 接口不变（另一会话照常用），prerelease 输入同时控制
+#   GitHub Release 的预发布标记和 update.json 里的 prerelease 字段。
 
 on:
   workflow_dispatch:
@@ -73,13 +75,14 @@ jobs:
         id: meta
         env:
           CHANGELOG: ${{ inputs.changelog }}
+          PRERELEASE: ${{ inputs.prerelease }}
         run: |
           # 版本号从 APK 本体解析（aapt），避免与 build.gradle.kts 不一致导致"假更新"
           BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
           BADGING=$("$ANDROID_HOME/build-tools/$BT/aapt" dump badging ota/app-debug.apk)
           CODE=$(echo "$BADGING" | grep -oP "versionCode='\K[0-9]+")
           NAME=$(echo "$BADGING" | grep -oP "versionName='\K[^']+")
-          echo "APK versionCode=$CODE versionName=$NAME"
+          echo "APK versionCode=$CODE versionName=$NAME prerelease=$PRERELEASE"
           if [ -z "$CODE" ] || [ -z "$NAME" ]; then echo "failed to parse APK version" >&2; exit 1; fi
           # 文件名带版本号：每个版本 URL 唯一，彻底避开各层缓存拿到旧包
           APK_FILE="ai-launcher-v${NAME}.apk"
@@ -88,17 +91,19 @@ jobs:
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "apk_file=$APK_FILE" >> "$GITHUB_OUTPUT"
           ls -la ota/
-          python3 - "$CODE" "$NAME" "$CHANGELOG" <<'EOF'
+          python3 - "$CODE" "$NAME" "$CHANGELOG" "$PRERELEASE" <<'EOF'
           import json, sys
           code = int(sys.argv[1])
           name = sys.argv[2]
           changelog = sys.argv[3].strip() or "常规更新"
+          prerelease = sys.argv[4] == "true"
           data = {
               "versionCode": code,
               "versionName": name,
               "apkUrl": f"https://github.com/0xbobot/ai-launcher/releases/download/v{name}/ai-launcher-v{name}.apk",
               "changelog": changelog,
               "forceUpdate": False,
+              "prerelease": prerelease,
           }
           with open("ota/update.json", "w", encoding="utf-8") as f:
               json.dump(data, f, ensure_ascii=False, indent=2)
