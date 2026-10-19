@@ -194,7 +194,8 @@ fun PullUpDock(
                     modifier = Modifier
                         .fillMaxWidth()
                         // v0.68.73（Bob）：横屏 Dock 收拢，不横贯全屏
-                        .let { if (isLandscapeDock) it.widthIn(max = 480.dp) else it }
+                        // v0.68.76（Bob）：横屏 Dock 只占右侧窄条，不散开
+                        .let { if (isLandscapeDock) it.widthIn(max = 148.dp) else it }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .clip(RoundedCornerShape(28.dp))
                         .background(AILauncherColors.GlassCard.copy(alpha = 0.55f * dockBgAlpha))
@@ -291,7 +292,8 @@ fun PullUpDock(
                                 onLaunch = ::launchApp,
                                 menuApp = popupApp,
                                 onLongPress = { popupApp = it },
-                                onDismissMenu = { popupApp = null }
+                                onDismissMenu = { popupApp = null },
+                                isLandscape = isLandscapeDock
                             )
                         } else {
                             DockRow4(
@@ -299,7 +301,8 @@ fun PullUpDock(
                                 onLaunch = ::launchApp,
                                 menuApp = popupApp,
                                 onLongPress = { popupApp = it },
-                                onDismissMenu = { popupApp = null }
+                                onDismissMenu = { popupApp = null },
+                                isLandscape = isLandscapeDock
                             )
                         }
                         }
@@ -382,8 +385,31 @@ private fun DockRow4(
     onLaunch: (AppInfo) -> Unit,
     menuApp: AppInfo?,
     onLongPress: (AppInfo) -> Unit,
-    onDismissMenu: () -> Unit
+    onDismissMenu: () -> Unit,
+    isLandscape: Boolean = false
 ) {
+    // v0.68.76（Bob）：横屏时竖排，放在右侧窄条
+    if (isLandscape) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            apps.forEach { app ->
+                DockIconButton(
+                    app = app,
+                    iconSize = 56.dp,
+                    corner = 16.dp,
+                    menuApp = menuApp,
+                    onLaunch = onLaunch,
+                    onLongPress = onLongPress,
+                    onDismissMenu = onDismissMenu
+                )
+            }
+        }
+    } else {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -404,6 +430,7 @@ private fun DockRow4(
             )
         }
     }
+    }
 }
 
 /** 第二档：同一批常用重排成 10 个小图标（2×5，46dp），只留图标 */
@@ -413,18 +440,21 @@ private fun DockGrid10(
     onLaunch: (AppInfo) -> Unit,
     menuApp: AppInfo?,
     onLongPress: (AppInfo) -> Unit,
-    onDismissMenu: () -> Unit
+    onDismissMenu: () -> Unit,
+    isLandscape: Boolean = false
 ) {
+    // v0.68.76（Bob）：横屏时 2 列竖排，放在右侧窄条
+    val cols = if (isLandscape) 2 else 5
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 12.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        apps.chunked(5).forEach { row ->
+        apps.chunked(cols).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
             ) {
                 row.forEach { app ->
                     Box(
