@@ -1,0 +1,53 @@
+name: Smoke Test (Emulator)
+
+# 每版构建成功后自动冒烟：CI 模拟器装包 -> 手势脚本 -> 截图存档
+# Bob 不再需要手动测每版；他只在里程碑版本做真机手感验收。
+# publish-ota 只看 build-apk.yml 的 build job 结论，本 workflow 独立结论，失败不阻塞发布。
+
+on:
+  workflow_run:
+    workflows: ["Build Debug APK"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  smoke:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout triggering commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download debug APK artifact
+        uses: dawidd6/action-download-artifact@v27
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: build-apk.yml
+          run_id: ${{ github.event.workflow_run.id }}
+          name: ai-launcher-debug-apk
+          path: apk
+
+      - name: Run smoke tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-snapshot -no-audio -no-boot-anim -camera-back none
+          script: bash scripts/smoke.sh
+
+      - name: Upload smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots
+          path: smoke-out/
+          retention-days: 14
