@@ -303,7 +303,7 @@ fun QizaiEquipment(
                             .size(36.dp)
                             .shadow(4.dp, CircleShape)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.9f))
+                            .background(AILauncherColors.Card.copy(alpha = 0.9f))
                             .clickable { expanded = true },
                         contentAlignment = Alignment.Center
                     ) {
@@ -391,7 +391,7 @@ fun QizaiEquipment(
                         maxLines = 1,
                         modifier = Modifier
                             .zIndex(1f)
-                            .background(Color.White.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
+                            .background(AILauncherColors.Card.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -404,7 +404,7 @@ fun QizaiEquipment(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.9f)),
+                            .background(AILauncherColors.Card.copy(alpha = 0.9f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(text = "\u2039", fontSize = 20.sp, color = Color(0xFF8A837C))
@@ -417,7 +417,7 @@ fun QizaiEquipment(
                         maxLines = 1,
                         modifier = Modifier
                             .zIndex(1f)
-                            .background(Color.White.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
+                            .background(AILauncherColors.Card.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -486,7 +486,7 @@ private fun EquipButton(
             .size(36.dp)
             .shadow(4.dp, CircleShape)
             .clip(CircleShape)
-            .background(Color.White)
+            .background(AILauncherColors.Card)
             .padding(4.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -524,14 +524,14 @@ internal fun QuickActionAddFlow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color.White.copy(alpha = 0.97f))
+                .background(AILauncherColors.Card.copy(alpha = 0.97f))
                 .padding(16.dp)
         ) {
             when (step) {
                 0 -> {
                     val all = apps
                     Column {
-                        Text("选择应用", fontSize = 16.sp, color = Color(0xFF1C1C1E))
+                        Text("选择应用", fontSize = 16.sp, color = AILauncherColors.Title)
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = search,
@@ -570,7 +570,7 @@ internal fun QuickActionAddFlow(
                                         Text(
                                             text = app.label.toString(),
                                             fontSize = 14.sp,
-                                            color = Color(0xFF1C1C1E),
+                                            color = AILauncherColors.Title,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -583,7 +583,7 @@ internal fun QuickActionAddFlow(
                 1 -> {
                     val app = pickedApp
                     Column {
-                        Text("选择快捷方式", fontSize = 16.sp, color = Color(0xFF1C1C1E))
+                        Text("选择快捷方式", fontSize = 16.sp, color = AILauncherColors.Title)
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = app?.label?.toString().orEmpty(),
@@ -659,7 +659,7 @@ internal fun QuickActionAddFlow(
                 }
                 else -> {
                     Column {
-                        Text("起个短名字", fontSize = 16.sp, color = Color(0xFF1C1C1E))
+                        Text("起个短名字", fontSize = 16.sp, color = AILauncherColors.Title)
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = label,
@@ -729,7 +729,7 @@ private fun ShortcutRow(
         icon()
         Spacer(Modifier.width(10.dp))
         Column {
-            Text(text = title, fontSize = 14.sp, color = Color(0xFF1C1C1E), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = title, fontSize = 14.sp, color = AILauncherColors.Title, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotEmpty()) {
                 Text(text = subtitle, fontSize = 12.sp, color = Color(0xFFAEAEB2), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

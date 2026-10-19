@@ -58,7 +58,7 @@ fun NextUpStrip(
             .padding(horizontal = 20.dp)
             .shadow(8.dp, RoundedCornerShape(20.dp), spotColor = palette.title.copy(alpha = 0.08f))
             .clip(RoundedCornerShape(20.dp))
-            .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.88f))
+            .background(androidx.compose.ui.graphics.AILauncherColors.Card.copy(alpha = 0.88f))
             .then(if (hasMeeting) Modifier.clickable { nextEvent?.let(onMeetingTap) } else Modifier)
             .padding(horizontal = 22.dp, vertical = 18.dp)
     ) {

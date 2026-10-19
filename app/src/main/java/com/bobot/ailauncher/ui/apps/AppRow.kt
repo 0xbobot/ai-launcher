@@ -319,7 +319,7 @@ internal fun AppRow(
                     modifier = Modifier
                         .matchParentSize()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White.copy(alpha = 0.8f))
+                        .background(AILauncherColors.Card.copy(alpha = 0.8f))
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() },

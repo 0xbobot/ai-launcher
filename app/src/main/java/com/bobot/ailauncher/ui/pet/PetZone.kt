@@ -738,7 +738,7 @@ fun PetZone(
                                 with(density) { 34.dp.toPx() }.roundToInt()
                             )
                         }
-                        .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
+                        .background(AILauncherColors.Card.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
                         .padding(horizontal = 9.dp, vertical = 7.dp)
                 )
             }
@@ -777,7 +777,7 @@ fun PetZone(
                     spotColor = Color.Black.copy(alpha = 0.08f)
                 )
                 .clip(RoundedCornerShape(28.dp))
-                .background(Color.White.copy(alpha = 0.65f))
+                .background(AILauncherColors.Card.copy(alpha = 0.65f))
         ) {
             // v0.64.0：十万火急红色光带扫过顶部（1 次）
             val sweepX = remember { Animatable(-0.3f) }
@@ -880,7 +880,7 @@ fun PetPresentedCard() {
         val masked = cur.cat == PetCat.PRIV && !armed
         Card(
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.92f)),
+            colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card.copy(alpha = 0.92f)),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
             modifier = Modifier
                 .fillMaxWidth()
@@ -1092,7 +1092,7 @@ private fun SpeechBubble(
             }
             Card(
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
                 modifier = Modifier
                     .widthIn(max = 240.dp)
@@ -1546,7 +1546,7 @@ private fun TodaySection(
                         text = summaryText,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1C1C1E),
+                        color = AILauncherColors.Title,
                         maxLines = 1
                     )
                     Spacer(modifier = Modifier.height(2.dp))
@@ -1582,7 +1582,7 @@ private fun TodaySection(
                 }
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = Color.White.copy(alpha = 0.5f),
+                    color = AILauncherColors.Card.copy(alpha = 0.5f),
                     modifier = Modifier
                         .combinedClickable(
                             enabled = !editMode,
@@ -1789,7 +1789,7 @@ private fun TodaySection(
                                             text = e.title.ifBlank { "（无标题）" },
                                             fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF1C1C1E)
+                                            color = AILauncherColors.Title
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
@@ -1961,7 +1961,7 @@ private fun TodaySection(
                 Text(
                     text = "🎉 有新版本 ${availUpdate.versionName}",
                     fontSize = 13.sp,
-                    color = Color(0xFF1C1C1E),
+                    color = AILauncherColors.Title,
                     modifier = Modifier.weight(1f)
                 )
                 Text(text = "›", fontSize = 16.sp, color = Color(0xFFC7C7CC))
@@ -2070,7 +2070,7 @@ private fun PriorityReplyRow(
                     text = "${item.appName} · ${item.title.ifBlank { "新消息" }}",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1C1C1E),
+                    color = AILauncherColors.Title,
                     // v0.68.20：单行省略，杜绝长标题换行重叠
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -2084,7 +2084,7 @@ private fun PriorityReplyRow(
                                 text = kp,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = Color(0xFF1C1C1E),
+                                color = AILauncherColors.Title,
                                 modifier = Modifier.padding(bottom = 2.dp)
                             )
                         }
@@ -2128,7 +2128,7 @@ private fun PriorityReplyRow(
                 enabled = !editMode,
                 shape = RoundedCornerShape(99.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1C1C1E),
+                    containerColor = AILauncherColors.Title,
                     contentColor = Color.White
                 ),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
@@ -2315,7 +2315,7 @@ private fun NormalMessageRow(
                     text = item.appName,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF1C1C1E),
+                    color = AILauncherColors.Title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -2419,7 +2419,7 @@ private fun TodoRow(
                     text = todo.action,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF1C1917),
+                    color = AILauncherColors.Title,
                     textDecoration = if (completing) TextDecoration.LineThrough else null,
                     maxLines = 1,
                     // v0.68.20：补省略号，防长文本溢出

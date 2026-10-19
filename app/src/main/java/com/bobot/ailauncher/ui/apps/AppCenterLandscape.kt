@@ -171,7 +171,7 @@ fun AppCenterLandscape(
                         modifier = Modifier
                             .width(440.dp)
                             .clip(RoundedCornerShape(24.dp))
-                            .background(Color.White.copy(alpha = 0.7f))
+                            .background(AILauncherColors.Card.copy(alpha = 0.7f))
                             .padding(horizontal = 18.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
