@@ -37,9 +37,12 @@ jobs:
         # ubuntu-24.04 runner 镜像缺 libpulse，qemu 启动直接报
         # "libpulse.so.0: cannot open shared object file"；先装上。
         run: |
-          ls -la /dev/kvm || echo "NO /dev/kvm"
           sudo apt-get update -qq
           sudo apt-get install -y -qq libpulse0
+          # /dev/kvm 存在但 runner 用户不在 kvm 组 → 直接放开权限，启用硬件加速
+          # （否则模拟器走 -accel off 软件模拟，启动慢到超时）
+          sudo chmod 666 /dev/kvm || true
+          ls -la /dev/kvm
 
       - name: Run smoke tests on emulator
         uses: reactivecircus/android-emulator-runner@v2
