@@ -501,8 +501,9 @@ fun AppCenterContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            // v0.68.75（Bob）：去掉 statusBarsPadding——启动器全屏绘制，横屏侧边留白即由此来
             .onSizeChanged { size -> isLandscapeAc = size.width > size.height }
+            // v0.68.81（Bob）：statusBarsPadding 只在竖屏加——v0.68.75 全去掉后竖屏状态栏错乱
+            .then(if (isLandscapeAc) Modifier else Modifier.statusBarsPadding())
     ) {
         // ---- Header（v0.68.44 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----
         // 顶栏下滑 → D2；顶栏右滑 → 回记住的 Dock 档（手势签名：右滑=更少）
