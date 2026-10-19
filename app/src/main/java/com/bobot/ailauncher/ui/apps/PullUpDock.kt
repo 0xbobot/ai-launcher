@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -143,6 +144,8 @@ fun PullUpDock(
     var popupApp by remember { mutableStateOf<AppInfo?>(null) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // v0.68.73（Bob）：横屏时 Dock 收拢，不横贯全屏
+        val isLandscapeDock = maxWidth > maxHeight
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
         // D2→D1 改由下滑/右滑手势触发
 
@@ -189,6 +192,8 @@ fun PullUpDock(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        // v0.68.73（Bob）：横屏 Dock 收拢，不横贯全屏
+                        .let { if (isLandscapeDock) it.widthIn(max = 480.dp) else it }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .clip(RoundedCornerShape(28.dp))
                         .background(AILauncherColors.GlassCard.copy(alpha = 0.55f * dockBgAlpha))

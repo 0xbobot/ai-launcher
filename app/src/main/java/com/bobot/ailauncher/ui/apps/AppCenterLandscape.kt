@@ -50,9 +50,10 @@ import kotlinx.coroutines.launch
 
 /**
  * v0.68.66（Bob）：横屏应用中心 v4。
- * - 删竖屏遗留的顶栏搜索，只留一个紧凑搜索
- * - 左 A-Z 全高数列：点按 + 按住上下滑动快速定位（drag → 字母 → 横滚）
- * - 应用区：竖排流——算好一列能排几个，排不满往右续列，不嵌套滚动
+ * v0.68.73（Bob）：字母导航移到右侧（同竖屏）+ 显示完整 A-Z；
+ *   字母头占一个完整应用行位（68.dp），融入应用流。
+ * - 右 A-Z 全高数列：点按 + 按住上下滑动快速定位（drag → 字母 → 横滚）
+ * - 应用区：竖排流——字母占首行位，一列排满往右续列（续列无头），不嵌套滚动
  */
 @Composable
 fun AppCenterLandscape(
@@ -70,35 +71,28 @@ fun AppCenterLandscape(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val rowH = 68.dp
-        // maxHeight 已是顶栏之外的剩余高度，直接算（Bob：竖向空间没算好）
-        //  header 占 24.dp，约 0.35 行；首列可用 rowsPerCol，续列可用 rowsPerCol+1（无头）
+        // v0.68.73：字母头占一个完整行位（rowH），与应用同高
         val rowsPerCol = ((maxHeight - 8.dp) / rowH).toInt().coerceAtLeast(4)
 
-        // 按字母切列：每个字母从新列顶部开始（Bob）
-        // 首列：[头 24.dp][应用...]；续列：无头，应用直接从顶部开始
+        // 按字母切列：每个字母从新列顶部开始，字母头占首行位（Bob）
+        // 首列：[字母头 rowH][应用...]；续列：无头，应用直接从顶部开始
         val columns = remember(azGroups, rowsPerCol) {
             val cols = mutableListOf<MutableList<FlowItem>>()
             var cur = mutableListOf<FlowItem>()
-            var curUsedDp = 0.dp  // 当前列已用高度（dp）
-            val headerH = 24.dp
-            fun colCap(hasHeader: Boolean): Int {
-                // 有头：头占 24.dp，剩余排应用；无头：全排应用
-                val avail = maxHeight - 8.dp - (if (hasHeader) headerH else 0.dp)
-                return (avail / rowH).toInt().coerceAtLeast(1)
-            }
+            fun colCap(): Int = rowsPerCol
             fun flush() {
                 if (cur.isNotEmpty()) { cols.add(cur); cur = mutableListOf() }
             }
             azGroups.forEach { (letter, apps) ->
                 flush()  // 新字母新起一列
                 cur.add(FlowItem.Header(letter))
-                var cap = colCap(hasHeader = true)
+                var cap = colCap() - 1  // 字母头已占 1 行
                 var count = 0
                 apps.forEach { app ->
                     if (count >= cap) {
                         flush()
                         // 续列：无头，应用直接顶头排
-                        cap = colCap(hasHeader = false)
+                        cap = colCap()
                         count = 0
                     }
                     cur.add(FlowItem.App(app)); count++
@@ -128,22 +122,7 @@ fun AppCenterLandscape(
         }
 
         Row(Modifier.fillMaxSize()) {
-            // 左：A-Z 全高数列（点按 + 滑动定位）
-            LetterRail(
-                letters = letters,
-                selectedLetter = selectedLetter,
-                onLetter = ::scrollToLetter,
-                modifier = Modifier
-                    .width(80.dp)
-                    .fillMaxHeight()
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(1.dp)
-                    .background(AILauncherColors.Divider)
-            )
-            // 右：内容区
+            // 左：内容区
             Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
                 // 紧凑顶栏（唯一的搜索）
                 Row(
@@ -223,16 +202,16 @@ fun AppCenterLandscape(
                             columns[idx].forEach { item ->
                                 when (item) {
                                     is FlowItem.Header -> {
-                                        // Bob：字母头紧凑，占第一格（24.dp）；续列无头
+                                        // v0.68.73（Bob）：字母头占一个完整应用行位，融入应用流
                                         Text(
                                             text = item.letter.toString(),
                                             fontFamily = FontFamily.Serif,
-                                            fontSize = 16.sp,
+                                            fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = AILauncherColors.Title.copy(alpha = 0.45f),
+                                            color = AILauncherColors.Title,
                                             modifier = Modifier
-                                                .height(24.dp)
-                                                .padding(start = 8.dp)
+                                                .height(rowH)
+                                                .padding(start = 12.dp)
                                                 .wrapContentHeight(Alignment.CenterVertically)
                                         )
                                     }
@@ -272,34 +251,54 @@ fun AppCenterLandscape(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(1.dp)
+                    .background(AILauncherColors.Divider)
+            )
+            // v0.68.73（Bob）：右：A-Z 全高数列（点按 + 滑动定位，同竖屏）
+            LetterRail(
+                letters = letters,
+                selectedLetter = selectedLetter,
+                onLetter = ::scrollToLetter,
+                modifier = Modifier
+                    .width(56.dp)
+                    .fillMaxHeight()
+            )
         }
     }
 }
 
 /**
- * 左侧字母轨：点按 + 按住上下滑动快速定位。
+ * v0.68.73（Bob）：右侧字母轨，显示完整 A-Z，点按 + 按住上下滑动快速定位。
+ * 无应用的字母置灰不可点。
  */
 @Composable
 private fun LetterRail(
-    letters: List<Char>,
+    letters: List<Char>,  // 有应用的字母（用于定位）
     selectedLetter: Char?,
     onLetter: (Char) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var railHeightPx by remember { mutableStateOf(0) }
+    // v0.68.73：完整 A-Z，方便滑动定位
+    val fullAlphabet = remember { ('A'..'Z').toList() }
+    val letterSet = remember(letters) { letters.toSet() }
 
     fun letterAt(yPx: Float): Char? {
-        if (railHeightPx <= 0 || letters.isEmpty()) return null
-        val idx = ((yPx / railHeightPx) * letters.size).toInt()
-            .coerceIn(0, letters.size - 1)
-        return letters[idx]
+        if (railHeightPx <= 0 || fullAlphabet.isEmpty()) return null
+        val idx = ((yPx / railHeightPx) * fullAlphabet.size).toInt()
+            .coerceIn(0, fullAlphabet.size - 1)
+        val c = fullAlphabet[idx]
+        return if (letterSet.contains(c)) c else null
     }
 
     Column(
         modifier = modifier
             .background(AILauncherColors.Background)
             .onSizeChanged { railHeightPx = it.height }
-            .pointerInput(letters) {
+            .pointerInput(fullAlphabet) {
                 detectVerticalDragGestures(
                     onDragStart = { offset -> letterAt(offset.y)?.let(onLetter) },
                     onVerticalDrag = { change, _ ->
@@ -308,28 +307,33 @@ private fun LetterRail(
                     }
                 )
             }
-            .padding(vertical = 8.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceEvenly
     ) {
-        letters.forEach { letter ->
+        fullAlphabet.forEach { letter ->
+            val hasApps = letterSet.contains(letter)
             val isSel = letter == selectedLetter
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(28.dp)
                     .clip(CircleShape)
                     .background(
                         if (isSel) AILauncherColors.Accent.copy(alpha = 0.2f)
                         else Color.Transparent
                     )
-                    .clickable { onLetter(letter) },
+                    .clickable(enabled = hasApps) { onLetter(letter) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = letter.toString(),
-                    fontSize = 14.sp,
+                    fontSize = 12.sp,
                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                    color = if (isSel) AILauncherColors.Title else AILauncherColors.Hint
+                    color = when {
+                        isSel -> AILauncherColors.Title
+                        hasApps -> AILauncherColors.Hint
+                        else -> AILauncherColors.Hint.copy(alpha = 0.35f)
+                    }
                 )
             }
         }
