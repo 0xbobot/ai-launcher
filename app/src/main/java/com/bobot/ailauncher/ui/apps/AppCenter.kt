@@ -549,7 +549,7 @@ fun AppCenterContent(
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
-            }  // else 竖屏刊头结束
+            }  // 刊头 Column 结束（if 继续往下包搜索框）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -644,7 +644,7 @@ fun AppCenterContent(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            }  // if (!isLandscapeAc) 竖屏顶栏+搜索结束
+            }  // v0.68.71：if (!isLandscapeAc) 结束（刊头+搜索只在竖屏）
 
         // v0.68.62（Bob）：横屏双栏——左索引右网格，竖屏用原单列
         if (isLandscapeAc) {
@@ -1371,7 +1371,7 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
     ) {
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             modifier = Modifier
                 .padding(horizontal = 36.dp)
                 .clickable(enabled = false, onClick = {})
