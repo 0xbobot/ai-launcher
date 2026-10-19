@@ -454,11 +454,15 @@ private fun DockGrid10(
         apps.chunked(cols).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
+                horizontalArrangement = Arrangement.spacedBy(
+                    if (isLandscape) 12.dp else 4.dp,
+                    Alignment.CenterHorizontally
+                )
             ) {
                 row.forEach { app ->
+                    // v0.68.77（Bob）：横屏不用 weight，否则两列被撑开散掉
                     Box(
-                        modifier = Modifier.weight(1f),
+                        modifier = if (isLandscape) Modifier else Modifier.weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
                         DockIconButton(
