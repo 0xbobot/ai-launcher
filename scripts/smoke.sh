@@ -74,8 +74,10 @@ adb shell input keyevent KEYCODE_HOME || true
 sleep 4
 shot "home"
 
-# --- 5. 左滑展开盲操扇形（pixel_6 1080x2400；封面区纯展示无交互，手势直达首页手势层）---
-adb shell input swipe 900 300 200 300 300 || true
+# --- 5. 左滑展开盲操扇形（pixel_6 1080x2400）
+# 注意：手势检测器在 HomeScreen 根 Box 上，TODAY 卡片/Dock/七仔会先消费触摸，
+# 必须落在空白背景上（y=1400 为 TODAY 卡片与 Dock 之间的空白）；落在卡片上会被吃掉。
+adb shell input swipe 900 1400 200 1400 300 || true
 sleep 2
 shot "fan"
 
@@ -83,9 +85,9 @@ shot "fan"
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 
-# --- 6. 点七仔（宠物区中央；果冻反馈+开心表情）---
-adb shell input tap 540 1030 || true
-sleep 2
+# --- 6. 点七仔（宠物区，home 截图里约 840,630；果冻反馈+开心表情 1.2 秒，0.8 秒后截图抓表情）---
+adb shell input tap 840 630 || true
+sleep 1
 shot "pet"
 
 # --- 7. 上滑开 D3 应用中心 ---
