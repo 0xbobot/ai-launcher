@@ -549,7 +549,6 @@ fun AppCenterContent(
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
-            }  // 刊头 Column 结束（if 继续往下包搜索框）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -645,6 +644,7 @@ fun AppCenterContent(
             }
             Spacer(modifier = Modifier.height(8.dp))
             }  // v0.68.71：if (!isLandscapeAc) 结束（刊头+搜索只在竖屏）
+        }  // Header Column 闭合
 
         // v0.68.62（Bob）：横屏双栏——左索引右网格，竖屏用原单列
         if (isLandscapeAc) {
