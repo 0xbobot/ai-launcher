@@ -549,6 +549,9 @@ fun AppCenterContent(
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
+            }  // else 竖屏刊头结束
+            // v0.68.72：搜索框横屏隐藏（横屏用 AppCenterLandscape 的搜索）
+            if (!isLandscapeAc) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -643,7 +646,7 @@ fun AppCenterContent(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            }  // v0.68.71：if (!isLandscapeAc) 结束（刊头+搜索只在竖屏）
+            }  // if (!isLandscapeAc) 搜索框结束（v0.68.72 新增）
         }  // Header Column 闭合
 
         // v0.68.62（Bob）：横屏双栏——左索引右网格，竖屏用原单列
