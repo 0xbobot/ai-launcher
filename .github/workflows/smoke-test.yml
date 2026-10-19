@@ -52,7 +52,9 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          emulator-options: -no-snapshot -no-audio -no-boot-anim -camera-back none
+          # -no-window：CI 无显示器，headless 运行（否则 Qt 报
+          # "no Qt platform plugin could be initialized" 直接崩溃）
+          emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu swiftshader_indirect
           script: bash scripts/smoke.sh
 
       - name: Upload smoke screenshots
