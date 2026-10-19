@@ -2,7 +2,6 @@ package com.bobot.ailauncher.ui.apps
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -37,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,7 +65,6 @@ fun AppCenterLandscape(
 ) {
     val scope = rememberCoroutineScope()
     val rowState = rememberLazyListState()
-    var selectedLetter by remember { mutableStateOf<Char?>(null) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val rowH = 68.dp
@@ -115,7 +112,6 @@ fun AppCenterLandscape(
         }
 
         fun scrollToLetter(letter: Char) {
-            selectedLetter = letter
             letterToCol[letter]?.let { idx ->
                 scope.launch { rowState.animateScrollToItem(idx) }
             }
@@ -257,11 +253,25 @@ fun AppCenterLandscape(
                     .width(1.dp)
                     .background(AILauncherColors.Divider)
             )
-            // v0.68.73（Bob）：右：A-Z 全高数列（点按 + 滑动定位，同竖屏）
-            LetterRail(
-                letters = letters,
-                selectedLetter = selectedLetter,
-                onLetter = ::scrollToLetter,
+            // v0.68.74（Bob）：右：波浪字母导航（复用竖屏 WaveRail，完整 A-Z）
+            // 无应用的字母滑动时自动找最近有应用的字母
+            AppRail(
+                items = remember { ('A'..'Z').map { RailItem.Letter(it) } },
+                onActiveItem = { item ->
+                    if (item is RailItem.Letter) {
+                        // 找该字母或之后最近有应用的字母
+                        var c = item.char
+                        while (c <= 'Z' && !letterToCol.containsKey(c)) c++
+                        if (c <= 'Z') scrollToLetter(c)
+                        else {
+                            // 往前找
+                            c = item.char
+                            while (c >= 'A' && !letterToCol.containsKey(c)) c--
+                            if (c >= 'A') scrollToLetter(c)
+                        }
+                    }
+                },
+                onRelease = { },
                 modifier = Modifier
                     .width(56.dp)
                     .fillMaxHeight()
@@ -270,75 +280,6 @@ fun AppCenterLandscape(
     }
 }
 
-/**
- * v0.68.73（Bob）：右侧字母轨，显示完整 A-Z，点按 + 按住上下滑动快速定位。
- * 无应用的字母置灰不可点。
- */
-@Composable
-private fun LetterRail(
-    letters: List<Char>,  // 有应用的字母（用于定位）
-    selectedLetter: Char?,
-    onLetter: (Char) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var railHeightPx by remember { mutableStateOf(0) }
-    // v0.68.73：完整 A-Z，方便滑动定位
-    val fullAlphabet = remember { ('A'..'Z').toList() }
-    val letterSet = remember(letters) { letters.toSet() }
-
-    fun letterAt(yPx: Float): Char? {
-        if (railHeightPx <= 0 || fullAlphabet.isEmpty()) return null
-        val idx = ((yPx / railHeightPx) * fullAlphabet.size).toInt()
-            .coerceIn(0, fullAlphabet.size - 1)
-        val c = fullAlphabet[idx]
-        return if (letterSet.contains(c)) c else null
-    }
-
-    Column(
-        modifier = modifier
-            .background(AILauncherColors.Background)
-            .onSizeChanged { railHeightPx = it.height }
-            .pointerInput(fullAlphabet) {
-                detectVerticalDragGestures(
-                    onDragStart = { offset -> letterAt(offset.y)?.let(onLetter) },
-                    onVerticalDrag = { change, _ ->
-                        letterAt(change.position.y)?.let(onLetter)
-                        change.consume()
-                    }
-                )
-            }
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceEvenly
-    ) {
-        fullAlphabet.forEach { letter ->
-            val hasApps = letterSet.contains(letter)
-            val isSel = letter == selectedLetter
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isSel) AILauncherColors.Accent.copy(alpha = 0.2f)
-                        else Color.Transparent
-                    )
-                    .clickable(enabled = hasApps) { onLetter(letter) },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = letter.toString(),
-                    fontSize = 12.sp,
-                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                    color = when {
-                        isSel -> AILauncherColors.Title
-                        hasApps -> AILauncherColors.Hint
-                        else -> AILauncherColors.Hint.copy(alpha = 0.35f)
-                    }
-                )
-            }
-        }
-    }
-}
 
 private sealed interface FlowItem {
     data class Header(val letter: Char) : FlowItem

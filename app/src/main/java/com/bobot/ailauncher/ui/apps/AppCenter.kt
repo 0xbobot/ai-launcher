@@ -501,7 +501,8 @@ fun AppCenterContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
+            // v0.68.74（Bob）：横屏不加 statusBarsPadding（横屏状态栏在侧边，加了会留边）
+            .let { if (isLandscapeAc) it else it.statusBarsPadding() }
             .onSizeChanged { size -> isLandscapeAc = size.width > size.height }
     ) {
         // ---- Header（v0.68.44 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----

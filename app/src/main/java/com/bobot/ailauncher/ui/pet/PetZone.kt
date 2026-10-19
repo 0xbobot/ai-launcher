@@ -408,8 +408,13 @@ fun PetZone(
     // v0.68.44（Bob）：封面模式——杂志 hero + 紧凑条；TodaySection 只跑数据不上 UI
     // v0.68.45：恢复点七仔快捷面板（Bob：快捷服务别删）；无会议时紧凑条隐藏（Bob：别和 hero 重复）
     // v0.68.47：装备环包进宠物槽位、以宠物为中心（Bob：散落不优雅）
+    // v0.68.74（Bob）：横屏时紧凑条收窄放左侧，避免和 Dock 重叠
     if (coverMode) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            val isLandscapeCover = maxWidth > maxHeight
+            Column(modifier = Modifier.fillMaxWidth()) {
             CoverHero(
                 summary = coverSummary,
                 weatherDesc = weatherDesc ?: "",
@@ -471,14 +476,22 @@ fun PetZone(
             Spacer(modifier = Modifier.height(16.dp))
             // 有会议才显示——无会时 hero 已有"难得清闲"，不重复
             if (coverNextEvent != null) {
-                NextUpStrip(
-                    summary = coverSummary,
-                    nextEvent = coverNextEvent,
-                    palette = coverPalette,
-                    onMeetingTap = { e -> remindMeeting(e, "cover") }
-                )
+                // v0.68.74（Bob）：横屏时紧凑条收窄到左侧 60%，避免和 Dock 重叠
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = androidx.compose.ui.Alignment.CenterStart
+                ) {
+                    NextUpStrip(
+                        summary = coverSummary,
+                        nextEvent = coverNextEvent,
+                        palette = coverPalette,
+                        onMeetingTap = { e -> remindMeeting(e, "cover") },
+                        modifier = if (isLandscapeCover) Modifier.fillMaxWidth(0.62f) else Modifier.fillMaxWidth()
+                    )
+                }
             }
-        }
+            }  // Column 结束
+        }  // v0.68.74：BoxWithConstraints 结束
         // 数据源：只跑 effect、上报，不渲染
         TodaySection(
             dataOnly = true,
