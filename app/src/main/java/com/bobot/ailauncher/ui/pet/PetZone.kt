@@ -346,10 +346,6 @@ fun PetZone(
     )
     // v0.50.0：Today 直接放首屏（不再用 Bottom Sheet）
     var speechVisible by remember { mutableStateOf(false) }
-    // v0.65.5：七仔装备——点七仔展开/收起环绕的快捷图标（无容器拟物化）
-    var showQuickPanel by remember { mutableStateOf(false) }
-    // v0.66.6：收起时先播反向摇摆动画，再真正移除（panelCollapsing 期间保持挂载）
-    var panelCollapsing by remember { mutableStateOf(false) }
     LaunchedEffect(speech?.id) {
         val s = speech
         if (s != null) {
@@ -432,16 +428,11 @@ fun PetZone(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
-                                        // 和原版一致：点七仔展开/收起快捷面板
+                                        // v0.68.79（Bob）：装备环已移除，全部以扇形为主——点七仔只做果冻+开心表情
                                         if (hasUpgrade) onUpgradeTap()
                                         else {
                                             jellyTick++
                                             PetRepository.setMoodHappyBrief()
-                                            if (showQuickPanel && !panelCollapsing) {
-                                                panelCollapsing = true
-                                            } else if (!showQuickPanel) {
-                                                showQuickPanel = true
-                                            }
                                         }
                                     }
                                 )
@@ -455,19 +446,6 @@ fun PetZone(
                                 scene = demoScene,
                                 onSceneDone = { demoScene = QizaiScene.NONE },
                                 modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                        // 装备环：220.dp 以七仔为中心，四周溢出 50.dp 环绕
-                        // 右上 pet，环左移 40.dp 让右腰装备不飞出屏幕
-                        if (showQuickPanel || panelCollapsing) {
-                            QizaiEquipment(
-                                modifier = Modifier.offset(x = (-40).dp),
-                                onLaunch = { if (!panelCollapsing) panelCollapsing = true },
-                                collapsing = panelCollapsing,
-                                onCollapseDone = {
-                                    panelCollapsing = false
-                                    showQuickPanel = false
-                                }
                             )
                         }
                     }
@@ -588,22 +566,8 @@ fun PetZone(
             // v0.51.2：会议临近黄条已删（Capsule 已覆盖，避免重复）
             // v0.47.0：七仔说话气泡——统一信息区（Mii 风+游戏化），有话就弹出来
             // v0.64.5：编辑模式下点气泡退出编辑模式
-            // v0.65.5：七仔装备——拟物化快捷方式，无容器，图标像武器一样挂在七仔周围
-            // v0.65.2：快捷面板打开时优先显示，普通说话气泡让位
-            // v0.66.6：panelCollapsing 期间保持挂载，播完反向摇摆才移除
-            if (showQuickPanel || panelCollapsing) {
-                QizaiEquipment(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = petTop), // v0.66.8：随七仔，七仔在上 1/3 区域偏下
-                    onLaunch = { if (!panelCollapsing) panelCollapsing = true },
-                    collapsing = panelCollapsing,
-                    onCollapseDone = {
-                        panelCollapsing = false
-                        showQuickPanel = false
-                    }
-                )
-            } else if (speech != null) {
+            // v0.68.79（Bob）：七仔装备环已移除，全部以扇形为主
+            if (speech != null) {
                 SpeechBubble(
                     text = speech!!.text,
                     visible = speechVisible,
@@ -669,17 +633,11 @@ fun PetZone(
                             // v0.50.0：Today 已在首屏，点按宠物只做果冻反馈
                             // 场景改由真实事件触发（天气/通知/日程）
                             // v0.56.0 M2：开心表情，不说话
-                            // v0.65.5：点七仔展开/收起装备（环绕的快捷图标）
-                            // v0.66.6：收起时先播反向摇摆（panelCollapsing），播完才真正移除
+                            // v0.68.79（Bob）：装备环已移除，全部以扇形为主
                             if (hasUpgrade) onUpgradeTap()
                             else {
                                 jellyTick++
                                 PetRepository.setMoodHappyBrief()
-                                if (showQuickPanel && !panelCollapsing) {
-                                    panelCollapsing = true
-                                } else if (!showQuickPanel) {
-                                    showQuickPanel = true
-                                }
                             }
                         },
                         onLongClick = {

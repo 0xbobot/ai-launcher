@@ -7,14 +7,9 @@ import android.content.pm.ShortcutInfo
 import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
 import android.os.Process
-import android.view.HapticFeedbackConstants
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,26 +18,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.EaseInOut
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,17 +40,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -209,292 +190,6 @@ internal fun launchQuickAction(context: Context, item: QuickActionItem) {
         PetRepository.say("打不开这个，快检查一下应用还在不在")
     }
 }
-
-// ============ v0.65.5：七仔装备——拟物化快捷方式 ============
-/**
- * v0.65.5：不要盒子/气泡。快捷图标像"武器装备"一样长在七仔周围——
- * 左右腰间、右上（背着）、左下四个槽位，图标 36dp 圆形 + 4dp 阴影，
- * 每个轻微不同角度，像挂在身上。标签 9sp 无背景。
- * 超 4 个时前 3 个环绕 + 第 4 槽显示"···"，点开展开全部（下方横向浮层，无背景）。
- * 调用方 modifier 对齐七仔位置：align(TopCenter).padding(top = 80.dp)（v0.66.3：随七仔下移）。
- */
-
-/** 装备槽位：相对七仔中心的偏移 + 旋转角度（像挂在身上） */
-private data class EquipSlot(val x: Dp, val y: Dp, val rotation: Float)
-
-private val EquipSlots = listOf(
-    EquipSlot((-72).dp, 5.dp, -8f),    // 左腰（v0.66.9：y 15→5，bottom 在 stageH-17，卡片在 stageH+24）
-    EquipSlot(72.dp, 5.dp, 8f),        // 右腰（v0.66.9：y 15→5）
-    EquipSlot(55.dp, (-55).dp, 12f),   // 右上（背着的武器，保持）
-    EquipSlot((-58).dp, (-52).dp, -10f), // 左上（v0.66.9：左下 80→-52 移到左上，bottom 在 stageH-74，不被卡片裁）
-)
-
-@Composable
-fun QizaiEquipment(
-    modifier: Modifier = Modifier,
-    onLaunch: () -> Unit = {}, // 启动后由调用方决定是否收起
-    // v0.66.6：收起时播反向摇摆动画——collapsing=true 时 wobble 1→0，播完调 onCollapseDone
-    collapsing: Boolean = false,
-    onCollapseDone: () -> Unit = {}
-) {
-    val context = LocalContext.current
-    val view = LocalView.current
-    var items by remember { mutableStateOf(QuickActionsPrefs.load(context)) }
-    var showAddFlow by remember { mutableStateOf(false) }
-    var deleteTarget by remember { mutableStateOf<QuickActionItem?>(null) }
-    var expanded by remember { mutableStateOf(false) }
-    // v0.66.6：展开摇摆——像挂件晃动（300ms ease-in-out）；收起时反向
-    val wobble = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        wobble.animateTo(1f, animationSpec = tween(300, easing = EaseInOut))
-    }
-    LaunchedEffect(collapsing) {
-        if (collapsing) {
-            wobble.animateTo(0f, animationSpec = tween(300, easing = EaseInOut))
-            onCollapseDone()
-        }
-    }
-    // v0.65.5：首次见到装备 → 七仔介绍（只一次），4 秒后提示消失
-    var showEquipHint by remember {
-        mutableStateOf(GuideManager.tryShow(context, GuideManager.Id.EQUIPMENT))
-    }
-    if (showEquipHint) {
-        LaunchedEffect(Unit) {
-            delay(4000)
-            showEquipHint = false
-        }
-    }
-
-    val overflow = items.size > 4
-    val ringItems = if (overflow) items.take(3) else items.take(4)
-
-    Box(modifier = modifier) {
-        // 装备环：220dp 盒子与七仔同框（v0.67.0：200dp→220dp，容纳移到 (-90,-52) 的 "+" 按钮，左边缘 -104 不被裁）
-        if (!expanded) {
-            Box(modifier = Modifier.size(220.dp)) {
-                ringItems.forEachIndexed { index, item ->
-                    val slot = EquipSlots[index]
-                    key(item.id) {
-                        EquipButton(
-                            item = item,
-                            rotation = slot.rotation,
-                            wobble = wobble.value,
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .offset(slot.x, slot.y),
-                            onClick = {
-                                launchQuickAction(context, item)
-                                onLaunch()
-                            },
-                            onLongPress = {
-                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                deleteTarget = item
-                            }
-                        )
-                    }
-                }
-                // 超 4 个：第 4 槽显示"···"，点开展开全部
-                if (overflow) {
-                    val slot = EquipSlots[3]
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .offset(slot.x, slot.y)
-                            .graphicsLayer { rotationZ = slot.rotation }
-                            .size(36.dp)
-                            .shadow(4.dp, CircleShape)
-                            .clip(CircleShape)
-                            .background(AILauncherColors.Card.copy(alpha = 0.9f))
-                            .clickable { expanded = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = "\u00B7\u00B7\u00B7", fontSize = 14.sp, color = Color(0xFF8A837C))
-                    }
-                }
-                // + 添加：左上槽位旁（v0.67.0：从七仔正下方 (0,10) 移到 (-90,-52)，原位置被七仔挡住）
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .offset((-90).dp, (-52).dp)
-                        .clickable { showAddFlow = true }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .border(1.5.dp, Color(0xFFAEAEB2), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = "+", fontSize = 16.sp, color = Color(0xFFAEAEB2))
-                    }
-                }
-                // 首次提示：七仔介绍小装备（v0.66.9：移到上方 y=-85，bottom 在 stageH-115，不被卡片裁）
-                if (showEquipHint) {
-                    Text(
-                        text = "这些是我的小装备，点一下就能用",
-                        fontSize = 12.sp,
-                        color = Color(0xFF8A837C),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .offset(y = (-85).dp)
-                    )
-                }
-            }
-        } else {
-            // 展开态：全部图标横向浮层（无背景），在七仔下方（v0.66.4：随收紧上移）
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = 108.dp)
-                    .widthIn(max = 300.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalAlignment = Alignment.Top
-            ) {
-                items.forEach { item ->
-                    key(item.id) {
-                        EquipButton(
-                            item = item,
-                            rotation = 0f,
-                            wobble = wobble.value,
-                            onClick = {
-                                launchQuickAction(context, item)
-                                onLaunch()
-                            },
-                            onLongPress = {
-                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                deleteTarget = item
-                            }
-                        )
-                    }
-                }
-                // + 添加
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.clickable { showAddFlow = true }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .border(1.5.dp, Color(0xFFAEAEB2), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = "+", fontSize = 20.sp, color = Color(0xFFAEAEB2))
-                    }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "添加",
-                        fontSize = 10.sp,
-                        color = Color(0xFF3A352F),
-                        maxLines = 1,
-                        modifier = Modifier
-                            .zIndex(1f)
-                            .background(AILauncherColors.Card.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-                // 收起
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.clickable { expanded = false }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(AILauncherColors.Card.copy(alpha = 0.9f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = "\u2039", fontSize = 20.sp, color = Color(0xFF8A837C))
-                    }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "收起",
-                        fontSize = 10.sp,
-                        color = Color(0xFF3A352F),
-                        maxLines = 1,
-                        modifier = Modifier
-                            .zIndex(1f)
-                            .background(AILauncherColors.Card.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-        }
-    }
-
-    // 添加流程（三步：选应用→选快捷方式→输标签）
-    if (showAddFlow) {
-        QuickActionAddFlow(
-            onDismiss = { showAddFlow = false },
-            onSaved = { item ->
-                items = items + item
-                QuickActionsPrefs.save(context, items)
-                showAddFlow = false
-                PetRepository.say("已添加「${item.label}」")
-            }
-        )
-    }
-
-    // 删除确认（长按图标 → 震动+确认）
-    val target = deleteTarget
-    if (target != null) {
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text("删除这个小装备？") },
-            text = { Text("「${target.label}」") },
-            confirmButton = {
-                TextButton(onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                    items = items.filter { it.id != target.id }
-                    QuickActionsPrefs.save(context, items)
-                    deleteTarget = null
-                    PetRepository.say("已删除")
-                }) { Text("删除", color = Color(0xFFFF3B30)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
-            }
-        )
-    }
-}
-
-/** v0.65.5：装备按钮——36dp 圆形图标 + 4dp 阴影 + 轻微旋转。
- * v0.66.5：隐藏名称标签，只显示图标；长按时删除确认框里带名称。 */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun EquipButton(
-    item: QuickActionItem,
-    rotation: Float,
-    modifier: Modifier = Modifier,
-    // v0.66.6：摇摆进度 0→1（展开）/1→0（收起反向），阻尼正弦摆动
-    wobble: Float = 0f,
-    onClick: () -> Unit,
-    onLongPress: () -> Unit
-) {
-    // 摆动角度：sin 两个周期 * 12° * 阻尼(1-wobble)，wobble=1 时静止
-    val swing = (kotlin.math.sin(wobble * Math.PI * 2) * 12f * (1f - wobble)).toFloat()
-    Box(
-        modifier = modifier
-            .graphicsLayer { rotationZ = rotation + swing }
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongPress
-            )
-            .size(36.dp)
-            .shadow(4.dp, CircleShape)
-            .clip(CircleShape)
-            .background(AILauncherColors.Card)
-            .padding(4.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        QuickActionIcon(item = item, size = 28.dp)
-    }
-}
-
 
 // ============ 添加流程：选应用 → 选快捷方式 → 输标签（v0.65.0，不动） ============
 
