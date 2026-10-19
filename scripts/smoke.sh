@@ -77,11 +77,16 @@ shot "home"
 # --- 5. 左滑展开盲操扇形（pixel_6 1080x2400）
 # 注意：手势检测器在 HomeScreen 根 Box 上，TODAY 卡片/Dock/七仔会先消费触摸，
 # 必须落在空白背景上（y=1400 为 TODAY 卡片与 Dock 之间的空白）；落在卡片上会被吃掉。
-adb shell input swipe 900 1400 200 1400 300 || true
-sleep 2
+# 注意 2：扇形只在按住拖动期间可见——松手即触发（段外/拍照段进相机、⊕段进编辑）。
+# 所以用后台长 swipe（3 秒），在拖动中途截图，才能抓到展开中的扇形。
+adb shell input swipe 900 1400 300 1400 3000 &
+SWIPE_PID=$!
+sleep 1.5
 shot "fan"
-
-# --- 收起扇形 ---
+wait $SWIPE_PID || true
+# 清理松手后的状态（相机/编辑表）：连按两次 BACK 回到首页
+adb shell input keyevent KEYCODE_BACK || true
+sleep 1
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 
