@@ -151,12 +151,18 @@ fun PullUpDock(
 
         // ---- D1/D2 悬浮图标（无卡片，v0.27.1 去底） ----
         // v0.68.75（Bob）：横屏时 Dock 放右侧（分栏布局），不再放底部
+        // v0.68.78（Bob）：用 align 直接定位，contentAlignment 在横屏下不可靠
         Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = if (isLandscapeDock) Alignment.CenterEnd else Alignment.BottomCenter
+            modifier = Modifier.fillMaxSize()
         ) {
             AnimatedVisibility(
                 visible = cardVisible,
+                modifier = Modifier
+                    .align(
+                        if (isLandscapeDock) Alignment.CenterEnd else Alignment.BottomCenter
+                    )
+                    // v0.68.78：横屏时右侧留边，不贴边
+                    .let { if (isLandscapeDock) it.padding(end = 12.dp) else it },
                 enter = slideInVertically(
                     animationSpec = spring(
                         stiffness = Spring.StiffnessMediumLow,
