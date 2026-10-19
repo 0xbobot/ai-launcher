@@ -90,9 +90,9 @@ sleep 1
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 
-# --- 6. 点七仔（宠物区，home 截图里约 840,630；果冻反馈+开心表情 1.2 秒，0.8 秒后截图抓表情）---
+# --- 6. 点七仔（宠物区，home 截图里约 840,630；果冻反馈+开心表情 1.2 秒，0.3 秒后截图抓动画中途）---
 adb shell input tap 840 630 || true
-sleep 1
+sleep 0.3
 shot "pet"
 
 # --- 7. 上滑开 D3 应用中心 ---
