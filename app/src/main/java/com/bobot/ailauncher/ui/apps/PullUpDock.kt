@@ -150,9 +150,10 @@ fun PullUpDock(
         // D2→D1 改由下滑/右滑手势触发
 
         // ---- D1/D2 悬浮图标（无卡片，v0.27.1 去底） ----
+        // v0.68.75（Bob）：横屏时 Dock 放右侧（分栏布局），不再放底部
         Box(
             modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.BottomCenter
+            contentAlignment = if (isLandscapeDock) Alignment.CenterEnd else Alignment.BottomCenter
         ) {
             AnimatedVisibility(
                 visible = cardVisible,

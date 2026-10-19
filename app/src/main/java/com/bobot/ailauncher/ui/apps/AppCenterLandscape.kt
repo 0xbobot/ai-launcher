@@ -58,6 +58,8 @@ fun AppCenterLandscape(
     azGroups: List<Pair<Char, List<AppInfo>>>,
     letters: List<Char>,
     totalCount: Int,
+    favApps: List<AppInfo> = emptyList(),
+    hiddenApps: List<AppInfo> = emptyList(),
     onLaunch: (AppInfo) -> Unit,
     onLongPress: (AppInfo) -> Unit,
     onOpenSettings: () -> Unit,
@@ -69,16 +71,31 @@ fun AppCenterLandscape(
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val rowH = 68.dp
         // v0.68.73：字母头占一个完整行位（rowH），与应用同高
-        val rowsPerCol = ((maxHeight - 8.dp) / rowH).toInt().coerceAtLeast(4)
+        // v0.68.75（Bob）：减去顶栏 56.dp + 底部分隔 8.dp，否则多算一行导致末行被压缩
+        val rowsPerCol = ((maxHeight - 56.dp - 8.dp) / rowH).toInt().coerceAtLeast(3)
 
         // 按字母切列：每个字母从新列顶部开始，字母头占首行位（Bob）
         // 首列：[字母头 rowH][应用...]；续列：无头，应用直接从顶部开始
-        val columns = remember(azGroups, rowsPerCol) {
+        // v0.68.75（Bob）：收藏放最前、隐藏放最后，核心功能不能丢
+        val columns = remember(azGroups, favApps, hiddenApps, rowsPerCol) {
             val cols = mutableListOf<MutableList<FlowItem>>()
             var cur = mutableListOf<FlowItem>()
             fun colCap(): Int = rowsPerCol
             fun flush() {
                 if (cur.isNotEmpty()) { cols.add(cur); cur = mutableListOf() }
+            }
+            // 收藏区（★头）
+            if (favApps.isNotEmpty()) {
+                flush()
+                cur.add(FlowItem.SectionHeader("★ 收藏"))
+                var cap = colCap() - 1
+                var count = 0
+                favApps.forEach { app ->
+                    if (count >= cap) {
+                        flush(); cap = colCap(); count = 0
+                    }
+                    cur.add(FlowItem.App(app)); count++
+                }
             }
             azGroups.forEach { (letter, apps) ->
                 flush()  // 新字母新起一列
@@ -95,10 +112,23 @@ fun AppCenterLandscape(
                     cur.add(FlowItem.App(app)); count++
                 }
             }
+            // 隐藏区（👁头）
+            if (hiddenApps.isNotEmpty()) {
+                flush()
+                cur.add(FlowItem.SectionHeader("👁 隐藏"))
+                var cap = colCap() - 1
+                var count = 0
+                hiddenApps.forEach { app ->
+                    if (count >= cap) {
+                        flush(); cap = colCap(); count = 0
+                    }
+                    cur.add(FlowItem.App(app)); count++
+                }
+            }
             flush()
             cols.map { it.toList() }
         }
-        // 字母 → 列索引（取该字母首次出现的列）
+        // 字母 → 列索引（取该字母首次出现的列）；★→0，👁→末列
         val letterToCol = remember(columns) {
             val map = mutableMapOf<Char, Int>()
             columns.forEachIndexed { colIdx, col ->
@@ -109,6 +139,11 @@ fun AppCenterLandscape(
                 }
             }
             map
+        }
+        val favColIdx = 0
+        val hiddenColIdx = remember(columns) {
+            columns.indexOfFirst { col -> col.any { it is FlowItem.SectionHeader && it.title.contains("隐藏") } }
+                .takeIf { it >= 0 }
         }
 
         fun scrollToLetter(letter: Char) {
@@ -211,6 +246,20 @@ fun AppCenterLandscape(
                                                 .wrapContentHeight(Alignment.CenterVertically)
                                         )
                                     }
+                                    is FlowItem.SectionHeader -> {
+                                        // v0.68.75（Bob）：收藏/隐藏区头，占一个完整行位
+                                        Text(
+                                            text = item.title,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 2.sp,
+                                            color = AILauncherColors.Accent,
+                                            modifier = Modifier
+                                                .height(rowH)
+                                                .padding(start = 12.dp)
+                                                .wrapContentHeight(Alignment.CenterVertically)
+                                        )
+                                    }
                                     is FlowItem.App -> {
                                         val app = item.app
                                         Row(
@@ -254,21 +303,42 @@ fun AppCenterLandscape(
                     .background(AILauncherColors.Divider)
             )
             // v0.68.74（Bob）：右：波浪字母导航（复用竖屏 WaveRail，完整 A-Z）
-            // 无应用的字母滑动时自动找最近有应用的字母
+            // v0.68.75（Bob）：加回收藏★和隐藏👁，核心功能不能丢
             AppRail(
-                items = remember { ('A'..'Z').map { RailItem.Letter(it) } },
-                onActiveItem = { item ->
-                    if (item is RailItem.Letter) {
-                        // 找该字母或之后最近有应用的字母
-                        var c = item.char
-                        while (c <= 'Z' && !letterToCol.containsKey(c)) c++
-                        if (c <= 'Z') scrollToLetter(c)
-                        else {
-                            // 往前找
-                            c = item.char
-                            while (c >= 'A' && !letterToCol.containsKey(c)) c--
-                            if (c >= 'A') scrollToLetter(c)
+                items = remember(favApps, hiddenApps) {
+                    buildList {
+                        if (favApps.isNotEmpty()) add(RailItem.Star)
+                        if (favApps.isNotEmpty()) add(RailItem.Separator)
+                        ('A'..'Z').forEach { add(RailItem.Letter(it)) }
+                        if (hiddenApps.isNotEmpty()) {
+                            add(RailItem.Separator)
+                            add(RailItem.Eye)
                         }
+                    }
+                },
+                onActiveItem = { item ->
+                    when (item) {
+                        is RailItem.Star -> {
+                            scope.launch { rowState.animateScrollToItem(favColIdx) }
+                        }
+                        is RailItem.Eye -> {
+                            hiddenColIdx?.let { idx ->
+                                scope.launch { rowState.animateScrollToItem(idx) }
+                            }
+                        }
+                        is RailItem.Letter -> {
+                            // 找该字母或之后最近有应用的字母
+                            var c = item.char
+                            while (c <= 'Z' && !letterToCol.containsKey(c)) c++
+                            if (c <= 'Z') scrollToLetter(c)
+                            else {
+                                // 往前找
+                                c = item.char
+                                while (c >= 'A' && !letterToCol.containsKey(c)) c--
+                                if (c >= 'A') scrollToLetter(c)
+                            }
+                        }
+                        else -> {}
                     }
                 },
                 onRelease = { },
@@ -283,5 +353,6 @@ fun AppCenterLandscape(
 
 private sealed interface FlowItem {
     data class Header(val letter: Char) : FlowItem
+    data class SectionHeader(val title: String) : FlowItem
     data class App(val app: AppInfo) : FlowItem
 }

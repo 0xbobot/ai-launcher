@@ -501,8 +501,7 @@ fun AppCenterContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            // v0.68.74（Bob）：横屏不加 statusBarsPadding（横屏状态栏在侧边，加了会留边）
-            .let { if (isLandscapeAc) it else it.statusBarsPadding() }
+            // v0.68.75（Bob）：去掉 statusBarsPadding——启动器全屏绘制，横屏侧边留白即由此来
             .onSizeChanged { size -> isLandscapeAc = size.width > size.height }
     ) {
         // ---- Header（v0.68.44 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----
@@ -656,6 +655,8 @@ fun AppCenterContent(
                 azGroups = azGroups,
                 letters = letters,
                 totalCount = azApps.size,
+                favApps = dockApps,
+                hiddenApps = hiddenApps,
                 onLaunch = ::launchApp,
                 onLongPress = { popupApp = it },
                 onOpenSettings = onOpenSettings,
