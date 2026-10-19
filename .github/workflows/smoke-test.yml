@@ -16,7 +16,7 @@ permissions:
 jobs:
   smoke:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout triggering commit
@@ -32,6 +32,14 @@ jobs:
           run_id: ${{ github.event.workflow_run.id }}
           name: ai-launcher-debug-apk
           path: apk
+
+      - name: Install emulator system dependencies
+        # ubuntu-24.04 runner 镜像缺 libpulse，qemu 启动直接报
+        # "libpulse.so.0: cannot open shared object file"；先装上。
+        run: |
+          ls -la /dev/kvm || echo "NO /dev/kvm"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpulse0
 
       - name: Run smoke tests on emulator
         uses: reactivecircus/android-emulator-runner@v2
