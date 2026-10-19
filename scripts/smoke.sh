@@ -4,7 +4,7 @@
 # 每步容错：失败记 FAIL 继续往下走，不设 -e；最后汇总 PASS/FAIL 并以 FAIL 数作为退出码。
 # 截图（smoke-out/）：home.png / fan.png / pet.png / appcenter.png，供人工验证。
 # 首启对话框（onboarding 引导、低电量保护询问）用 run-as 预写 SharedPreferences 跳过，
-# 不依赖 UI 坐标；uiautomator 文本点按只做兜底。
+# 不依赖 UI 坐标；若预写失败，用固定坐标点按做兜底（pixel_6 1080x2400，对话框位置稳定）。
 
 PKG="com.bobot.ailauncher"
 APK="apk/app-debug.apk"
@@ -24,26 +24,6 @@ shot() {
   fi
 }
 
-# 在当前界面找文本节点并点它；坐标越界则拒绝（防解析错误点飞）。找不到返回 1。
-tap_text() {
-  local want="$1" dump bounds nums x1 y1 x2 y2 cx cy
-  adb shell uiautomator dump /sdcard/window_dump.xml > /dev/null 2>&1 || return 1
-  dump=$(adb shell cat /sdcard/window_dump.xml 2>/dev/null) || return 1
-  bounds=$(echo "$dump" | grep -o "text=\"$want\"[^>]*" | grep -o '\[[0-9 ]*,[0-9 ]*\]\[[0-9 ]*,[0-9 ]*\]' | head -1)
-  [ -n "$bounds" ] || return 1
-  nums=$(echo "$bounds" | tr -cd '0-9,')
-  x1=$(echo "$nums" | cut -d, -f1); y1=$(echo "$nums" | cut -d, -f2)
-  x2=$(echo "$nums" | cut -d, -f3); y2=$(echo "$nums" | cut -d, -f4)
-  cx=$(((x1+x2)/2)); cy=$(((y1+y2)/2))
-  if [ "$cx" -lt 0 ] || [ "$cx" -gt 1080 ] || [ "$cy" -lt 0 ] || [ "$cy" -gt 2400 ]; then
-    log "tap_text: $want -> ($cx,$cy) out of bounds, refused"
-    return 1
-  fi
-  adb shell input tap "$cx" "$cy" || return 1
-  log "tap_text: $want -> $cx,$cy"
-  return 0
-}
-
 adb wait-for-device
 adb shell input keyevent KEYCODE_WAKEUP || true
 sleep 2
@@ -57,30 +37,25 @@ fi
 
 # --- 2. 预写 SharedPreferences：跳过 onboarding（onboarded）+ 低电量保护询问（battery_asked）---
 # MainActivity 读 ai_launcher SP 的这两个 key；debug 包可用 run-as 写入（文件归属 app uid）。
-adb shell <<'ADB_EOF' > /dev/null 2>&1
-run-as com.bobot.ailauncher
-mkdir -p shared_prefs
-cat > shared_prefs/ai_launcher.xml <<'XML_EOF'
-<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
-<map>
-    <boolean name="battery_asked" value="true" />
-    <boolean name="onboarded" value="true" />
-</map>
-XML_EOF
-chmod 660 shared_prefs/ai_launcher.xml
-exit
-ADB_EOF
-if adb shell "run-as com.bobot.ailauncher cat shared_prefs/ai_launcher.xml" 2>/dev/null | grep -q 'name="onboarded" value="true"'; then
+# 写法：本地生成 xml -> adb push 到 /data/local/tmp -> run-as cp 进 app 私有目录（避免 heredoc 嵌套引号坑）。
+printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
+  '    <boolean name="battery_asked" value="true" />' \
+  '    <boolean name="onboarded" value="true" />' "</map>" > "$OUT/ai_launcher.xml"
+adb push "$OUT/ai_launcher.xml" /data/local/tmp/ai_launcher.xml
+adb shell "run-as $PKG mkdir -p shared_prefs"
+adb shell "run-as $PKG cp /data/local/tmp/ai_launcher.xml shared_prefs/ai_launcher.xml"
+adb shell "run-as $PKG chmod 660 shared_prefs/ai_launcher.xml"
+if adb shell "run-as $PKG cat shared_prefs/ai_launcher.xml" 2>/dev/null | grep -q 'name="onboarded" value="true"'; then
   ok "seed-prefs"
 else
   ng "seed-prefs"
-  # 兜底：尝试 UI 点掉（坐标校验防点飞）
+  # 兜底：固定坐标点掉（pixel_6 1080x2400，对话框位置稳定；uiautomator 解析曾翻车，不再用）
   adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
   sleep 5
-  for i in 1 2 3; do tap_text "跳过" && break; sleep 2; done
+  adb shell input tap 950 130 || true   # onboarding 右上角"跳过"
+  sleep 3
+  adb shell input tap 585 1310 || true # 低电量对话框"不用"
   sleep 2
-  for i in 1 2 3; do tap_text "不用" && break; sleep 2; done
-  sleep 1
 fi
 
 # --- 3. 启动 ---
