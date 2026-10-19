@@ -81,6 +81,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.bobot.ailauncher.ui.theme.AILauncherColors
 
 /**
  * v0.65.2：快捷操作从 TODAY 卡片移到七仔气泡。
