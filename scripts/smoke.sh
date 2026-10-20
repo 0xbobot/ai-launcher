@@ -160,6 +160,25 @@ sleep 1
 adb shell input tap "$BX" "$CY" || true
 sleep 2
 shot "intent-nokey"
+# 诊断（三轮点提交后截图无错误条，原因待查）：点后 dump 层级，查错误文案是否进了 UI 树；
+# 没有则再走 IME Done（回车键）路径复验一次，区分"点击没触发"与"状态没渲染"。
+adb shell uiautomator dump /sdcard/intent_after.xml > /dev/null 2>&1 || true
+adb pull /sdcard/intent_after.xml smoke-out/intent_after.xml > /dev/null 2>&1 || true
+if grep -q "先在设置里配置大模型" smoke-out/intent_after.xml 2>/dev/null; then
+  echo "[smoke] intent error strip: FOUND in hierarchy after button tap"
+else
+  echo "[smoke] intent error strip: NOT in hierarchy after button tap; trying IME Done (keyevent 66)"
+  adb shell input keyevent 66 || true
+  sleep 2
+  shot "intent-done"
+  adb shell uiautomator dump /sdcard/intent_after2.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/intent_after2.xml smoke-out/intent_after2.xml > /dev/null 2>&1 || true
+  if grep -q "先在设置里配置大模型" smoke-out/intent_after2.xml 2>/dev/null; then
+    echo "[smoke] intent error strip: FOUND after IME Done"
+  else
+    echo "[smoke] intent error strip: NOT FOUND after IME Done either"
+  fi
+fi
 adb shell pidof "$PKG" | grep -q . && ok "intent-alive" || ng "intent-alive"
 
 # --- 10. crash 检查（只看本包 FATAL，避免系统噪音）---
