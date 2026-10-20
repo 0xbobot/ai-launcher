@@ -100,7 +100,21 @@ adb shell input swipe 540 2000 540 800 300 || true
 sleep 3
 shot "appcenter"
 
-# --- 8. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 8. 深色模式截图（R1）：切系统夜间模式 -> 回首页截 dark-home -> 上滑截 dark-appcenter -> 复原 ---
+adb shell cmd uimode night yes || true
+sleep 3
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+shot "dark-home"
+adb shell input swipe 540 2000 540 800 300 || true
+sleep 3
+shot "dark-appcenter"
+adb shell cmd uimode night auto || true
+sleep 2
+
+# --- 9. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

@@ -1,8 +1,10 @@
 package com.bobot.ailauncher.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -118,6 +120,24 @@ private val AILauncherColorScheme = lightColorScheme(
     outline = AILauncherColors.Divider
 )
 
+// R1（2026-10-20）：Material 暗色 scheme——取 AILauncherColors 的暗色 token 值。
+// 注意不能在这里读 AILauncherColors 的 getter：scheme 是顶层 val，初始化时 isDark
+// 还没被置 true，getter 会取到浅色值并被冻结。故直接写暗色字面值，与 token 保持一致：
+// Background #1A1815 / Card #2A2723 / Title #F4F2EE / Body #B8B2A8 / Divider #3A362F。
+// primary 沿用暖金 Accent #C9A227；金色底用深色字（#1F1D1A）保证 onPrimary 可读。
+private val AILauncherDarkColorScheme = darkColorScheme(
+    background = Color(0xFF1A1815),
+    surface = Color(0xFF2A2723),
+    surfaceVariant = Color(0xFF1A1815),
+    onBackground = Color(0xFFF4F2EE),
+    onSurface = Color(0xFFF4F2EE),
+    onSurfaceVariant = Color(0xFFB8B2A8),
+    primary = Color(0xFFC9A227),
+    onPrimary = Color(0xFF1F1D1A),
+    secondary = Color(0xFFB8B2A8),
+    outline = Color(0xFF3A362F)
+)
+
 private val AILauncherShapes = Shapes(
     small = RoundedCornerShape(12.dp),
     medium = RoundedCornerShape(20.dp),
@@ -126,8 +146,11 @@ private val AILauncherShapes = Shapes(
 
 @Composable
 fun AILauncherTheme(content: @Composable () -> Unit) {
+    // R1：按系统深色选 Material scheme，并同步全局 isDark（与 MainScreen 的写入同值，幂等）
+    val dark = isSystemInDarkTheme()
+    AILauncherColors.isDark = dark
     MaterialTheme(
-        colorScheme = AILauncherColorScheme,
+        colorScheme = if (dark) AILauncherDarkColorScheme else AILauncherColorScheme,
         shapes = AILauncherShapes,
         content = content
     )
