@@ -84,6 +84,13 @@ android {
     }
 }
 
+// R2：单测结果打到控制台日志，CI 里可直接核对每个用例的通过情况
+tasks.withType<Test>().configureEach {
+    testLogging {
+        events("passed", "failed", "skipped")
+    }
+}
+
 dependencies {
     val bom = libs.androidx.compose.bom
     implementation(platform(bom))
