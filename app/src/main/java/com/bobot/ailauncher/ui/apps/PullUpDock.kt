@@ -99,6 +99,8 @@ fun PullUpDock(
     onD3SwipeUpToHome: () -> Unit,
     onHideDockRequest: () -> Unit,
     onOpenSettings: () -> Unit,
+    // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页并提交协调器（HomeHost 提供）
+    onAskQizai: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -107,6 +109,7 @@ fun PullUpDock(
     val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
     val onD3SwipeUpToHomeState = rememberUpdatedState(onD3SwipeUpToHome)
     val onHideDockRequestState = rememberUpdatedState(onHideDockRequest)
+    val onAskQizaiState = rememberUpdatedState(onAskQizai)
 
     val allApps = remember {
         listLaunchableApps(context).filter { it.packageName != context.packageName }
@@ -365,7 +368,8 @@ fun PullUpDock(
             FullAppsOverlay(
                 onStateChange = onStateChangeState.value,
                 onD3SwipeRight = onD3SwipeRightState.value,
-                onOpenSettings = onOpenSettings
+                onOpenSettings = onOpenSettings,
+                onAskQizai = onAskQizaiState.value
             )
         }
     }
@@ -383,7 +387,9 @@ fun PullUpDock(
 private fun FullAppsOverlay(
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    // R2 UI（10-21 新规格）：应用中心「问七仔」
+    onAskQizai: (String) -> Unit = {}
 ) {
     val onStateChangeState = rememberUpdatedState(onStateChange)
     val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
@@ -402,6 +408,8 @@ private fun FullAppsOverlay(
             onHeaderSwipeRight = { onD3SwipeRightState.value() },
             // v0.40.0：底部上滑 → 回桌面（与标题区右滑同义：回到记住的 Dock 档）
             onBottomSwipeUp = { onD3SwipeRightState.value() },
+            // R2 UI（10-21 新规格）：「问七仔」——回首页并提交协调器
+            onAskQizai = onAskQizai,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)

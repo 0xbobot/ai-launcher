@@ -23,11 +23,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -48,8 +46,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import com.bobot.ailauncher.core.intent.IntentCoordinatorFactory
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.PanelAccessibilityService
@@ -92,16 +88,17 @@ fun HomeScreen(
     blindDockZoneDp: Float = 0f,
     // R2 UI：意图入口"去设置"导航（无 Key 时引导去配大模型 Key）
     onOpenSettings: () -> Unit = {},
+    // R2 UI（10-21 新规格）：意图状态与回调——协调器由 HomeHost 持有（应用中心「问七仔」共用），
+    // HomeScreen 只负责把状态交给胶囊渲染
+    intentState: com.bobot.ailauncher.core.intent.IntentUiState,
+    onIntentSubmit: (String) -> Unit,
+    onIntentConfirm: (com.bobot.ailauncher.core.action.ActionRequest) -> Unit,
+    onIntentDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val view = LocalView.current
     val haptics = LocalHapticFeedback.current
-
-    // R2 UI：意图入口协调器（逻辑层 R2 已合入）——HomeScreen 持有，胶囊经 PetZone 槽位渲染
-    val intentCoordinator = remember { IntentCoordinatorFactory.create(context) }
-    val intentState by intentCoordinator.state.collectAsState()
-    val intentScope = rememberCoroutineScope()
 
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
     // v0.68.0：盲操状态
@@ -302,9 +299,9 @@ fun HomeScreen(
                 coverIntentSlot = {
                     IntentEntry(
                         state = intentState,
-                        onSubmit = { t -> intentScope.launch { intentCoordinator.submit(t) } },
-                        onConfirm = { req -> intentCoordinator.confirm(req) },
-                        onDismiss = { intentCoordinator.dismiss() },
+                        onSubmit = onIntentSubmit,
+                        onConfirm = onIntentConfirm,
+                        onDismiss = onIntentDismiss,
                         onOpenSettings = onOpenSettings,
                         onOpenPermissionSettings = { perm -> openPermissionSettings(context, perm) }
                     )

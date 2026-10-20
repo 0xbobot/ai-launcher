@@ -44,25 +44,134 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.core.action.ActionRequest
 import com.bobot.ailauncher.core.intent.IntentCoordinator
 import com.bobot.ailauncher.core.intent.IntentUiState
+import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.AppSearchIndex
+import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.HiddenApps
+import com.bobot.ailauncher.data.listLaunchableApps
+import com.bobot.ailauncher.ui.components.AppIconImage
+import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.delay
 
 /**
- * R2 UI（文档二 P0）：首页意图入口胶囊——封面与 TODAY 紧凑条之间。
+ * 意图胶囊输入行（2026-10-21 新规格：胶囊与应用中心搜索合二为一的同一组件）。
  *
- * 呈现规则（Bob 2026-10-20 拍板）：
+ * 首页与应用中心共用这一行：✨ + 输入框 + 金色提交按钮，无麦克风。
+ * 组件本身只管输入与提交；"打字时出什么"由宿主决定——
+ * 首页在胶囊下方结果条出本地应用直达，应用中心用同一文本过滤网格。
+ */
+@Composable
+fun IntentCapsuleField(
+    text: String,
+    onTextChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "想做什么？",
+    planning: Boolean = false
+) {
+    val focusRequester = remember { FocusRequester() }
+    val canSubmit = text.isNotBlank() && !planning
+    Row(
+        modifier = modifier
+            .height(56.dp)
+            .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.Title.copy(alpha = 0.08f))
+            .clip(RoundedCornerShape(28.dp))
+            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .clickable { focusRequester.requestFocus() }
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Filled.AutoAwesome,
+            contentDescription = null,
+            tint = AILauncherColors.Accent,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        BasicTextField(
+            value = text,
+            onValueChange = onTextChange,
+            modifier = Modifier
+                .weight(1f)
+                .focusRequester(focusRequester),
+            enabled = !planning,
+            singleLine = true,
+            textStyle = TextStyle(
+                fontSize = 15.sp,
+                color = AILauncherColors.Title
+            ),
+            cursorBrush = SolidColor(AILauncherColors.Accent),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { if (canSubmit) onSubmit() }),
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (text.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            fontSize = 15.sp,
+                            color = AILauncherColors.Hint
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        // 提交区：Planning 时换轻量进度（文字保留、不可重复提交）
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(
+                    if (canSubmit || planning) AILauncherColors.Accent
+                    else AILauncherColors.Accent.copy(alpha = 0.35f)
+                )
+                .clickable(enabled = canSubmit) { onSubmit() },
+            contentAlignment = Alignment.Center
+        ) {
+            if (planning) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = Color.White,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "提交",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * R2 UI（文档二 P0 + 2026-10-21 新规格）：首页意图入口——封面与 TODAY 紧凑条之间。
+ *
+ * 一个入口、两层响应：
+ * - 本地直达层：打字时在胶囊下方「七仔结果条」实时出本地应用匹配
+ *   （复用应用中心同一套 AppSearchIndex 匹配与同一应用数据源），只展示、点选才打开，
+ *   绝不自动执行；提交后本地结果收起，用户再改文本才重新出。
+ * - 意图层：提交（按钮/IME Done）走 [IntentCoordinator]，与本地层互不干扰。
+ *
+ * 呈现规则（Bob 拍板）：
  * - 只有 NeedsConfirmation（中/高风险动作确认，安全门）用 AlertDialog，全 App 意图链路仅此一种弹窗；
- *   其余状态（回复/错误/缺权限）一律非模态：七仔气泡（协调器已 say）+ 胶囊下方短时小条/说明卡。
+ *   其余状态（回复/错误/缺权限）一律非模态，与本地结果共用胶囊下方同一个结果条槽位。
  * - 胶囊右侧只有提交按钮，不做麦克风（语音胶囊已于 10-18 全部清除）。
- * - 外观沿用封面体系：Card 88% 底 + 柔和阴影 + 大圆角，与 NextUpStrip 同语言，不新增渐变/重阴影。
  *
  * 状态由 [IntentCoordinator] 驱动，本组件只读渲染 + 转发用户动作，不碰 LLM/执行细节。
  */
@@ -76,13 +185,31 @@ fun IntentEntry(
     onOpenPermissionSettings: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var text by remember { mutableStateOf("") }
-    val focusRequester = remember { FocusRequester() }
+    // 已提交的文本：与当前文本相同期间不再出本地结果（提交后清掉本地层）
+    var submittedText by remember { mutableStateOf<String?>(null) }
     val planning = state is IntentUiState.Planning
-    val canSubmit = text.isNotBlank() && !planning
+
+    // 本地直达层数据源：与应用中心 azApps 完全一致（listLaunchableApps 去自己、去隐藏），
+    // 匹配复用 AppSearchIndex.build/search 同一实现，不另写一套。
+    val localApps = remember {
+        val hidden = HiddenApps.getHidden(context)
+        listLaunchableApps(context).filter {
+            it.packageName != context.packageName && it.packageName !in hidden
+        }
+    }
+    val localIndex = remember(localApps) { AppSearchIndex.build(context, localApps) }
+    val localResults = remember(text, localIndex, submittedText) {
+        if (text.isBlank() || text == submittedText) emptyList()
+        else AppSearchIndex.search(context, text, localIndex).take(4)
+    }
 
     fun submitIfReady() {
-        if (canSubmit) onSubmit(text)
+        if (text.isNotBlank() && !planning) {
+            submittedText = text
+            onSubmit(text)
+        }
     }
 
     // 回复小条短时呈现：5 秒后自动收起（协调器 dismiss 回编辑态，原话不丢）
@@ -94,100 +221,18 @@ fun IntentEntry(
     }
 
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        // ---- 胶囊本体 ----
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.Title.copy(alpha = 0.08f))
-                .clip(RoundedCornerShape(28.dp))
-                .background(AILauncherColors.Card.copy(alpha = 0.88f))
-                .clickable { focusRequester.requestFocus() }
-                .padding(horizontal = 18.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Filled.AutoAwesome,
-                contentDescription = null,
-                tint = AILauncherColors.Accent,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            BasicTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(focusRequester),
-                enabled = !planning,
-                singleLine = true,
-                textStyle = TextStyle(
-                    fontSize = 15.sp,
-                    color = AILauncherColors.Title
-                ),
-                cursorBrush = SolidColor(AILauncherColors.Accent),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { submitIfReady() }),
-                decorationBox = { innerTextField ->
-                    Box(contentAlignment = Alignment.CenterStart) {
-                        if (text.isEmpty()) {
-                            Text(
-                                text = "想做什么？",
-                                fontSize = 15.sp,
-                                color = AILauncherColors.Hint
-                            )
-                        }
-                        innerTextField()
-                    }
-                }
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            // 提交区：Planning 时换轻量进度（文字保留、不可重复提交）
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (canSubmit || planning) AILauncherColors.Accent
-                        else AILauncherColors.Accent.copy(alpha = 0.35f)
-                    )
-                    .clickable(enabled = canSubmit) { submitIfReady() },
-                contentAlignment = Alignment.Center
-            ) {
-                if (planning) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "提交",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
+        // ---- 胶囊本体（与应用中心同一组件） ----
+        IntentCapsuleField(
+            text = text,
+            onTextChange = { text = it },
+            onSubmit = { submitIfReady() },
+            planning = planning,
+            modifier = Modifier.fillMaxWidth()
+        )
 
-        // ---- 状态小条 / 说明卡（非模态） ----
+        // ---- 结果条槽位（非模态）：本地结果 / 回复 / 错误 / 权限说明共用 ----
+        // 优先序：权限说明（需用户处理）> 本地结果（用户已改文本继续打字）> 回复/错误（对应已提交文本）
         when (val s = state) {
-            is IntentUiState.Reply -> {
-                StatusStrip(
-                    text = s.text,
-                    onClose = onDismiss
-                )
-            }
-            is IntentUiState.Error -> {
-                val noKey = s.message == IntentCoordinator.NO_KEY_MESSAGE
-                StatusStrip(
-                    text = s.message,
-                    actionLabel = if (noKey) "去设置" else null,
-                    onAction = if (noKey) onOpenSettings else null,
-                    onClose = onDismiss
-                )
-            }
             is IntentUiState.NeedsPermission -> {
                 PermissionExplainCard(
                     message = s.message,
@@ -198,7 +243,31 @@ fun IntentEntry(
                     onDismiss = onDismiss
                 )
             }
-            else -> Unit
+            else -> {
+                if (localResults.isNotEmpty() && state !is IntentUiState.NeedsConfirmation) {
+                    LocalResultsBar(
+                        apps = localResults,
+                        onOpen = { app -> launchLocalApp(context, app) }
+                    )
+                } else when (s) {
+                    is IntentUiState.Reply -> {
+                        StatusStrip(
+                            text = s.text,
+                            onClose = onDismiss
+                        )
+                    }
+                    is IntentUiState.Error -> {
+                        val noKey = s.message == IntentCoordinator.NO_KEY_MESSAGE
+                        StatusStrip(
+                            text = s.message,
+                            actionLabel = if (noKey) "去设置" else null,
+                            onAction = if (noKey) onOpenSettings else null,
+                            onClose = onDismiss
+                        )
+                    }
+                    else -> Unit
+                }
+            }
         }
     }
 
@@ -236,6 +305,82 @@ fun IntentEntry(
                 }
             }
         )
+    }
+}
+
+/**
+ * 七仔结果条·本地直达：打字时实时出的本地应用匹配（图标+名称，最多 4 个）。
+ * 与回复/错误小条同一槽位、同一 Card 语言；文案以七仔口吻呈现——结果是七仔端出来的。
+ * 只展示，点选才打开，绝不自动执行。
+ */
+@Composable
+private fun LocalResultsBar(
+    apps: List<AppInfo>,
+    onOpen: (AppInfo) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        Text(
+            text = "七仔找到了这些，点一下打开",
+            fontSize = 12.sp,
+            color = AILauncherColors.Hint
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            apps.forEach { app ->
+                Column(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onOpen(app) }
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    AppIconImage(
+                        drawable = app.icon,
+                        contentDescription = app.label.toString(),
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                    )
+                    Text(
+                        text = app.label.toString(),
+                        fontSize = 11.sp,
+                        color = AILauncherColors.Body,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 本地直达打开应用：与应用中心 launchApp 同一做法（记使用统计 + 系统启动意图 + 失败 toast）。 */
+private fun launchLocalApp(context: Context, app: AppInfo) {
+    AppUsageTracker.recordLaunch(context, app.packageName)
+    try {
+        val intent = context.packageManager
+            .getLaunchIntentForPackage(app.packageName)
+            ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        if (intent != null) context.startActivity(intent)
+        else IslandToasts.show("无法打开「${app.label}」")
+    } catch (_: Exception) {
+        IslandToasts.show("「${app.label}」暂不可用")
     }
 }
 

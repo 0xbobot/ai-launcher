@@ -3,7 +3,8 @@
 # 跑在 reactivecircus/android-emulator-runner 的 script 里（adb 已就绪，工作目录为仓库根）。
 # 每步容错：失败记 FAIL 继续往下走，不设 -e；最后汇总 PASS/FAIL 并以 FAIL 数作为退出码。
 # 截图（smoke-out/）：home.png / fan.png / pet.png / appcenter.png / dark-home.png / dark-appcenter.png /
-# intent-home.png / intent-nokey.png，供人工验证。
+# intent-home.png / intent-nokey.png / intent-local.png / intent-opened.png / appcenter2.png /
+# appcenter-filter.png，供人工验证。
 # 首启对话框（onboarding 引导、低电量保护询问）用 run-as 预写 SharedPreferences 跳过，
 # 不依赖 UI 坐标；若预写失败，用固定坐标点按做兜底（pixel_6 1080x2400，对话框位置稳定）。
 
@@ -194,7 +195,123 @@ else
 fi
 adb shell pidof "$PKG" | grep -q . && ok "intent-alive" || ng "intent-alive"
 
-# --- 10. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 10. 本地直达层 + 应用中心同组件（R2 UI 10-21 新规格）---
+# 首页打字出本地结果：点胶囊输 "cam" -> 七仔结果条应出现 Camera（英文标签，名称包含匹配）；
+# press 点第一个结果 -> 前台包应切换。应用中心：顶部应换成新胶囊（占位"想做什么？"），
+# 输 "cam" 后网格过滤出 Camera 且出现「问七仔」行。基线用 force-stop 重启回首页（同第 9 段法）。
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+# 定位胶囊（dump 找占位，兜底坐标同第 9 段）
+LCX=540; LCY=1247
+adb shell uiautomator dump /sdcard/local_dump0.xml > /dev/null 2>&1 || true
+adb pull /sdcard/local_dump0.xml "$OUT/local_dump0.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/local_dump0.xml" ]; then
+  NODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/local_dump0.xml" | head -1)
+  if [ -n "$NODE" ]; then
+    NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+    X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+    if [ -n "$X1" ] && [ -n "$Y2" ]; then
+      LCX=$(( (X1 + X2) / 2 )); LCY=$(( (Y1 + Y2) / 2 ))
+      log "local capsule at ($LCX,$LCY)"
+    fi
+  fi
+fi
+adb shell input swipe "$LCX" "$LCY" "$LCX" "$LCY" 150 || true
+sleep 2
+adb shell input text "cam" || true
+sleep 1
+# 收键盘再截图/定位：键盘会遮挡结果条下沿且 dump 坐标会变（同第 9 段教训）
+adb shell input keyevent KEYCODE_BACK || true
+sleep 1
+shot "intent-local"
+adb shell uiautomator dump /sdcard/local_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/local_dump.xml "$OUT/local_dump.xml" > /dev/null 2>&1 || true
+RCX=""; RCY=""
+if [ -f "$OUT/local_dump.xml" ]; then
+  # 结果条里的应用名节点（首页基线 UI 无其它 "Camera" 文本）
+  RNODE=$(grep -o '<node[^>]*text="Camera"[^>]*>' "$OUT/local_dump.xml" | head -1)
+  if [ -n "$RNODE" ]; then
+    ok "intent-local-results"
+    RNUMS=$(echo "$RNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    RX1=$(echo "$RNUMS" | sed -n 1p); RY1=$(echo "$RNUMS" | sed -n 2p)
+    RX2=$(echo "$RNUMS" | sed -n 3p); RY2=$(echo "$RNUMS" | sed -n 4p)
+    if [ -n "$RX1" ] && [ -n "$RY2" ]; then
+      RCX=$(( (RX1 + RX2) / 2 )); RCY=$(( (RY1 + RY2) / 2 ))
+      log "camera result label at ($RCX,$RCY)"
+    fi
+  else
+    ng "intent-local-results"
+  fi
+fi
+# press 点结果 -> 前台应切到相机（模拟器相机包 com.android.camera2）
+if [ -n "$RCX" ]; then
+  adb shell input swipe "$RCX" "$RCY" "$RCX" "$RCY" 150 || true
+  sleep 3
+  shot "intent-opened"
+  FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
+  log "foreground after open: $FG"
+  if echo "$FG" | grep -qi "camera"; then
+    ok "intent-open-app"
+  else
+    ng "intent-open-app"
+  fi
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+else
+  ng "intent-open-app"
+fi
+# 应用中心同组件：上滑开 D3（同第 7 段基线），顶部应是新胶囊而非旧搜索框
+adb shell input swipe 540 2000 540 800 300 || true
+sleep 3
+shot "appcenter2"
+ACX=540; ACY=330
+adb shell uiautomator dump /sdcard/ac_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/ac_dump.xml "$OUT/ac_dump.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/ac_dump.xml" ]; then
+  if grep -q 'text="想做什么？"' "$OUT/ac_dump.xml"; then
+    ok "appcenter-capsule"
+  else
+    ng "appcenter-capsule"
+  fi
+  ANODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/ac_dump.xml" | head -1)
+  if [ -n "$ANODE" ]; then
+    ANUMS=$(echo "$ANODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    AX1=$(echo "$ANUMS" | sed -n 1p); AY1=$(echo "$ANUMS" | sed -n 2p)
+    AX2=$(echo "$ANUMS" | sed -n 3p); AY2=$(echo "$ANUMS" | sed -n 4p)
+    if [ -n "$AX1" ] && [ -n "$AY2" ]; then
+      ACX=$(( (AX1 + AX2) / 2 )); ACY=$(( (AY1 + AY2) / 2 ))
+      log "appcenter capsule at ($ACX,$ACY)"
+    fi
+  fi
+fi
+adb shell input swipe "$ACX" "$ACY" "$ACX" "$ACY" 150 || true
+sleep 2
+adb shell input text "cam" || true
+sleep 1
+adb shell input keyevent KEYCODE_BACK || true
+sleep 2
+shot "appcenter-filter"
+adb shell uiautomator dump /sdcard/ac_dump2.xml > /dev/null 2>&1 || true
+adb pull /sdcard/ac_dump2.xml "$OUT/ac_dump2.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/ac_dump2.xml" ]; then
+  if grep -q '问七仔' "$OUT/ac_dump2.xml"; then
+    ok "appcenter-ask-row"
+  else
+    ng "appcenter-ask-row"
+  fi
+  if grep -q 'text="Camera"' "$OUT/ac_dump2.xml"; then
+    ok "appcenter-filter"
+  else
+    ng "appcenter-filter"
+  fi
+fi
+
+# --- 11. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

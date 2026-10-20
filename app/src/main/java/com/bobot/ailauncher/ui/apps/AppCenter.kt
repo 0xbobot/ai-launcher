@@ -60,8 +60,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.filled.Fingerprint
@@ -71,16 +72,10 @@ import androidx.fragment.app.FragmentActivity
 import com.bobot.ailauncher.data.BiometricAuth
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -123,6 +118,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
+import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.UiPrefs
@@ -143,7 +139,8 @@ import com.bobot.ailauncher.ui.island.IslandToasts
 /**
  * 应用中心（v0.22，PRD 重设计方向）：D3 全屏单列表，只干一件事——最快找到应用。
  * - 顶部：Header（"应用"标题 + 设置齿轮）
- * - 搜索框（吸顶）：拼音/首字母/自然语言/模糊四档匹配（AppSearchIndex）
+ * - 搜索（吸顶）：与首页同一个意图胶囊组件（10-21 新规格合二为一）——打字过滤网格
+ *   （拼音/首字母/自然语言/模糊四档匹配，AppSearchIndex），提交/点「问七仔」回首页交协调器
  * - 下面直接连全部应用 A-Z 列表（字母分组头 + 行）
  * - Rail 只做定位：字母跳转对应字母
  * - v0.22：分类区取消（Bob 决定，等需要时再重新设计）；AllAppsScreen 死代码删除
@@ -156,6 +153,8 @@ fun AppCenterContent(
     onPullDownToD2: () -> Unit,
     onHeaderSwipeRight: () -> Unit,
     onBottomSwipeUp: () -> Unit,
+    // R2 UI（10-21 新规格）：「问七仔」——回首页并把整句提交意图协调器（HomeHost 提供）
+    onAskQizai: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -589,64 +588,19 @@ fun AppCenterContent(
                     },
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // v0.21 搜索框：拼音/首字母/自然语言/模糊（PRD §三十三）
-                // v0.41.9（Bob 选 B）：细线搜索 + 左侧放大镜图标
-                val keyboardController =
-                    androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-                Column(modifier = Modifier.weight(1f)) {
-                    TextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        placeholder = {
-                            Text(
-                                "搜索应用，支持拼音/首字母",
-                                fontSize = 14.sp,
-                                color = AILauncherColors.Hint,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Filled.Search,
-                                contentDescription = "搜索",
-                                tint = AILauncherColors.Hint,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        trailingIcon = {
-                            if (query.isNotEmpty()) {
-                                IconButton(onClick = { query = "" }) {
-                                    Icon(
-                                        Icons.Filled.Close,
-                                        contentDescription = "清空",
-                                        tint = AILauncherColors.Hint
-                                    )
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = {
-                            keyboardController?.hide()
-                        }),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            focusedTextColor = AILauncherColors.Title,
-                            unfocusedTextColor = AILauncherColors.Title,
-                            cursorColor = AILauncherColors.Accent
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    HorizontalDivider(
-                        color = AILauncherColors.Divider,
-                        thickness = 1.dp
-                    )
-                }
+                // R2 UI（2026-10-21 新规格）：原搜索框删除，换成与首页同一个意图胶囊组件——
+                // 一个入口两层响应：打字走本地层过滤网格（状态层 query/searchResults 不变），
+                // 提交（按钮/IME Done）= 问七仔（回首页交协调器）。横屏仍用 AppCenterLandscape 自己的搜索。
+                IntentCapsuleField(
+                    text = query,
+                    onTextChange = { query = it },
+                    onSubmit = {
+                        val q = query.trim()
+                        if (q.isNotEmpty()) onAskQizai(q)
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
                 // v0.41.9（Bob 选 B）：设置齿轮缩小弱化，仍在右上
                 IconButton(onClick = onOpenSettings) {
                     Icon(
@@ -657,8 +611,44 @@ fun AppCenterContent(
                     )
                 }
             }
+            // R2 UI（10-21 新规格）：「问七仔」行——有输入时出现，整句交给七仔理解（回首页提交协调器）
+            if (searching) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 12.dp, top = 10.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(AILauncherColors.Card.copy(alpha = 0.88f))
+                        .clickable { onAskQizai(query.trim()) }
+                        .padding(horizontal = 16.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        tint = AILauncherColors.Accent,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "问七仔：「${query.trim()}」",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.Accent,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = AILauncherColors.Accent,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(8.dp))
-            }  // if (!isLandscapeAc) 搜索框结束（v0.68.72 新增）
+            }  // if (!isLandscapeAc) 搜索区结束（v0.68.72 新增，R2 改同组件）
         }  // Header Column 闭合
 
         // v0.68.62（Bob）：横屏双栏——左索引右网格，竖屏用原单列

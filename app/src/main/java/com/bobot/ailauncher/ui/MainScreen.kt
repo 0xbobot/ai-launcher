@@ -200,6 +200,16 @@ private fun HomeHost(
     onHideDockConfirm: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    // R2 UI（10-21 新规格）：意图协调器提到 HomeHost 持有——首页胶囊与应用中心「问七仔」
+    // 共用同一协调器，状态只有一个真源；HomeScreen 只拿状态渲染
+    val intentCoordinator = remember { com.bobot.ailauncher.core.intent.IntentCoordinatorFactory.create(context) }
+    val intentState by intentCoordinator.state.collectAsState()
+    val intentScope = rememberCoroutineScope()
+    // 应用中心「问七仔」：先回首页（离 D3），再把整句交给协调器理解
+    val onAskQizai: (String) -> Unit = { text ->
+        onD3SwipeUpToHome()
+        intentScope.launch { intentCoordinator.submit(text) }
+    }
     // v0.64.2：更新弹窗走共享流（自动检查 / TODAY 卡片"有新版本"行点击）
     val updatePrompt by OtaUpdater.updatePrompt.collectAsState()
 
@@ -275,6 +285,11 @@ private fun HomeHost(
             },
             // R2 UI：意图入口无 Key 时的"去设置"
             onOpenSettings = onOpenSettings,
+            // R2 UI：意图状态与回调（协调器在 HomeHost）
+            intentState = intentState,
+            onIntentSubmit = { t -> intentScope.launch { intentCoordinator.submit(t) } },
+            onIntentConfirm = { req -> intentCoordinator.confirm(req) },
+            onIntentDismiss = { intentCoordinator.dismiss() },
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位）
@@ -285,7 +300,9 @@ private fun HomeHost(
             onD3SwipeUpToHome = onD3SwipeUpToHome,
             modifier = Modifier.graphicsLayer { alpha = dockAlpha },
             onHideDockRequest = onHideDockRequest,
-            onOpenSettings = onOpenSettings
+            onOpenSettings = onOpenSettings,
+            // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页 + 提交协调器
+            onAskQizai = onAskQizai
         )
         // v0.67.13（Bob）：主屏 rail 长按 → 快找；房子/收藏/字母/隐藏一条导航滑动到达。
         // 长按震动后选择器浮现；手指一动就由应用中心接管（D3 淡入）；picker 会话在 D3 打开后
