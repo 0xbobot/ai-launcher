@@ -153,10 +153,12 @@ adb shell input tap "$CX" "$CY" || true
 sleep 2
 adb shell input text "open%swechat" || true
 sleep 1
+# 先收键盘再点提交：键盘弹起时窗口 resize、首页内容上移，胶囊不在 dump 坐标处
+# （二轮实测：文字输进去了但提交点空、无错误条）。BACK 只收键盘，输入与焦点保留。
+adb shell input keyevent KEYCODE_BACK || true
+sleep 1
 adb shell input tap "$BX" "$CY" || true
 sleep 2
-adb shell input keyevent KEYCODE_BACK || true   # 收起键盘，露出错误小条
-sleep 1
 shot "intent-nokey"
 adb shell pidof "$PKG" | grep -q . && ok "intent-alive" || ng "intent-alive"
 
