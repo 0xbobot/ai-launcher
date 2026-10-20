@@ -84,11 +84,16 @@ SWIPE_PID=$!
 sleep 1.5
 shot "fan"
 wait $SWIPE_PID || true
-# 清理松手后的状态（相机/编辑表）：连按两次 BACK 回到首页
+# 清理松手后的状态：扇形长按会钉住进编辑模式，松手落在虚线段会弹"选择应用"表，
+# 两次 BACK 不一定关得掉（R1 二轮实测残留）→ 再点一次表外 scrim + 按 HOME 回首页基线
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
+adb shell input tap 540 200 || true
+sleep 1
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
 
 # --- 6. 点七仔（宠物区中央；果冻反馈+开心表情 1.2 秒，0.5 秒后截图抓反应中途）---
 # 坐标按当前首页布局实测：七仔在 home 截图约 (540,950)；旧坐标 840,630 点空导致 pet 与 home 同帧（R1 实测）。
