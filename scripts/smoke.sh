@@ -97,8 +97,9 @@ sleep 2
 
 # --- 6. 点七仔（宠物区中央；果冻反馈+开心表情 1.2 秒，0.5 秒后截图抓反应中途）---
 # 坐标按当前首页布局实测：七仔在 home 截图约 (540,950)；旧坐标 840,630 点空导致 pet 与 home 同帧（R1 实测）。
-adb shell input tap 540 950 || true
-sleep 0.5
+# press 150ms 模拟真手指（瞬时 tap 会被首页手势层取消，见第 9 段注）
+adb shell input swipe 540 950 540 950 150 || true
+sleep 0.7
 shot "pet"
 
 # --- 7. 上滑开 D3 应用中心 ---
@@ -134,7 +135,7 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 shot "intent-home"
-CX=540; CY=1247; BX=950
+CX=540; CY=1247; BX=928; BY=1246
 adb shell uiautomator dump /sdcard/intent_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/intent_dump.xml "$OUT/intent_dump.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/intent_dump.xml" ]; then
@@ -148,8 +149,21 @@ if [ -f "$OUT/intent_dump.xml" ]; then
       log "intent capsule at ($CX,$CY)"
     fi
   fi
+  # 提交按钮中心同法从 dump 取（content-desc="提交" 的图标节点 ≈ 按钮中心）
+  BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/intent_dump.xml" | head -1)
+  if [ -n "$BNODE" ]; then
+    BNUMS=$(echo "$BNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    BX1=$(echo "$BNUMS" | sed -n 1p); BY1=$(echo "$BNUMS" | sed -n 2p)
+    BX2=$(echo "$BNUMS" | sed -n 3p); BY2=$(echo "$BNUMS" | sed -n 4p)
+    if [ -n "$BX1" ] && [ -n "$BY2" ]; then
+      BX=$(( (BX1 + BX2) / 2 )); BY=$(( (BY1 + BY2) / 2 ))
+      log "intent submit button at ($BX,$BY)"
+    fi
+  fi
 fi
-adb shell input tap "$CX" "$CY" || true
+# 点按用带时长的 press（swipe 同点 150ms）模拟真手指：adb 瞬时 tap 在本应用首页
+# 手势层下会被取消（实测：瞬时 tap 点提交/点宠物均不触发，IME Done 与长按压正常）。
+adb shell input swipe "$CX" "$CY" "$CX" "$CY" 150 || true
 sleep 2
 adb shell input text "open%swechat" || true
 sleep 1
@@ -157,17 +171,16 @@ sleep 1
 # （二轮实测：文字输进去了但提交点空、无错误条）。BACK 只收键盘，输入与焦点保留。
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
-adb shell input tap "$BX" "$CY" || true
+adb shell input swipe "$BX" "$BY" "$BX" "$BY" 150 || true
 sleep 2
 shot "intent-nokey"
-# 诊断（三轮点提交后截图无错误条，原因待查）：点后 dump 层级，查错误文案是否进了 UI 树；
-# 没有则再走 IME Done（回车键）路径复验一次，区分"点击没触发"与"状态没渲染"。
+# 点后 dump 层级复核错误条确实进了 UI 树（截图+层级双证据）；没有则再走 IME Done 复验并如实记录。
 adb shell uiautomator dump /sdcard/intent_after.xml > /dev/null 2>&1 || true
 adb pull /sdcard/intent_after.xml smoke-out/intent_after.xml > /dev/null 2>&1 || true
 if grep -q "先在设置里配置大模型" smoke-out/intent_after.xml 2>/dev/null; then
-  echo "[smoke] intent error strip: FOUND in hierarchy after button tap"
+  echo "[smoke] intent error strip: FOUND in hierarchy after button press"
 else
-  echo "[smoke] intent error strip: NOT in hierarchy after button tap; trying IME Done (keyevent 66)"
+  echo "[smoke] intent error strip: NOT in hierarchy after button press; trying IME Done (keyevent 66)"
   adb shell input keyevent 66 || true
   sleep 2
   shot "intent-done"
