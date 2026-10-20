@@ -123,14 +123,18 @@ sleep 2
 # --- 9. 意图入口（R2 UI）：回首页截含胶囊图 -> 点胶囊输入一句话 -> 提交 -> 截无 Key 错误态 ---
 # CI 全新环境未配大模型 Key：提交后应进 Error 态（"先在设置里配置大模型 Key"小条 + 去设置），不崩溃、不误启 App。
 # 胶囊位置随封面模板（3 模板按日轮换）变化：用 uiautomator dump 找占位文案"想做什么？"的 bounds 取中心点，
-# 找不到时用固定坐标兜底（pixel_6 1080x2400，按当前布局估算）。输入用英文：adb input text 打不了中文，
-# 走的是同一条无 Key 路径，不影响断言目的。
+# 找不到时用固定坐标兜底（pixel_6 1080x2400，按 home 截图实测胶囊中心约 y=1247）。输入用英文：adb input text
+# 打不了中文，走的是同一条无 Key 路径，不影响断言目的。
+# 基线：上一段结束时停在 D3 应用中心（Dock 状态在 MainActivity 内，am start/HOME 回不到首页视图，
+# 首轮实测 intent-home 拍成 D3、点按误开 Contacts）→ 同第 5 段清理法：force-stop 重启回首页基线。
+adb shell am force-stop "$PKG" || true
+sleep 1
 adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
 sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 shot "intent-home"
-CX=540; CY=1230; BX=950
+CX=540; CY=1247; BX=950
 adb shell uiautomator dump /sdcard/intent_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/intent_dump.xml "$OUT/intent_dump.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/intent_dump.xml" ]; then
