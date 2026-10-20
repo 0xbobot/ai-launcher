@@ -344,7 +344,7 @@ fun AppCenterLandscape(
                                 )
                             }
                         } else {
-                            items(results, key = { "s:${it.packageName}" }) { app ->
+                            items(results, key = { _, app -> "s:${app.packageName}" }) { app ->
                                 LandscapeAppRow(app = app, onLaunch = onLaunch)
                             }
                         }
