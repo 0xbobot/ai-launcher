@@ -48,6 +48,14 @@ class MainActivity : FragmentActivity() {
         }
         // v0.25：全屏 edge-to-edge，桌面内容延伸到状态栏/导航栏后面
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        // v0.68.83（Bob 报）：横屏左侧出现一条"空状态栏"（蓝色）——窗口未进挖孔区被
+        // letterbox 避让，没画到的地方透出系统壁纸。SHORT_EDGES 让窗口在横屏时
+        // 延伸进左侧短边挖孔区，全屏绘制
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                android.view.WindowManager.LayoutParams
+                    .LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
         CapabilityRegistry.load(this)
         // v0.15 宠物整理员：初始化（亲密度持久化等）
         PetRepository.init(this)
