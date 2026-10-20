@@ -273,6 +273,8 @@ private fun HomeHost(
                 DockState.D2 -> 144f
                 else -> 0f
             },
+            // R2 UI：意图入口无 Key 时的"去设置"
+            onOpenSettings = onOpenSettings,
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位）

@@ -2,7 +2,8 @@
 # AI Launcher 冒烟测试 v1：安装 -> 预写 prefs 跳过引导/对话框 -> 设为默认桌面 -> 首页/扇形/点七仔/D3
 # 跑在 reactivecircus/android-emulator-runner 的 script 里（adb 已就绪，工作目录为仓库根）。
 # 每步容错：失败记 FAIL 继续往下走，不设 -e；最后汇总 PASS/FAIL 并以 FAIL 数作为退出码。
-# 截图（smoke-out/）：home.png / fan.png / pet.png / appcenter.png，供人工验证。
+# 截图（smoke-out/）：home.png / fan.png / pet.png / appcenter.png / dark-home.png / dark-appcenter.png /
+# intent-home.png / intent-nokey.png，供人工验证。
 # 首启对话框（onboarding 引导、低电量保护询问）用 run-as 预写 SharedPreferences 跳过，
 # 不依赖 UI 坐标；若预写失败，用固定坐标点按做兜底（pixel_6 1080x2400，对话框位置稳定）。
 
@@ -119,7 +120,43 @@ shot "dark-appcenter"
 adb shell cmd uimode night auto || true
 sleep 2
 
-# --- 9. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 9. 意图入口（R2 UI）：回首页截含胶囊图 -> 点胶囊输入一句话 -> 提交 -> 截无 Key 错误态 ---
+# CI 全新环境未配大模型 Key：提交后应进 Error 态（"先在设置里配置大模型 Key"小条 + 去设置），不崩溃、不误启 App。
+# 胶囊位置随封面模板（3 模板按日轮换）变化：用 uiautomator dump 找占位文案"想做什么？"的 bounds 取中心点，
+# 找不到时用固定坐标兜底（pixel_6 1080x2400，按当前布局估算）。输入用英文：adb input text 打不了中文，
+# 走的是同一条无 Key 路径，不影响断言目的。
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+shot "intent-home"
+CX=540; CY=1230; BX=950
+adb shell uiautomator dump /sdcard/intent_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/intent_dump.xml "$OUT/intent_dump.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/intent_dump.xml" ]; then
+  NODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/intent_dump.xml" | head -1)
+  if [ -n "$NODE" ]; then
+    NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+    X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+    if [ -n "$X1" ] && [ -n "$Y2" ]; then
+      CX=$(( (X1 + X2) / 2 )); CY=$(( (Y1 + Y2) / 2 ))
+      log "intent capsule at ($CX,$CY)"
+    fi
+  fi
+fi
+adb shell input tap "$CX" "$CY" || true
+sleep 2
+adb shell input text "open%swechat" || true
+sleep 1
+adb shell input tap "$BX" "$CY" || true
+sleep 2
+adb shell input keyevent KEYCODE_BACK || true   # 收起键盘，露出错误小条
+sleep 1
+shot "intent-nokey"
+adb shell pidof "$PKG" | grep -q . && ok "intent-alive" || ng "intent-alive"
+
+# --- 10. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true
