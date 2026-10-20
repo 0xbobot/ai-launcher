@@ -661,6 +661,14 @@ fun AppCenterContent(
                 onLaunch = ::launchApp,
                 onLongPress = { popupApp = it },
                 onOpenSettings = onOpenSettings,
+                // v0.68.82（横屏专项第 1 项）：三套手势对齐竖屏
+                onPullDownToD2 = { onPullDownState.value() },
+                onHeaderSwipeRight = { onHeaderSwipeRightState.value() },
+                onBottomSwipeUp = { onBottomSwipeUpState.value() },
+                // v0.68.82（横屏专项第 2 项）：真搜索框（状态层复用竖屏）
+                query = query,
+                onQueryChange = { query = it },
+                searchResults = searchResults,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)

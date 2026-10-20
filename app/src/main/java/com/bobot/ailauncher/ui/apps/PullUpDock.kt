@@ -11,8 +11,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.slideOut
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -37,7 +39,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemGestures
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -55,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.UiPrefs
@@ -152,6 +156,7 @@ fun PullUpDock(
         // ---- D1/D2 悬浮图标（无卡片，v0.27.1 去底） ----
         // v0.68.75（Bob）：横屏时 Dock 放右侧（分栏布局），不再放底部
         // v0.68.78（Bob）：用 align 直接定位，contentAlignment 在横屏下不可靠
+        // v0.68.82（横屏专项第 3 项，Bob）：横屏改回横向（同竖屏），放右下角约四分之一屏
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
@@ -159,22 +164,44 @@ fun PullUpDock(
                 visible = cardVisible,
                 modifier = Modifier
                     .align(
-                        if (isLandscapeDock) Alignment.CenterEnd else Alignment.BottomCenter
+                        if (isLandscapeDock) Alignment.BottomEnd else Alignment.BottomCenter
                     )
                     // v0.68.78：横屏时右侧留边，不贴边
                     .let { if (isLandscapeDock) it.padding(end = 12.dp) else it },
-                enter = slideInVertically(
-                    animationSpec = spring(
-                        stiffness = Spring.StiffnessMediumLow,
-                        dampingRatio = 0.86f
-                    )
-                ) { it } + fadeIn(tween(180)),
-                exit = slideOutVertically(
-                    animationSpec = spring(
-                        stiffness = Spring.StiffnessMedium,
-                        dampingRatio = 0.9f
-                    )
-                ) { it } + fadeOut(tween(150)),
+                enter = if (isLandscapeDock) {
+                    // v0.68.82（第 3 项）：横屏从右下角斜向滑入
+                    slideIn(
+                        initialOffset = { IntOffset(it.width, it.height) },
+                        animationSpec = spring(
+                            stiffness = Spring.StiffnessMediumLow,
+                            dampingRatio = 0.86f
+                        )
+                    ) + fadeIn(tween(180))
+                } else {
+                    slideInVertically(
+                        animationSpec = spring(
+                            stiffness = Spring.StiffnessMediumLow,
+                            dampingRatio = 0.86f
+                        )
+                    ) { it } + fadeIn(tween(180))
+                },
+                exit = if (isLandscapeDock) {
+                    // v0.68.82（第 3 项）：横屏向右下角斜向滑出
+                    slideOut(
+                        targetOffset = { IntOffset(it.width, it.height) },
+                        animationSpec = spring(
+                            stiffness = Spring.StiffnessMedium,
+                            dampingRatio = 0.9f
+                        )
+                    ) + fadeOut(tween(150))
+                } else {
+                    slideOutVertically(
+                        animationSpec = spring(
+                            stiffness = Spring.StiffnessMedium,
+                            dampingRatio = 0.9f
+                        )
+                    ) { it } + fadeOut(tween(150))
+                },
                 label = "dockCard"
             ) {
                 val hThreshPx = with(density) { 48.dp.toPx() }
@@ -198,10 +225,8 @@ fun PullUpDock(
                 )
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        // v0.68.73（Bob）：横屏 Dock 收拢，不横贯全屏
-                        // v0.68.76（Bob）：横屏 Dock 只占右侧窄条，不散开
-                        .let { if (isLandscapeDock) it.widthIn(max = 148.dp) else it }
+                        // v0.68.82（第 3 项）：横屏包内容（右下角），不再 148dp 右侧窄条
+                        .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .clip(RoundedCornerShape(28.dp))
                         .background(AILauncherColors.GlassCard.copy(alpha = 0.55f * dockBgAlpha))
@@ -289,7 +314,7 @@ fun PullUpDock(
                         // v0.68.58（Bob）：内容无背景——背景只在按压时显示（外层控制）
                         Column(
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
                                 .padding(vertical = 16.dp)
                         ) {
                         if (s == DockState.D2) {
@@ -394,31 +419,10 @@ private fun DockRow4(
     onDismissMenu: () -> Unit,
     isLandscape: Boolean = false
 ) {
-    // v0.68.76（Bob）：横屏时竖排，放在右侧窄条
-    if (isLandscape) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            apps.forEach { app ->
-                DockIconButton(
-                    app = app,
-                    iconSize = 56.dp,
-                    corner = 16.dp,
-                    menuApp = menuApp,
-                    onLaunch = onLaunch,
-                    onLongPress = onLongPress,
-                    onDismissMenu = onDismissMenu
-                )
-            }
-        }
-    } else {
+    // v0.68.82（第 3 项）：横屏改回横向（同竖屏），不再竖排
     Row(
         modifier = Modifier
-            .fillMaxWidth()
+            .let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() }
             .padding(horizontal = 20.dp, vertical = 16.dp),
         // v0.27.2：居中（之前 spacedBy 默认左对齐）
         horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
@@ -436,7 +440,6 @@ private fun DockRow4(
             )
         }
     }
-    }
 }
 
 /** 第二档：同一批常用重排成 10 个小图标（2×5，46dp），只留图标 */
@@ -449,24 +452,21 @@ private fun DockGrid10(
     onDismissMenu: () -> Unit,
     isLandscape: Boolean = false
 ) {
-    // v0.68.76（Bob）：横屏时 2 列竖排，放在右侧窄条
-    val cols = if (isLandscape) 2 else 5
+    // v0.68.82（第 3 项）：横屏改回横向 5 列（同竖屏），不再 2 列竖排
+    val cols = 5
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() }
             .padding(horizontal = 12.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         apps.chunked(cols).forEach { row ->
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(
-                    if (isLandscape) 12.dp else 4.dp,
-                    Alignment.CenterHorizontally
-                )
+                modifier = Modifier.let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() },
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
             ) {
                 row.forEach { app ->
-                    // v0.68.77（Bob）：横屏不用 weight，否则两列被撑开散掉
+                    // v0.68.77（Bob）：横屏不用 weight，否则被撑开散掉
                     Box(
                         modifier = if (isLandscape) Modifier else Modifier.weight(1f),
                         contentAlignment = Alignment.Center
