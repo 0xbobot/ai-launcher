@@ -26,6 +26,9 @@ jobs:
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
 
+      - name: Run unit tests
+        run: gradle :app:testDebugUnitTest --no-daemon
+
       - name: Verify APK signature and manifest
         run: |
           BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)

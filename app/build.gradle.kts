@@ -102,6 +102,9 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.squareup.okhttp)
+    // R2：IntentCoordinator 纯逻辑单测（JVM，不走 Android 运行时）
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     // v0.41.9：隐藏应用入口的生物识别（面部/指纹）
     implementation("androidx.biometric:biometric:1.1.0")
 
