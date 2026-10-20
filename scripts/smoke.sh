@@ -90,9 +90,10 @@ sleep 1
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 
-# --- 6. 点七仔（宠物区，home 截图里约 840,630；果冻反馈+开心表情 1.2 秒，0.3 秒后截图抓动画中途）---
-adb shell input tap 840 630 || true
-sleep 0.3
+# --- 6. 点七仔（宠物区中央；果冻反馈+开心表情 1.2 秒，0.5 秒后截图抓反应中途）---
+# 坐标按当前首页布局实测：七仔在 home 截图约 (540,950)；旧坐标 840,630 点空导致 pet 与 home 同帧（R1 实测）。
+adb shell input tap 540 950 || true
+sleep 0.5
 shot "pet"
 
 # --- 7. 上滑开 D3 应用中心 ---
