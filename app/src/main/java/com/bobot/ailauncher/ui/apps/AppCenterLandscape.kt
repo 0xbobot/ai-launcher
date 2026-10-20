@@ -344,8 +344,12 @@ fun AppCenterLandscape(
                                 )
                             }
                         } else {
-                            items(results, key = { _, app -> "s:${app.packageName}" }) { app ->
-                                LandscapeAppRow(app = app, onLaunch = onLaunch)
+                            // 注：不用 items(results, key=)/trailing lambda——本文件上下文里
+                            // LazyListScope.items 重载解析总偏向 count:Int 版，改用 forEach+item 避开
+                            results.forEach { app ->
+                                item(key = "s:${app.packageName}") {
+                                    LandscapeAppRow(app = app, onLaunch = onLaunch)
+                                }
                             }
                         }
                     }
