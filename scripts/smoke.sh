@@ -84,14 +84,13 @@ SWIPE_PID=$!
 sleep 1.5
 shot "fan"
 wait $SWIPE_PID || true
-# 清理松手后的状态：扇形长按会钉住进编辑模式，松手落在虚线段会弹"选择应用"表，
-# 两次 BACK 不一定关得掉（R1 二轮实测残留）→ 再点一次表外 scrim + 按 HOME 回首页基线
-adb shell input keyevent KEYCODE_BACK || true
+# 清理松手后的状态：扇形编辑的 bottom sheet（选择应用/快捷方式）BACK 关不掉，
+# 本 App 就是桌面、HOME 也重置不了 Compose 状态（R1 二、三轮实测，清理 tap 还会误触推进流程）
+# → force-stop 重启进程，确定性回到首页基线
+adb shell am force-stop "$PKG" || true
 sleep 1
-adb shell input keyevent KEYCODE_BACK || true
-sleep 1
-adb shell input tap 540 200 || true
-sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 
