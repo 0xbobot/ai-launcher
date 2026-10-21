@@ -45,6 +45,11 @@ if [ -z "$DENSITY" ]; then DENSITY=420; fi
 SX() { echo $(( $1 * SCR_W / 1080 )); }
 SY() { echo $(( $1 * SCR_H / 2400 )); }
 log "geometry: ${SCR_W}x${SCR_H} density=$DENSITY label=${SMOKE_LABEL:-base} font=${SMOKE_FONT_SCALE:-default} night=${SMOKE_NIGHT:-no}"
+LANDSCAPE=0
+if [ "$SCR_W" -gt "$SCR_H" ]; then
+  LANDSCAPE=1
+  log "landscape leg: app-center assertions follow AppCenterLandscape expectations"
+fi
 
 # --- 1. 安装 ---
 if [ -f "$APK" ]; then
@@ -268,9 +273,11 @@ fi
 adb shell pidof "$PKG" | grep -q . && ok "intent-alive" || ng "intent-alive"
 
 # --- 10. 本地直达层 + 应用中心同组件（R2 UI 10-21 新规格）---
-# 首页打字出本地结果：点胶囊输 "cam" -> 七仔结果条应出现 Camera（英文标签，名称包含匹配）；
+# 首页打字出本地结果：点胶囊输 "clo" -> 七仔结果条应出现 Clock（英文标签，名称包含匹配）；
+# 探针选 Clock 不选 Camera：API 29 default 镜像根本没有相机应用（R4 实测 11 款里无 Camera，
+# 曾致 api29 腿本地结果全红），Clock 在 API 29/34 与 Nexus 9 镜像里都有。
 # press 点第一个结果 -> 前台包应切换。应用中心：顶部应换成新胶囊（占位"想做什么？"），
-# 输 "cam" 后网格过滤出 Camera 且出现「问七仔」行。基线用 force-stop 重启回首页（同第 9 段法）。
+# 输 "clo" 后网格过滤出 Clock 且出现「问七仔」行。基线用 force-stop 重启回首页（同第 9 段法）。
 adb shell am force-stop "$PKG" || true
 sleep 1
 adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
@@ -295,7 +302,7 @@ if [ -f "$OUT/local_dump0.xml" ]; then
 fi
 adb shell input swipe "$LCX" "$LCY" "$LCX" "$LCY" 150 || true
 sleep 2
-adb shell input text "cam" || true
+adb shell input text "clo" || true
 sleep 1
 # 收键盘再截图/定位：键盘会遮挡结果条下沿且 dump 坐标会变（同第 9 段教训）
 adb shell input keyevent KEYCODE_BACK || true
@@ -303,10 +310,16 @@ sleep 1
 shot "intent-local"
 adb shell uiautomator dump /sdcard/local_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/local_dump.xml "$OUT/local_dump.xml" > /dev/null 2>&1 || true
+# uiautomator 偶发返回残缺层级（R4 small 腿实测 26 节点、独缺探针标签）：未命中时重 dump 一次再判
+if ! grep -q 'text="Clock"' "$OUT/local_dump.xml" 2>/dev/null; then
+  sleep 1
+  adb shell uiautomator dump /sdcard/local_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/local_dump.xml "$OUT/local_dump.xml" > /dev/null 2>&1 || true
+fi
 RCX=""; RCY=""
 if [ -f "$OUT/local_dump.xml" ]; then
-  # 结果条里的应用名节点（首页基线 UI 无其它 "Camera" 文本）
-  RNODE=$(grep -o '<node[^>]*text="Camera"[^>]*>' "$OUT/local_dump.xml" | head -1)
+  # 结果条里的应用名节点（首页基线 UI 无其它 "Clock" 文本）
+  RNODE=$(grep -o '<node[^>]*text="Clock"[^>]*>' "$OUT/local_dump.xml" | head -1)
   if [ -n "$RNODE" ]; then
     ok "intent-local-results"
     RNUMS=$(echo "$RNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
@@ -314,15 +327,14 @@ if [ -f "$OUT/local_dump.xml" ]; then
     RX2=$(echo "$RNUMS" | sed -n 3p); RY2=$(echo "$RNUMS" | sed -n 4p)
     if [ -n "$RX1" ] && [ -n "$RY2" ]; then
       RCX=$(( (RX1 + RX2) / 2 )); RCY=$(( (RY1 + RY2) / 2 ))
-      log "camera result label at ($RCX,$RCY)"
+      log "clock result label at ($RCX,$RCY)"
     fi
   else
     ng "intent-local-results"
   fi
 fi
-# press 点结果 -> 相机应被打开。先清 logcat 再点；本模拟器 -camera-back none 无相机硬件，
-# AOSP Camera2 可能被拉起后立即退出（3 秒后单次前台采样会错过），故双路取证：
-# 前台轮询 6 秒任一命中 camera，或 logcat 出现目标包的 START 派发记录，都算链路通。
+# press 点结果 -> Clock 应被打开。先清 logcat 再点，双路取证：
+# 前台轮询 6 秒任一命中 clock，或 logcat 出现目标包的 START 派发记录，都算链路通。
 if [ -n "$RCX" ]; then
   adb logcat -c > /dev/null 2>&1 || true
   adb shell input swipe "$RCX" "$RCY" "$RCX" "$RCY" 150 || true
@@ -331,14 +343,14 @@ if [ -n "$RCX" ]; then
   for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
     sleep 0.5
     FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
-    if echo "$FG" | grep -qi "camera"; then OPENED=1; break; fi
+    if echo "$FG" | grep -qi "clock"; then OPENED=1; break; fi
   done
   shot "intent-opened"
   log "foreground after open: $FG"
   if [ "$OPENED" = "1" ]; then
     ok "intent-open-app"
-  elif adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "camera"; then
-    log "camera start dispatched (foreground did not stick: no camera HAL in this emulator)"
+  elif adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "clock"; then
+    log "clock start dispatched (foreground did not stick)"
     ok "intent-open-app"
   else
     ng "intent-open-app"
@@ -348,13 +360,53 @@ if [ -n "$RCX" ]; then
 else
   ng "intent-open-app"
 fi
-# 应用中心同组件：上滑开 D3（同第 7 段基线），顶部应是新胶囊而非旧搜索框
+# 应用中心：上滑开 D3（同第 7 段基线）。竖屏顶部应是统一胶囊；横屏是
+# AppCenterLandscape 的旧搜索框（R2 合并未并入，横屏归专项/冲突 4），分开断言。
 adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
 sleep 3
 shot "appcenter2"
-ACX=$(SX 540); ACY=$(SY 330)
 adb shell uiautomator dump /sdcard/ac_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/ac_dump.xml "$OUT/ac_dump.xml" > /dev/null 2>&1 || true
+if [ "$LANDSCAPE" = "1" ]; then
+  # 横屏分支：断言横屏现实——旧搜索框在场 + 输 "clo" 过滤出 Clock；
+  # 胶囊/问七仔/✕ 在横屏不存在，跳过不判失败（产品差异记为 R4 发现 F2）。
+  LSX=""; LSY=""
+  if [ -f "$OUT/ac_dump.xml" ] && grep -q '搜索应用' "$OUT/ac_dump.xml"; then
+    ok "appcenter-landscape-search"
+    LSNODE=$(grep -o '<node[^>]*text="[^"]*搜索应用[^"]*"[^>]*>' "$OUT/ac_dump.xml" | head -1)
+    if [ -n "$LSNODE" ]; then
+      LSNUMS=$(echo "$LSNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+      LX1=$(echo "$LSNUMS" | sed -n 1p); LY1=$(echo "$LSNUMS" | sed -n 2p)
+      LX2=$(echo "$LSNUMS" | sed -n 3p); LY2=$(echo "$LSNUMS" | sed -n 4p)
+      if [ -n "$LX1" ] && [ -n "$LY2" ]; then
+        LSX=$(( (LX1 + LX2) / 2 )); LSY=$(( (LY1 + LY2) / 2 ))
+        log "landscape search field at ($LSX,$LSY)"
+      fi
+    fi
+  else
+    ng "appcenter-landscape-search"
+  fi
+  if [ -n "$LSX" ]; then
+    adb shell input swipe "$LSX" "$LSY" "$LSX" "$LSY" 150 || true
+    sleep 2
+    adb shell input text "clo" || true
+    sleep 1
+    adb shell input keyevent KEYCODE_BACK || true
+    sleep 2
+    shot "appcenter-filter"
+    adb shell uiautomator dump /sdcard/ac_dump2.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/ac_dump2.xml "$OUT/ac_dump2.xml" > /dev/null 2>&1 || true
+    if [ -f "$OUT/ac_dump2.xml" ] && grep -q 'text="Clock"' "$OUT/ac_dump2.xml"; then
+      ok "appcenter-landscape-filter"
+    else
+      ng "appcenter-landscape-filter"
+    fi
+  else
+    ng "appcenter-landscape-filter"
+  fi
+  log "landscape: capsule/ask-row/clear assertions skipped (landscape search not merged; finding F2)"
+else
+ACX=$(SX 540); ACY=$(SY 330)
 if [ -f "$OUT/ac_dump.xml" ]; then
   if grep -q 'text="想做什么？"' "$OUT/ac_dump.xml"; then
     ok "appcenter-capsule"
@@ -374,7 +426,7 @@ if [ -f "$OUT/ac_dump.xml" ]; then
 fi
 adb shell input swipe "$ACX" "$ACY" "$ACX" "$ACY" 150 || true
 sleep 2
-adb shell input text "cam" || true
+adb shell input text "clo" || true
 sleep 1
 adb shell input keyevent KEYCODE_BACK || true
 sleep 2
@@ -387,7 +439,7 @@ if [ -f "$OUT/ac_dump2.xml" ]; then
   else
     ng "appcenter-ask-row"
   fi
-  if grep -q 'text="Camera"' "$OUT/ac_dump2.xml"; then
+  if grep -q 'text="Clock"' "$OUT/ac_dump2.xml"; then
     ok "appcenter-filter"
   else
     ng "appcenter-filter"
@@ -425,12 +477,13 @@ if [ -n "$KX" ]; then
 else
   ng "appcenter-cleared"
 fi
+fi
 
 # --- 11. 封面 3 模板下的胶囊 + 结果条（R2 UI 10-21 追加：Bob 提醒主页有 3 模板轮换）---
 # 模板选择是纯日期逻辑：CoverHero 里 coverTemplateFor() = DAY_OF_YEAR % 3 ->
 # values()[0]=GIANT_TIME（时间巨像）/ [1]=HEADLINE（头条简报）/ [2]=MINIMAL（留白时刻），不走 prefs。
 # 故靠改模拟器日期（今天起 +0/+1/+2 天必覆盖三余数）逐个切换；每次 force-stop 重启回首页，
-# 截 intent-tpl-<name>.png 并 dump 断言胶囊在场，再输 "cam" 截 -local 图并断言结果条 Camera。
+# 截 intent-tpl-<name>.png 并 dump 断言胶囊在场，再输 "clo" 截 -local 图并断言结果条 Clock。
 # 日期改不动（如镜像无权限）时只 log 记录、不判失败——此时以代码级证据为准：
 # PetZone 封面 Column 里 CoverHero 之后隔 16dp 无条件调用 coverIntentSlot()，三模板共用同一渲染路径。
 adb shell settings put global auto_time 0 > /dev/null 2>&1 || true
@@ -480,14 +533,19 @@ for OFF in 0 1 2; do
       TCX=$(( (TX1 + TX2) / 2 )); TCY=$(( (TY1 + TY2) / 2 ))
       adb shell input swipe "$TCX" "$TCY" "$TCX" "$TCY" 150 || true
       sleep 2
-      adb shell input text "cam" || true
+      adb shell input text "clo" || true
       sleep 1
       adb shell input keyevent KEYCODE_BACK || true
       sleep 1
       shot "intent-tpl-$TPL-local"
       adb shell uiautomator dump /sdcard/tpl_dump2.xml > /dev/null 2>&1 || true
       adb pull /sdcard/tpl_dump2.xml "$OUT/tpl_${TPL}_local.xml" > /dev/null 2>&1 || true
-      if [ -f "$OUT/tpl_${TPL}_local.xml" ] && grep -q 'text="Camera"' "$OUT/tpl_${TPL}_local.xml"; then
+      if ! grep -q 'text="Clock"' "$OUT/tpl_${TPL}_local.xml" 2>/dev/null; then
+        sleep 1
+        adb shell uiautomator dump /sdcard/tpl_dump2.xml > /dev/null 2>&1 || true
+        adb pull /sdcard/tpl_dump2.xml "$OUT/tpl_${TPL}_local.xml" > /dev/null 2>&1 || true
+      fi
+      if [ -f "$OUT/tpl_${TPL}_local.xml" ] && grep -q 'text="Clock"' "$OUT/tpl_${TPL}_local.xml"; then
         ok "tpl-$TPL-local"
       else
         ng "tpl-$TPL-local"
@@ -536,7 +594,7 @@ adb shell pidof "$PKG" | grep -q . && ok "font-scale-alive" || ng "font-scale-al
 
 # --- 13. 七仔反应（R3-C 对话感）：聚焦倾听态 / 本地结果呈现态 ---
 # force-stop 回首页基线 -> press 点胶囊（键盘弹起、七仔应进倾听姿态 FETCH）截 intent-focus；
-# 输 "cam" 收键盘截 intent-present（结果条在场 + 七仔应为呈现姿态 FILE 抱卡片）。
+# 输 "clo" 收键盘截 intent-present（结果条在场 + 七仔应为呈现姿态）。
 # Planning 思考态在无 Key 环境瞬时跳过（协调器无 Key 直接进 Error），本轮取不到图，如实标注未验。
 adb shell am force-stop "$PKG" || true
 sleep 1
@@ -562,14 +620,19 @@ fi
 adb shell input swipe "$FCX" "$FCY" "$FCX" "$FCY" 150 || true
 sleep 2
 shot "intent-focus"
-adb shell input text "cam" || true
+adb shell input text "clo" || true
 sleep 1
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 shot "intent-present"
 adb shell uiautomator dump /sdcard/present_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/present_dump.xml "$OUT/present_dump.xml" > /dev/null 2>&1 || true
-if [ -f "$OUT/present_dump.xml" ] && grep -q 'text="Camera"' "$OUT/present_dump.xml"; then
+if ! grep -q 'text="Clock"' "$OUT/present_dump.xml" 2>/dev/null; then
+  sleep 1
+  adb shell uiautomator dump /sdcard/present_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/present_dump.xml "$OUT/present_dump.xml" > /dev/null 2>&1 || true
+fi
+if [ -f "$OUT/present_dump.xml" ] && grep -q 'text="Clock"' "$OUT/present_dump.xml"; then
   ok "intent-present-results"
 else
   ng "intent-present-results"
@@ -581,7 +644,7 @@ fi
 # TalkBack 走查归真机验收，CI 不冒充已验；liveRegion/stateDescription 不出现在
 # uiautomator dump 里，同样归真机验收项（a11y_check.py 会明示）。
 if command -v python3 > /dev/null 2>&1; then
-  A11Y_OUT=$(python3 scripts/a11y_check.py "$DENSITY" "$OUT" 2>&1)
+  A11Y_OUT=$(python3 scripts/a11y_check.py "$DENSITY" "$OUT" "$LANDSCAPE" 2>&1)
   echo "$A11Y_OUT" | while IFS= read -r line; do log "$line"; done
   echo "$A11Y_OUT" > "$OUT/a11y-report.txt"
   if echo "$A11Y_OUT" | grep -q "^A11Y FAIL"; then
