@@ -671,11 +671,16 @@ if [ -z "$CAL_ID" ]; then
   CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
 fi
 if [ -z "$CAL_ID" ]; then
-  INS_CAL=$(adb shell content insert --uri content://com.android.calendar/calendars \
+  # 普通身份建日历行会被 CalendarProvider 拒（实测 "Error while accessing provider"）：
+  # 带 caller_is_syncadapter=true 以同步适配器身份建 LOCAL 日历，provider 放行。
+  adb shell pm list packages 2>/dev/null | grep -i calendar | head -3 | while IFS= read -r l; do log "nextup pkg: $l"; done
+  INS_CAL=$(adb shell content insert --uri "content://com.android.calendar/calendars?caller_is_syncadapter=true" \
     --bind account_name:s:smoke@local --bind account_type:s:LOCAL \
     --bind name:s:SmokeCal --bind calendar_displayName:s:SmokeCal \
-    --bind calendar_access_level:i:700 --bind visible:i:1 --bind sync_events:i:1 2>&1 || true)
-  log "nextup calendars insert: $INS_CAL"
+    --bind calendar_access_level:i:700 --bind visible:i:1 --bind sync_events:i:1 \
+    --bind calendar_timezone:s:UTC --bind canOrganizerRespond:i:1 \
+    --bind canModifyEvents:i:1 --bind maxReminders:i:5 2>&1 || true)
+  log "nextup calendars insert(syncadapter): $INS_CAL"
   CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
   log "nextup calendars query#3: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
   CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
@@ -757,7 +762,7 @@ if [ -n "$CAL_ID" ]; then
   EV_BEGIN=$(( (EMU_S + 1200) * 1000 ))
   EV_END=$(( (EMU_S + 4800) * 1000 ))
   # 事件 A：无链接 → 点卡应打开日历（CATEGORY_APP_CALENDAR / 事件详情）
-  INS_A=$(adb shell content insert --uri content://com.android.calendar/events \
+  INS_A=$(adb shell content insert --uri "content://com.android.calendar/events?caller_is_syncadapter=true" \
     --bind calendar_id:i:"$CAL_ID" --bind title:s:SmokeNoLink \
     --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
     --bind eventTimezone:s:UTC 2>&1 || true)
@@ -771,7 +776,7 @@ if [ -n "$CAL_ID" ]; then
   fi
   adb shell content delete --uri content://com.android.calendar/events --where "title='SmokeNoLink'" > /dev/null 2>&1 || true
   # 事件 B：描述带 Zoom 链接 → 点卡应直开链接（前台离开本包 / 派发含 zoom）
-  INS_B=$(adb shell content insert --uri content://com.android.calendar/events \
+  INS_B=$(adb shell content insert --uri "content://com.android.calendar/events?caller_is_syncadapter=true" \
     --bind calendar_id:i:"$CAL_ID" --bind title:s:SmokeWithLink \
     --bind description:s:https://zoom.us/j/1234567890 \
     --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
