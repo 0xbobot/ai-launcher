@@ -33,19 +33,19 @@ const val MAX_CHARS = 700
 
 fun build(snapshot: IntentContextSnapshot): String {
 val fixed = mutableListOf<String>()
-fixed += "${snapshot.nowText}"
-snapshot.nextMeeting?.takeIf { it.isNotBlank()}?.let { fixed += "$it"}
-snapshot.weather?.takeIf { it.isNotBlank()}?.let { fixed += "$it"}
+fixed += "【现在】${snapshot.nowText}"
+snapshot.nextMeeting?.takeIf { it.isNotBlank()}?.let { fixed += "【下一会议】$it" }
+snapshot.weather?.takeIf { it.isNotBlank()}?.let { fixed += "【天气】$it" }
 if (snapshot.topApps.isNotEmpty()) {
-fixed += "${snapshot.topApps.joinToString("、")}"
+fixed += "【常用应用】${snapshot.topApps.joinToString("、")}"
 }
-snapshot.pendingReplies?.takeIf { it > 0}?.let { fixed += "$it 条"}
+snapshot.pendingReplies?.takeIf { it > 0}?.let { fixed += "【待回消息】$it 条" }
 
 val result = StringBuilder(fixed.joinToString("\n"))
 
 // 已装名录：用剩余预算逐个塞，塞不下就截断并注明总数
 if (snapshot.installedApps.isNotEmpty()) {
-val prefix = ""
+val prefix = "【已装应用】"
 val total = snapshot.installedApps.size
 val kept = mutableListOf<String>()
 var used = result.length + 1 + prefix.length // 换行 + 标签

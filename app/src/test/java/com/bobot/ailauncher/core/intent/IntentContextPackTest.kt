@@ -23,12 +23,12 @@ installedApps = listOf("微信", "飞书", "高德地图", "日历"),
 pendingReplies = 3
 )
 )
-assertTrue(text.contains("2026年10月21日 星期三 22:20（晚上）"))
-assertTrue(text.contains("23:00 展台方案评审 · 3F 会议室"))
-assertTrue(text.contains("深圳 晴 28°（今日 24~30°）"))
-assertTrue(text.contains("微信、飞书、高德地图"))
-assertTrue(text.contains("微信、飞书、高德地图、日历"))
-assertTrue(text.contains("3 条"))
+assertTrue(text.contains("【现在】2026年10月21日 星期三 22:20（晚上）"))
+assertTrue(text.contains("【下一会议】23:00 展台方案评审 · 3F 会议室"))
+assertTrue(text.contains("【天气】深圳 晴 28°（今日 24~30°）"))
+assertTrue(text.contains("【常用应用】微信、飞书、高德地图"))
+assertTrue(text.contains("【已装应用】微信、飞书、高德地图、日历"))
+assertTrue(text.contains("【待回消息】3 条"))
 // 全量塞得下时不许出现截断尾巴
 assertFalse(text.contains("其余略"))
 }
@@ -38,7 +38,7 @@ fun `missing optionals are omitted, never fabricated`() {
 val text = IntentContextPack.build(
 IntentContextSnapshot(nowText = "2026年10月21日 星期三 09:00（上午）")
 )
-assertEquals("2026年10月21日 星期三 09:00（上午）", text)
+assertEquals("【现在】2026年10月21日 星期三 09:00（上午）", text)
 }
 
 @Test
@@ -46,12 +46,14 @@ fun `zero pending replies are omitted`() {
 val text = IntentContextPack.build(
 IntentContextSnapshot(nowText = "T", pendingReplies = 0)
 )
-assertFalse(text.contains("待回消息"))
+assertFalse(text.contains("【待回消息】"))
 }
 
 @Test
 fun `installed apps are truncated to the char budget with total noted`() {
-val many = (1..120).map { "应用$it"}
+// 200 个较长名字总长远超 700 字预算，必须触发截断
+//（首版用 120 个短名总长没到上限，拼装器无从截——数据问题，非实现问题）
+val many = (1..200).map { "应用软件$it"}
 val text = IntentContextPack.build(
 IntentContextSnapshot(
 nowText = "2026年10月21日 星期三 22:20（晚上）",
@@ -62,8 +64,8 @@ assertTrue(
 "总长 ${text.length} 超过上限 ${IntentContextPack.MAX_CHARS}",
 text.length <= IntentContextPack.MAX_CHARS
 )
-assertTrue(text.contains("…（共120个，其余略）"))
+assertTrue(text.contains("…（共200个，其余略）"))
 // 时间这种高优先项不能被名录挤掉
-assertTrue(text.startsWith(""))
+assertTrue(text.startsWith("【现在】"))
 }
 }
