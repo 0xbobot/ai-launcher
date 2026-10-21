@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -49,6 +50,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -415,17 +417,30 @@ fun IntentEntry(
  * 高度贴合内容（2026-10-21 Bob 批准）：文字关字体内边距（includeFontPadding=false）+
  * 显式行高 + 收紧内边距，消除单个结果时卡片下方的大片空白；整体上限 180dp
  * （[RESULT_BAR_MAX_HEIGHT]），超限条内滚动，不挤 Dock。
+ *
+ * F4 保底高度（R4 矩阵发现，Bob 定修法）：结果条是封面 Column 流的末位元素，
+ * 矮屏+高模板时只分到剩余高度——MINIMAL + 1080×1920 + 字体 1.3 实测仅 78.5dp，
+ * 单行结果被从中间切掉（结果项实测 42.3dp < 48dp、名称标签绘出条外）。
+ * 下限把「标题行 + 图标 + 名称标签行」完整算入（构成见 [LocalResultsBar] 内注释），
+ * 用 requiredHeightIn 顶住父级剩余高度的钳制（普通 heightIn(min) 会被钳回剩余值）；
+ * 只加下限，上限与条内滚动不变。
  */
 @Composable
 private fun LocalResultsBar(
     apps: List<AppInfo>,
     onOpen: (AppInfo) -> Unit
 ) {
+    // 保底高度构成：固定部分 69dp = 容器上下内边距 16 + 结果行上距 6
+    // + 结果项（上下内边距 8 + 图标 36 + 标签上距 3）；文字部分 = 标题行高 15sp
+    // + 标签行高 13sp（按 sp 换算，fontScale 多大都完整算入）；另加 4dp 余量
+    // （R4 dump 实测 TextView 高度比 lineHeight 多约 2.6dp，字体内边距关不干净）。
+    val density = LocalDensity.current
+    val minBarHeight = 73.dp + with(density) { (15.sp + 13.sp).toDp() }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp)
-            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
+            .requiredHeightIn(min = minBarHeight, max = RESULT_BAR_MAX_HEIGHT)
             .clip(RoundedCornerShape(16.dp))
             .background(AILauncherColors.Card.copy(alpha = 0.88f))
             .verticalScroll(rememberScrollState())
