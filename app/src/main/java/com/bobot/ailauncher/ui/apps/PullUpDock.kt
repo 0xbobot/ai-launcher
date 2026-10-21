@@ -23,7 +23,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.bobot.ailauncher.ui.theme.confirm
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -525,7 +525,7 @@ private fun DockIconButton(
                 .combinedClickable(
                     onClick = { onLaunch(app) },
                     onLongClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        haptics.confirm()
                         onLongPress(app)
                     }
                 )

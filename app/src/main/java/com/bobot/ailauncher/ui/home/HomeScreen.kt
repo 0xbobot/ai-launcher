@@ -34,10 +34,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -99,6 +103,19 @@ fun HomeScreen(
     val density = LocalDensity.current
     val view = LocalView.current
     val haptics = LocalHapticFeedback.current
+
+    // v0.68.93（布局与交互 Loop 一批①）：点胶囊外释放焦点的宿主侧状态——
+    // 胶囊聚焦与否由 IntentEntry 经 onFocusChanged 外报，胶囊范围用包裹 Box 的
+    // boundsInRoot 捕获，根节点原点用 positionInRoot 换算本地坐标（观察者见根 Box）。
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var intentFocused by remember { mutableStateOf(false) }
+    var intentBoundsInRoot by remember {
+        mutableStateOf<androidx.compose.ui.geometry.Rect?>(null)
+    }
+    var rootPosInRoot by remember {
+        mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+    }
 
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
     // v0.68.0：盲操状态
@@ -231,7 +248,27 @@ fun HomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .onGloballyPositioned { coords -> homeSize = coords.size }
+            .onGloballyPositioned { coords ->
+                homeSize = coords.size
+                rootPosInRoot = coords.positionInRoot()
+            }
+            // v0.68.93：点意图区外任意处 → 释放焦点 + 收键盘（不消费事件，
+            // 拖拽/点按/扇形全部照旧；文本保留不动）
+            .clearIntentFocusOnOutsideTap(
+                focused = { intentFocused },
+                targetBoundsInHost = {
+                    intentBoundsInRoot?.let { b ->
+                        androidx.compose.ui.geometry.Rect(
+                            b.left - rootPosInRoot.x,
+                            b.top - rootPosInRoot.y,
+                            b.right - rootPosInRoot.x,
+                            b.bottom - rootPosInRoot.y
+                        )
+                    }
+                },
+                focusManager = focusManager,
+                keyboardController = keyboardController
+            )
             // v0.68.17：落点跟踪已删除（触发改为"任何左滑"，不再需要真实落点）
             .pointerInput(blindCtl) {
                 var totalX = 0f
@@ -297,14 +334,20 @@ fun HomeScreen(
                 todayCardAlpha = todayAlpha,
                 coverMode = true,
                 coverIntentSlot = {
-                    IntentEntry(
-                        state = intentState,
-                        onSubmit = onIntentSubmit,
-                        onConfirm = onIntentConfirm,
-                        onDismiss = onIntentDismiss,
-                        onOpenSettings = onOpenSettings,
-                        onOpenPermissionSettings = { perm -> openPermissionSettings(context, perm) }
-                    )
+                    // v0.68.93：包裹层只为捕获意图区在根坐标中的范围（焦点观察者用）
+                    Box(
+                        Modifier.onGloballyPositioned { intentBoundsInRoot = it.boundsInRoot() }
+                    ) {
+                        IntentEntry(
+                            state = intentState,
+                            onSubmit = onIntentSubmit,
+                            onConfirm = onIntentConfirm,
+                            onDismiss = onIntentDismiss,
+                            onOpenSettings = onOpenSettings,
+                            onOpenPermissionSettings = { perm -> openPermissionSettings(context, perm) },
+                            onFocusChanged = { intentFocused = it }
+                        )
+                    }
                 }
             )
         }

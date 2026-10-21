@@ -61,7 +61,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.bobot.ailauncher.ui.theme.confirm
+import com.bobot.ailauncher.ui.theme.tick
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -432,7 +433,7 @@ class BlindCaptureController(
         triggered = false
         modeIndex = -1
         editPinned = true
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        haptics.confirm()
         guideEditOnce()
         setUi(BlindUiState.Editing(centerX, centerY, fanDir, buildEditSegments(), openAddSheet))
         Log.d(TAG, "diag: editMode(openAddSheet=$openAddSheet)")
@@ -528,7 +529,7 @@ class BlindCaptureController(
                 modeIndex = -1
                 setUi(BlindUiState.Selecting(centerX, centerY, -1, fanDir, segments))
                 dwellStartMs = change.uptimeMillis
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                haptics.confirm()
                 if (isZeroQuick) guideZeroQuickOnce()
                 else PetRepository.say("拍点什么？")
                 Log.d(TAG, "diag: fan展开")
@@ -553,7 +554,7 @@ class BlindCaptureController(
             dwellStartMs = change.uptimeMillis
             setUi(BlindUiState.Selecting(centerX, centerY, idx, fanDir, segments))
             if (idx >= 0) {
-                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                haptics.tick()
                 PetRepository.say(segmentLabel(idx))
                 Log.d(TAG, "diag: sector=${segmentLabel(idx)}")
             }
@@ -626,7 +627,7 @@ class BlindCaptureController(
         triggered = false
         modeIndex = -1
         setUi(BlindUiState.PhotoFlash)
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        haptics.confirm()
         val t = ++flashToken
         Handler(Looper.getMainLooper()).postDelayed({
             if (t != flashToken) return@postDelayed

@@ -33,7 +33,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.bobot.ailauncher.ui.theme.confirm
+import com.bobot.ailauncher.ui.theme.tick
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -411,11 +412,11 @@ private fun HomeHost(
                         val cp = p.coerceIn(0f, 1f)
                         pickerHousePull = cp
                         if (cp >= 0.5f && lastPickerHousePull < 0.5f) {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            haptics.tick()
                         }
                         if (cp >= 1f) {
                             pickerHouseArmed = false
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptics.confirm()
                             // v0.68.30（Bob）：picker 房子上拉——D3 开着时要先关 D3 回主页，
                             // 不能只关 picker（不然还停在 D3 里）
                             if (d3Opened) {
@@ -543,7 +544,7 @@ private fun HomeHost(
                             full.add(to, item)
                             QuickActionsPrefs.save(ctx, full)
                             refreshEditSegs()
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            haptics.tick()
                         }
                     },
                     onEditTapOutside = {

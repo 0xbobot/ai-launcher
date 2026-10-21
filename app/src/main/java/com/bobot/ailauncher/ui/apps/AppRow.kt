@@ -55,7 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.bobot.ailauncher.ui.theme.tick
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -205,7 +205,7 @@ internal fun AppRow(
     fun onIconTap(which: String, action: () -> Unit) {
         if (tappedIcon != null) return
         tappedIcon = which
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        haptics.tick()
         scope.launch {
             tapScale.snapTo(1f)
             tapScale.animateTo(0.75f, tween(80))

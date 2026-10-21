@@ -43,7 +43,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.bobot.ailauncher.ui.theme.confirm
+import com.bobot.ailauncher.ui.theme.tick
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -137,7 +138,7 @@ internal fun WaveRail(
     val pulseScale = remember { androidx.compose.animation.core.Animatable(1f) }
     LaunchedEffect(pulseTick) {
         if (pulseItem != null && pulseTick > 0) {
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            haptics.tick()
             pulseScale.animateTo(1.7f, tween(180))
             pulseScale.animateTo(1f, tween(220))
         }
@@ -149,7 +150,7 @@ internal fun WaveRail(
         // v0.68.13：分隔线不可触摸，滑过时无反应
         if (items[i] is RailItem.Separator) return
         activeIndex = i
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        haptics.tick()
         onActiveItem(items[i])
     }
 
@@ -238,7 +239,7 @@ internal fun WaveRail(
                     if (requireLongPress) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { offset ->
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptics.confirm()
                                 onLongPressStart()
                                 cancelPendingTapRelease()
                                 emitItem(indexAt(offset.y))

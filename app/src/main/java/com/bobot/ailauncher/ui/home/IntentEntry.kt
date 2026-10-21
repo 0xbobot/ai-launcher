@@ -49,16 +49,22 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.invisibleToUser
@@ -278,6 +284,42 @@ fun IntentCapsuleField(
  *
  * 状态由 [IntentCoordinator] 驱动，本组件只读渲染 + 转发用户动作，不碰 LLM/执行细节。
  */
+/**
+ * v0.68.93（布局与交互 Loop 一批①·Bob 真机点名的 bug）：点胶囊外释放焦点。
+ *
+ * 根因：Compose 没有「点外部自动清焦」——[IntentEntry] 的 releaseInputFocus 只在
+ * 提交/点结果/回复呈现时从内部调，点首页空白、七仔、Dock 时没有任何一层清焦，
+ * 键盘收不掉，用户被困在编辑态（系统 Back 之外无路可退）。
+ *
+ * 宿主把这个观察者挂在根容器上：它在 Initial pass 只观察按下位置、从不消费
+ * 事件，既有手势（拖拽/扇形/点按）零影响；胶囊聚焦期间，按下点落在胶囊范围
+ * 外才 clearFocus + 收键盘，回到非编辑呈现。已输入文本一个字不动（保留口径
+ * 沿旧：文本留在框里，dismiss 时协调器带回）。
+ *
+ * [targetBoundsInHost] 须返回胶囊在本宿主节点本地坐标系中的范围（宿主用
+ * boundsInRoot 减自身 positionInRoot 换算）。
+ */
+fun Modifier.clearIntentFocusOnOutsideTap(
+    focused: () -> Boolean,
+    targetBoundsInHost: () -> Rect?,
+    focusManager: FocusManager,
+    keyboardController: SoftwareKeyboardController?
+): Modifier = this.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            if (event.type != PointerEventType.Press) continue
+            if (!focused()) continue
+            val bounds = targetBoundsInHost() ?: continue
+            val pos = event.changes.firstOrNull()?.position ?: continue
+            if (!bounds.contains(pos)) {
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            }
+        }
+    }
+}
+
 @Composable
 fun IntentEntry(
     state: IntentUiState,
@@ -286,6 +328,8 @@ fun IntentEntry(
     onDismiss: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenPermissionSettings: (String) -> Unit,
+    // v0.68.93：焦点变化外报（宿主据此挂「点外部释放焦点」观察者，见 clearIntentFocusOnOutsideTap）
+    onFocusChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -368,6 +412,9 @@ fun IntentEntry(
     // + 下一会议一行（若有）。会议数据经 TodayEventsHolder 从 PetZone 共享
     // （原本只活在 PetZone 的 Composable 状态里）；建议面只展示，点选才打开/入会。
     val nextEvent by TodayEventsHolder.nextEvent.collectAsState()
+    // v0.68.93（布局与交互 Loop 一批④）：NextUp 条正在呈现的事件 id（同一 holder，
+    // PetZone 与数据同源写入）——建议面会议行按 eventId 与它去重，只补位不复刻。
+    val presentedNextEventId by TodayEventsHolder.presentedNextEventId.collectAsState()
     var suggestionApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
     LaunchedEffect(capsuleFocused, installedEpoch) {
         if (capsuleFocused) {
@@ -445,7 +492,10 @@ fun IntentEntry(
             onValueChange = { fieldValue = it },
             onSubmit = { submitIfReady() },
             planning = planning,
-            onFocusChanged = { capsuleFocused = it },
+            onFocusChanged = {
+                capsuleFocused = it
+                onFocusChanged(it)
+            },
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -500,8 +550,13 @@ fun IntentEntry(
                         // 建议面（意图改进一批）：槽位最低优先序——仅在聚焦 + 空文本
                         // + Idle/Editing 时出现；文本一旦非空，本地结果立即接管槽位。
                         // 会议只取尚未结束的（holder 里可能是刚过期的上一场）。
+                        // v0.68.93（布局与交互 Loop 一批④）：同一信息只在一处呈现——
+                        // NextUp 条正在呈现同一事件（eventId 相同）时，建议面不出
+                        // 会议行（NextUp 是常驻主场，建议面只在它没呈现该事件时补位）；
+                        // 去重后建议面回归单一职责：常用 Top + 示例句。
                         val upcomingEvent = nextEvent?.takeIf {
-                            it.end > System.currentTimeMillis()
+                            it.end > System.currentTimeMillis() &&
+                                it.eventId != presentedNextEventId
                         }
                         if (capsuleFocused && text.isEmpty() &&
                             (s is IntentUiState.Idle || s is IntentUiState.Editing) &&
@@ -678,8 +733,10 @@ private const val SUGGESTION_EXAMPLE = "打车去机场"
 /**
  * 七仔结果条·零打字建议面（意图改进一批）：胶囊刚聚焦、一个字还没打时端出来的
  * 「此刻常用」——Top 应用（频次+时段亲和，与本地结果同一 [ResultAppItem]，点一下
- * 直达打开）+ 下一会议一行（若有，与封面「接下来」条同一文案语言，点按走
- * [joinCalendarEvent] 同一条入会路径）。只展示不执行，点选才发生动作。
+ * 直达打开）+ 下一会议一行（仅补位：v0.68.93 起调用方已按 eventId 与 TODAY 的
+ * NextUp 条去重——NextUp 正在呈现同一事件时这里不再复刻，建议面回归常用 Top +
+ * 示例句的单一职责；NextUp 没呈现该事件时才出会议行，点按走 [joinCalendarEvent]
+ * 同一条入会路径）。只展示不执行，点选才发生动作。
  *
  * 布局防线（Bob 2026-10-21）：与本地结果共用同一槽位、同一 180dp 上限
  * （[RESULT_BAR_MAX_HEIGHT]），超限条内滚动，不新开浮层、不挤其他槽位；

@@ -358,7 +358,18 @@ fun PetZone(
     // （会议数据原本只活在本 Composable 的状态里，IntentEntry 够不着）；
     // PetZone 离场时清空，避免建议面读到陈旧会议。TODAY 数据流本身不改。
     LaunchedEffect(coverNextEvent) { TodayEventsHolder.update(coverNextEvent) }
-    DisposableEffect(Unit) { onDispose { TodayEventsHolder.update(null) } }
+    // v0.68.93（布局与交互 Loop 一批④）：NextUp 呈现状态与数据同源上报——封面条
+    // 的渲染条件就是 coverNextEvent != null（见下方 NextUpStrip 调用点），呈现的
+    // 事件 id 与 coverNextEvent.eventId 同拍写入/清空，供建议面按 id 去重。
+    LaunchedEffect(coverNextEvent) {
+        TodayEventsHolder.updatePresentedNextEventId(coverNextEvent?.eventId)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            TodayEventsHolder.update(null)
+            TodayEventsHolder.updatePresentedNextEventId(null)
+        }
+    }
     // 批B ③：coverPaletteFor 是非组合纯函数，深浅由这里从 CompositionLocal 读后传入
     val coverIsDark = AILauncherColors.current.isDark
     val coverPalette = remember {
