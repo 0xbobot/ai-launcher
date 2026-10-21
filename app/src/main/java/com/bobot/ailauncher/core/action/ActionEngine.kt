@@ -41,31 +41,33 @@ object ActionEngine {
             }
         }
 
-        // 4) 工具选择：本机已安装的能力
-        val resolved = CapabilityRegistry.resolveFirstInstalled(context, cap.id)
-            ?: return fail(request, "本机没有安装支持「${cap.label}」的应用")
-
-        // 5) 执行（按 PRD §二十一优先级；App Functions/无障碍暂不支持，要明说）
-        val ok = try {
+        // 4) 工具选择 + 执行（v0.68.88：候选链——已装提供方深链优先序 → geo
+        //    兜底 → 打开绑定的应用本体；不再「绑死一家、失败即死胡同」）
+        val outcome = try {
             when (cap.executionMethod) {
                 ExecutionMethod.APP_FUNCTION ->
                     return fail(request, "「${cap.label}」需要 App Functions，当前应用暂不支持")
                 ExecutionMethod.ACCESSIBILITY ->
                     return fail(request, "「${cap.label}」需要无障碍操作，暂不提供")
                 else ->
-                    CapabilityRegistry.launchResolved(context, resolved, request.params)
+                    CapabilityRegistry.launchCapability(context, cap, request.params)
             }
         } catch (t: Throwable) {
             Log.w("ActionEngine", "execute failed: ${cap.id}", t)
-            false
+            CapabilityRegistry.LaunchOutcome.Failed
         }
 
-        // 6) 结果回写事件总线（成功/失败都要，PRD §六十四）
-        EventBus.emit(LauncherEvent.TaskCompleted(request.id, ok))
-        return if (ok) {
-            ActionResult.Done("已为你打开${resolved.label}")
-        } else {
-            fail(request, "没能打开「${cap.label}」，换个说法试试")
+        // 5) 结果回写事件总线（成功/失败都要，PRD §六十四）+ 诚实文案分层：
+        //    一步都没得试（没装任何能用的应用）≠ 试了但没打开，不许混报。
+        return when (outcome) {
+            is CapabilityRegistry.LaunchOutcome.Opened -> {
+                EventBus.emit(LauncherEvent.TaskCompleted(request.id, true))
+                ActionResult.Done("已为你打开${outcome.label}")
+            }
+            CapabilityRegistry.LaunchOutcome.NoProvider ->
+                fail(request, "本机没有安装支持「${cap.label}」的应用")
+            CapabilityRegistry.LaunchOutcome.Failed ->
+                fail(request, "没能打开「${cap.label}」，换个说法试试")
         }
     }
 

@@ -38,6 +38,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -75,6 +76,7 @@ import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
+import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
@@ -309,8 +311,14 @@ fun IntentEntry(
     // 的「此刻常用」复用（launchableApps），避免重复查 PackageManager。
     var launchableApps by remember { mutableStateOf<List<AppInfo>?>(null) }
     var localIndex by remember { mutableStateOf<List<AppSearchIndex.Entry>?>(null) }
-    LaunchedEffect(committedQuery) {
-        if (committedQuery.isNotBlank() && localIndex == null) {
+    // v0.68.88·保持更新：索引/应用列表按 InstalledApps.epoch 失效——此前懒建后
+    // 永不刷新，新装的应用在首页永远搜不到（卸了的还留在结果里），必须等进程
+    // 重启；现在装/卸一发生，epoch 变化，下一次查询即在 IO 线程按新清单重建。
+    var indexEpoch by remember { mutableIntStateOf(-1) }
+    val installedEpoch by InstalledApps.epoch.collectAsState()
+    LaunchedEffect(Unit) { InstalledApps.ensureRegistered(context) }
+    LaunchedEffect(committedQuery, installedEpoch) {
+        if (committedQuery.isNotBlank() && (localIndex == null || indexEpoch != installedEpoch)) {
             val built = withContext(Dispatchers.IO) {
                 val hidden = HiddenApps.getHidden(context)
                 val apps = listLaunchableApps(context).filter {
@@ -318,8 +326,9 @@ fun IntentEntry(
                 }
                 apps to AppSearchIndex.build(context, apps)
             }
-            if (launchableApps == null) launchableApps = built.first
-            if (localIndex == null) localIndex = built.second
+            launchableApps = built.first
+            localIndex = built.second
+            indexEpoch = installedEpoch
         }
     }
     val localResults = remember(committedQuery, localIndex, submittedText) {
@@ -344,14 +353,19 @@ fun IntentEntry(
     // （原本只活在 PetZone 的 Composable 状态里）；建议面只展示，点选才打开/入会。
     val nextEvent by TodayEventsHolder.nextEvent.collectAsState()
     var suggestionApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
-    LaunchedEffect(capsuleFocused) {
+    LaunchedEffect(capsuleFocused, installedEpoch) {
         if (capsuleFocused) {
-            val apps = launchableApps ?: withContext(Dispatchers.IO) {
-                val hidden = HiddenApps.getHidden(context)
-                listLaunchableApps(context).filter {
-                    it.packageName != context.packageName && it.packageName !in hidden
-                }
-            }.also { launchableApps = it }
+            // 建议面的应用列表与索引同 epoch 口径：装/卸后别再端已卸载的应用
+            val apps = if (launchableApps == null || indexEpoch != installedEpoch) {
+                withContext(Dispatchers.IO) {
+                    val hidden = HiddenApps.getHidden(context)
+                    listLaunchableApps(context).filter {
+                        it.packageName != context.packageName && it.packageName !in hidden
+                    }
+                }.also { launchableApps = it }
+            } else {
+                launchableApps!!
+            }
             suggestionApps = withContext(Dispatchers.IO) {
                 AppUsageTracker.topApps(context, apps, 4)
             }

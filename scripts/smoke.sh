@@ -1133,19 +1133,27 @@ else
   log "python3 unavailable - a11y check skipped (not counted)"
 fi
 
-# --- 17. 缺参追问态实拍 + planner 注入端到端取证（意图改进二批）---
+# --- 17. 缺参追问态 + 能力动态绑定端到端（意图改进二批 + v0.68.88）---
 # 手段（仅测试路径，生产逻辑零改动）：LlmConfig 读 SharedPreferences "llm"——
 # run-as 预写 api_key/base_url/model，把 base_url 指向 runner 本机 mock LLM
-#（scripts/mock_llm.py）。mock 对任何输入都回
-# 通路（首轮实测教训）：base_url 不能用 10.0.2.2——targetSdk 34 默认禁明文 HTTP、
-# 无 networkSecurityConfig 时请求直接被系统拦下（界面只报「网络超时」）。
-# 改走 adb reverse + 127.0.0.1：回环地址在明文豁免内，零生产配置改动。
-# daohang 且 params 为空 → 协调器执行前校验必然拦下、进 NeedsInput 追问态；
-# 再补一句参数，应合并走执行（CI 未装高德/百度地图，执行如实失败
-#「本机没有安装支持」——恰好证明合并后真的到了执行，而不是又被追问/吞掉）。
-# 顺带断言发往 mock 的请求体含带参数说明的 hints 与上下文包（二批注入取证）。
+#（scripts/mock_llm.py，对任何输入恒回 daohang 空参）。通路沿用二批定案：
+# adb reverse + 127.0.0.1 + src/debug 网络配置放行回环明文。
+#
+# 阶段 A（出厂镜像：没装任何地图应用）：
+# - 提交 -> mock 回 daohang 空参 -> 协调器执行前校验拦下进 NeedsInput 追问
+#   （needsinput-question，沿用二批）；
+# - 该次请求里的 hints 不得含未装应用的能力（wechat/doubao）——v0.68.88
+#   「不许诺做不到的事」（hints-excludes-unavailable）；上下文包【现在】应在；
+# - 补参后执行：无提供方且本镜像无 geo 处理者 -> 如实报「本机没有安装支持」
+#   并离开追问态（fill-without-provider-honest）。
+# 阶段 B（装上腾讯地图桩 scripts/tencent-stub，包名 com.tencent.map——复现
+# Bob 真机「只装腾讯地图」场景；桩由 build-tools 在 runner 上现场拼装签名）：
+# - 同一句提交，这次请求里的 hints 必须含 daohang 的参数说明——绑定随实装
+#   变化（planner-pack-injected，含上下文包断言）；
+# - 追问补参后执行应真正分发：前台变成 com.tencent.map
+#   （needsinput-fill-executes，语义较二批升级：从「如实失败」变「真打开了」）。
 # mock 起不来或 prefs 预写失败时整段跳过不计 FAIL（环境问题不冒充产品失败）；
-# 段末清掉 llm prefs 并 force-stop，不污染后续段落与真机配置。
+# 段末清掉 llm prefs 并 force-stop，桩卸载，不污染后续段落与真机配置。
 MOCK_PORT=18741
 MOCK_LOG="$OUT/mock_llm_requests.log"
 MOCK_PID=""
@@ -1161,6 +1169,84 @@ if command -v python3 > /dev/null 2>&1; then
     sleep 0.5
   done
 fi
+
+# 定位胶囊 -> CGX/CGY（dump 找占位文案，与第 15 段同法）
+ni_locate_capsule() {
+  CGX=""; CGY=""
+  adb shell uiautomator dump /sdcard/ni_dump0.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/ni_dump0.xml "$OUT/ni_dump0.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/ni_dump0.xml" ]; then
+    local CNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/ni_dump0.xml" | head -1)
+    if [ -n "$CNODE" ]; then
+      local CNUMS=$(echo "$CNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+      local CX1=$(echo "$CNUMS" | sed -n 1p); local CY1=$(echo "$CNUMS" | sed -n 2p)
+      local CX2=$(echo "$CNUMS" | sed -n 3p); local CY2=$(echo "$CNUMS" | sed -n 4p)
+      if [ -n "$CX1" ] && [ -n "$CY2" ]; then
+        CGX=$(( (CX1 + CX2) / 2 )); CGY=$(( (CY1 + CY2) / 2 ))
+      fi
+    fi
+  fi
+  [ -n "$CGX" ]
+}
+
+# 定位并点按金色提交钮（content-desc=提交）；成功返回 0
+ni_tap_submit() {
+  adb shell uiautomator dump /sdcard/ni_btn.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/ni_btn.xml "$OUT/ni_btn.xml" > /dev/null 2>&1 || true
+  local BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/ni_btn.xml" 2> /dev/null | head -1)
+  [ -n "$BNODE" ] || return 1
+  local BNUMS=$(echo "$BNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  local BX1=$(echo "$BNUMS" | sed -n 1p); local BY1=$(echo "$BNUMS" | sed -n 2p)
+  local BX2=$(echo "$BNUMS" | sed -n 3p); local BY2=$(echo "$BNUMS" | sed -n 4p)
+  [ -n "$BX1" ] && [ -n "$BY2" ] || return 1
+  adb shell input swipe $(( (BX1 + BX2) / 2 )) $(( (BY1 + BY2) / 2 )) $(( (BX1 + BX2) / 2 )) $(( (BY1 + BY2) / 2 )) 150 > /dev/null 2>&1 || true
+  return 0
+}
+
+# 聚焦胶囊 -> 输词（补空格让 LatinIME 组合上屏，同第 15 段注）-> 点提交
+ni_type_submit() {
+  adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 > /dev/null 2>&1 || true
+  sleep 2
+  adb shell input text "$1" > /dev/null 2>&1 || true
+  sleep 1
+  adb shell input text "%s" > /dev/null 2>&1 || true
+  sleep 1
+  ni_tap_submit
+}
+
+# 轮询等 dump 里出现某串（最多约 12 秒，慢腿余量）；最后一份 dump 留在 ni_poll.xml
+ni_wait_text() {
+  for i in $(seq 1 12); do
+    sleep 1
+    adb shell uiautomator dump /sdcard/ni_poll.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/ni_poll.xml "$OUT/ni_poll.xml" > /dev/null 2>&1 || true
+    if grep -q "$1" "$OUT/ni_poll.xml" 2> /dev/null; then return 0; fi
+  done
+  return 1
+}
+
+# 腾讯地图桩：用 runner 的 build-tools 现场拼装（javac -> d8 -> aapt2 link ->
+# zip 塞 dex -> zipalign -> apksigner 自签），成功置 STUB_APK 并返回 0
+STUB_APK=""
+ni_build_stub() {
+  local BT=$(ls "$ANDROID_HOME/build-tools" 2> /dev/null | sort -V | tail -1)
+  [ -n "$BT" ] || return 1
+  local AJAR=$(ls "$ANDROID_HOME"/platforms/android-*/android.jar 2> /dev/null | sort -V | tail -1)
+  [ -n "$AJAR" ] || return 1
+  local BTOOLS="$ANDROID_HOME/build-tools/$BT"
+  local D="$OUT/stubbuild"
+  rm -rf "$D"; mkdir -p "$D/classes"
+  javac -encoding UTF-8 -cp "$AJAR" -d "$D/classes" scripts/tencent-stub/MainActivity.java 2> "$D/javac.log" || return 1
+  "$BTOOLS/d8" --min-api 24 --output "$D" $(find "$D/classes" -name '*.class') 2> "$D/d8.log" || return 1
+  "$BTOOLS/aapt2" link -I "$AJAR" --manifest scripts/tencent-stub/AndroidManifest.xml -o "$D/stub.apk" 2> "$D/aapt2.log" || return 1
+  (cd "$D" && zip -q stub.apk classes.dex) || return 1
+  "$BTOOLS/zipalign" -f 4 "$D/stub.apk" "$D/stub-aligned.apk" || return 1
+  keytool -genkeypair -keystore "$D/stub.keystore" -storepass android -keypass android -alias stub -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=smoke-stub" 2> /dev/null || return 1
+  "$BTOOLS/apksigner" sign --ks "$D/stub.keystore" --ks-pass pass:android --key-pass pass:android --out "$D/tencent-stub.apk" "$D/stub-aligned.apk" || return 1
+  STUB_APK="$D/tencent-stub.apk"
+  return 0
+}
+
 if [ "$MOCK_UP" = "1" ]; then
   # 设备侧 127.0.0.1:$MOCK_PORT -> runner 本机 mock（回环转发，段末撤销）
   adb reverse "tcp:$MOCK_PORT" "tcp:$MOCK_PORT" > /dev/null 2>&1 || true
@@ -1178,111 +1264,91 @@ if [ "$MOCK_UP" = "1" ]; then
     sleep 5
     adb shell input keyevent KEYCODE_HOME || true
     sleep 2
-    # 定位胶囊（dump 找占位文案，与第 15 段同法）
-    CGX=""; CGY=""
-    adb shell uiautomator dump /sdcard/ni_dump0.xml > /dev/null 2>&1 || true
-    adb pull /sdcard/ni_dump0.xml "$OUT/ni_dump0.xml" > /dev/null 2>&1 || true
-    if [ -f "$OUT/ni_dump0.xml" ]; then
-      CNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/ni_dump0.xml" | head -1)
-      if [ -n "$CNODE" ]; then
-        CNUMS=$(echo "$CNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-        CX1=$(echo "$CNUMS" | sed -n 1p); CY1=$(echo "$CNUMS" | sed -n 2p)
-        CX2=$(echo "$CNUMS" | sed -n 3p); CY2=$(echo "$CNUMS" | sed -n 4p)
-        if [ -n "$CX1" ] && [ -n "$CY2" ]; then
-          CGX=$(( (CX1 + CX2) / 2 )); CGY=$(( (CY1 + CY2) / 2 ))
-        fi
-      fi
-    fi
-    if [ -n "$CGX" ]; then
-      # 聚焦 -> 输词（补空格让 LatinIME 组合上屏，同第 15 段注）-> 定位提交钮 -> 提交
-      adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 || true
-      sleep 2
-      adb shell input text "daohang" || true
-      sleep 1
-      adb shell input text "%s" || true
-      sleep 1
-      SUBX=""; SUBY=""
-      adb shell uiautomator dump /sdcard/ni_kb.xml > /dev/null 2>&1 || true
-      adb pull /sdcard/ni_kb.xml "$OUT/ni_kb.xml" > /dev/null 2>&1 || true
-      if [ -f "$OUT/ni_kb.xml" ]; then
-        BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/ni_kb.xml" | head -1)
-        if [ -n "$BNODE" ]; then
-          BNUMS=$(echo "$BNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-          BX1=$(echo "$BNUMS" | sed -n 1p); BY1=$(echo "$BNUMS" | sed -n 2p)
-          BX2=$(echo "$BNUMS" | sed -n 3p); BY2=$(echo "$BNUMS" | sed -n 4p)
-          if [ -n "$BX1" ] && [ -n "$BY2" ]; then
-            SUBX=$(( (BX1 + BX2) / 2 )); SUBY=$(( (BY1 + BY2) / 2 ))
-          fi
-        fi
-      fi
-      if [ -n "$SUBX" ]; then
-        adb shell input swipe "$SUBX" "$SUBY" "$SUBX" "$SUBY" 150 || true
-        # 轮询等追问出现（plan 走本机 mock 应很快，给足慢腿余量）
-        FOUND_Q=0
-        for i in $(seq 1 12); do
-          sleep 1
-          adb shell uiautomator dump /sdcard/ni_q.xml > /dev/null 2>&1 || true
-          adb pull /sdcard/ni_q.xml "$OUT/ni_q.xml" > /dev/null 2>&1 || true
-          if grep -q "去哪儿" "$OUT/ni_q.xml" 2> /dev/null; then FOUND_Q=1; break; fi
-        done
-        shot "intent-needsinput"
-        # 诊断（mock 通路排障）：把 LlmPlan 的网络异常原文打进冒烟日志并存档，
-        # 区分「明文被拦 / 转发未生效 / 连接拒绝」，不靠猜。
-        adb logcat -d 2> /dev/null | grep "LlmPlan" | tail -4 | while IFS= read -r line; do log "llm: $line"; done
-        adb logcat -d 2> /dev/null | grep "LlmPlan" > "$OUT/ni_logcat.txt" || true
-        if [ "$FOUND_Q" = "1" ]; then
+    if ni_locate_capsule; then
+      # ===== 阶段 A：没装任何地图（如实失败 + hints 不许诺）=====
+      REQ_A0=$(wc -l < "$MOCK_LOG" 2> /dev/null || echo 0)
+      if ni_type_submit "daohang"; then
+        if ni_wait_text "去哪儿"; then
           ok "needsinput-question"
         else
           ng "needsinput-question"
         fi
-        # planner 注入取证：请求体里应有带参数说明的 hints 与上下文包
-        if grep -q "必填 to=目的地" "$MOCK_LOG" 2> /dev/null && grep -q "【现在】" "$MOCK_LOG" 2> /dev/null; then
-          ok "planner-pack-injected"
+        shot "intent-needsinput"
+        # 诊断（mock 通路排障）：把 LlmPlan 的网络异常原文打进冒烟日志并存档
+        adb logcat -d 2> /dev/null | grep "LlmPlan" | tail -4 | while IFS= read -r line; do log "llm: $line"; done
+        adb logcat -d 2> /dev/null | grep "LlmPlan" > "$OUT/ni_logcat.txt" || true
+        # hints 过滤取证：A 段请求含上下文包、但不得含未装应用的能力行
+        A_LOG=$(tail -n +$((REQ_A0 + 1)) "$MOCK_LOG" 2> /dev/null)
+        if ! echo "$A_LOG" | grep -q "wechat: " && ! echo "$A_LOG" | grep -q "doubao: " && echo "$A_LOG" | grep -q "【现在】"; then
+          ok "hints-excludes-unavailable"
         else
-          ng "planner-pack-injected"
+          ng "hints-excludes-unavailable"
         fi
-        # 补参：再聚焦（追问态下输入框已清空）-> 输目的地 -> 提交 -> 应离开追问态走到执行
-        adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 || true
-        sleep 2
-        adb shell input text "jichang" || true
-        sleep 1
-        adb shell input text "%s" || true
-        sleep 1
-        SUBX2=""; SUBY2=""
-        adb shell uiautomator dump /sdcard/ni_kb2.xml > /dev/null 2>&1 || true
-        adb pull /sdcard/ni_kb2.xml "$OUT/ni_kb2.xml" > /dev/null 2>&1 || true
-        if [ -f "$OUT/ni_kb2.xml" ]; then
-          BNODE2=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/ni_kb2.xml" | head -1)
-          if [ -n "$BNODE2" ]; then
-            BNUMS2=$(echo "$BNODE2" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-            BX21=$(echo "$BNUMS2" | sed -n 1p); BY21=$(echo "$BNUMS2" | sed -n 2p)
-            BX22=$(echo "$BNUMS2" | sed -n 3p); BY22=$(echo "$BNUMS2" | sed -n 4p)
-            if [ -n "$BX21" ] && [ -n "$BY22" ]; then
-              SUBX2=$(( (BX21 + BX22) / 2 )); SUBY2=$(( (BY21 + BY22) / 2 ))
-            fi
-          fi
-        fi
-        if [ -n "$SUBX2" ]; then
-          adb shell input swipe "$SUBX2" "$SUBY2" "$SUBX2" "$SUBY2" 150 || true
-          sleep 4
+        # 补参 -> 执行：无提供方 + 无 geo 处理者 -> 如实报错且离开追问态
+        if ni_type_submit "jichang"; then
+          ni_wait_text "本机没有安装支持" || true
+          cp "$OUT/ni_poll.xml" "$OUT/ni_a.xml" 2> /dev/null || true
           shot "intent-needsinput-answered"
-          adb shell uiautomator dump /sdcard/ni_a.xml > /dev/null 2>&1 || true
-          adb pull /sdcard/ni_a.xml "$OUT/ni_a.xml" > /dev/null 2>&1 || true
           if grep -q "本机没有安装支持" "$OUT/ni_a.xml" 2> /dev/null && ! grep -q "去哪儿" "$OUT/ni_a.xml" 2> /dev/null; then
-            ok "needsinput-fill-executes"
+            ok "fill-without-provider-honest"
+          else
+            ng "fill-without-provider-honest"
+          fi
+        else
+          ng "fill-without-provider-honest"
+        fi
+      else
+        ng "needsinput-question"
+        ng "hints-excludes-unavailable"
+        ng "fill-without-provider-honest"
+      fi
+      # ===== 阶段 B：只装腾讯地图（桩）时，导航应绑腾讯 =====
+      if ni_build_stub && adb install -r "$STUB_APK" > /dev/null 2>&1; then
+        log "tencent stub installed"
+        # 重启应用进程：清掉阶段 A 的错误态与旧缓存，从干净状态重走一遍
+        adb shell am force-stop "$PKG" || true
+        sleep 1
+        adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+        sleep 5
+        adb shell input keyevent KEYCODE_HOME || true
+        sleep 2
+        REQ_B0=$(wc -l < "$MOCK_LOG" 2> /dev/null || echo 0)
+        if ni_locate_capsule && ni_type_submit "daohang"; then
+          ni_wait_text "去哪儿" || true
+          # 绑定取证：这次请求里 daohang 必须带着参数说明回到 hints
+          B_LOG=$(tail -n +$((REQ_B0 + 1)) "$MOCK_LOG" 2> /dev/null)
+          if echo "$B_LOG" | grep -q "必填 to=目的地" && echo "$B_LOG" | grep -q "【现在】"; then
+            ok "planner-pack-injected"
+          else
+            ng "planner-pack-injected"
+          fi
+          if ni_type_submit "jichang"; then
+            sleep 4
+            shot "intent-tencent-bound"
+            FG_B=$(adb shell dumpsys activity activities 2> /dev/null | grep -m1 "topResumedActivity" || true)
+            log "phaseB foreground: $FG_B"
+            if echo "$FG_B" | grep -q "com.tencent.map"; then
+              ok "needsinput-fill-executes"
+            else
+              ng "needsinput-fill-executes"
+            fi
           else
             ng "needsinput-fill-executes"
           fi
         else
+          ng "planner-pack-injected"
           ng "needsinput-fill-executes"
         fi
+        adb shell pm uninstall com.tencent.map > /dev/null 2>&1 || true
       else
-        ng "needsinput-question"
+        log "tencent stub build/install failed - phase B counted as fail"
         ng "planner-pack-injected"
         ng "needsinput-fill-executes"
       fi
     else
       ng "needsinput-question"
+      ng "hints-excludes-unavailable"
+      ng "fill-without-provider-honest"
       ng "planner-pack-injected"
       ng "needsinput-fill-executes"
     fi

@@ -122,11 +122,36 @@
           "icon": "directions_subway",
           "id": "ditie",
           "label": "地铁",
-          "note": "需真机验证",
+          "note": "三家深链均以坐标直达（腾讯 routeplan 官方格式 tocoord）；没装地图时退 geo 坐标点；需真机验证",
           "packageNames": [
             "com.autonavi.minimap",
+            "com.tencent.map",
             "com.baidu.BaiduMap"
           ],
+          "providers": [
+            {
+              "name": "高德地图",
+              "packageNames": [
+                "com.autonavi.minimap"
+              ],
+              "deeplink": "amap://route?sourceApplication=ai-launcher&dlat={lat}&dlon={lon}&dev=0&t=1"
+            },
+            {
+              "name": "腾讯地图",
+              "packageNames": [
+                "com.tencent.map"
+              ],
+              "deeplink": "qqmap://map/routeplan?type=bus&tocoord={lat},{lon}&referer=ai-launcher"
+            },
+            {
+              "name": "百度地图",
+              "packageNames": [
+                "com.baidu.BaiduMap"
+              ],
+              "deeplink": "baidumap://map/direction?destination=latlng:{lat},{lon}&mode=transit&coord_type=gcj02&src=ai-launcher"
+            }
+          ],
+          "geoFallback": "coord",
           "params": [
             {
               "name": "lat",
@@ -148,11 +173,36 @@
           "icon": "navigation",
           "packageNames": [
             "com.autonavi.minimap",
-            "com.baidu.BaiduMap"
+            "com.baidu.BaiduMap",
+            "com.tencent.map"
           ],
           "deeplink": "amap://route?sourceApplication=ai-launcher&dname={to}&dev=0&t=1",
+          "providers": [
+            {
+              "name": "高德地图",
+              "packageNames": [
+                "com.autonavi.minimap"
+              ],
+              "deeplink": "amap://route?sourceApplication=ai-launcher&dname={to}&dev=0&t=1"
+            },
+            {
+              "name": "百度地图",
+              "packageNames": [
+                "com.baidu.BaiduMap"
+              ],
+              "deeplink": "baidumap://map/direction?destination={to}&mode=driving&src=ai-launcher"
+            },
+            {
+              "name": "腾讯地图",
+              "packageNames": [
+                "com.tencent.map"
+              ],
+              "deeplink": null
+            }
+          ],
+          "geoFallback": "name",
           "fallbackToLauncher": true,
-          "note": "需真机验证",
+          "note": "腾讯 routeplan 官方要求目的地坐标（tocoord 必填），只有名称时给不出深链：腾讯步走 geo 兜底/打开应用；需真机验证",
           "params": [
             {
               "name": "to",
