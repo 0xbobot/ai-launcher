@@ -4,7 +4,8 @@
 # 每步容错：失败记 FAIL 继续往下走，不设 -e；最后汇总 PASS/FAIL 并以 FAIL 数作为退出码。
 # 截图（smoke-out/）：home.png / fan.png / pet.png / appcenter.png / dark-home.png / dark-appcenter.png /
 # intent-home.png / intent-nokey.png / intent-local.png / intent-opened.png / appcenter2.png /
-# appcenter-filter.png，供人工验证。
+# appcenter-filter.png / intent-tpl-giant.png / intent-tpl-headline.png / intent-tpl-minimal.png
+#（含各自 -local 结果条图），供人工验证。
 # 首启对话框（onboarding 引导、低电量保护询问）用 run-as 预写 SharedPreferences 跳过，
 # 不依赖 UI 坐标；若预写失败，用固定坐标点按做兜底（pixel_6 1080x2400，对话框位置稳定）。
 
@@ -311,7 +312,85 @@ if [ -f "$OUT/ac_dump2.xml" ]; then
   fi
 fi
 
-# --- 11. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 11. 封面 3 模板下的胶囊 + 结果条（R2 UI 10-21 追加：Bob 提醒主页有 3 模板轮换）---
+# 模板选择是纯日期逻辑：CoverHero 里 coverTemplateFor() = DAY_OF_YEAR % 3 ->
+# values()[0]=GIANT_TIME（时间巨像）/ [1]=HEADLINE（头条简报）/ [2]=MINIMAL（留白时刻），不走 prefs。
+# 故靠改模拟器日期（今天起 +0/+1/+2 天必覆盖三余数）逐个切换；每次 force-stop 重启回首页，
+# 截 intent-tpl-<name>.png 并 dump 断言胶囊在场，再输 "cam" 截 -local 图并断言结果条 Camera。
+# 日期改不动（如镜像无权限）时只 log 记录、不判失败——此时以代码级证据为准：
+# PetZone 封面 Column 里 CoverHero 之后隔 16dp 无条件调用 coverIntentSlot()，三模板共用同一渲染路径。
+adb shell settings put global auto_time 0 > /dev/null 2>&1 || true
+TPL_ALL=1
+for OFF in 0 1 2; do
+  TGT=$(date -d "+$OFF day" +%m%d1000%Y.00)
+  DOY=$(date -d "+$OFF day" +%j)
+  RES=$((10#$DOY % 3))
+  case $RES in
+    0) TPL=giant ;;
+    1) TPL=headline ;;
+    *) TPL=minimal ;;
+  esac
+  adb shell date "$TGT" > /dev/null 2>&1 || true
+  sleep 1
+  NOW_DOY=$(adb shell date +%j 2>/dev/null | tr -d '\r')
+  if [ "$NOW_DOY" != "$DOY" ]; then
+    adb root > /dev/null 2>&1 || true
+    adb wait-for-device > /dev/null 2>&1 || true
+    sleep 2
+    adb shell date "$TGT" > /dev/null 2>&1 || true
+    sleep 1
+    NOW_DOY=$(adb shell date +%j 2>/dev/null | tr -d '\r')
+  fi
+  if [ "$NOW_DOY" != "$DOY" ]; then
+    log "template switch unavailable (date set failed: want doy $DOY, got $NOW_DOY) - code-level evidence only"
+    TPL_ALL=0
+    break
+  fi
+  log "cover template: $TPL (doy $DOY, residue $RES)"
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  shot "intent-tpl-$TPL"
+  adb shell uiautomator dump /sdcard/tpl_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/tpl_dump.xml "$OUT/tpl_${TPL}.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/tpl_${TPL}.xml" ] && grep -q 'text="想做什么？"' "$OUT/tpl_${TPL}.xml"; then
+    ok "tpl-$TPL-capsule"
+    TNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/tpl_${TPL}.xml" | head -1)
+    TNUMS=$(echo "$TNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    TX1=$(echo "$TNUMS" | sed -n 1p); TY1=$(echo "$TNUMS" | sed -n 2p)
+    TX2=$(echo "$TNUMS" | sed -n 3p); TY2=$(echo "$TNUMS" | sed -n 4p)
+    if [ -n "$TX1" ] && [ -n "$TY2" ]; then
+      TCX=$(( (TX1 + TX2) / 2 )); TCY=$(( (TY1 + TY2) / 2 ))
+      adb shell input swipe "$TCX" "$TCY" "$TCX" "$TCY" 150 || true
+      sleep 2
+      adb shell input text "cam" || true
+      sleep 1
+      adb shell input keyevent KEYCODE_BACK || true
+      sleep 1
+      shot "intent-tpl-$TPL-local"
+      adb shell uiautomator dump /sdcard/tpl_dump2.xml > /dev/null 2>&1 || true
+      adb pull /sdcard/tpl_dump2.xml "$OUT/tpl_${TPL}_local.xml" > /dev/null 2>&1 || true
+      if [ -f "$OUT/tpl_${TPL}_local.xml" ] && grep -q 'text="Camera"' "$OUT/tpl_${TPL}_local.xml"; then
+        ok "tpl-$TPL-local"
+      else
+        ng "tpl-$TPL-local"
+      fi
+    else
+      ng "tpl-$TPL-local"
+    fi
+  else
+    ng "tpl-$TPL-capsule"
+  fi
+done
+adb shell settings put global auto_time 1 > /dev/null 2>&1 || true
+if [ "$TPL_ALL" = "1" ]; then
+  log "cover templates exercised: giant/headline/minimal"
+fi
+
+# --- 12. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true
