@@ -241,6 +241,27 @@ object OtaUpdater {
     }
 
     /**
+     * 读下载包内的 versionCode（读不到/不可解析返回 null）。
+     * 下载完成时与 update.json 声称的 versionCode 比对，防错包被当成功。
+     */
+    fun apkVersionCode(context: Context, file: File): Int? {
+        return try {
+            if (!file.exists() || file.length() <= 0) return null
+            val pi = if (Build.VERSION.SDK_INT >= 33) {
+                context.packageManager.getPackageArchiveInfo(
+                    file.absolutePath, PackageManager.PackageInfoFlags.of(0)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+            }
+            pi?.longVersionCode?.toInt()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * App 版本变化（升级/重装）后调用：清理旧安装包与旧下载状态，
      * 避免下次更新时"直接安装"命中旧包。建议在 MainActivity.onCreate 调用。
      */
