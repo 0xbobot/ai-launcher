@@ -8,13 +8,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import okhttp3.Dns
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.io.IOException
 import java.net.Inet4Address
@@ -36,12 +34,27 @@ import java.util.concurrent.TimeUnit
  *   后继续下；Launcher 常驻，进程不会被杀。
  * - 完成自动弹安装（promptInstall 带 FLAG_ACTIVITY_NEW_TASK，可用 applicationContext）。
  * - 对话框通过 state StateFlow 显示进度；失败置 Failed，对话框显示重试。
+ *
+ * 下载提速（本次改动，Bob：App 内下载明显比 Chrome 慢）：
+ * 旧实现是单连接单流顺序下载——跨境到 GitHub 资产 CDN 的链路上单条 TCP 流吃不满
+ * 带宽，且失败/取消即删文件从零重下。现在改走 [ChunkedDownloader]：Range 分片
+ * 并行拉取（服务端不支持 Range 自动退回单流）+ 片级断点续传；State 带实时速度，
+ * 对话框显示 MB/s，用户能直接和 Chrome 对比。
+ * 失败/取消不再删已下载分片（续传用）；半成品永不以正式包名出现（拼装校验通过
+ * 才落为 APK_FILE_NAME），且 OtaUpdater 的 complete 标记未置位前 shouldPromptInstall
+ * 不会命中，所以保留分片不破坏 v0.65.6 的防误装设计。
  */
 object OtaDownloader {
 
     sealed interface State {
         data object Idle : State
-        data class Downloading(val progress: Float) : State
+        data class Downloading(
+            val progress: Float,
+            val downloadedBytes: Long = 0L,
+            val totalBytes: Long = -1L,
+            /** 实时速度（字节/秒，滑动窗口估算）；刚开始或无法估算时为 0 */
+            val speedBps: Long = 0L
+        ) : State
         data class Success(val file: File) : State
         data object Failed : State
     }
@@ -51,6 +64,9 @@ object OtaDownloader {
 
     private var job: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private const val USER_AGENT = "AI-Launcher-OTA"
+    private const val PARTS_DIR_NAME = "ota-parts"
 
     // v0.41.22：client 需要 Context 来读系统代理，改为按需构建（缓存）
     private var cachedClient: OkHttpClient? = null
@@ -107,89 +123,81 @@ object OtaDownloader {
         }
     }
 
-    /** 开始下载。已在下载中则忽略（防双击）。 */
+    /** 开始下载。已在下载中则忽略（防双击）。同版本重试会自动续传未完成的分片。 */
     fun start(context: Context, info: OtaInfo) {
         if (_state.value is State.Downloading) return
         val appContext = context.applicationContext
-        // 清旧残留包
+        // 清旧残留包（正式包名只允许出现完整包；分片在 ota-parts 里，由 meta 按 URL 自洽）
         OtaUpdater.downloadedApk(appContext)?.delete()
         OtaUpdater.markDownloadStart(appContext, info.versionCode)
         _state.value = State.Downloading(0f)
         job = scope.launch {
-            // v0.65.6：partial 文件引用外提——失败/中断时删掉，不留残缺包被误装
-            var file: File? = null
             try {
-                val req = Request.Builder()
-                    .url(info.apkUrl)
-                    .header("User-Agent", "AI-Launcher-OTA")
-                    .build()
-                getClient(appContext).newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) {
-                        _state.value = State.Failed
-                        return@launch
-                    }
-                    val body = resp.body
-                    if (body == null) {
-                        _state.value = State.Failed
-                        return@launch
-                    }
-                    val total = body.contentLength() // 可能为 -1（未知）
-                    // v0.65.6：记录期望长度，用于完整性校验
-                    OtaUpdater.markDownloadSize(appContext, total)
-                    file = File(
-                        appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
-                        OtaUpdater.APK_FILE_NAME
-                    )
-                    val outFile = file!!
-                    body.byteStream().use { input ->
-                        outFile.outputStream().use { output ->
-                            val buf = ByteArray(32 * 1024)
-                            var downloaded = 0L
-                            var lastEmit = 0L
-                            while (true) {
-                                ensureActive() // 支持取消
-                                val n = input.read(buf)
-                                if (n == -1) break
-                                output.write(buf, 0, n)
-                                downloaded += n
-                                // 进度节流：每 200ms 或每 2% 更新一次，避免 StateFlow 刷太频
-                                val now = System.currentTimeMillis()
-                                if (total > 0 && (now - lastEmit > 200 || downloaded == total)) {
-                                    lastEmit = now
-                                    _state.value = State.Downloading(
-                                        (downloaded.toFloat() / total).coerceIn(0f, 1f)
-                                    )
-                                }
-                            }
-                            output.flush()
-                            // v0.65.6：长度校验——流提前结束（锁屏断网等）算失败，不装坏包
-                            if (total > 0 && downloaded != total) {
-                                throw IOException(
-                                    "incomplete download: $downloaded/$total"
-                                )
-                            }
+                val downloadsDir = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                    ?: throw IOException("downloads dir unavailable")
+                val target = File(downloadsDir, OtaUpdater.APK_FILE_NAME)
+                val workDir = File(downloadsDir, PARTS_DIR_NAME)
+
+                // 速度估算：保留最近的采样点（时间, 累计字节），用最近 ≤3 秒窗口算速率
+                val samples = ArrayDeque<Pair<Long, Long>>()
+                var lastEmitAt = 0L
+                val downloader = ChunkedDownloader(getClient(appContext))
+                val outFile = downloader.download(
+                    url = info.apkUrl,
+                    userAgent = USER_AGENT,
+                    workDir = workDir,
+                    targetFile = target
+                ) { p ->
+                    val now = System.currentTimeMillis()
+                    synchronized(samples) {
+                        samples.addLast(now to p.downloaded)
+                        while (samples.size > 2 && now - samples.first().first > 3_000) {
+                            samples.removeFirst()
                         }
                     }
-                    // v0.65.6：APK 可解析校验——截断/损坏包直接判失败
-                    if (!OtaUpdater.isValidApk(appContext, outFile)) {
-                        throw IOException("downloaded apk failed to parse")
-                    }
-                    _state.value = State.Downloading(1f)
-                    _state.value = State.Success(outFile)
-                    // 下载完成直接弹安装（Bob 要求）
-                    OtaUpdater.markDownloadComplete(appContext, info.versionCode)
-                    if (OtaUpdater.promptInstall(appContext, outFile)) {
-                        OtaUpdater.markInstallPrompted(appContext)
+                    // 进度节流：每 200ms 更新一次状态（与旧实现的节流一致）
+                    if (now - lastEmitAt >= 200 || (p.total > 0 && p.downloaded == p.total)) {
+                        lastEmitAt = now
+                        val speed = synchronized(samples) {
+                            val first = samples.firstOrNull()
+                            val last = samples.lastOrNull()
+                            if (first != null && last != null && last.first > first.first) {
+                                val dt = (last.first - first.first) / 1000.0
+                                if (dt > 0.3) ((last.second - first.second) / dt).toLong() else 0L
+                            } else 0L
+                        }
+                        val progress = if (p.total > 0) {
+                            (p.downloaded.toFloat() / p.total).coerceIn(0f, 1f)
+                        } else 0f
+                        _state.value = State.Downloading(progress, p.downloaded, p.total, speed)
                     }
                 }
+
+                // 完整性校验：长度以拼装后的文件为准（分片路径已按 total 核对过）
+                OtaUpdater.markDownloadSize(appContext, outFile.length())
+                // APK 可解析校验——截断/损坏包直接判失败
+                if (!OtaUpdater.isValidApk(appContext, outFile)) {
+                    throw IOException("downloaded apk failed to parse")
+                }
+                // 版本号校验：包内 versionCode 必须与 update.json 声称的一致，
+                // 防重定向给到错包时"装了个旧版本还报成功"
+                val apkVersion = OtaUpdater.apkVersionCode(appContext, outFile)
+                if (apkVersion != null && apkVersion != info.versionCode) {
+                    throw IOException("apk version mismatch: $apkVersion != ${info.versionCode}")
+                }
+                _state.value = State.Downloading(1f, outFile.length(), outFile.length(), 0L)
+                _state.value = State.Success(outFile)
+                // 下载完成直接弹安装（Bob 要求）
+                OtaUpdater.markDownloadComplete(appContext, info.versionCode)
+                if (OtaUpdater.promptInstall(appContext, outFile)) {
+                    OtaUpdater.markInstallPrompted(appContext)
+                }
             } catch (e: CancellationException) {
-                // v0.65.6：取消也删 partial，下次 start() 会重下
-                file?.delete()
+                // 取消保留已完成分片，下次 start() 同版本自动续传（不再删文件从零重下）
                 _state.value = State.Idle
                 throw e
             } catch (_: Exception) {
-                // v0.65.6：任何失败都删 partial——不完整的文件绝不留给安装流程
-                file?.delete()
+                // 失败同样保留分片供重试续传；正式包名下不会有半成品，不会被误装
                 _state.value = State.Failed
             }
         }

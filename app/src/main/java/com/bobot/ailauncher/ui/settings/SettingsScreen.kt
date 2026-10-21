@@ -58,6 +58,7 @@ import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.OtaCheckResult
 import com.bobot.ailauncher.data.OtaDownloader
+import com.bobot.ailauncher.ui.components.downloadStatusText
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -365,7 +366,9 @@ fun SettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "已下载 ${(dlProgress * 100).toInt()}%",
+                                    text = downloadStatusText(
+                                        dlState as OtaDownloader.State.Downloading
+                                    ),
                                     fontSize = 13.sp,
                                     color = AILauncherColors.Hint
                                 )

@@ -78,7 +78,7 @@ fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
                     Spacer(modifier = Modifier.height(12.dp))
                     LinearProgressIndicator(progress = { progress })
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("已下载 ${(progress * 100).toInt()}%")
+                    Text(downloadStatusText(dlState as OtaDownloader.State.Downloading))
                 }
                 else -> Text(info.changelog)
             }
@@ -122,4 +122,26 @@ fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
             }
         }
     )
+}
+
+/** 下载状态文案：百分比 + 已下载/总量 + 实时速度（速度可估算时），方便与浏览器下载对比 */
+internal fun downloadStatusText(state: OtaDownloader.State.Downloading): String {
+    val pct = (state.progress * 100).toInt()
+    val sb = StringBuilder("已下载 $pct%")
+    if (state.totalBytes > 0) {
+        sb.append(" · ${formatBytes(state.downloadedBytes)}/${formatBytes(state.totalBytes)}")
+    }
+    if (state.speedBps > 0) {
+        sb.append(" · ${formatBytes(state.speedBps)}/s")
+    }
+    return sb.toString()
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format("%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return String.format("%.1f MB", mb)
+    return String.format("%.2f GB", mb / 1024.0)
 }
