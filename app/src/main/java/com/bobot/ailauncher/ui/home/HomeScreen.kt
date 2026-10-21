@@ -26,7 +26,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -87,6 +86,14 @@ fun HomeScreen(
     onBlindController: (BlindCaptureController) -> Unit = {},
     // v0.68.32：底部 Dock 区高度（dp），用于扇形圆心钳制
     blindDockZoneDp: Float = 0f,
+    // R2 UI：意图入口"去设置"导航（无 Key 时引导去配大模型 Key）
+    onOpenSettings: () -> Unit = {},
+    // R2 UI（10-21 新规格）：意图状态与回调——协调器由 HomeHost 持有（应用中心「问七仔」共用），
+    // HomeScreen 只负责把状态交给胶囊渲染
+    intentState: com.bobot.ailauncher.core.intent.IntentUiState,
+    onIntentSubmit: (String) -> Unit,
+    onIntentConfirm: (com.bobot.ailauncher.core.action.ActionRequest) -> Unit,
+    onIntentDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -286,7 +293,20 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // v0.68.44（Bob）：杂志封面模式
-            PetZone(todayCardAlpha = todayAlpha, coverMode = true)
+            PetZone(
+                todayCardAlpha = todayAlpha,
+                coverMode = true,
+                coverIntentSlot = {
+                    IntentEntry(
+                        state = intentState,
+                        onSubmit = onIntentSubmit,
+                        onConfirm = onIntentConfirm,
+                        onDismiss = onIntentDismiss,
+                        onOpenSettings = onOpenSettings,
+                        onOpenPermissionSettings = { perm -> openPermissionSettings(context, perm) }
+                    )
+                }
+            )
         }
         // v0.36.0：无障碍权限引导卡
         panelGuideMode?.let { mode ->

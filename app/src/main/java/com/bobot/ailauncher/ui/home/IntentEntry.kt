@@ -1,0 +1,566 @@
+package com.bobot.ailauncher.ui.home
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.core.action.ActionRequest
+import com.bobot.ailauncher.core.intent.IntentCoordinator
+import com.bobot.ailauncher.core.intent.IntentUiState
+import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.AppSearchIndex
+import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.HiddenApps
+import com.bobot.ailauncher.data.listLaunchableApps
+import com.bobot.ailauncher.ui.components.AppIconImage
+import com.bobot.ailauncher.ui.island.IslandToasts
+import com.bobot.ailauncher.ui.theme.AILauncherColors
+import kotlinx.coroutines.delay
+
+/** 结果条槽位高度上限：三种内容（本地结果/回复错误/权限卡）共用，超限不挤压 Dock。 */
+private val RESULT_BAR_MAX_HEIGHT = 180.dp
+
+/**
+ * 意图胶囊输入行（2026-10-21 新规格：胶囊与应用中心搜索合二为一的同一组件）。
+ *
+ * 首页与应用中心共用这一行：✨ + 输入框 + 金色提交按钮，无麦克风。
+ * 组件本身只管输入与提交；"打字时出什么"由宿主决定——
+ * 首页在胶囊下方结果条出本地应用直达，应用中心用同一文本过滤网格。
+ *
+ * [showClearButton]（2026-10-21 Bob 批准）：仅应用中心变体开启——有文本时在提交钮左侧
+ * 出 ✕ 一键清空（点后文本清空、网格恢复全量）；首页胶囊保持原设计不开，避免和提交钮抢位。
+ */
+@Composable
+fun IntentCapsuleField(
+    text: String,
+    onTextChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "想做什么？",
+    planning: Boolean = false,
+    showClearButton: Boolean = false
+) {
+    val focusRequester = remember { FocusRequester() }
+    val canSubmit = text.isNotBlank() && !planning
+    Row(
+        modifier = modifier
+            .height(56.dp)
+            .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.Title.copy(alpha = 0.08f))
+            .clip(RoundedCornerShape(28.dp))
+            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .clickable { focusRequester.requestFocus() }
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Filled.AutoAwesome,
+            contentDescription = null,
+            tint = AILauncherColors.Accent,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        BasicTextField(
+            value = text,
+            onValueChange = onTextChange,
+            modifier = Modifier
+                .weight(1f)
+                .focusRequester(focusRequester),
+            enabled = !planning,
+            singleLine = true,
+            textStyle = TextStyle(
+                fontSize = 15.sp,
+                color = AILauncherColors.Title
+            ),
+            cursorBrush = SolidColor(AILauncherColors.Accent),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { if (canSubmit) onSubmit() }),
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (text.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            fontSize = 15.sp,
+                            color = AILauncherColors.Hint
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        // ✕ 一键清空（仅应用中心变体开启）：有文本时才出现，清空走 onTextChange("")，
+        // 宿主状态层（应用中心 query）随之回空、网格自动恢复，不另设回调。
+        if (showClearButton && text.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .clickable { onTextChange("") },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "清空",
+                    tint = AILauncherColors.Hint,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        // 提交区：Planning 时换轻量进度（文字保留、不可重复提交）
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(
+                    if (canSubmit || planning) AILauncherColors.Accent
+                    else AILauncherColors.Accent.copy(alpha = 0.35f)
+                )
+                .clickable(enabled = canSubmit) { onSubmit() },
+            contentAlignment = Alignment.Center
+        ) {
+            if (planning) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = Color.White,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "提交",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * R2 UI（文档二 P0 + 2026-10-21 新规格）：首页意图入口——封面与 TODAY 紧凑条之间。
+ *
+ * 一个入口、两层响应：
+ * - 本地直达层：打字时在胶囊下方「七仔结果条」实时出本地应用匹配
+ *   （复用应用中心同一套 AppSearchIndex 匹配与同一应用数据源），只展示、点选才打开，
+ *   绝不自动执行；提交后本地结果收起，用户再改文本才重新出。
+ * - 意图层：提交（按钮/IME Done）走 [IntentCoordinator]，与本地层互不干扰。
+ *
+ * 呈现规则（Bob 拍板）：
+ * - 只有 NeedsConfirmation（中/高风险动作确认，安全门）用 AlertDialog，全 App 意图链路仅此一种弹窗；
+ *   其余状态（回复/错误/缺权限）一律非模态，与本地结果共用胶囊下方同一个结果条槽位。
+ * - 胶囊右侧只有提交按钮，不做麦克风（语音胶囊已于 10-18 全部清除）。
+ *
+ * 状态由 [IntentCoordinator] 驱动，本组件只读渲染 + 转发用户动作，不碰 LLM/执行细节。
+ */
+@Composable
+fun IntentEntry(
+    state: IntentUiState,
+    onSubmit: (String) -> Unit,
+    onConfirm: (ActionRequest) -> Unit,
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenPermissionSettings: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var text by remember { mutableStateOf("") }
+    // 已提交的文本：与当前文本相同期间不再出本地结果（提交后清掉本地层）
+    var submittedText by remember { mutableStateOf<String?>(null) }
+    val planning = state is IntentUiState.Planning
+
+    // 本地直达层数据源：与应用中心 azApps 完全一致（listLaunchableApps 去自己、去隐藏），
+    // 匹配复用 AppSearchIndex.build/search 同一实现，不另写一套。
+    val localApps = remember {
+        val hidden = HiddenApps.getHidden(context)
+        listLaunchableApps(context).filter {
+            it.packageName != context.packageName && it.packageName !in hidden
+        }
+    }
+    val localIndex = remember(localApps) { AppSearchIndex.build(context, localApps) }
+    val localResults = remember(text, localIndex, submittedText) {
+        if (text.isBlank() || text == submittedText) emptyList()
+        else AppSearchIndex.search(context, text, localIndex).take(4)
+    }
+
+    fun submitIfReady() {
+        if (text.isNotBlank() && !planning) {
+            submittedText = text
+            onSubmit(text)
+        }
+    }
+
+    // 回复小条短时呈现：5 秒后自动收起（协调器 dismiss 回编辑态，原话不丢）
+    LaunchedEffect(state) {
+        if (state is IntentUiState.Reply) {
+            delay(5_000)
+            onDismiss()
+        }
+    }
+
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+        // ---- 胶囊本体（与应用中心同一组件） ----
+        IntentCapsuleField(
+            text = text,
+            onTextChange = { text = it },
+            onSubmit = { submitIfReady() },
+            planning = planning,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // ---- 结果条槽位（非模态）：本地结果 / 回复 / 错误 / 权限说明共用 ----
+        // 优先序：权限说明（需用户处理）> 本地结果（用户已改文本继续打字）> 回复/错误（对应已提交文本）
+        when (val s = state) {
+            is IntentUiState.NeedsPermission -> {
+                PermissionExplainCard(
+                    message = s.message,
+                    onGoSettings = {
+                        onOpenPermissionSettings(s.permission)
+                        onDismiss()
+                    },
+                    onDismiss = onDismiss
+                )
+            }
+            else -> {
+                if (localResults.isNotEmpty() && state !is IntentUiState.NeedsConfirmation) {
+                    LocalResultsBar(
+                        apps = localResults,
+                        onOpen = { app -> launchLocalApp(context, app) }
+                    )
+                } else when (s) {
+                    is IntentUiState.Reply -> {
+                        StatusStrip(
+                            text = s.text,
+                            onClose = onDismiss
+                        )
+                    }
+                    is IntentUiState.Error -> {
+                        val noKey = s.message == IntentCoordinator.NO_KEY_MESSAGE
+                        StatusStrip(
+                            text = s.message,
+                            actionLabel = if (noKey) "去设置" else null,
+                            onAction = if (noKey) onOpenSettings else null,
+                            onClose = onDismiss
+                        )
+                    }
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    // ---- 唯一弹窗：中/高风险动作确认（安全门，Bob 拍板归类） ----
+    if (state is IntentUiState.NeedsConfirmation) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = {
+                Text(
+                    text = "确认执行？",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AILauncherColors.Title
+                )
+            },
+            text = {
+                Text(
+                    text = state.message,
+                    fontSize = 14.sp,
+                    color = AILauncherColors.Body
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onConfirm(state.request) }) {
+                    Text(
+                        text = "执行",
+                        color = AILauncherColors.Accent,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) {
+                    Text(text = "取消", color = AILauncherColors.Hint)
+                }
+            }
+        )
+    }
+}
+
+/**
+ * 七仔结果条·本地直达：打字时实时出的本地应用匹配（图标+名称，最多 4 个）。
+ * 与回复/错误小条同一槽位、同一 Card 语言；文案以七仔口吻呈现——结果是七仔端出来的。
+ * 只展示，点选才打开，绝不自动执行。
+ *
+ * 高度贴合内容（2026-10-21 Bob 批准）：文字关字体内边距（includeFontPadding=false）+
+ * 显式行高 + 收紧内边距，消除单个结果时卡片下方的大片空白；整体上限 180dp
+ * （[RESULT_BAR_MAX_HEIGHT]），超限条内滚动，不挤 Dock。
+ */
+@Composable
+private fun LocalResultsBar(
+    apps: List<AppInfo>,
+    onOpen: (AppInfo) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
+            .clip(RoundedCornerShape(16.dp))
+            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = "七仔找到了这些，点一下打开",
+            fontSize = 12.sp,
+            color = AILauncherColors.Hint,
+            style = TextStyle(
+                lineHeight = 15.sp,
+                platformStyle = PlatformTextStyle(includeFontPadding = false)
+            )
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            apps.forEach { app ->
+                Column(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onOpen(app) }
+                        .padding(vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    AppIconImage(
+                        drawable = app.icon,
+                        contentDescription = app.label.toString(),
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                    )
+                    Text(
+                        text = app.label.toString(),
+                        fontSize = 11.sp,
+                        color = AILauncherColors.Body,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        style = TextStyle(
+                            lineHeight = 13.sp,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 3.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 本地直达打开应用：与应用中心 launchApp 同一做法（记使用统计 + 系统启动意图 + 失败 toast）。 */
+private fun launchLocalApp(context: Context, app: AppInfo) {
+    AppUsageTracker.recordLaunch(context, app.packageName)
+    try {
+        val intent = context.packageManager
+            .getLaunchIntentForPackage(app.packageName)
+            ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        if (intent != null) context.startActivity(intent)
+        else IslandToasts.show("无法打开「${app.label}」")
+    } catch (_: Exception) {
+        IslandToasts.show("「${app.label}」暂不可用")
+    }
+}
+
+/** 胶囊下方短时小条：回复/错误共用，可带一个动作（如"去设置"），可关。 */
+@Composable
+private fun StatusStrip(
+    text: String,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    onClose: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = text,
+            fontSize = 13.sp,
+            color = AILauncherColors.Body,
+            // 短时小条：最多 3 行，超长截断，保证结果条高度有上限（见 RESULT_BAR_MAX_HEIGHT）
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        if (actionLabel != null && onAction != null) {
+            TextButton(onClick = onAction) {
+                Text(
+                    text = actionLabel,
+                    color = AILauncherColors.Accent,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.sp
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .clickable { onClose() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "关闭",
+                tint = AILauncherColors.Hint,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+/** 缺权限说明卡（非模态）：与 HomeScreen 无障碍引导卡同风格——先讲清用途，再给"去开启"。 */
+@Composable
+private fun PermissionExplainCard(
+    message: String,
+    onGoSettings: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
+            .clip(RoundedCornerShape(16.dp))
+            .background(AILauncherColors.Card.copy(alpha = 0.92f))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = "需要开启一个权限",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = AILauncherColors.Title
+        )
+        Text(
+            text = message,
+            fontSize = 13.sp,
+            color = AILauncherColors.Body
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = onDismiss) {
+                Text(text = "暂不", color = AILauncherColors.Hint, fontSize = 13.sp)
+            }
+            TextButton(onClick = onGoSettings) {
+                Text(
+                    text = "去开启",
+                    color = AILauncherColors.Accent,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.sp
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 按权限类型跳对应系统设置页（参考 ActionEngine 可能给出的权限标识做尽力映射，
+ * 无法识别时落到本应用详情页，不静默失败）。当前 capabilities.json 尚无能力声明
+ * permission，此路径未在真实触发下验证过。
+ */
+internal fun openPermissionSettings(context: Context, permission: String) {
+    val p = permission.lowercase()
+    val intent = when {
+        p.contains("notification") -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        p.contains("accessibility") || p.contains("bind_accessibility") ->
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        p.contains("usage") -> Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+        p.contains("overlay") || p.contains("alert_window") -> Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${context.packageName}")
+        )
+        else -> Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${context.packageName}")
+        )
+    }
+    try {
+        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: Exception) {
+        // 个别 ROM 没有对应设置页：落到应用详情，不让用户点空
+        try {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:${context.packageName}")
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) { }
+    }
+}

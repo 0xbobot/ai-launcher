@@ -169,7 +169,10 @@ fun PetZone(
     coverMode: Boolean = false,
     // v0.68.35：简报标题/下个会议上抛（封面 hero 用）
     onSummaryChange: (String) -> Unit = {},
-    onNextEventChange: (CalEvent?) -> Unit = {}
+    onNextEventChange: (CalEvent?) -> Unit = {},
+    // R2 UI（文档二 P0）：意图入口胶囊槽位——封面模式下渲染在 hero 与紧凑条之间；
+    // 状态由 HomeScreen 持有（IntentCoordinator），PetZone 只负责摆位
+    coverIntentSlot: @Composable () -> Unit = {}
 ) {
     val mood by PetRepository.mood.collectAsState()
     val mouth by PetRepository.mouth.collectAsState()
@@ -452,8 +455,11 @@ fun PetZone(
                 }
             )
             Spacer(modifier = Modifier.height(16.dp))
+            // R2 UI：意图入口胶囊（封面与 TODAY 紧凑条之间）
+            coverIntentSlot()
             // 有会议才显示——无会时 hero 已有"难得清闲"，不重复
             if (coverNextEvent != null) {
+                Spacer(modifier = Modifier.height(12.dp))
                 // v0.68.74（Bob）：横屏时紧凑条收窄到左侧 60%，避免和 Dock 重叠
                 androidx.compose.foundation.layout.Box(
                     modifier = Modifier.fillMaxWidth(),

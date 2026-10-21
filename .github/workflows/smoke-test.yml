@@ -8,6 +8,10 @@ on:
   workflow_run:
     workflows: ["Build Debug APK"]
     types: [completed]
+  # 分支验证用：workflow_run 不为非默认分支的构建触发，分支冒烟靠手动 dispatch
+  # （R2 UI 分支 loop-r2-ui 首次发现，2026-10-20）。dispatch 时取该分支最近一次
+  # 成功构建的 APK，checkout 用 dispatch 所在 ref 的代码（含 smoke.sh）。
+  workflow_dispatch:
 
 permissions:
   actions: read
@@ -15,21 +19,33 @@ permissions:
 
 jobs:
   smoke:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout triggering commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Download debug APK artifact
+        if: ${{ github.event_name == 'workflow_run' }}
         uses: dawidd6/action-download-artifact@v27
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: build-apk.yml
           run_id: ${{ github.event.workflow_run.id }}
+          name: ai-launcher-debug-apk
+          path: apk
+
+      - name: Download debug APK artifact (dispatch)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: dawidd6/action-download-artifact@v27
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: build-apk.yml
+          branch: ${{ github.ref_name }}
+          workflow_conclusion: success
           name: ai-launcher-debug-apk
           path: apk
 
