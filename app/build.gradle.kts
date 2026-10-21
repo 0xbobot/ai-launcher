@@ -116,7 +116,7 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     // 体检批D ⑥：JVM 单测里解析 update.json 需要真 org.json 实现
     // （android.jar 的 org.json 是桩）；仅测试 classpath，不进 APK
-    testImplementation(libs.json)
+    testImplementation(libs.org.json)
     // v0.41.9：隐藏应用入口的生物识别（面部/指纹）
     implementation("androidx.biometric:biometric:1.1.0")
 
