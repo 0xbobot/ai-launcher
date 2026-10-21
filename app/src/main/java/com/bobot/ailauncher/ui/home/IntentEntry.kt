@@ -435,7 +435,7 @@ private fun LocalResultsBar(
     // + 标签行高 13sp（按 sp 换算，fontScale 多大都完整算入）；另加 4dp 余量
     // （R4 dump 实测 TextView 高度比 lineHeight 多约 2.6dp，字体内边距关不干净）。
     val density = LocalDensity.current
-    val minBarHeight = 73.dp + with(density) { (15.sp + 13.sp).toDp() }
+    val minBarHeight = 73.dp + with(density) { 15.sp.toDp() + 13.sp.toDp() }
     Column(
         modifier = Modifier
             .fillMaxWidth()
