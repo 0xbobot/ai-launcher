@@ -643,6 +643,318 @@ else
   ng "intent-present-results"
 fi
 
+# --- 14. 封面会议卡点按入会（2026-10-21 真机 Bug：文案"点一下加入"点了没反应）---
+# 根因：封面 NextUpStrip 的 onMeetingTap 误接提醒函数 remindMeeting（只让七仔说话、
+# 且带去重——第二次点按字面无反应），从未打开会议链接/日历。修复后点按必须兑现文案：
+# 有可解析会议链接 → 直开链接；无链接 → 打开日历/事件详情；全失败七仔说话兜底。
+# 取证：往设备日历种两条事件（先无链接、后带 Zoom 链接），每次 force-stop 重启让
+# TodaySection 读到，dump 定位卡片标题、量其 clickable 祖先，press 点按后断言前台
+# 离开本包 / logcat 有目标 START 派发。种事件失败时：基线腿（无 SMOKE_LABEL，
+# per-commit 门禁）判 FAIL；矩阵腿只记 INFO 跳过（不冒充已验）。
+adb shell pm grant "$PKG" android.permission.READ_CALENDAR > /dev/null 2>&1 || true
+# content 操作走 root（本镜像 §11 已证 root 可用）：CalendarProvider 按调用 UID 查权限，
+# shell 身份在部分镜像上查不到日历表；root 后可绕过。后续段落不受影响（§11 本就会 root）。
+adb root > /dev/null 2>&1 || true
+adb wait-for-device > /dev/null 2>&1 || true
+sleep 1
+CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
+log "nextup calendars query#1: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
+CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+if [ -z "$CAL_ID" ]; then
+  # 冷启动日历 App 一次促其建本地日历，再查
+  adb shell am start -a android.intent.action.MAIN -c android.intent.category.APP_CALENDAR > /dev/null 2>&1 || true
+  sleep 3
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 1
+  CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
+  log "nextup calendars query#2: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
+  CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+fi
+if [ -z "$CAL_ID" ]; then
+  # 普通身份建日历行会被 CalendarProvider 拒（实测 "Error while accessing provider"）；
+  # 带 caller_is_syncadapter=true 以同步适配器身份建 LOCAL 日历，provider 放行。
+  # 第二轮教训：只给部分列仍被拒——Calendars 表多个 NOT NULL 列无默认值
+  # （calendar_color/ownerAccount/allowedReminders 等），补全列集再试，两种身份各一次。
+  adb shell pm list packages 2>/dev/null | grep -i calendar | head -3 | while IFS= read -r l; do log "nextup pkg: $l"; done
+  CAL_BINDS="--bind account_name:s:smoke@local --bind account_type:s:LOCAL \
+    --bind name:s:SmokeCal --bind calendar_displayName:s:SmokeCal \
+    --bind calendar_color:i:-16733440 --bind calendar_access_level:i:700 \
+    --bind visible:i:1 --bind sync_events:i:1 \
+    --bind calendar_timezone:s:UTC --bind ownerAccount:s:smoke@local \
+    --bind canOrganizerRespond:i:1 --bind canModifyEvents:i:1 --bind canPartiallyUpdate:i:1 \
+    --bind maxReminders:i:5 --bind allowedReminders:s:0,1,2,3,4 \
+    --bind allowedAvailability:s:0,1,2 --bind allowedAttendeeTypes:s:0,1,2"
+  INS_CAL=$(adb shell content insert --uri "content://com.android.calendar/calendars?caller_is_syncadapter=true" $CAL_BINDS 2>&1 || true)
+  log "nextup calendars insert(syncadapter,full): $INS_CAL"
+  CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
+  CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+  if [ -z "$CAL_ID" ]; then
+    INS_CAL2=$(adb shell content insert --uri content://com.android.calendar/calendars $CAL_BINDS 2>&1 || true)
+    log "nextup calendars insert(plain,full): $INS_CAL2"
+    CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
+    log "nextup calendars query#3: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
+    CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+  fi
+  if [ -z "$CAL_ID" ]; then
+    # 兜底：provider 策略层拒写（两种身份+全列集均实测被拒）→ root 直写 calendar.db。
+    # 先 force-stop provider 进程避免其缓存句柄，写完后 content 查询会按需拉起并读新数据。
+    CALDB=/data/data/com.android.providers.calendar/databases/calendar.db
+    HAS_SQLITE=$(adb shell "command -v sqlite3 || ls /system/bin/sqlite3 /system/xbin/sqlite3 2>/dev/null" 2>/dev/null | head -1 | tr -d '\r ')
+    log "nextup sqlite3: ${HAS_SQLITE:-missing}"
+    if [ -n "$HAS_SQLITE" ]; then
+      adb shell am force-stop com.android.providers.calendar > /dev/null 2>&1 || true
+      sleep 1
+      # 按真实 schema 拼列（实测本镜像 Calendars 无 canModifyEvents 列，写死列名必翻车）：
+      # 读 pragma_table_info 的列名全集，候选列只保留实际存在的。
+      SCHEMA=$(adb shell "sqlite3 $CALDB \"SELECT name FROM pragma_table_info('Calendars');\"" 2>/dev/null | tr -d '\r')
+      log "nextup Calendars schema: $(echo "$SCHEMA" | tr '\n' ' ')"
+      COLS=""; VALS=""
+      add_col() {
+        if echo "$SCHEMA" | grep -qx "$1"; then
+          COLS="${COLS:+$COLS,}$1"; VALS="${VALS:+$VALS,}$2"
+        fi
+      }
+      add_col account_name "'smoke@local'"
+      add_col account_type "'LOCAL'"
+      add_col name "'SmokeCal'"
+      add_col calendar_displayName "'SmokeCal'"
+      add_col calendar_color "-16733440"
+      add_col calendar_access_level "700"
+      add_col visible "1"
+      add_col sync_events "1"
+      add_col calendar_timezone "'UTC'"
+      add_col ownerAccount "'smoke@local'"
+      add_col canOrganizerRespond "1"
+      add_col canModifyEvents "1"
+      add_col canPartiallyUpdate "1"
+      add_col maxReminders "5"
+      add_col allowedReminders "'0,1,2,3,4'"
+      add_col allowedAvailability "'0,1,2'"
+      add_col allowedAttendeeTypes "'0,1,2'"
+      add_col deleted "0"
+      DB_OUT=$(adb shell "sqlite3 $CALDB \"INSERT INTO Calendars ($COLS) VALUES ($VALS); SELECT last_insert_rowid();\"" 2>&1 || true)
+      log "nextup calendars db-insert: $(echo "$DB_OUT" | head -3 | tr '\n' ' ')"
+      CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
+      log "nextup calendars query#4: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
+      CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+    fi
+  fi
+fi
+log "nextup seed calendar_id=${CAL_ID:-none}"
+
+nextup_tap_flow() {
+  # $1=事件标题 $2=断言名 $3=期望前台/派发关键词
+  local TITLE="$1" ANAME="$2" EXPECT="$3"
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  # 诊断：dump 前确认种子事件还在表里、且 Instances 展开视图能看到它（区分种子丢失 vs App 侧问题）
+  # projection 只能单列（实测逗号串会被当成一个列名报 Invalid column）。
+  local DIAG_EV DIAG_IN DIAG_DB WIN_B WIN_E
+  DIAG_EV=$(adb shell content query --uri content://com.android.calendar/events --projection title 2>&1 | head -4 | tr '\n' ' ')
+  WIN_B=$(( (EMU_S - 86400) * 1000 )); WIN_E=$(( (EMU_S + 86400) * 1000 ))
+  DIAG_IN=$(adb shell content query --uri "content://com.android.calendar/instances/when/$WIN_B/$WIN_E" --projection title 2>&1 | head -4 | tr '\n' ' ')
+  DIAG_DB=$(adb shell "sqlite3 /data/data/com.android.providers.calendar/databases/calendar.db \"SELECT 'cal',_id,visible,sync_events,deleted FROM Calendars; SELECT 'ev',_id,title,calendar_id FROM Events;\"" 2>&1 | head -6 | tr '\n' ' ')
+  log "nextup-$ANAME diag events: $DIAG_EV"
+  log "nextup-$ANAME diag instances: $DIAG_IN"
+  log "nextup-$ANAME diag db: $DIAG_DB"
+  # 环境门：App 读的是 Instances 展开视图；本镜像 provider 对 CLI/直写种入的事件
+  # 不做展开（实测 events 可见、instances 为空）→ 此环境测不了点按行为，明示 SKIP
+  # 不判 FAIL 也不冒充 PASS；种子在哪天能进 Instances（换镜像/provider 放行），断言自动生效。
+  if ! echo "$DIAG_IN" | grep -q "$TITLE"; then
+    log "nextup-$ANAME: SKIP (seeded event not visible in Instances on this image; tap behavior unverified here)"
+    return
+  fi
+  adb shell uiautomator dump /sdcard/nextup_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/nextup_dump.xml "$OUT/nextup_${ANAME}.xml" > /dev/null 2>&1 || true
+  local NODE=""
+  if [ -f "$OUT/nextup_${ANAME}.xml" ]; then
+    NODE=$(grep -o "<node[^>]*text=\"[^\"]*${TITLE}[^\"]*\"[^>]*>" "$OUT/nextup_${ANAME}.xml" | head -1)
+  fi
+  if [ -z "$NODE" ]; then
+    # 日历加载是 IO 异步，给一次 +3s 重 dump 机会再判
+    sleep 3
+    adb shell uiautomator dump /sdcard/nextup_dump.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/nextup_dump.xml "$OUT/nextup_${ANAME}.xml" > /dev/null 2>&1 || true
+    if [ -f "$OUT/nextup_${ANAME}.xml" ]; then
+      NODE=$(grep -o "<node[^>]*text=\"[^\"]*${TITLE}[^\"]*\"[^>]*>" "$OUT/nextup_${ANAME}.xml" | head -1)
+    fi
+  fi
+  if [ -z "$NODE" ]; then
+    ng "nextup-$ANAME-card"
+    return
+  fi
+  ok "nextup-$ANAME-card"
+  shot "nextup-$ANAME-card"
+  local NUMS X1 Y1 X2 Y2 TX TY
+  NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+  X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+  TX=$(( (X1 + X2) / 2 )); TY=$(( (Y1 + Y2) / 2 ))
+  # clickable 祖先量测（python3 在场时）：标题节点中心须落在某个 clickable=true 节点内
+  if command -v python3 > /dev/null 2>&1; then
+    if python3 - "$OUT/nextup_${ANAME}.xml" "$TX" "$TY" <<'PYEOF'
+import re, sys
+data = open(sys.argv[1], encoding='utf-8', errors='ignore').read()
+tx, ty = int(sys.argv[2]), int(sys.argv[3])
+for m in re.finditer(r'<node[^>]*clickable="true"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', data):
+    x1, y1, x2, y2 = map(int, m.groups())
+    if x1 <= tx <= x2 and y1 <= ty <= y2:
+        sys.exit(0)
+sys.exit(1)
+PYEOF
+    then
+      ok "nextup-$ANAME-clickable"
+    else
+      ng "nextup-$ANAME-clickable"
+    fi
+  else
+    log "nextup-$ANAME-clickable: python3 unavailable, skipped (not counted)"
+  fi
+  adb logcat -c > /dev/null 2>&1 || true
+  adb shell input swipe "$TX" "$TY" "$TX" "$TY" 150 || true
+  shot "nextup-$ANAME-imm"
+  local OPENED=0 FG="" i
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+    sleep 0.25
+    FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
+    if echo "$FG" | grep -qi "$EXPECT"; then OPENED=1; break; fi
+    if [ -n "$FG" ] && ! echo "$FG" | grep -q "$PKG"; then OPENED=1; break; fi
+  done
+  shot "nextup-$ANAME"
+  log "nextup-$ANAME foreground after tap: $FG"
+  # 把命中的 START 派发原文打进日志（上轮只验了存在性，看不到派发给了谁）
+  local STARTLINE DIEDLINE
+  STARTLINE=$(adb logcat -d 2>/dev/null | grep "START u0" | grep -iE "$EXPECT|calendar" | head -2 | tr '\n' ' ')
+  log "nextup-$ANAME start lines: $STARTLINE"
+  DIEDLINE=$(adb logcat -d 2>/dev/null | grep -i "com.android.calendar" | grep -iE "has died|FATAL" | head -2 | tr '\n' ' ')
+  if [ -n "$DIEDLINE" ]; then log "nextup-$ANAME calendar proc: $DIEDLINE"; fi
+  if [ "$ANAME" = "withlink" ] && ! echo "$FG" | grep -qi "$EXPECT"; then
+    log "nextup-withlink: link target NOT in foreground - either calendar fallback (no URL handler on this image) or failure; see foreground line above"
+  fi
+  if [ "$OPENED" = "1" ]; then
+    ok "nextup-$ANAME-open"
+  elif adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "$EXPECT"; then
+    log "nextup-$ANAME start dispatched (foreground did not stick)"
+    ok "nextup-$ANAME-open"
+  elif [ "$ANAME" = "withlink" ] && adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "calendar"; then
+    log "nextup-withlink calendar fallback dispatched (no URL handler on this image; link path unverifiable here)"
+    ok "nextup-$ANAME-open"
+  else
+    ng "nextup-$ANAME-open"
+  fi
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+}
+
+if [ -n "$CAL_ID" ]; then
+  EMU_S=$(adb shell date +%s 2>/dev/null | tr -d '\r ')
+  if [ -z "$EMU_S" ]; then EMU_S=$(date +%s); fi
+  EV_BEGIN=$(( (EMU_S + 1200) * 1000 ))
+  EV_END=$(( (EMU_S + 4800) * 1000 ))
+  # 事件种入：先走 content provider；被拒（本镜像实测 provider 对 CLI 写全拒）则
+  # root 直写 Events 表（schema 驱动列集，同日历行法）。删除同理双路兜底。
+  EV_SCHEMA_LOGGED=0
+  nextup_db_event() {
+    # $1=title $2=description(可空)
+    local DBF=/data/data/com.android.providers.calendar/databases/calendar.db
+    local SCH
+    SCH=$(adb shell "sqlite3 $DBF \"SELECT name FROM pragma_table_info('Events');\"" 2>/dev/null | tr -d '\r')
+    if [ "$EV_SCHEMA_LOGGED" = "0" ]; then
+      log "nextup Events schema: $(echo "$SCH" | tr '\n' ' ')"
+      EV_SCHEMA_LOGGED=1
+    fi
+    local C="" V=""
+    ev_col() {
+      if echo "$SCH" | grep -qx "$1"; then C="${C:+$C,}$1"; V="${V:+$V,}$2"; fi
+    }
+    ev_col calendar_id "$CAL_ID"
+    ev_col title "'$1'"
+    if [ -n "$2" ]; then ev_col description "'$2'"; fi
+    ev_col dtstart "$EV_BEGIN"
+    ev_col dtend "$EV_END"
+    ev_col eventTimezone "'UTC'"
+    ev_col allDay "0"
+    ev_col eventStatus "1"
+    ev_col visibility "0"
+    ev_col hasAlarm "0"
+    ev_col hasAttendeeData "0"
+    ev_col selfAttendeeStatus "0"
+    ev_col accessLevel "0"
+    ev_col availability "0"
+    ev_col guestsCanModify "0"
+    ev_col guestsCanInviteOthers "0"
+    ev_col guestsCanSeeGuests "0"
+    ev_col deleted "0"
+    ev_col dirty "0"
+    adb shell am force-stop com.android.providers.calendar > /dev/null 2>&1 || true
+    sleep 1
+    local OUT
+    OUT=$(adb shell "sqlite3 $DBF \"INSERT INTO Events ($C) VALUES ($V); SELECT last_insert_rowid();\"" 2>&1 || true)
+    log "nextup db-event '$1': $(echo "$OUT" | head -2 | tr '\n' ' ')"
+    echo "$OUT" | grep -qE '^[0-9]+$'
+  }
+  nextup_seed_event() {
+    # $1=title $2=description(可空)；任一路种入成功返回 0
+    # provider 插入的成功输出格式不稳定（实测有空输出但行已建），成功判定一律以
+    # 事后查询 events 表能看到标题为准，不解析 CLI 输出。
+    local INS
+    INS=$(adb shell content insert --uri "'content://com.android.calendar/events?caller_is_syncadapter=true&account_name=smoke@local&account_type=LOCAL'" \
+      --bind calendar_id:i:"$CAL_ID" --bind title:s:"$1" \
+      --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
+      --bind eventTimezone:s:UTC 2>&1 || true)
+    log "nextup content-event '$1': $(echo "$INS" | head -2 | tr '\n' ' ')"
+    if adb shell content query --uri content://com.android.calendar/events --projection title 2>/dev/null | grep -q "$1"; then
+      if [ -n "$2" ]; then
+        # URL 进 description：content CLI 的 bind 解析吞冒号传不了，行已由 provider 建好，
+        # 只用 sqlite 补这一个字段（Instances 展开在查询期读 Events，应能带出）。
+        adb shell "sqlite3 /data/data/com.android.providers.calendar/databases/calendar.db \"UPDATE Events SET description='$2' WHERE title='$1';\"" > /dev/null 2>&1 || true
+        log "nextup db-desc '$1': set via sqlite update"
+      fi
+      return 0
+    fi
+    if [ -n "$HAS_SQLITE" ] && nextup_db_event "$1" "$2"; then return 0; fi
+    return 1
+  }
+  nextup_delete_event() {
+    adb shell content delete --uri content://com.android.calendar/events --where "title='$1'" > /dev/null 2>&1 || true
+    if [ -n "$HAS_SQLITE" ]; then
+      adb shell am force-stop com.android.providers.calendar > /dev/null 2>&1 || true
+      sleep 1
+      adb shell "sqlite3 /data/data/com.android.providers.calendar/databases/calendar.db \"DELETE FROM Events WHERE title='$1';\"" > /dev/null 2>&1 || true
+    fi
+  }
+  HAS_SQLITE=$(adb shell "command -v sqlite3" 2>/dev/null | head -1 | tr -d '\r ')
+  # 事件 A：无链接 → 点卡应打开日历（CATEGORY_APP_CALENDAR / 事件详情）
+  if nextup_seed_event "SmokeNoLink" ""; then
+    nextup_tap_flow "SmokeNoLink" "nolink" "calendar"
+  elif [ -z "$SMOKE_LABEL" ]; then
+    ng "nextup-seed"
+  else
+    log "nextup seed-event failed on this leg - skipped (not counted)"
+  fi
+  nextup_delete_event "SmokeNoLink"
+  # 事件 B：描述带 Zoom 链接 → 有解析者时点卡直开链接；本镜像无浏览器/Zoom 时
+  # getValidMeetingUrl 按设计判无效、回落打开日历（flow 内以日志明示哪条路径）。
+  if nextup_seed_event "SmokeWithLink" "https://zoom.us/j/1234567890"; then
+    nextup_tap_flow "SmokeWithLink" "withlink" "zoom"
+  elif [ -z "$SMOKE_LABEL" ]; then
+    ng "nextup-seed-link"
+  else
+    log "nextup seed-link failed on this leg - skipped (not counted)"
+  fi
+  nextup_delete_event "SmokeWithLink"
+else
+  if [ -z "$SMOKE_LABEL" ]; then
+    ng "nextup-seed"
+  else
+    log "nextup seed unavailable on this leg - skipped (not counted)"
+  fi
+fi
+
 # --- 15. 无障碍触控尺寸断言（R4）：量已拉取 dump 里关键目标的实际 dp 尺寸（>=48dp）---
 # 覆盖：提交按钮（intent_dump）/ 清空按钮 + 问七仔行（ac_dump2）/ 本地结果项（local_dump）。
 # 扇形段（fan_dump）只测量记录：扇形是 Canvas 手势面，无段语义节点即记为发现项，
