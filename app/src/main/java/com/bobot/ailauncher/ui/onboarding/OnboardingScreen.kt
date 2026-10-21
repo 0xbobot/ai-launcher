@@ -81,7 +81,7 @@ private fun StepScaffold(
             horizontalArrangement = Arrangement.End
         ) {
             TextButton(onClick = onSkip) {
-                Text("跳过", color = AILauncherColors.Hint)
+                Text("跳过", color = AILauncherColors.current.Hint)
             }
         }
         Spacer(modifier = Modifier.height(40.dp))
@@ -100,7 +100,7 @@ private fun StepScaffold(
 private fun ProgressDot(active: Boolean) {
     androidx.compose.foundation.Canvas(modifier = Modifier.size(8.dp)) {
         drawCircle(
-            color = if (active) AILauncherColors.Accent else AILauncherColors.Divider,
+            color = if (active) AILauncherColors.current.Accent else AILauncherColors.current.Divider,
             radius = size.minDimension / 2
         )
     }
@@ -111,7 +111,7 @@ private fun PrimaryButton(text: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         shape = RoundedCornerShape(20.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.Title)
+        colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Title)
     ) {
         Text(
             text = text,
@@ -128,7 +128,7 @@ private fun StepWelcome(onNext: () -> Unit, onSkip: () -> Unit) {
         Icon(
             Icons.Filled.AutoAwesome,
             contentDescription = null,
-            tint = AILauncherColors.Accent,
+            tint = AILauncherColors.current.Accent,
             modifier = Modifier.size(64.dp)
         )
         Spacer(modifier = Modifier.height(24.dp))
@@ -136,14 +136,14 @@ private fun StepWelcome(onNext: () -> Unit, onSkip: () -> Unit) {
             text = "把手机变成会干活的空间",
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
-            color = AILauncherColors.Title,
+            color = AILauncherColors.current.Title,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "说出你想干嘛，不用找 App",
             fontSize = 16.sp,
-            color = AILauncherColors.Body,
+            color = AILauncherColors.current.Body,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(36.dp))
@@ -160,14 +160,14 @@ private fun StepDefaultLauncher(onNext: () -> Unit, onSkip: () -> Unit) {
             text = "设为默认桌面",
             fontSize = 26.sp,
             fontWeight = FontWeight.Bold,
-            color = AILauncherColors.Title,
+            color = AILauncherColors.current.Title,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "把 AI桌面 设为默认，才能替代系统桌面，接管你的 Home 键。",
             fontSize = 16.sp,
-            color = AILauncherColors.Body,
+            color = AILauncherColors.current.Body,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(28.dp))
@@ -190,13 +190,13 @@ private fun StepDefaultLauncher(onNext: () -> Unit, onSkip: () -> Unit) {
                 IslandToasts.show("还没检测到，请先在设置中完成")
             }
         }) {
-            Text("下一步", color = AILauncherColors.Title)
+            Text("下一步", color = AILauncherColors.current.Title)
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = "从设置返回后，点「下一步」会自动检测",
             fontSize = 12.sp,
-            color = AILauncherColors.Hint
+            color = AILauncherColors.current.Hint
         )
     }
 }
@@ -210,14 +210,14 @@ private fun StepNotificationAccess(onNext: () -> Unit, onSkip: () -> Unit) {
             text = "开启通知读取",
             fontSize = 26.sp,
             fontWeight = FontWeight.Bold,
-            color = AILauncherColors.Title,
+            color = AILauncherColors.current.Title,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "「正在进行时」需要读取通知，才能把会议、快递、消息主动浮上来。",
             fontSize = 16.sp,
-            color = AILauncherColors.Body,
+            color = AILauncherColors.current.Body,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(28.dp))
@@ -243,7 +243,7 @@ private fun StepNotificationAccess(onNext: () -> Unit, onSkip: () -> Unit) {
                 IslandToasts.show("还没检测到，请先在设置中开启")
             }
         }) {
-            Text("下一步", color = AILauncherColors.Title)
+            Text("下一步", color = AILauncherColors.current.Title)
         }
     }
 }
@@ -255,7 +255,7 @@ private fun StepDone(onFinish: () -> Unit) {
         Icon(
             Icons.Filled.Check,
             contentDescription = null,
-            tint = AILauncherColors.Success,
+            tint = AILauncherColors.current.Success,
             modifier = Modifier.size(64.dp)
         )
         Spacer(modifier = Modifier.height(24.dp))
@@ -263,14 +263,14 @@ private fun StepDone(onFinish: () -> Unit) {
             text = "一切就绪",
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
-            color = AILauncherColors.Title,
+            color = AILauncherColors.current.Title,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "意图入口、正在进行时、能力视图都已准备好。\n按 Home 键，随时回到你的 AI 空间。",
             fontSize = 16.sp,
-            color = AILauncherColors.Body,
+            color = AILauncherColors.current.Body,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(36.dp))
@@ -284,14 +284,14 @@ private fun StatusRow(done: Boolean, doneText: String, todoText: String) {
         Icon(
             Icons.Filled.Check,
             contentDescription = null,
-            tint = if (done) AILauncherColors.Success else AILauncherColors.Hint,
+            tint = if (done) AILauncherColors.current.Success else AILauncherColors.current.Hint,
             modifier = Modifier.size(20.dp)
         )
         Spacer(modifier = Modifier.size(8.dp))
         Text(
             text = if (done) doneText else todoText,
             fontSize = 14.sp,
-            color = if (done) AILauncherColors.Success else AILauncherColors.Hint
+            color = if (done) AILauncherColors.current.Success else AILauncherColors.current.Hint
         )
     }
 }

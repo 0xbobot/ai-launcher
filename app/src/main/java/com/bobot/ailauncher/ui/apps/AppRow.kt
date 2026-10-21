@@ -307,7 +307,7 @@ internal fun AppRow(
                 Text(
                     text = app.label.toString(),
                     fontSize = 16.sp,
-                    color = AILauncherColors.Title.copy(alpha = contentAlpha),
+                    color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -319,7 +319,7 @@ internal fun AppRow(
                     modifier = Modifier
                         .matchParentSize()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(AILauncherColors.Card.copy(alpha = 0.8f))
+                        .background(AILauncherColors.current.Card.copy(alpha = 0.8f))
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() },

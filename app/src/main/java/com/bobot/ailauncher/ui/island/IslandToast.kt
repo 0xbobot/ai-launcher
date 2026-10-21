@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -102,7 +102,7 @@ fun IslandToastHost(
             .fillMaxWidth()
             // v0.68.56：回落到状态栏下方——B 方案走系统通道时这里不显示，
             // 只有无通知权限时才用应用内 pill，必须干净不重叠
-            .statusBarsPadding()
+            .statusBarsTopPadding()
             .padding(top = 8.dp),
         contentAlignment = Alignment.TopCenter
     ) {
@@ -118,7 +118,7 @@ fun IslandToastHost(
                         .background(Color.Black.copy(alpha = 0.92f))
                         // R3-B：深色下黑胶囊与深底融为一体，加 1dp 描边保住边界
                         // （Divider token 深浅自适应；浅色下几乎不可见，不改原观感）
-                        .border(1.dp, AILauncherColors.Divider, RoundedCornerShape(28.dp))
+                        .border(1.dp, AILauncherColors.current.Divider, RoundedCornerShape(28.dp))
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {

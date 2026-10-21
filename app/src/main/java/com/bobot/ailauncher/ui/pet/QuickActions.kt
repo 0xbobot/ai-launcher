@@ -162,7 +162,7 @@ private fun QuickActionIcon(item: QuickActionItem, size: Dp) {
             modifier = Modifier
                 .size(size)
                 .clip(RoundedCornerShape(8.dp))
-                .background(AILauncherColors.AccentSoft)
+                .background(AILauncherColors.current.AccentSoft)
         )
     }
 }
@@ -219,14 +219,14 @@ internal fun QuickActionAddFlow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
-                .background(AILauncherColors.Card.copy(alpha = 0.97f))
+                .background(AILauncherColors.current.Card.copy(alpha = 0.97f))
                 .padding(16.dp)
         ) {
             when (step) {
                 0 -> {
                     val all = apps
                     Column {
-                        Text("选择应用", fontSize = 16.sp, color = AILauncherColors.Title)
+                        Text("选择应用", fontSize = 16.sp, color = AILauncherColors.current.Title)
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = search,
@@ -265,7 +265,7 @@ internal fun QuickActionAddFlow(
                                         Text(
                                             text = app.label.toString(),
                                             fontSize = 14.sp,
-                                            color = AILauncherColors.Title,
+                                            color = AILauncherColors.current.Title,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -278,12 +278,12 @@ internal fun QuickActionAddFlow(
                 1 -> {
                     val app = pickedApp
                     Column {
-                        Text("选择快捷方式", fontSize = 16.sp, color = AILauncherColors.Title)
+                        Text("选择快捷方式", fontSize = 16.sp, color = AILauncherColors.current.Title)
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = app?.label?.toString().orEmpty(),
                             fontSize = 12.sp,
-                            color = AILauncherColors.Hint
+                            color = AILauncherColors.current.Hint
                         )
                         Spacer(Modifier.height(8.dp))
                         // 加载快捷方式
@@ -354,7 +354,7 @@ internal fun QuickActionAddFlow(
                 }
                 else -> {
                     Column {
-                        Text("起个短名字", fontSize = 16.sp, color = AILauncherColors.Title)
+                        Text("起个短名字", fontSize = 16.sp, color = AILauncherColors.current.Title)
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = label,
@@ -398,7 +398,7 @@ internal fun QuickActionAddFlow(
                                         )
                                     )
                                 }
-                            ) { Text("保存", color = AILauncherColors.Accent) }
+                            ) { Text("保存", color = AILauncherColors.current.Accent) }
                         }
                     }
                 }
@@ -424,9 +424,9 @@ private fun ShortcutRow(
         icon()
         Spacer(Modifier.width(10.dp))
         Column {
-            Text(text = title, fontSize = 14.sp, color = AILauncherColors.Title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = title, fontSize = 14.sp, color = AILauncherColors.current.Title, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotEmpty()) {
-                Text(text = subtitle, fontSize = 12.sp, color = AILauncherColors.Hint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(text = subtitle, fontSize = 12.sp, color = AILauncherColors.current.Hint, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -444,7 +444,7 @@ private fun AppIconDrawable(drawable: Drawable, size: Dp) {
             modifier = Modifier.size(size).clip(RoundedCornerShape(8.dp))
         )
     } else {
-        Box(Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(AILauncherColors.AccentSoft))
+        Box(Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(AILauncherColors.current.AccentSoft))
     }
 }
 
@@ -460,6 +460,6 @@ private fun ShortcutIconDrawable(context: Context, packageName: String, shortcut
             modifier = Modifier.size(size).clip(RoundedCornerShape(6.dp))
         )
     } else {
-        Box(Modifier.size(size).clip(RoundedCornerShape(6.dp)).background(AILauncherColors.AccentSoft))
+        Box(Modifier.size(size).clip(RoundedCornerShape(6.dp)).background(AILauncherColors.current.AccentSoft))
     }
 }

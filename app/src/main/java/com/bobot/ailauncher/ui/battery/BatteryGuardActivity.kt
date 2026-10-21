@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.LocalAILauncherColors
 
 /**
  * v0.28.0：低电量温和提醒弹窗。
@@ -74,6 +75,13 @@ class BatteryGuardActivity : ComponentActivity() {
         // 已开省电模式时不再建议"去开省电模式"（文案与状态矛盾）
         val powerSaveMode = (getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode
         setContent {
+            // 批B ③：本 Activity 不走 AILauncherTheme，单独按系统主题提供调色板
+            // （与原全局 isDark 在常驻进程下被 MainScreen 写入同值，行为不变）
+            androidx.compose.runtime.CompositionLocalProvider(
+                LocalAILauncherColors provides AILauncherColors.forDark(
+                    androidx.compose.foundation.isSystemInDarkTheme()
+                )
+            ) {
             BatteryGuardDialog(
                 pct = pct,
                 critical = critical,
@@ -98,6 +106,7 @@ class BatteryGuardActivity : ComponentActivity() {
                 },
                 onDismiss = { finish() }
             )
+            }
         }
     }
 
@@ -151,13 +160,13 @@ private fun BatteryGuardDialog(
                     text = title,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.Title
+                    color = AILauncherColors.current.Title
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = message,
                     fontSize = 14.sp,
-                    color = AILauncherColors.Body,
+                    color = AILauncherColors.current.Body,
                     textAlign = TextAlign.Center,
                     lineHeight = 20.sp
                 )
@@ -185,7 +194,7 @@ private fun BatteryGuardDialog(
                     Text(
                         text = "好，知道了",
                         fontSize = 14.sp,
-                        color = AILauncherColors.Hint
+                        color = AILauncherColors.current.Hint
                     )
                 }
             }

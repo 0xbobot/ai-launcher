@@ -63,7 +63,7 @@ fun AppPopupMenu(
         onDismissRequest = onDismiss,
         modifier = modifier.widthIn(min = 208.dp, max = 300.dp),
         shape = RoundedCornerShape(20.dp),
-        containerColor = AILauncherColors.Card,
+        containerColor = AILauncherColors.current.Card,
         tonalElevation = 0.dp,
         shadowElevation = 8.dp
     ) {
@@ -84,7 +84,7 @@ fun AppPopupMenu(
                 text = app.label.toString(),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = AILauncherColors.Title,
+                color = AILauncherColors.current.Title,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
@@ -99,7 +99,7 @@ fun AppPopupMenu(
                 Icon(
                     imageVector = Icons.Outlined.Info,
                     contentDescription = "应用信息",
-                    tint = AILauncherColors.Hint,
+                    tint = AILauncherColors.current.Hint,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -107,7 +107,7 @@ fun AppPopupMenu(
         if (shortcuts.isNotEmpty()) {
             HorizontalDivider(
                 modifier = Modifier.padding(horizontal = 14.dp),
-                color = AILauncherColors.Divider
+                color = AILauncherColors.current.Divider
             )
         }
         // 系统快捷方式（有才显示）
@@ -118,7 +118,7 @@ fun AppPopupMenu(
                     Text(
                         text = s.shortLabel?.toString().orEmpty().ifBlank { "快捷方式" },
                         fontSize = 14.sp,
-                        color = AILauncherColors.Title,
+                        color = AILauncherColors.current.Title,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -138,14 +138,14 @@ fun AppPopupMenu(
                     launchAppShortcut(context, app.packageName, s.id)
                     onDismiss()
                 },
-                colors = MenuDefaults.itemColors(textColor = AILauncherColors.Title),
+                colors = MenuDefaults.itemColors(textColor = AILauncherColors.current.Title),
                 contentPadding = MenuDefaults.DropdownMenuItemContentPadding
             )
         }
         // v0.41.11（Bob 选方案1）：卸载从左滑移到长按菜单；ⓘ 已在标题行
         HorizontalDivider(
             modifier = Modifier.padding(horizontal = 14.dp),
-            color = AILauncherColors.Divider
+            color = AILauncherColors.current.Divider
         )
         DropdownMenuItem(
             text = {
@@ -202,7 +202,7 @@ fun AppShortcutInline(
         // 金线分隔（与行内容区分，但同一张卡）
         androidx.compose.material3.HorizontalDivider(
             modifier = Modifier.padding(horizontal = 20.dp),
-            color = AILauncherColors.Divider
+            color = AILauncherColors.current.Divider
         )
         // 系统快捷方式
         shortcuts.forEach { s ->
@@ -230,7 +230,7 @@ fun AppShortcutInline(
                 Text(
                     text = s.shortLabel?.toString().orEmpty().ifBlank { "快捷方式" },
                     fontSize = 14.sp,
-                    color = AILauncherColors.Title,
+                    color = AILauncherColors.current.Title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -239,7 +239,7 @@ fun AppShortcutInline(
         // 卸载
         androidx.compose.material3.HorizontalDivider(
             modifier = Modifier.padding(horizontal = 20.dp),
-            color = AILauncherColors.Divider
+            color = AILauncherColors.current.Divider
         )
         Row(
             verticalAlignment = Alignment.CenterVertically,

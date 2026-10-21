@@ -822,8 +822,8 @@ fun BlindCaptureFan(
     // v0.68.42：选中段暖金 #D9A05B alpha 0.85（替代暖棕 #D8CBB6，克制的记忆色）
     val selectedFill = Color(0xFFD9A05B).copy(alpha = 0.85f)
     val goldRipple = Color(0xFFD9A05B)
-    val titleColor = AILauncherColors.Title
-    val bodyColor = AILauncherColors.Body
+    val titleColor = AILauncherColors.current.Title
+    val bodyColor = AILauncherColors.current.Body
 
     // v0.68.24 方案A：选中段径向伸长——每段外半径独立 spring；
     // v0.68.35：展开 0→120dp，选中该段 120→140dp（+20dp），滑出回弹；

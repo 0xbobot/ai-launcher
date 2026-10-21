@@ -47,7 +47,8 @@ class MainActivity : FragmentActivity() {
             }
         }
         // v0.25：全屏 edge-to-edge，桌面内容延伸到状态栏/导航栏后面
-        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        // 批B ⑧：手工调用收口到 ui/theme/Insets.kt 的统一 helper（行为不变）
+        com.bobot.ailauncher.ui.theme.enableEdgeToEdge(window)
         // v0.68.83（Bob 报）：横屏左侧出现一条"空状态栏"（蓝色）——窗口未进挖孔区被
         // letterbox 避让，没画到的地方透出系统壁纸。SHORT_EDGES 让窗口在横屏时
         // 延伸进左侧短边挖孔区，全屏绘制

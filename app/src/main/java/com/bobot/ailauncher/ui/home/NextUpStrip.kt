@@ -22,7 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bobot.ailauncher.ui.pet.CalEvent
+import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.CoverPalette
 import java.text.SimpleDateFormat
@@ -59,7 +59,7 @@ fun NextUpStrip(
             .padding(horizontal = 20.dp)
             .shadow(8.dp, RoundedCornerShape(20.dp), spotColor = palette.title.copy(alpha = 0.08f))
             .clip(RoundedCornerShape(20.dp))
-            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
             .then(if (hasMeeting) Modifier.clickable { nextEvent?.let(onMeetingTap) } else Modifier)
             .padding(horizontal = 22.dp, vertical = 18.dp)
     ) {
@@ -69,7 +69,7 @@ fun NextUpStrip(
                     text = kicker,
                     fontSize = 12.sp,
                     tracking = 3.dp,
-                    color = AILauncherColors.Accent
+                    color = AILauncherColors.current.Accent
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))

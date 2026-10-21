@@ -7,10 +7,10 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
@@ -22,26 +22,49 @@ import androidx.compose.ui.unit.dp
  * 深色中文排版 / sparkle AI 点缀
  */
 object AILauncherColors {
-    // v0.68.50：深色自适应——MainScreen 按系统主题设置，全局 State 驱动重组
-    // 用 State 而非 @Composable getter：非 composable 上下文（MaterialTheme 等）也能编译
-    var isDark: Boolean by androidx.compose.runtime.mutableStateOf(false)
+    /**
+     * 一套调色板（浅/深各一份实例）。
+     * 批B ③：原全局 `var isDark`（组合期写全局 State）已废除——调色板改由
+     * [LocalAILauncherColors] 在组合根（[AILauncherTheme]）按系统主题提供，
+     * 全部读点走 [current]；颜色值与原 getter 逐一对应的字面值，零变化。
+     */
+    class Palette(val isDark: Boolean) {
+        val Background: Color = if (isDark) Color(0xFF1A1815) else Color(0xFFF4F2EE)
+        val Card: Color = if (isDark) Color(0xFF2A2723) else Color(0xFFFFFFFF)
+        val Title: Color = if (isDark) Color(0xFFF4F2EE) else Color(0xFF1F1D1A)
+        val Body: Color = if (isDark) Color(0xFFB8B2A8) else Color(0xFF5C5852)
+        val Hint: Color = if (isDark) Color(0xFF6B6560) else Color(0xFFA8A29A)
+        val Accent: Color = Color(0xFFC9A227)      // sparkle 金（深浅通用）
+        val AccentSoft: Color = if (isDark) Color(0xFF3A3226) else Color(0xFFF6ECD4)
+        val Success: Color = Color(0xFF4C9A52)     // 成功绿（深浅通用）
+        val Divider: Color = if (isDark) Color(0xFF3A362F) else Color(0xFFE8E2D9)
 
-    val Background: Color get() = if (isDark) Color(0xFF1A1815) else Color(0xFFF4F2EE)
-    val Card: Color get() = if (isDark) Color(0xFF2A2723) else Color(0xFFFFFFFF)
-    val Title: Color get() = if (isDark) Color(0xFFF4F2EE) else Color(0xFF1F1D1A)
-    val Body: Color get() = if (isDark) Color(0xFFB8B2A8) else Color(0xFF5C5852)
-    val Hint: Color get() = if (isDark) Color(0xFF6B6560) else Color(0xFFA8A29A)
-    val Accent: Color = Color(0xFFC9A227)      // sparkle 金（深浅通用）
-    val AccentSoft: Color get() = if (isDark) Color(0xFF3A3226) else Color(0xFFF6ECD4)
-    val Success: Color = Color(0xFF4C9A52)     // 成功绿（深浅通用）
-    val Divider: Color get() = if (isDark) Color(0xFF3A362F) else Color(0xFFE8E2D9)
+        // ---- 玻璃拟态（v0.11）：半透明底色 + 系统壁纸透出；API 31+ 叠加 Window 真实背景模糊 ----
+        val GlassCard: Color = if (isDark) Color(0x8C1A1815) else Color(0x8CFFFFFF)
+        val GlassCardStrong: Color = if (isDark) Color(0xE01A1815) else Color(0xE0FFFFFF)
+        val GlassBorder: Color = if (isDark) Color(0x801A1815) else Color(0x80FFFFFF)
+        val Grabber: Color = (if (isDark) Color(0xFFF4F2EE) else Color(0xFF1F1D1A)).copy(alpha = 0.28f)
+    }
 
-    // ---- 玻璃拟态（v0.11）：半透明底色 + 系统壁纸透出；API 31+ 叠加 Window 真实背景模糊 ----
-    val GlassCard: Color get() = if (isDark) Color(0x8C1A1815) else Color(0x8CFFFFFF)
-    val GlassCardStrong: Color get() = if (isDark) Color(0xE01A1815) else Color(0xE0FFFFFF)
-    val GlassBorder: Color get() = if (isDark) Color(0x801A1815) else Color(0x80FFFFFF)
-    val Grabber: Color get() = (if (isDark) Color(0xFFF4F2EE) else Color(0xFF1F1D1A)).copy(alpha = 0.28f)
+    val Light = Palette(isDark = false)
+    val Dark = Palette(isDark = true)
+
+    fun forDark(dark: Boolean): Palette = if (dark) Dark else Light
+
+    /** 当前组合的调色板——只能在 @Composable 上下文读取（经 [LocalAILauncherColors]）。 */
+    val current: Palette
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalAILauncherColors.current
 }
+
+/**
+ * 批B ③：调色板 CompositionLocal。[AILauncherTheme] 在组合根提供；
+ * 无提供者时回退浅色（与原全局 var 初始值 false 一致，如独立 Activity 冷启）。
+ * 主题切换是整树级事件，故用 staticCompositionLocalOf（全量失效，语义与原全局 State 一致）。
+ */
+val LocalAILauncherColors: androidx.compose.runtime.ProvidableCompositionLocal<AILauncherColors.Palette> =
+    staticCompositionLocalOf { AILauncherColors.Light }
 
 /**
  * v0.68.34（Bob）：杂志封面时段配色——暖纸底不动，色温随晨/午/夜微调。
@@ -54,9 +77,10 @@ data class CoverPalette(
     val divider: Color
 )
 
-fun coverPaletteFor(hour: Int): CoverPalette {
-    // v0.68.50：深色用 AILauncherColors.isDark（全局 State，MainScreen 设置）
-    if (AILauncherColors.isDark) {
+fun coverPaletteFor(hour: Int, isDark: Boolean): CoverPalette {
+    // v0.68.50：深色另走一套；批B ③：isDark 由调用方从 CompositionLocal 读后传入
+    // （本函数是非组合纯函数，不再读全局状态）
+    if (isDark) {
         // 深色：暖黑底 + 米白字，时段只做轻微明暗变化
         return when (hour) {
             in 6..11 -> CoverPalette(
@@ -108,17 +132,19 @@ val GlassTextShadow = Shadow(
     color = Color(0x66000000)
 )
 
+// 批B ③：浅色 scheme 直接取 Light 调色板的字面值（与原 getter 在 isDark=false 时的
+// 取值逐一相同；顶层 val 初始化时无组合上下文，不能走 CompositionLocal）。
 private val AILauncherColorScheme = lightColorScheme(
-    background = AILauncherColors.Background,
-    surface = AILauncherColors.Card,
-    surfaceVariant = AILauncherColors.Background,
-    onBackground = AILauncherColors.Title,
-    onSurface = AILauncherColors.Title,
-    onSurfaceVariant = AILauncherColors.Body,
-    primary = AILauncherColors.Accent,
+    background = AILauncherColors.Light.Background,
+    surface = AILauncherColors.Light.Card,
+    surfaceVariant = AILauncherColors.Light.Background,
+    onBackground = AILauncherColors.Light.Title,
+    onSurface = AILauncherColors.Light.Title,
+    onSurfaceVariant = AILauncherColors.Light.Body,
+    primary = AILauncherColors.Light.Accent,
     onPrimary = Color.White,
-    secondary = AILauncherColors.Body,
-    outline = AILauncherColors.Divider
+    secondary = AILauncherColors.Light.Body,
+    outline = AILauncherColors.Light.Divider
 )
 
 // R1（2026-10-20）：Material 暗色 scheme——取 AILauncherColors 的暗色 token 值。
@@ -147,14 +173,16 @@ private val AILauncherShapes = Shapes(
 
 @Composable
 fun AILauncherTheme(content: @Composable () -> Unit) {
-    // R1：按系统深色选 Material scheme，并同步全局 isDark（与 MainScreen 的写入同值，幂等）
+    // R1：按系统深色选 Material scheme；批B ③：调色板改经 CompositionLocal 在此提供
+    // （原 Theme/MainScreen 两处组合期写全局 isDark 一并取消）
     val dark = isSystemInDarkTheme()
-    AILauncherColors.isDark = dark
-    MaterialTheme(
-        colorScheme = if (dark) AILauncherDarkColorScheme else AILauncherColorScheme,
-        shapes = AILauncherShapes,
-        content = content
-    )
+    CompositionLocalProvider(LocalAILauncherColors provides AILauncherColors.forDark(dark)) {
+        MaterialTheme(
+            colorScheme = if (dark) AILauncherDarkColorScheme else AILauncherColorScheme,
+            shapes = AILauncherShapes,
+            content = content
+        )
+    }
 }
 
 /**
