@@ -82,7 +82,7 @@ import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.island.IslandToasts
-import com.bobot.ailauncher.ui.pet.CalEvent
+import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import com.bobot.ailauncher.ui.pet.joinCalendarEvent
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -131,9 +131,9 @@ fun IntentCapsuleField(
             // R3-A：最小高度策略——fontScale 放大时允许胶囊长高，不定死 56dp 裁字；
             // 内容最高项是提交钮触控外框 48dp（R3-C），< 56dp 下限，外观仍是原规格 56dp
             .heightIn(min = 56.dp)
-            .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.Title.copy(alpha = 0.08f))
+            .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             .clip(RoundedCornerShape(28.dp))
-            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
             .clickable { focusRequester.requestFocus() }
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -141,7 +141,7 @@ fun IntentCapsuleField(
         Icon(
             imageVector = Icons.Filled.AutoAwesome,
             contentDescription = null,
-            tint = AILauncherColors.Accent,
+            tint = AILauncherColors.current.Accent,
             modifier = Modifier.size(18.dp)
         )
         Spacer(modifier = Modifier.width(10.dp))
@@ -161,9 +161,9 @@ fun IntentCapsuleField(
             singleLine = true,
             textStyle = TextStyle(
                 fontSize = 15.sp,
-                color = AILauncherColors.Title
+                color = AILauncherColors.current.Title
             ),
-            cursorBrush = SolidColor(AILauncherColors.Accent),
+            cursorBrush = SolidColor(AILauncherColors.current.Accent),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { if (canSubmit) onSubmit() }),
             decorationBox = { innerTextField ->
@@ -172,7 +172,7 @@ fun IntentCapsuleField(
                         Text(
                             text = placeholder,
                             fontSize = 15.sp,
-                            color = AILauncherColors.Hint,
+                            color = AILauncherColors.current.Hint,
                             // R3-A：大字体下占位文案单行省略，不溢出胶囊
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -202,7 +202,7 @@ fun IntentCapsuleField(
                     Icon(
                         imageVector = Icons.Filled.Close,
                         contentDescription = "清空",
-                        tint = AILauncherColors.Hint,
+                        tint = AILauncherColors.current.Hint,
                         modifier = Modifier.size(15.dp)
                     )
                 }
@@ -222,8 +222,8 @@ fun IntentCapsuleField(
                     .size(40.dp)
                     .clip(CircleShape)
                     .background(
-                        if (canSubmit || planning) AILauncherColors.Accent
-                        else AILauncherColors.Accent.copy(alpha = 0.35f)
+                        if (canSubmit || planning) AILauncherColors.current.Accent
+                        else AILauncherColors.current.Accent.copy(alpha = 0.35f)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -526,28 +526,28 @@ fun IntentEntry(
                     text = "确认执行？",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.Title
+                    color = AILauncherColors.current.Title
                 )
             },
             text = {
                 Text(
                     text = state.message,
                     fontSize = 14.sp,
-                    color = AILauncherColors.Body
+                    color = AILauncherColors.current.Body
                 )
             },
             confirmButton = {
                 TextButton(onClick = { onConfirm(state.request) }) {
                     Text(
                         text = "执行",
-                        color = AILauncherColors.Accent,
+                        color = AILauncherColors.current.Accent,
                         fontWeight = FontWeight.Medium
                     )
                 }
             },
             dismissButton = {
                 TextButton(onClick = onDismiss) {
-                    Text(text = "取消", color = AILauncherColors.Hint)
+                    Text(text = "取消", color = AILauncherColors.current.Hint)
                 }
             }
         )
@@ -587,7 +587,7 @@ private fun LocalResultsBar(
             .padding(top = 8.dp)
             .requiredHeightIn(min = minBarHeight, max = RESULT_BAR_MAX_HEIGHT)
             .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
             .verticalScroll(rememberScrollState())
             // R3-C 无障碍：结果一出现 TalkBack 礼貌播报（标题+应用名），不用手动找焦点
             .semantics { liveRegion = LiveRegionMode.Polite }
@@ -596,7 +596,7 @@ private fun LocalResultsBar(
         Text(
             text = "七仔找到了这些，点一下打开",
             fontSize = 12.sp,
-            color = AILauncherColors.Hint,
+            color = AILauncherColors.current.Hint,
             style = TextStyle(
                 lineHeight = 15.sp,
                 platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -639,7 +639,7 @@ private fun ResultAppItem(
         Text(
             text = app.label.toString(),
             fontSize = 11.sp,
-            color = AILauncherColors.Body,
+            color = AILauncherColors.current.Body,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
@@ -684,7 +684,7 @@ private fun SuggestionsBar(
             .padding(top = 8.dp)
             .heightIn(max = RESULT_BAR_MAX_HEIGHT)
             .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
             .verticalScroll(rememberScrollState())
             // 与本地结果同款：出现时 TalkBack 礼貌播报，不用手动找焦点
             .semantics { liveRegion = LiveRegionMode.Polite }
@@ -704,7 +704,7 @@ private fun SuggestionsBar(
                 Text(
                     text = "接下来 · ${formatEventTime(event.begin)}",
                     fontSize = 12.sp,
-                    color = AILauncherColors.Accent,
+                    color = AILauncherColors.current.Accent,
                     style = TextStyle(
                         lineHeight = 15.sp,
                         platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -713,7 +713,7 @@ private fun SuggestionsBar(
                 Text(
                     text = "${event.title.ifBlank { "日程" }} · 点一下加入",
                     fontSize = 13.sp,
-                    color = AILauncherColors.Title,
+                    color = AILauncherColors.current.Title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = TextStyle(
@@ -728,7 +728,7 @@ private fun SuggestionsBar(
             Text(
                 text = "七仔猜你现在想用",
                 fontSize = 12.sp,
-                color = AILauncherColors.Hint,
+                color = AILauncherColors.current.Hint,
                 style = TextStyle(
                     lineHeight = 15.sp,
                     platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -758,7 +758,7 @@ private fun SuggestionsBar(
                 Text(
                     text = "试试说：「$SUGGESTION_EXAMPLE」",
                     fontSize = 12.sp,
-                    color = AILauncherColors.Accent,
+                    color = AILauncherColors.current.Accent,
                     style = TextStyle(
                         lineHeight = 15.sp,
                         platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -800,7 +800,7 @@ private fun StatusStrip(
             .fillMaxWidth()
             .padding(top = 8.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
             // R3-C 无障碍：回复/错误出现时 TalkBack 礼貌播报条内文案
             .semantics { liveRegion = LiveRegionMode.Polite }
             .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
@@ -809,7 +809,7 @@ private fun StatusStrip(
         Text(
             text = text,
             fontSize = 13.sp,
-            color = AILauncherColors.Body,
+            color = AILauncherColors.current.Body,
             // 短时小条：最多 3 行，超长截断，保证结果条高度有上限（见 RESULT_BAR_MAX_HEIGHT）
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
@@ -819,7 +819,7 @@ private fun StatusStrip(
             TextButton(onClick = onAction) {
                 Text(
                     text = actionLabel,
-                    color = AILauncherColors.Accent,
+                    color = AILauncherColors.current.Accent,
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp
                 )
@@ -841,7 +841,7 @@ private fun StatusStrip(
                 Icon(
                     imageVector = Icons.Filled.Close,
                     contentDescription = "关闭",
-                    tint = AILauncherColors.Hint,
+                    tint = AILauncherColors.current.Hint,
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -867,7 +867,7 @@ private fun NeedsInputStrip(
             .padding(top = 8.dp)
             .heightIn(max = RESULT_BAR_MAX_HEIGHT)
             .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
             // 问题出现时 TalkBack 礼貌播报，用户不用找焦点也知道被问了什么
             .semantics { liveRegion = LiveRegionMode.Polite }
             .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
@@ -876,7 +876,7 @@ private fun NeedsInputStrip(
         Text(
             text = question,
             fontSize = 13.sp,
-            color = AILauncherColors.Title,
+            color = AILauncherColors.current.Title,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
@@ -896,7 +896,7 @@ private fun NeedsInputStrip(
                 Icon(
                     imageVector = Icons.Filled.Close,
                     contentDescription = "取消这件事",
-                    tint = AILauncherColors.Hint,
+                    tint = AILauncherColors.current.Hint,
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -917,7 +917,7 @@ private fun PermissionExplainCard(
             .padding(top = 8.dp)
             .heightIn(max = RESULT_BAR_MAX_HEIGHT)
             .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.Card.copy(alpha = 0.92f))
+            .background(AILauncherColors.current.Card.copy(alpha = 0.92f))
             .verticalScroll(rememberScrollState())
             // R3-C 无障碍：权限说明出现时 TalkBack 礼貌播报
             .semantics { liveRegion = LiveRegionMode.Polite }
@@ -928,24 +928,24 @@ private fun PermissionExplainCard(
             text = "需要开启一个权限",
             fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold,
-            color = AILauncherColors.Title
+            color = AILauncherColors.current.Title
         )
         Text(
             text = message,
             fontSize = 13.sp,
-            color = AILauncherColors.Body
+            color = AILauncherColors.current.Body
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
         ) {
             TextButton(onClick = onDismiss) {
-                Text(text = "暂不", color = AILauncherColors.Hint, fontSize = 13.sp)
+                Text(text = "暂不", color = AILauncherColors.current.Hint, fontSize = 13.sp)
             }
             TextButton(onClick = onGoSettings) {
                 Text(
                     text = "去开启",
-                    color = AILauncherColors.Accent,
+                    color = AILauncherColors.current.Accent,
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp
                 )

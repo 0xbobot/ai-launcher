@@ -322,7 +322,7 @@ internal fun WaveRail(
                                 .height(1.5.dp)
                                 .background(
                                     // v0.68.18（Bob）：Divider色太接近背景看不见，改深色低透明
-                                    AILauncherColors.Title.copy(alpha = 0.25f),
+                                    AILauncherColors.current.Title.copy(alpha = 0.25f),
                                     CircleShape
                                 )
                         )
@@ -354,7 +354,7 @@ internal fun WaveRail(
                             // v0.55.3（Bob）：G/S 底部被截断——显式 lineHeight 给足字高
                             fontSize = 12.sp,
                             lineHeight = 14.sp,
-                            color = AILauncherColors.Title.copy(alpha = 0.6f),
+                            color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                             fontWeight = FontWeight.Normal,
                             maxLines = 1,
                             modifier = Modifier.graphicsLayer {
@@ -381,20 +381,20 @@ internal fun WaveRail(
                             }
                         when (item) {
                             RailItem.House -> HouseGlyph(
-                                color = AILauncherColors.Title.copy(alpha = 0.6f),
+                                color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
                             // v0.68.8：线条风，与房子同款描边
                             RailItem.Star -> StarGlyph(
-                                color = AILauncherColors.Title.copy(alpha = 0.6f),
+                                color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
                             RailItem.Eye -> EyeOffGlyph(
-                                color = AILauncherColors.Title.copy(alpha = 0.6f),
+                                color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
                             is RailItem.Letter -> StarGlyph(
-                                color = AILauncherColors.Title.copy(alpha = 0.6f),
+                                color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
                             is RailItem.Separator -> {}
@@ -435,7 +435,7 @@ internal fun WaveRail(
                     .size(48.dp)
                     .border(
                         bubbleBorderWidth,
-                        AILauncherColors.Accent.copy(alpha = bubbleRingAlpha),
+                        AILauncherColors.current.Accent.copy(alpha = bubbleRingAlpha),
                         CircleShape
                     ),
                 contentAlignment = Alignment.Center
@@ -446,7 +446,7 @@ internal fun WaveRail(
                         text = bubbleItem.char.toString(),
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
-                        color = AILauncherColors.Title
+                        color = AILauncherColors.current.Title
                     )
                 } else {
                     // v0.68.6：精致版 HouseGlyph（细描边+圆角+门洞）
@@ -455,7 +455,7 @@ internal fun WaveRail(
                             // v0.68.25（Bob）：上拉 1x→2.5x 跟手；消散段先去掉，到阈值直接回主页
                             val houseScale = 1f + housePull * 1.5f
                             HouseGlyph(
-                                color = AILauncherColors.Title,
+                                color = AILauncherColors.current.Title,
                                 modifier = Modifier
                                     .size(24.dp)
                                     .graphicsLayer {
@@ -466,14 +466,14 @@ internal fun WaveRail(
                         }
                         // v0.68.8：线条风，与房子同款描边
                         RailItem.Star -> StarGlyph(
-                            color = AILauncherColors.Title,
+                            color = AILauncherColors.current.Title,
                             modifier = Modifier.size(24.dp)
                         )
                         RailItem.Eye -> {
                             // v0.68.20：下拉 1x→2x，配合震动给解锁反馈
                             val eyeScale = 1f + eyePull * 1f
                             EyeOffGlyph(
-                                color = AILauncherColors.Title,
+                                color = AILauncherColors.current.Title,
                                 modifier = Modifier
                                     .size(24.dp)
                                     .graphicsLayer {
@@ -483,7 +483,7 @@ internal fun WaveRail(
                             )
                         }
                         is RailItem.Letter -> StarGlyph(
-                            color = AILauncherColors.Title,
+                            color = AILauncherColors.current.Title,
                             modifier = Modifier.size(24.dp)
                         )
                         is RailItem.Separator -> {}

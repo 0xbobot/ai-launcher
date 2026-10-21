@@ -36,7 +36,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -129,6 +128,7 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -521,7 +521,7 @@ fun AppCenterContent(
         modifier = modifier
             .fillMaxSize()
             // v0.68.45（走查）：实底纸面——之前透明，主屏大时间透过来盖住列表
-            .background(AILauncherColors.Background)
+            .background(AILauncherColors.current.Background)
     ) {
     // v0.68.70（Bob）：横屏判断改用量实际尺寸（LocalConfiguration 也不可靠）
     var isLandscapeAc by remember { mutableStateOf(false) }
@@ -532,10 +532,12 @@ fun AppCenterContent(
             // v0.68.81（Bob）：statusBarsPadding 只在竖屏加——v0.68.75 全去掉后竖屏状态栏错乱
             // v0.68.83（Bob 报）：横屏顶部状态栏与内容重叠——横屏补回顶部 inset（只 Top，
             // 不带侧边，避免 v0.68.75 的"横屏侧边留白"复发）
+            // 批B ⑧：竖屏分支改走统一 helper statusBarsTopPadding（与 statusBarsPadding
+            // 取值等价）；横屏分支属横屏线领地，原样不动
             .then(
                 if (isLandscapeAc) Modifier.windowInsetsPadding(
                     WindowInsets.statusBars.only(WindowInsetsSides.Top)
-                ) else Modifier.statusBarsPadding()
+                ) else Modifier.statusBarsTopPadding()
             )
     ) {
         // ---- Header（v0.68.44 杂志刊头，Bob 选 A）：INDEX kicker + 宋体"全部应用" + 数量 ----
@@ -574,12 +576,12 @@ fun AppCenterContent(
                     fontWeight = FontWeight.Bold,
                     fontSize = 32.sp,
                     letterSpacing = 2.sp,
-                    color = AILauncherColors.Title
+                    color = AILauncherColors.current.Title
                 )
                 Text(
                     text = "${azApps.size} 款 · 右侧滑字母直达",
                     fontSize = 12.sp,
-                    color = AILauncherColors.Hint,
+                    color = AILauncherColors.current.Hint,
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
@@ -632,7 +634,7 @@ fun AppCenterContent(
                     Icon(
                         Icons.Filled.Settings,
                         contentDescription = "设置",
-                        tint = AILauncherColors.Hint.copy(alpha = 0.6f),
+                        tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -645,7 +647,7 @@ fun AppCenterContent(
                         .fillMaxWidth()
                         .padding(start = 20.dp, end = 12.dp, top = 10.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(AILauncherColors.Card.copy(alpha = 0.88f))
+                        .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
                         .clickable { onAskQizai(query.trim()) }
                         .padding(horizontal = 16.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -653,14 +655,14 @@ fun AppCenterContent(
                     Icon(
                         Icons.Filled.AutoAwesome,
                         contentDescription = null,
-                        tint = AILauncherColors.Accent,
+                        tint = AILauncherColors.current.Accent,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "问七仔：「${query.trim()}」",
                         fontSize = 13.sp,
-                        color = AILauncherColors.Accent,
+                        color = AILauncherColors.current.Accent,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -669,7 +671,7 @@ fun AppCenterContent(
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = null,
-                        tint = AILauncherColors.Accent,
+                        tint = AILauncherColors.current.Accent,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -732,7 +734,7 @@ fun AppCenterContent(
                             Text(
                                 text = "没有找到「${filterQuery.trim()}」相关的应用",
                                 fontSize = 14.sp,
-                                color = AILauncherColors.Hint,
+                                color = AILauncherColors.current.Hint,
                                 modifier = Modifier.padding(
                                     top = 32.dp, start = 72.dp, end = 64.dp
                                 )
@@ -749,7 +751,7 @@ fun AppCenterContent(
                                     .padding(start = 72.dp, end = 64.dp)
                                     .clip(RoundedCornerShape(20.dp))
                                     .background(
-                                        if (isPopupExpanded) AILauncherColors.Card
+                                        if (isPopupExpanded) AILauncherColors.current.Card
                                         else Color.Transparent
                                     )
                                     .animateContentSize(
@@ -837,7 +839,7 @@ fun AppCenterContent(
                             Icon(
                                 imageVector = Icons.Filled.Star,
                                 contentDescription = null,
-                                tint = AILauncherColors.Title.copy(alpha = if (index == 0) 0.14f else 0f),
+                                tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) 0.14f else 0f),
                                 modifier = Modifier
                                     .align(Alignment.CenterStart)
                                     .padding(start = 20.dp)
@@ -851,7 +853,7 @@ fun AppCenterContent(
                                     .padding(start = 72.dp, end = 64.dp)
                                     .clip(RoundedCornerShape(20.dp))
                                     .background(
-                                        if (isPopupExpandedX) AILauncherColors.Card
+                                        if (isPopupExpandedX) AILauncherColors.current.Card
                                         else Color.Transparent
                                     )
                             ) {
@@ -900,7 +902,7 @@ fun AppCenterContent(
                             Icon(
                                 imageVector = Icons.Filled.DragHandle,
                                 contentDescription = "拖动排序",
-                                tint = AILauncherColors.Hint,
+                                tint = AILauncherColors.current.Hint,
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
                                     .padding(end = 86.dp)
@@ -970,7 +972,7 @@ fun AppCenterContent(
                                     fontFamily = FontFamily.Serif,
                                     fontSize = 56.sp,
                                     // v0.68.44（Bob）：杂志章节感——放大加深
-                                    color = AILauncherColors.Title.copy(alpha = 0.20f),
+                                    color = AILauncherColors.current.Title.copy(alpha = 0.20f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
                                         .padding(start = 20.dp)
@@ -984,7 +986,7 @@ fun AppCenterContent(
                                     .padding(start = 72.dp, end = 64.dp)
                                     .clip(RoundedCornerShape(20.dp))
                                     .background(
-                                        if (isPopupExpandedX) AILauncherColors.Card
+                                        if (isPopupExpandedX) AILauncherColors.current.Card
                                         else Color.Transparent
                                     )
                             ) {
@@ -1035,7 +1037,7 @@ fun AppCenterContent(
                                 Icon(
                                     imageVector = Icons.Outlined.Lock,
                                     contentDescription = null,
-                                    tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                                    tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
                                         .padding(start = 20.dp)
@@ -1054,13 +1056,13 @@ fun AppCenterContent(
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(RoundedCornerShape(10.dp))
-                                        .background(AILauncherColors.Divider),
+                                        .background(AILauncherColors.current.Divider),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Filled.Fingerprint,
                                         contentDescription = null,
-                                        tint = AILauncherColors.Hint,
+                                        tint = AILauncherColors.current.Hint,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
@@ -1068,7 +1070,7 @@ fun AppCenterContent(
                                 Text(
                                     text = "点击解锁查看",
                                     fontSize = 16.sp,
-                                    color = AILauncherColors.Title
+                                    color = AILauncherColors.current.Title
                                 )
                                 }
                             }
@@ -1081,7 +1083,7 @@ fun AppCenterContent(
                                 Icon(
                                     imageVector = Icons.Filled.VisibilityOff,
                                     contentDescription = null,
-                                    tint = AILauncherColors.Title.copy(alpha = if (index == 0) 0.14f else 0f),
+                                    tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) 0.14f else 0f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
                                         .padding(start = 20.dp)
@@ -1095,7 +1097,7 @@ fun AppCenterContent(
                                         .padding(start = 72.dp, end = 64.dp)
                                         .clip(RoundedCornerShape(20.dp))
                                         .background(
-                                            if (isPopupExpandedX) AILauncherColors.Card
+                                            if (isPopupExpandedX) AILauncherColors.current.Card
                                             else Color.Transparent
                                         )
                                 ) {
@@ -1159,7 +1161,7 @@ fun AppCenterContent(
                     Icon(
                         imageVector = Icons.Filled.Star,
                         contentDescription = null,
-                        tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                        tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 20.dp, top = 12.dp)
@@ -1172,7 +1174,7 @@ fun AppCenterContent(
                         imageVector = if (hiddenUnlocked) Icons.Filled.VisibilityOff
                             else Icons.Filled.VisibilityOff,
                         contentDescription = null,
-                        tint = AILauncherColors.Title.copy(alpha = 0.14f),
+                        tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 20.dp, top = 12.dp)
@@ -1183,7 +1185,7 @@ fun AppCenterContent(
                         text = sl.toString(),
                         fontFamily = FontFamily.Serif,
                         fontSize = 56.sp,
-                        color = AILauncherColors.Title.copy(alpha = 0.20f),
+                        color = AILauncherColors.current.Title.copy(alpha = 0.20f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 20.dp, top = 12.dp)
@@ -1429,7 +1431,7 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
                     text = "滑动快捷操作",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.Title
+                    color = AILauncherColors.current.Title
                 )
                 GuideRow(
                     icon = Icons.Filled.Star,
@@ -1446,7 +1448,7 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
                 Text(
                     text = "点任意处关闭",
                     fontSize = 12.sp,
-                    color = AILauncherColors.Hint,
+                    color = AILauncherColors.current.Hint,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
             }
@@ -1474,12 +1476,12 @@ private fun GuideRow(
                 text = title,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = AILauncherColors.Title
+                color = AILauncherColors.current.Title
             )
             Text(
                 text = desc,
                 fontSize = 12.sp,
-                color = AILauncherColors.Hint
+                color = AILauncherColors.current.Hint
             )
         }
     }
@@ -1530,7 +1532,7 @@ internal fun MastheadKicker(text: String) {
             androidx.compose.material3.Text(
                 text = ch.toString(),
                 fontSize = 12.sp,
-                color = AILauncherColors.Accent,
+                color = AILauncherColors.current.Accent,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
             )
             Spacer(modifier = Modifier.width(4.dp))

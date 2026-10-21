@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,7 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.data.LlmConfig
-import com.bobot.ailauncher.data.LlmRouter
+import com.bobot.ailauncher.data.LlmConnectionTester
 import com.bobot.ailauncher.data.OtaCheckResult
 import com.bobot.ailauncher.data.OtaDownloader
 import com.bobot.ailauncher.ui.components.downloadStatusText
@@ -114,8 +114,8 @@ fun SettingsScreen(
         // v0.61.1：和应用中心一样的半透明背景（GlassCardStrong，白 88%）
         // v0.68.45：contentPadding 归零，各 item 自带 padding——刊头和应用中心像素对齐
         modifier = Modifier.fillMaxSize()
-            .background(AILauncherColors.GlassCardStrong)
-            .statusBarsPadding()
+            .background(AILauncherColors.current.GlassCardStrong)
+            .statusBarsTopPadding()
             .then(swipeUpToHome),
         contentPadding = PaddingValues(0.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -139,7 +139,7 @@ fun SettingsScreen(
                     Text(
                         text = "‹ ",
                         fontSize = 14.sp,
-                        color = AILauncherColors.Accent,
+                        color = AILauncherColors.current.Accent,
                         fontWeight = FontWeight.Bold
                     )
                     com.bobot.ailauncher.ui.apps.MastheadKicker(text = "CONFIG · 设置")
@@ -150,7 +150,7 @@ fun SettingsScreen(
                     fontWeight = FontWeight.Bold,
                     fontSize = 32.sp,
                     letterSpacing = 2.sp,
-                    color = AILauncherColors.Title
+                    color = AILauncherColors.current.Title
                 )
             }
         }
@@ -159,7 +159,7 @@ fun SettingsScreen(
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
@@ -175,13 +175,13 @@ fun SettingsScreen(
                                 text = "让七仔更聪明",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = AILauncherColors.Title
+                                color = AILauncherColors.current.Title
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "填上大模型 Key，七仔能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
                                 fontSize = 13.sp,
-                                color = AILauncherColors.Hint,
+                                color = AILauncherColors.current.Hint,
                                 lineHeight = 18.sp
                             )
                         }
@@ -189,7 +189,7 @@ fun SettingsScreen(
                             if (llmExpanded) Icons.Filled.KeyboardArrowUp
                             else Icons.Filled.KeyboardArrowDown,
                             contentDescription = if (llmExpanded) "收起" else "展开",
-                            tint = AILauncherColors.Hint
+                            tint = AILauncherColors.current.Hint
                         )
                     }
                     if (llmExpanded) {
@@ -198,7 +198,7 @@ fun SettingsScreen(
                             value = apiKey,
                             onValueChange = { apiKey = it; persist() },
                             label = { Text("大模型 Key") },
-                            placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.Hint) },
+                            placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth().then(hideOnBlur)
@@ -208,14 +208,14 @@ fun SettingsScreen(
                             value = baseUrl,
                             onValueChange = { baseUrl = it; persist() },
                             label = { Text("接口地址") },
-                            placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.Hint) },
+                            placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().then(hideOnBlur)
                         )
                         Text(
                             text = "一般不用改。用别的服务商才需要换",
                             fontSize = 12.sp,
-                            color = AILauncherColors.Hint,
+                            color = AILauncherColors.current.Hint,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -223,14 +223,14 @@ fun SettingsScreen(
                             value = model,
                             onValueChange = { model = it; persist() },
                             label = { Text("用哪个模型") },
-                            placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.Hint) },
+                            placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().then(hideOnBlur)
                         )
                         Text(
                             text = "填你 Key 对应的模型名，比如 deepseek-flash",
                             fontSize = 12.sp,
-                            color = AILauncherColors.Hint,
+                            color = AILauncherColors.current.Hint,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -244,7 +244,7 @@ fun SettingsScreen(
                                 }
                                 testing = true
                                 scope.launch {
-                                    val err = LlmRouter.testConnection(
+                                    val err = LlmConnectionTester.testConnection(
                                         baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
                                         apiKey,
                                         model.ifBlank { LlmConfig.DEFAULT_MODEL }
@@ -254,7 +254,7 @@ fun SettingsScreen(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.Accent)
+                            colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
                         ) {
                             Text(if (testing) "测试中…" else "测试连接")
                         }
@@ -332,7 +332,7 @@ fun SettingsScreen(
 
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier.padding(horizontal = 20.dp),
                 onClick = { onCardClick?.invoke() }
@@ -355,7 +355,7 @@ fun SettingsScreen(
                             },
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.Title
+                            color = AILauncherColors.current.Title
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         when {
@@ -370,13 +370,13 @@ fun SettingsScreen(
                                         dlState as OtaDownloader.State.Downloading
                                     ),
                                     fontSize = 13.sp,
-                                    color = AILauncherColors.Hint
+                                    color = AILauncherColors.current.Hint
                                 )
                             }
                             dlDone -> Text(
                                 text = "点击安装 v${updateInfo?.versionName ?: ""}",
                                 fontSize = 13.sp,
-                                color = AILauncherColors.Accent
+                                color = AILauncherColors.current.Accent
                             )
                             dlFailed -> {
                                 Text(
@@ -404,7 +404,7 @@ fun SettingsScreen(
                                         Text(
                                             text = "手动下载（浏览器打开）",
                                             fontSize = 13.sp,
-                                            color = AILauncherColors.Accent
+                                            color = AILauncherColors.current.Accent
                                         )
                                     }
                                 }
@@ -412,14 +412,14 @@ fun SettingsScreen(
                             updateInfo != null -> Text(
                                 text = updateInfo!!.changelog,
                                 fontSize = 13.sp,
-                                color = AILauncherColors.Hint,
+                                color = AILauncherColors.current.Hint,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                             else -> Text(
                                 text = "当前版本 v${BuildConfig.VERSION_NAME}",
                                 fontSize = 13.sp,
-                                color = AILauncherColors.Hint
+                                color = AILauncherColors.current.Hint
                             )
                         }
                     }
@@ -427,13 +427,13 @@ fun SettingsScreen(
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.dp,
-                            color = AILauncherColors.Accent
+                            color = AILauncherColors.current.Accent
                         )
                     } else if (onCardClick != null) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
-                            tint = AILauncherColors.Hint
+                            tint = AILauncherColors.current.Hint
                         )
                     }
                 }
@@ -445,7 +445,7 @@ fun SettingsScreen(
             var betaOptIn by remember { mutableStateOf(OtaUpdater.isBetaOptIn(context)) }
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier.padding(horizontal = 20.dp)
             ) {
@@ -460,13 +460,13 @@ fun SettingsScreen(
                             text = "接收测试版更新",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.Title
+                            color = AILauncherColors.current.Title
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "开启后可收到测试版推送，适合尝鲜；默认只收正式版",
                             fontSize = 13.sp,
-                            color = AILauncherColors.Hint
+                            color = AILauncherColors.current.Hint
                         )
                     }
                     Switch(

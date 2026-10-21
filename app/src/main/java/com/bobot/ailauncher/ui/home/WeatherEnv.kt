@@ -78,7 +78,7 @@ fun WeatherEnv(modifier: Modifier = Modifier) {
             Text(
                 text = "${w.city} ${w.temp}°",
                 fontSize = 12.sp,
-                color = AILauncherColors.Title.copy(alpha = 0.55f),
+                color = AILauncherColors.current.Title.copy(alpha = 0.55f),
                 modifier = Modifier
                     .align(Alignment.Center)
                     .offset(y = 170.dp)

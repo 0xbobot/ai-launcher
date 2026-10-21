@@ -237,13 +237,13 @@ fun AppCenterLandscape(
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 3.sp,
-                            color = AILauncherColors.Accent
+                            color = AILauncherColors.current.Accent
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = "$totalCount 款",
                             fontSize = 12.sp,
-                            color = AILauncherColors.Hint
+                            color = AILauncherColors.current.Hint
                         )
                     }
                     Spacer(modifier = Modifier.weight(1f))
@@ -252,7 +252,7 @@ fun AppCenterLandscape(
                         modifier = Modifier
                             .width(440.dp)
                             .clip(RoundedCornerShape(24.dp))
-                            .background(AILauncherColors.Card.copy(alpha = 0.7f))
+                            .background(AILauncherColors.current.Card.copy(alpha = 0.7f))
                             .padding(horizontal = 18.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -262,9 +262,9 @@ fun AppCenterLandscape(
                             singleLine = true,
                             textStyle = TextStyle(
                                 fontSize = 14.sp,
-                                color = AILauncherColors.Title
+                                color = AILauncherColors.current.Title
                             ),
-                            cursorBrush = SolidColor(AILauncherColors.Accent),
+                            cursorBrush = SolidColor(AILauncherColors.current.Accent),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = {
                                 keyboardController?.hide()
@@ -274,7 +274,7 @@ fun AppCenterLandscape(
                                     Icon(
                                         Icons.Filled.Search,
                                         contentDescription = null,
-                                        tint = AILauncherColors.Hint,
+                                        tint = AILauncherColors.current.Hint,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
@@ -283,7 +283,7 @@ fun AppCenterLandscape(
                                             Text(
                                                 text = "搜索应用，支持拼音/首字母",
                                                 fontSize = 14.sp,
-                                                color = AILauncherColors.Hint,
+                                                color = AILauncherColors.current.Hint,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -298,7 +298,7 @@ fun AppCenterLandscape(
                                             Icon(
                                                 Icons.Filled.Close,
                                                 contentDescription = "清空",
-                                                tint = AILauncherColors.Hint,
+                                                tint = AILauncherColors.current.Hint,
                                                 modifier = Modifier.size(16.dp)
                                             )
                                         }
@@ -313,7 +313,7 @@ fun AppCenterLandscape(
                     Icon(
                         imageVector = Icons.Filled.Settings,
                         contentDescription = "设置",
-                        tint = AILauncherColors.Hint,
+                        tint = AILauncherColors.current.Hint,
                         modifier = Modifier
                             .size(24.dp)
                             .clip(CircleShape)
@@ -337,7 +337,7 @@ fun AppCenterLandscape(
                                 Text(
                                     text = "没有找到「${query.trim()}」相关的应用",
                                     fontSize = 14.sp,
-                                    color = AILauncherColors.Hint,
+                                    color = AILauncherColors.current.Hint,
                                     modifier = Modifier.padding(
                                         top = 32.dp, start = 12.dp, end = 12.dp
                                     )
@@ -382,7 +382,7 @@ fun AppCenterLandscape(
                                             fontFamily = FontFamily.Serif,
                                             fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = AILauncherColors.Title,
+                                            color = AILauncherColors.current.Title,
                                             modifier = Modifier
                                                 .height(rowH)
                                                 .padding(start = 12.dp)
@@ -396,7 +396,7 @@ fun AppCenterLandscape(
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold,
                                             letterSpacing = 2.sp,
-                                            color = AILauncherColors.Accent,
+                                            color = AILauncherColors.current.Accent,
                                             modifier = Modifier
                                                 .height(rowH)
                                                 .padding(start = 12.dp)
@@ -421,7 +421,7 @@ fun AppCenterLandscape(
                 modifier = Modifier
                     .fillMaxHeight()
                     .width(1.dp)
-                    .background(AILauncherColors.Divider)
+                    .background(AILauncherColors.current.Divider)
             )
             // v0.68.74（Bob）：右：波浪字母导航（复用竖屏 WaveRail，完整 A-Z）
             // v0.68.75（Bob）：加回收藏★和隐藏👁，核心功能不能丢
@@ -530,7 +530,7 @@ private fun LandscapeAppRow(
         Text(
             text = app.label.toString(),
             fontSize = 14.sp,
-            color = AILauncherColors.Title,
+            color = AILauncherColors.current.Title,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)

@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -65,6 +64,7 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.systemGestureBottomPx
 import kotlin.math.abs
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
@@ -211,7 +211,7 @@ fun PullUpDock(
                 val vThreshPx = with(density) { 72.dp.toPx() }
                 // v0.16.1：底部系统手势区高度（导航条/手势区），落在该区域内的拖拽起点不抢——
                 // 让系统处理底部左右滑（切最近应用）、底部上滑（回桌面/最近任务）
-                val sysGestureBottomPx = WindowInsets.systemGestures.getBottom(density)
+                val sysGestureBottomPx = systemGestureBottomPx()  // 批B ⑧：收口到 Insets helper（原内联读 WindowInsets.systemGestures）
                 val dockBottomPadPx = with(density) { 16.dp.toPx() }
                 // v0.27.1：去底（Bob 选一）——图标直接浮在壁纸上，无卡片无阴影
                 // v0.57.0：长按 Dock → 隐藏（与 D1 右滑并存）
@@ -232,7 +232,7 @@ fun PullUpDock(
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .clip(RoundedCornerShape(28.dp))
-                        .background(AILauncherColors.GlassCard.copy(alpha = 0.55f * dockBgAlpha))
+                        .background(AILauncherColors.current.GlassCard.copy(alpha = 0.55f * dockBgAlpha))
                         .combinedClickable(
                             interactionSource = dockPressSource,
                             indication = null,  // 用背景显隐做反馈，不要水波纹
@@ -400,7 +400,7 @@ private fun FullAppsOverlay(
             // v0.68.68：D3 用实底——半透明 GlassCardStrong 会让壁纸颜色透出来
             //（深色横屏时最左侧蓝条）；AppCenterContent 自己有实底背景，
             // 这里用实底确保边缘无缝
-            .background(AILauncherColors.Background)
+            .background(AILauncherColors.current.Background)
     ) {
         AppCenterContent(
             onOpenSettings = onOpenSettings,

@@ -111,6 +111,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.CalEvent
+import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.data.AiInsight
 import com.bobot.ailauncher.data.PetCat
 import com.bobot.ailauncher.data.PetItem
@@ -143,10 +145,6 @@ import kotlin.math.roundToInt
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import android.Manifest
-import android.content.ContentUris
-import android.content.pm.PackageManager
-import android.provider.CalendarContract
-import androidx.core.content.ContextCompat
 import java.util.Calendar
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -385,7 +383,7 @@ fun PetZone(
     // 产品原则：重要信息不用模态弹窗
     fun remindMeeting(e: CalEvent, tag: String) {
         // 没权限就静默跳过，用户在 TodaySheet 里手动授权
-        if (!hasCalendarPermission(context)) return
+        if (!CalendarRepository.hasCalendarPermission(context)) return
         val key = "${e.title}|${e.begin}|$tag"
         if (!notifiedCalendarKeys.add(key)) return
         val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
@@ -413,8 +411,13 @@ fun PetZone(
     // PetZone 离场时清空，避免建议面读到陈旧会议。TODAY 数据流本身不改。
     LaunchedEffect(coverNextEvent) { TodayEventsHolder.update(coverNextEvent) }
     DisposableEffect(Unit) { onDispose { TodayEventsHolder.update(null) } }
+    // 批B ③：coverPaletteFor 是非组合纯函数，深浅由这里从 CompositionLocal 读后传入
+    val coverIsDark = AILauncherColors.current.isDark
     val coverPalette = remember {
-        coverPaletteFor(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
+        coverPaletteFor(
+            java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY),
+            coverIsDark
+        )
     }
 
     // v0.68.44（Bob）：封面模式——杂志 hero + 紧凑条；TodaySection 只跑数据不上 UI
@@ -743,7 +746,7 @@ fun PetZone(
                                 with(density) { 34.dp.toPx() }.roundToInt()
                             )
                         }
-                        .background(AILauncherColors.Card.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
+                        .background(AILauncherColors.current.Card.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
                         .padding(horizontal = 9.dp, vertical = 7.dp)
                 )
             }
@@ -782,7 +785,7 @@ fun PetZone(
                     spotColor = Color.Black.copy(alpha = 0.08f)
                 )
                 .clip(RoundedCornerShape(28.dp))
-                .background(AILauncherColors.Card.copy(alpha = 0.65f))
+                .background(AILauncherColors.current.Card.copy(alpha = 0.65f))
         ) {
             // v0.64.0：十万火急红色光带扫过顶部（1 次）
             val sweepX = remember { Animatable(-0.3f) }
@@ -888,7 +891,7 @@ fun PetPresentedCard() {
         val masked = cur.cat == PetCat.PRIV && !armed
         Card(
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card.copy(alpha = 0.92f)),
+            colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card.copy(alpha = 0.92f)),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
             modifier = Modifier
                 .fillMaxWidth()
@@ -1100,7 +1103,7 @@ private fun SpeechBubble(
             }
             Card(
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
                 modifier = Modifier
                     .widthIn(max = 240.dp)
@@ -1217,7 +1220,7 @@ private fun TodaySection(
     var nextEvent by remember { mutableStateOf<CalEvent?>(null) }
     // v0.59.0 AI-2：保留今日所有事件，用于消息关联日历
     var allEvents by remember { mutableStateOf<List<CalEvent>>(emptyList()) }
-    var hasCalPermission by remember { mutableStateOf(hasCalendarPermission(context)) }
+    var hasCalPermission by remember { mutableStateOf(CalendarRepository.hasCalendarPermission(context)) }
     // v0.62.0：编辑模式 / 区块排序 / 显隐
     // v0.64.3：editMode 上提到 PetZone，卡片可按编辑模式调整高度
     var sectionOrder by remember { mutableStateOf(TodayPrefs.loadOrder(context)) } // v0.63.0：保留兼容，排序已移除
@@ -1243,7 +1246,7 @@ private fun TodaySection(
 
     LaunchedEffect(hasCalPermission) {
         if (hasCalPermission) {
-            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
+            val events = withContext(Dispatchers.IO) { CalendarRepository.loadTodayEvents(context) }
             val now = System.currentTimeMillis()
             // v0.59.0 AI-2：保留所有今日事件用于关联
             allEvents = events.filter { !it.allDay }
@@ -1261,7 +1264,7 @@ private fun TodaySection(
         val waitEnd = effectiveEnd - System.currentTimeMillis()
         if (waitEnd > 0) delay(waitEnd)
         if (hasCalPermission) {
-            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
+            val events = withContext(Dispatchers.IO) { CalendarRepository.loadTodayEvents(context) }
             val now2 = System.currentTimeMillis()
             allEvents = events.filter { !it.allDay }
             nextEvent = allEvents.firstOrNull { it.end > now2 }
@@ -1300,7 +1303,7 @@ private fun TodaySection(
         }
         when (section) {
             TodaySection.NEXT -> {
-                if (hasCalendarPermission(context)) {
+                if (CalendarRepository.hasCalendarPermission(context)) {
                     val nv = visibleSections + section
                     visibleSections = nv
                     TodayPrefs.saveVisible(context, nv)
@@ -1410,7 +1413,7 @@ private fun TodaySection(
     // v0.67.5：回到桌面时重查日历（省电原则：只在用户看到时刷新，不轮询），避免隔夜 stale
     LaunchedEffect(resumeTick) {
         if (resumeTick > 0 && hasCalPermission) {
-            val events = withContext(Dispatchers.IO) { loadTodayEvents(context) }
+            val events = withContext(Dispatchers.IO) { CalendarRepository.loadTodayEvents(context) }
             val now = System.currentTimeMillis()
             allEvents = events.filter { !it.allDay }
             nextEvent = allEvents.firstOrNull { it.end > now }
@@ -1554,7 +1557,7 @@ private fun TodaySection(
                         text = summaryText,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        color = AILauncherColors.Title,
+                        color = AILauncherColors.current.Title,
                         maxLines = 1
                     )
                     Spacer(modifier = Modifier.height(2.dp))
@@ -1590,7 +1593,7 @@ private fun TodaySection(
                 }
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = AILauncherColors.Card.copy(alpha = 0.5f),
+                    color = AILauncherColors.current.Card.copy(alpha = 0.5f),
                     modifier = Modifier
                         .combinedClickable(
                             enabled = !editMode,
@@ -1797,7 +1800,7 @@ private fun TodaySection(
                                             text = e.title.ifBlank { "（无标题）" },
                                             fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = AILauncherColors.Title
+                                            color = AILauncherColors.current.Title
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
@@ -1969,7 +1972,7 @@ private fun TodaySection(
                 Text(
                     text = "🎉 有新版本 ${availUpdate.versionName}",
                     fontSize = 13.sp,
-                    color = AILauncherColors.Title,
+                    color = AILauncherColors.current.Title,
                     modifier = Modifier.weight(1f)
                 )
                 Text(text = "›", fontSize = 16.sp, color = Color(0xFFC7C7CC))
@@ -2078,7 +2081,7 @@ private fun PriorityReplyRow(
                     text = "${item.appName} · ${item.title.ifBlank { "新消息" }}",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
-                    color = AILauncherColors.Title,
+                    color = AILauncherColors.current.Title,
                     // v0.68.20：单行省略，杜绝长标题换行重叠
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -2092,7 +2095,7 @@ private fun PriorityReplyRow(
                                 text = kp,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = AILauncherColors.Title,
+                                color = AILauncherColors.current.Title,
                                 modifier = Modifier.padding(bottom = 2.dp)
                             )
                         }
@@ -2136,7 +2139,7 @@ private fun PriorityReplyRow(
                 enabled = !editMode,
                 shape = RoundedCornerShape(99.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = AILauncherColors.Title,
+                    containerColor = AILauncherColors.current.Title,
                     contentColor = Color.White
                 ),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
@@ -2323,7 +2326,7 @@ private fun NormalMessageRow(
                     text = item.appName,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
-                    color = AILauncherColors.Title,
+                    color = AILauncherColors.current.Title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -2427,7 +2430,7 @@ private fun TodoRow(
                     text = todo.action,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
-                    color = AILauncherColors.Title,
+                    color = AILauncherColors.current.Title,
                     textDecoration = if (completing) TextDecoration.LineThrough else null,
                     maxLines = 1,
                     // v0.68.20：补省略号，防长文本溢出
@@ -2521,18 +2524,7 @@ private fun weatherSceneFor(desc: String?): QizaiScene = when (desc) {
     else -> QizaiScene.WEATHER_SUN
 }
 
-// v0.48.0：日程——从 v0.31.0 移除的 HomeScreen 日历逻辑迁回，由七仔统一呈现
-// v0.58.0：加 description 字段，用于提取在线会议链接
-data class CalEvent(
-    val title: String,
-    val begin: Long,
-    val end: Long,
-    val location: String,
-    val description: String = "",
-    val allDay: Boolean,
-    // v0.67.2：事件 ID，用于日历 fallback 直接打开事件详情
-    val eventId: Long = 0L
-)
+// 批B ②：CalEvent 已随日历查询下沉 data 层（com.bobot.ailauncher.data.CalEvent）
 
 /**
  * v0.58.0（需求4）：从日历事件的 location/description/title 提取在线会议链接。
@@ -2620,65 +2612,7 @@ private fun getValidMeetingUrl(context: android.content.Context, event: CalEvent
     return if (intent.resolveActivity(context.packageManager) != null) url else null
 }
 
-private fun hasCalendarPermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(
-        context, Manifest.permission.READ_CALENDAR
-    ) == PackageManager.PERMISSION_GRANTED
-
-private fun loadTodayEvents(context: Context): List<CalEvent> {
-    return try {
-        val cal = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val start = cal.timeInMillis
-        cal.add(Calendar.DAY_OF_YEAR, 1)
-        val end = cal.timeInMillis
-        val builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
-        ContentUris.appendId(builder, start)
-        ContentUris.appendId(builder, end)
-        val cursor = context.contentResolver.query(
-            builder.build(),
-            arrayOf(
-                CalendarContract.Instances.TITLE,
-                CalendarContract.Instances.BEGIN,
-                CalendarContract.Instances.END,
-                CalendarContract.Instances.EVENT_LOCATION,
-                CalendarContract.Instances.DESCRIPTION,
-                CalendarContract.Instances.ALL_DAY,
-                CalendarContract.Instances.EVENT_ID
-            ),
-            null, null,
-            CalendarContract.Instances.BEGIN + " ASC"
-        )
-        val list = mutableListOf<CalEvent>()
-        cursor?.use {
-            val ti = it.getColumnIndex(CalendarContract.Instances.TITLE)
-            val bi = it.getColumnIndex(CalendarContract.Instances.BEGIN)
-            val ei = it.getColumnIndex(CalendarContract.Instances.END)
-            val li = it.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
-            val di = it.getColumnIndex(CalendarContract.Instances.DESCRIPTION)
-            val ai = it.getColumnIndex(CalendarContract.Instances.ALL_DAY)
-            val eidi = it.getColumnIndex(CalendarContract.Instances.EVENT_ID)
-            while (it.moveToNext() && list.size < 20) {
-                list += CalEvent(
-                    title = if (ti >= 0) it.getString(ti).orEmpty() else "",
-                    begin = if (bi >= 0) it.getLong(bi) else 0L,
-                    end = if (ei >= 0) it.getLong(ei) else 0L,
-                    location = if (li >= 0) it.getString(li).orEmpty() else "",
-                    description = if (di >= 0) it.getString(di).orEmpty() else "",
-                    allDay = if (ai >= 0) it.getInt(ai) == 1 else false,
-                    eventId = if (eidi >= 0) it.getLong(eidi) else 0L
-                )
-            }
-        }
-        list
-    } catch (_: Exception) {
-        emptyList()
-    }
-}
+// 批B ②：hasCalendarPermission / loadTodayEvents 已下沉 data 层 CalendarRepository
 
 /**
  * v0.30.0：天气微动作——按天气给宠物加极小的身体语言。

@@ -80,8 +80,8 @@ fun MainScreen() {
     var dockState by remember {
         mutableStateOf(if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1)
     }
-    // v0.68.50：深色模式——系统主题 → 全局颜色 State
-    AILauncherColors.isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    // v0.68.50：深色模式随系统主题；批B ③：调色板由 AILauncherTheme 经
+    // CompositionLocal 提供，本处原组合期写全局 isDark 已取消
 
     // v0.26.6：返回键处理——D3（应用中心）返回主页，首页不做事
     // 用 BackHandler 拦截，避免系统默认行为导致页面刷新/重建
@@ -264,8 +264,8 @@ private fun HomeHost(
                 .background(
                     androidx.compose.ui.graphics.Brush.verticalGradient(
                         colors = listOf(
-                            com.bobot.ailauncher.ui.theme.AILauncherColors.Background.copy(alpha = 0.75f),
-                            com.bobot.ailauncher.ui.theme.AILauncherColors.Background.copy(alpha = 0.45f)
+                            com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.75f),
+                            com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.45f)
                         )
                     )
                 )
@@ -456,7 +456,7 @@ private fun HomeHost(
                         Text(
                             text = "隐藏后，在首页上滑就能把它叫回来。",
                             fontSize = 14.sp,
-                            color = AILauncherColors.Body
+                            color = AILauncherColors.current.Body
                         )
                         Spacer(modifier = Modifier.padding(top = 8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -465,13 +465,13 @@ private fun HomeHost(
                                 onCheckedChange = { noRemind = it }
                             )
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "不再提醒", fontSize = 13.sp, color = AILauncherColors.Body)
+                            Text(text = "不再提醒", fontSize = 13.sp, color = AILauncherColors.current.Body)
                         }
                     }
                 },
                 confirmButton = {
                     TextButton(onClick = { onHideDockConfirm(noRemind) }) {
-                        Text("隐藏", color = AILauncherColors.Accent)
+                        Text("隐藏", color = AILauncherColors.current.Accent)
                     }
                 },
                 dismissButton = {

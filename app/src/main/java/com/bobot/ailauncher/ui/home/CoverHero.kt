@@ -132,7 +132,7 @@ fun CoverHeroGiantTime(
                     modifier = Modifier
                         .width(44.dp)
                         .height(3.dp)
-                        .background(AILauncherColors.Accent)
+                        .background(AILauncherColors.current.Accent)
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -159,7 +159,7 @@ fun CoverHeroGiantTime(
                         text = ":",
                         fontSize = timeSize,
                         fontWeight = FontWeight.Bold,
-                        color = AILauncherColors.Accent,
+                        color = AILauncherColors.current.Accent,
                         lineHeight = timeSize
                     )
                     Text(
@@ -313,7 +313,7 @@ fun CoverHeroHeadline(
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     TrackedText(text = "HEADLINE · 头条", fontSize = 12.sp, tracking = 4.dp,
-                        color = AILauncherColors.Accent)
+                        color = AILauncherColors.current.Accent)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
@@ -328,10 +328,10 @@ fun CoverHeroHeadline(
             Box(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     TrackedText(text = "HEADLINE · 头条", fontSize = 12.sp, tracking = 4.dp,
-                        color = AILauncherColors.Accent)
+                        color = AILauncherColors.current.Accent)
                     Spacer(modifier = Modifier.height(12.dp))
                     Box(modifier = Modifier.width(44.dp).height(3.dp)
-                        .background(AILauncherColors.Accent))
+                        .background(AILauncherColors.current.Accent))
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
@@ -388,7 +388,7 @@ fun CoverHeroMinimal(
                     fontWeight = FontWeight.Bold, letterSpacing = (-4).sp,
                     color = palette.title, lineHeight = timeSize)
                 Text(text = ":", fontSize = timeSize, fontWeight = FontWeight.Bold,
-                    color = AILauncherColors.Accent, lineHeight = timeSize)
+                    color = AILauncherColors.current.Accent, lineHeight = timeSize)
                 Text(text = parts.getOrElse(1) { "--" }, fontSize = timeSize,
                     fontWeight = FontWeight.Bold, letterSpacing = (-4).sp,
                     color = palette.title, lineHeight = timeSize)
@@ -396,7 +396,7 @@ fun CoverHeroMinimal(
             Spacer(modifier = Modifier.height(24.dp))
             // 金线（居中短线）
             Box(modifier = Modifier.width(32.dp).height(2.dp)
-                .background(AILauncherColors.Accent))
+                .background(AILauncherColors.current.Accent))
             Spacer(modifier = Modifier.height(24.dp))
             // 一句天气
             Text(text = weatherDesc, fontSize = 16.sp,

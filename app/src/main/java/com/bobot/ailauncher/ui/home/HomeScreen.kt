@@ -349,7 +349,7 @@ private fun PanelPermissionGuide(
     ) {
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = AILauncherColors.Card),
+            colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
             modifier = Modifier
                 .padding(horizontal = 36.dp)
                 .clickable(enabled = false, onClick = {})
@@ -362,7 +362,7 @@ private fun PanelPermissionGuide(
                     text = if (compact) "还没开启权限" else "下滑手势需要开个权限",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.Title
+                    color = AILauncherColors.current.Title
                 )
                 Text(
                     text = if (compact)
@@ -370,7 +370,7 @@ private fun PanelPermissionGuide(
                     else
                         "下滑打开通知中心、斜滑打开控制中心，都要借用系统的无障碍能力。请在无障碍设置中开启「AI 桌面」，只用来帮你打开这两个面板，不会读取任何内容。",
                     fontSize = 13.sp,
-                    color = AILauncherColors.Body
+                    color = AILauncherColors.current.Body
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -379,13 +379,13 @@ private fun PanelPermissionGuide(
                     TextButton(onClick = onDismiss) {
                         Text(
                             text = if (compact) "知道了" else "暂不",
-                            color = AILauncherColors.Hint
+                            color = AILauncherColors.current.Hint
                         )
                     }
                     TextButton(onClick = onGoSettings) {
                         Text(
                             text = "去开启",
-                            color = AILauncherColors.Accent,
+                            color = AILauncherColors.current.Accent,
                             fontWeight = FontWeight.Medium
                         )
                     }
