@@ -98,9 +98,11 @@ private fun StepScaffold(
 
 @Composable
 private fun ProgressDot(active: Boolean) {
+    // 批B ③：颜色在组合上下文先读出再带进 Canvas（DrawScope 非组合上下文）
+    val dotColor = if (active) AILauncherColors.current.Accent else AILauncherColors.current.Divider
     androidx.compose.foundation.Canvas(modifier = Modifier.size(8.dp)) {
         drawCircle(
-            color = if (active) AILauncherColors.current.Accent else AILauncherColors.current.Divider,
+            color = dotColor,
             radius = size.minDimension / 2
         )
     }

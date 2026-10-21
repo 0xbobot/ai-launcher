@@ -33,7 +33,10 @@ fun enableEdgeToEdge(window: Window) {
 /**
  * 顶部状态栏 inset padding。等价于 statusBarsPadding()：
  * WindowInsets.statusBars 只有 Top 分量，only(Top) 取值相同。
+ * 注：WindowInsets.statusBars 的 getter 本身是 @Composable，故本 helper 亦然；
+ * 调用点都在组合上下文（Modifier 链），与原 statusBarsPadding() 调用位置一致。
  */
+@Composable
 fun Modifier.statusBarsTopPadding(): Modifier =
     windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top))
 
