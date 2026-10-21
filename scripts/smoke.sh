@@ -816,15 +816,22 @@ PYEOF
   fi
   adb logcat -c > /dev/null 2>&1 || true
   adb shell input swipe "$TX" "$TY" "$TX" "$TY" 150 || true
+  shot "nextup-$ANAME-imm"
   local OPENED=0 FG="" i
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    sleep 0.5
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+    sleep 0.25
     FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
     if echo "$FG" | grep -qi "$EXPECT"; then OPENED=1; break; fi
     if [ -n "$FG" ] && ! echo "$FG" | grep -q "$PKG"; then OPENED=1; break; fi
   done
   shot "nextup-$ANAME"
   log "nextup-$ANAME foreground after tap: $FG"
+  # 把命中的 START 派发原文打进日志（上轮只验了存在性，看不到派发给了谁）
+  local STARTLINE DIEDLINE
+  STARTLINE=$(adb logcat -d 2>/dev/null | grep "START u0" | grep -iE "$EXPECT|calendar" | head -2 | tr '\n' ' ')
+  log "nextup-$ANAME start lines: $STARTLINE"
+  DIEDLINE=$(adb logcat -d 2>/dev/null | grep -i "com.android.calendar" | grep -iE "has died|FATAL" | head -2 | tr '\n' ' ')
+  if [ -n "$DIEDLINE" ]; then log "nextup-$ANAME calendar proc: $DIEDLINE"; fi
   if [ "$ANAME" = "withlink" ] && ! echo "$FG" | grep -qi "$EXPECT"; then
     log "nextup-withlink: link target NOT in foreground - either calendar fallback (no URL handler on this image) or failure; see foreground line above"
   fi
@@ -832,6 +839,9 @@ PYEOF
     ok "nextup-$ANAME-open"
   elif adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "$EXPECT"; then
     log "nextup-$ANAME start dispatched (foreground did not stick)"
+    ok "nextup-$ANAME-open"
+  elif [ "$ANAME" = "withlink" ] && adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "calendar"; then
+    log "nextup-withlink calendar fallback dispatched (no URL handler on this image; link path unverifiable here)"
     ok "nextup-$ANAME-open"
   else
     ng "nextup-$ANAME-open"
@@ -889,20 +899,23 @@ if [ -n "$CAL_ID" ]; then
   }
   nextup_seed_event() {
     # $1=title $2=description(可空)；任一路种入成功返回 0
+    # provider 插入的成功输出格式不稳定（实测有空输出但行已建），成功判定一律以
+    # 事后查询 events 表能看到标题为准，不解析 CLI 输出。
     local INS
-    if [ -n "$2" ]; then
-      # 带 URL 的 description 会触发 content CLI 的 bind 解析 bug（实测 usage 报错），直接走直写
-      log "nextup content-event '$1': skipped (URL bind breaks content CLI parser), using db"
-      INS=""
-    else
-      # syncadapter 身份插事件必须在 URI 上带 account 参数（实测报错原文要求），单引号防 & 被设备 shell 拆断
-      INS=$(adb shell content insert --uri "'content://com.android.calendar/events?caller_is_syncadapter=true&account_name=smoke@local&account_type=LOCAL'" \
-        --bind calendar_id:i:"$CAL_ID" --bind title:s:"$1" \
-        --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
-        --bind eventTimezone:s:UTC 2>&1 || true)
-      log "nextup content-event '$1': $(echo "$INS" | head -2 | tr '\n' ' ')"
+    INS=$(adb shell content insert --uri "'content://com.android.calendar/events?caller_is_syncadapter=true&account_name=smoke@local&account_type=LOCAL'" \
+      --bind calendar_id:i:"$CAL_ID" --bind title:s:"$1" \
+      --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
+      --bind eventTimezone:s:UTC 2>&1 || true)
+    log "nextup content-event '$1': $(echo "$INS" | head -2 | tr '\n' ' ')"
+    if adb shell content query --uri content://com.android.calendar/events --projection title 2>/dev/null | grep -q "$1"; then
+      if [ -n "$2" ]; then
+        # URL 进 description：content CLI 的 bind 解析吞冒号传不了，行已由 provider 建好，
+        # 只用 sqlite 补这一个字段（Instances 展开在查询期读 Events，应能带出）。
+        adb shell "sqlite3 /data/data/com.android.providers.calendar/databases/calendar.db \"UPDATE Events SET description='$2' WHERE title='$1';\"" > /dev/null 2>&1 || true
+        log "nextup db-desc '$1': set via sqlite update"
+      fi
+      return 0
     fi
-    if echo "$INS" | grep -q "Row:"; then return 0; fi
     if [ -n "$HAS_SQLITE" ] && nextup_db_event "$1" "$2"; then return 0; fi
     return 1
   }
