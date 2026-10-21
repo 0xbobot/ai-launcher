@@ -10,6 +10,9 @@
 # intent-tpl-minimal.png（含各自 -local 结果条图），供人工验证。
 # 首启对话框（onboarding 引导、低电量保护询问）用 run-as 预写 SharedPreferences 跳过，
 # 不依赖 UI 坐标；若预写失败，用固定坐标点按做兜底（pixel_6 1080x2400，对话框位置稳定）。
+# R4 矩阵化：写死坐标一律按 1080x2400 基准经 SX/SY 按实际分辨率换算；SMOKE_FONT_SCALE /
+# SMOKE_NIGHT / SMOKE_LABEL 环境参数供 smoke-matrix.yml 多组合复用（不带 env 时行为不变）；
+# 第 15 段为 a11y 触控目标尺寸断言（scripts/a11y_check.py 量 uiautomator dump）。
 
 PKG="com.bobot.ailauncher"
 APK="apk/app-debug.apk"
@@ -32,6 +35,16 @@ shot() {
 adb wait-for-device
 adb shell input keyevent KEYCODE_WAKEUP || true
 sleep 2
+
+# --- 0. 屏幕几何（R4）：基准 1080x2400 的写死坐标经 SX/SY 换算到实际分辨率；密度供 a11y 的 px->dp ---
+SIZE_LINE=$(adb shell wm size 2>/dev/null | grep -o '[0-9]\+x[0-9]\+' | head -1)
+SCR_W=$(echo "$SIZE_LINE" | cut -dx -f1); SCR_H=$(echo "$SIZE_LINE" | cut -dx -f2)
+if [ -z "$SCR_W" ] || [ -z "$SCR_H" ]; then SCR_W=1080; SCR_H=2400; fi
+DENSITY=$(adb shell wm density 2>/dev/null | grep -o '[0-9]\+' | head -1)
+if [ -z "$DENSITY" ]; then DENSITY=420; fi
+SX() { echo $(( $1 * SCR_W / 1080 )); }
+SY() { echo $(( $1 * SCR_H / 2400 )); }
+log "geometry: ${SCR_W}x${SCR_H} density=$DENSITY label=${SMOKE_LABEL:-base} font=${SMOKE_FONT_SCALE:-default} night=${SMOKE_NIGHT:-no}"
 
 # --- 1. 安装 ---
 if [ -f "$APK" ]; then
@@ -57,10 +70,21 @@ else
   # 兜底：固定坐标点掉（pixel_6 1080x2400，对话框位置稳定；uiautomator 解析曾翻车，不再用）
   adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
   sleep 5
-  adb shell input tap 950 130 || true   # onboarding 右上角"跳过"
+  adb shell input tap "$(SX 950)" "$(SY 130)" || true   # onboarding 右上角"跳过"
   sleep 3
-  adb shell input tap 585 1310 || true # 低电量对话框"不用"
+  adb shell input tap "$(SX 585)" "$(SY 1310)" || true # 低电量对话框"不用"
   sleep 2
+fi
+
+# --- 2b. 矩阵环境（R4）：字体/夜间在启动前设好，首页第一帧即目标环境（不带 env 时跳过）---
+if [ -n "$SMOKE_FONT_SCALE" ]; then
+  adb shell settings put system font_scale "$SMOKE_FONT_SCALE" > /dev/null 2>&1 || true
+  log "ambient font_scale=$SMOKE_FONT_SCALE"
+fi
+if [ "$SMOKE_NIGHT" = "yes" ]; then
+  adb shell cmd uimode night yes > /dev/null 2>&1 || true
+  sleep 1
+  log "ambient night mode on"
 fi
 
 # --- 3. 启动 ---
@@ -79,12 +103,12 @@ adb shell input keyevent KEYCODE_HOME || true
 sleep 4
 shot "home"
 
-# --- 5. 左滑展开盲操扇形（pixel_6 1080x2400）
+# --- 5. 左滑展开盲操扇形（基准 1080x2400 坐标，经 SX/SY 换算）
 # 注意：手势检测器在 HomeScreen 根 Box 上，TODAY 卡片/Dock/七仔会先消费触摸，
 # 必须落在空白背景上（y=1400 为 TODAY 卡片与 Dock 之间的空白）；落在卡片上会被吃掉。
 # 注意 2：扇形只在按住拖动期间可见——松手即触发（段外/拍照段进相机、⊕段进编辑）。
 # 所以用后台长 swipe（3 秒），在拖动中途截图，才能抓到展开中的扇形。
-adb shell input swipe 900 1400 300 1400 3000 &
+adb shell input swipe "$(SX 900)" "$(SY 1400)" "$(SX 300)" "$(SY 1400)" 3000 &
 SWIPE_PID=$!
 sleep 1.5
 shot "fan"
@@ -99,15 +123,31 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 
+# --- 5b. 扇形语义 dump（R4 a11y）：基线恢复后单独再起一次 6 秒拖动，2.5 秒时 dump ---
+# uiautomator 读树需 1-2 秒，必须落在按住窗口内（第一段拖动中实测读到的是松手后首页）。
+# dump 内容供第 15 段逐节点列出量尺寸；松手后照旧 force-stop 清理恢复基线。
+adb shell input swipe "$(SX 900)" "$(SY 1400)" "$(SX 300)" "$(SY 1400)" 6000 &
+SWIPE2_PID=$!
+sleep 2.5
+adb shell uiautomator dump /sdcard/fan_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/fan_dump.xml "$OUT/fan_dump.xml" > /dev/null 2>&1 || true
+wait $SWIPE2_PID || true
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+
 # --- 6. 点七仔（宠物区中央；果冻反馈+开心表情 1.2 秒，0.5 秒后截图抓反应中途）---
 # 坐标按当前首页布局实测：七仔在 home 截图约 (540,950)；旧坐标 840,630 点空导致 pet 与 home 同帧（R1 实测）。
 # press 150ms 模拟真手指（瞬时 tap 会被首页手势层取消，见第 9 段注）
-adb shell input swipe 540 950 540 950 150 || true
+adb shell input swipe "$(SX 540)" "$(SY 950)" "$(SX 540)" "$(SY 950)" 150 || true
 sleep 0.7
 shot "pet"
 
 # --- 7. 上滑开 D3 应用中心 ---
-adb shell input swipe 540 2000 540 800 300 || true
+adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
 sleep 3
 shot "appcenter"
 
@@ -119,12 +159,12 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 shot "dark-home"
-adb shell input swipe 540 2000 540 800 300 || true
+adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
 sleep 3
 shot "dark-appcenter"
 # R3-B：设置页深色亲验——点应用中心齿轮（content-desc="设置"，dump 定位，兜底坐标按
 # dark-appcenter 截图实测齿轮约 (985,505)）进设置页，断言"让七仔更聪明"卡在场后截图，BACK 返回。
-SGX=985; SGY=505
+SGX=$(SX 985); SGY=$(SY 505)
 adb shell uiautomator dump /sdcard/set_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/set_dump.xml "$OUT/set_dump.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/set_dump.xml" ]; then
@@ -151,7 +191,7 @@ else
 fi
 adb shell input keyevent KEYCODE_BACK || true
 sleep 2
-adb shell cmd uimode night auto || true
+if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night auto || true; fi
 sleep 2
 
 # --- 9. 意图入口（R2 UI）：回首页截含胶囊图 -> 点胶囊输入一句话 -> 提交 -> 截无 Key 错误态 ---
@@ -168,7 +208,7 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 shot "intent-home"
-CX=540; CY=1247; BX=928; BY=1246
+CX=$(SX 540); CY=$(SY 1247); BX=$(SX 928); BY=$(SY 1246)
 adb shell uiautomator dump /sdcard/intent_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/intent_dump.xml "$OUT/intent_dump.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/intent_dump.xml" ]; then
@@ -238,7 +278,7 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 # 定位胶囊（dump 找占位，兜底坐标同第 9 段）
-LCX=540; LCY=1247
+LCX=$(SX 540); LCY=$(SY 1247)
 adb shell uiautomator dump /sdcard/local_dump0.xml > /dev/null 2>&1 || true
 adb pull /sdcard/local_dump0.xml "$OUT/local_dump0.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/local_dump0.xml" ]; then
@@ -309,10 +349,10 @@ else
   ng "intent-open-app"
 fi
 # 应用中心同组件：上滑开 D3（同第 7 段基线），顶部应是新胶囊而非旧搜索框
-adb shell input swipe 540 2000 540 800 300 || true
+adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
 sleep 3
 shot "appcenter2"
-ACX=540; ACY=330
+ACX=$(SX 540); ACY=$(SY 330)
 adb shell uiautomator dump /sdcard/ac_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/ac_dump.xml "$OUT/ac_dump.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/ac_dump.xml" ]; then
@@ -478,13 +518,13 @@ for FS in 1.3 1.5; do
   adb shell input keyevent KEYCODE_HOME || true
   sleep 2
   shot "font$FTAG-home"
-  adb shell input swipe 540 2000 540 800 300 || true
+  adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
   sleep 3
   shot "font$FTAG-appcenter"
   adb shell input keyevent KEYCODE_HOME || true
   sleep 1
 done
-adb shell settings put system font_scale 1.0 > /dev/null 2>&1 || true
+adb shell settings put system font_scale "${SMOKE_FONT_SCALE:-1.0}" > /dev/null 2>&1 || true
 sleep 1
 adb shell am force-stop "$PKG" || true
 sleep 1
@@ -504,7 +544,7 @@ adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
 sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
-FCX=540; FCY=1247
+FCX=$(SX 540); FCY=$(SY 1247)
 adb shell uiautomator dump /sdcard/focus_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/focus_dump.xml "$OUT/focus_dump.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/focus_dump.xml" ]; then
@@ -535,7 +575,25 @@ else
   ng "intent-present-results"
 fi
 
-# --- 14. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 15. 无障碍触控尺寸断言（R4）：量已拉取 dump 里关键目标的实际 dp 尺寸（>=48dp）---
+# 覆盖：提交按钮（intent_dump）/ 清空按钮 + 问七仔行（ac_dump2）/ 本地结果项（local_dump）。
+# 扇形段（fan_dump）只测量记录：扇形是 Canvas 手势面，无段语义节点即记为发现项，
+# TalkBack 走查归真机验收，CI 不冒充已验；liveRegion/stateDescription 不出现在
+# uiautomator dump 里，同样归真机验收项（a11y_check.py 会明示）。
+if command -v python3 > /dev/null 2>&1; then
+  A11Y_OUT=$(python3 scripts/a11y_check.py "$DENSITY" "$OUT" 2>&1)
+  echo "$A11Y_OUT" | while IFS= read -r line; do log "$line"; done
+  echo "$A11Y_OUT" > "$OUT/a11y-report.txt"
+  if echo "$A11Y_OUT" | grep -q "^A11Y FAIL"; then
+    ng "a11y-targets"
+  else
+    ok "a11y-targets"
+  fi
+else
+  log "python3 unavailable - a11y check skipped (not counted)"
+fi
+
+# --- 16. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true
