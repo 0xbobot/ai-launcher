@@ -6,6 +6,7 @@ import com.bobot.ailauncher.core.action.ActionRequest
 import com.bobot.ailauncher.core.action.ActionResult
 import com.bobot.ailauncher.data.Capability
 import com.bobot.ailauncher.data.CapabilityRegistry
+import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.PetRepository
@@ -19,6 +20,8 @@ object IntentCoordinatorFactory {
 
     fun create(context: Context): IntentCoordinator {
         val appContext = context.applicationContext
+        // v0.68.88：注册已装应用变化监听（幂等），能力绑定/首页索引靠它失效刷新
+        InstalledApps.ensureRegistered(appContext)
         return IntentCoordinator(
             config = LlmConfigAdapter(appContext),
             planner = LlmPlannerAdapter(appContext),
@@ -63,10 +66,16 @@ object IntentCoordinatorFactory {
 
         override fun validIds(): Set<String> = CapabilityRegistry.validIds()
 
-        /** 带参数说明的能力清单（意图改进二批：[CapabilityHints] 纯函数生成） */
+        /**
+         * 带参数说明的能力清单（二批：[CapabilityHints] 纯函数生成）。
+         * v0.68.88 起只含**本机当前可执行**的能力（[CapabilityRegistry.executableCapabilities]：
+         * 提供方装了哪家算哪家、深链能力另有 geo 处理者也算）——没装对应应用的
+         * 能力不进清单，不向模型许诺做不到的事；validIds 仍是全集（计划合法性
+         * 白名单），万一模型报出清单外能力，执行层会如实回「没有安装支持的应用」。
+         */
         override fun hints(): String =
             CapabilityHints.build(
-                CapabilityRegistry.groups().flatMap { it.capabilities }
+                CapabilityRegistry.executableCapabilities(context)
             )
 
         override fun find(id: String): Capability? = CapabilityRegistry.find(id)

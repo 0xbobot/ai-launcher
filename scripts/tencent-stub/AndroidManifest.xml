@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  冒烟专用桩应用：冒充「腾讯地图」（package = com.tencent.map）。
+  用途：在 CI 模拟器里复现 Bob 真机场景——只装了腾讯地图、没装高德/百度时，
+  导航能力应绑定到腾讯地图而不是报「没有安装支持的应用」。
+  声明 qqmap scheme 的 VIEW 入口（与真腾讯地图同名 scheme），并把收到的
+  intent data 原样显示出来，供冒烟 dump 断言深链确实分发到了本包。
+  仅测试资产，不进生产 APK；由 scripts/smoke.sh 第 17 段用 build-tools 现场拼装。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.tencent.map">
+
+    <uses-sdk
+        android:minSdkVersion="24"
+        android:targetSdkVersion="34" />
+
+    <application
+        android:label="腾讯地图桩"
+        android:theme="@android:style/Theme.Material">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="qqmap" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
