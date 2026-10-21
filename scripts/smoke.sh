@@ -695,6 +695,22 @@ if [ -z "$CAL_ID" ]; then
     log "nextup calendars query#3: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
     CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
   fi
+  if [ -z "$CAL_ID" ]; then
+    # 兜底：provider 策略层拒写（两种身份+全列集均实测被拒）→ root 直写 calendar.db。
+    # 先 force-stop provider 进程避免其缓存句柄，写完后 content 查询会按需拉起并读新数据。
+    CALDB=/data/data/com.android.providers.calendar/databases/calendar.db
+    HAS_SQLITE=$(adb shell "command -v sqlite3 || ls /system/bin/sqlite3 /system/xbin/sqlite3 2>/dev/null" 2>/dev/null | head -1 | tr -d '\r ')
+    log "nextup sqlite3: ${HAS_SQLITE:-missing}"
+    if [ -n "$HAS_SQLITE" ]; then
+      adb shell am force-stop com.android.providers.calendar > /dev/null 2>&1 || true
+      sleep 1
+      DB_OUT=$(adb shell "sqlite3 $CALDB \"INSERT INTO Calendars (account_name, account_type, name, calendar_displayName, calendar_color, calendar_access_level, visible, sync_events, calendar_timezone, ownerAccount, canOrganizerRespond, canModifyEvents, canPartiallyUpdate, maxReminders, allowedReminders, allowedAvailability, allowedAttendeeTypes) VALUES ('smoke@local', 'LOCAL', 'SmokeCal', 'SmokeCal', -16733440, 700, 1, 1, 'UTC', 'smoke@local', 1, 1, 1, 5, '0,1,2,3,4', '0,1,2', '0,1,2'); SELECT last_insert_rowid();\"" 2>&1 || true)
+      log "nextup calendars db-insert: $(echo "$DB_OUT" | head -3 | tr '\n' ' ')"
+      CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
+      log "nextup calendars query#4: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
+      CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+    fi
+  fi
 fi
 log "nextup seed calendar_id=${CAL_ID:-none}"
 
