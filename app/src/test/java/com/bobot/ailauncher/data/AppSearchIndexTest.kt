@@ -49,10 +49,11 @@ class AppSearchIndexTest {
 
     @Test
     fun `pinyinOf degrades on missing chars and symbols`() {
-        // 猫不在字典里 → 跳过该字；间隔号等符号忽略
+        // 猫不在字典里：未收录汉字走 isLetterOrDigit 分支原样透传（真实降级口径）；
+        // 间隔号等符号忽略
         val (full, initials) = AppSearchIndex.pinyinOf("微猫·", dict)
-        assertEquals("wei", full)
-        assertEquals("w", initials)
+        assertEquals("wei猫", full)
+        assertEquals("w猫", initials)
         assertEquals("" to "", AppSearchIndex.pinyinOf("", dict))
     }
 
@@ -128,8 +129,9 @@ class AppSearchIndexTest {
     @Test
     fun `score initials tier requires two chars`() {
         assertEquals(60, AppSearchIndex.scoreFor("wx", "微信", "com.tencent.mm", "weixin", "wx", emptySet()))
-        // 单字符不走首字母档：其余档也不命中 → 0
-        assertEquals(0, AppSearchIndex.scoreFor("w", "微信", "com.tencent.mm", "weixin", "wx", emptySet()))
+        // 单字符不走首字母档（带 q.length>=2 门槛）：w 先被全拼档收走
+        // （weixin 含 w）→ 70，而非首字母档的 60
+        assertEquals(70, AppSearchIndex.scoreFor("w", "微信", "com.tencent.mm", "weixin", "wx", emptySet()))
     }
 
     @Test
