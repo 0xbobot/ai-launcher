@@ -107,9 +107,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -257,13 +261,25 @@ fun AppCenterContent(
     val letters = remember(azGroups) { azGroups.map { it.first } }
 
     // v0.21：应用中心搜索（PRD §三十三）——拼音/首字母/自然语言/模糊
-    var query by remember { mutableStateOf("") }
-    val searching = query.trim().isNotBlank()
+    // 意图改进一批：状态迁到 TextFieldValue（与首页共用同一胶囊组件、同一 composing
+    // 语义）；query 是其文本的派生读法，「问七仔」行与提交沿用原始文本即时响应。
+    var queryField by remember { mutableStateOf(TextFieldValue("")) }
+    val query = queryField.text
+    // 过滤词经约 120ms 防抖落定，组合中（拼音未上屏）暂停更新——网格不逐键重算、
+    // 不被拼音半成品串扰动（与首页本地搜索同一机制、同一函数 AppSearchIndex.search，
+    // 频次破同分排序也同享）。
+    var filterQuery by remember { mutableStateOf("") }
+    LaunchedEffect(queryField) {
+        if (queryField.composition != null) return@LaunchedEffect
+        delay(120)
+        filterQuery = queryField.text
+    }
+    val searching = filterQuery.trim().isNotBlank()
     // v0.25.5：Niagara 式——拖动直接滚完整列表，不做内容过滤，松手零位移
     val searchIndex = remember(azApps) { AppSearchIndex.build(context, azApps) }
-    val searchResults = remember(query, searchIndex) {
-        if (query.trim().isBlank()) null
-        else AppSearchIndex.search(context, query, searchIndex)
+    val searchResults = remember(filterQuery, searchIndex) {
+        if (filterQuery.trim().isBlank()) null
+        else AppSearchIndex.search(context, filterQuery, searchIndex)
     }
     // v0.25.3：最近使用横条（搜索下方），取高频应用
     // 开始搜索时滚到顶部
@@ -428,8 +444,15 @@ fun AppCenterContent(
         }
     }
 
+    // 意图改进一批：点结果打开应用时先收键盘（清焦点 + 收 IME），与首页点本地
+    // 结果同规则；「问七仔」路径不走这里（回首页后由首页规则收），行为不变。
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     // v0.25.2：松手滚动——等列表恢复全量重组完成后再滚，避免打在旧内容上
     fun launchApp(app: AppInfo) {
+        focusManager.clearFocus()
+        keyboardController?.hide()
         AppUsageTracker.recordLaunch(context, app.packageName)
         try {
             val intent = context.packageManager
@@ -592,8 +615,8 @@ fun AppCenterContent(
                 // 一个入口两层响应：打字走本地层过滤网格（状态层 query/searchResults 不变），
                 // 提交（按钮/IME Done）= 问七仔（回首页交协调器）。横屏仍用 AppCenterLandscape 自己的搜索。
                 IntentCapsuleField(
-                    text = query,
-                    onTextChange = { query = it },
+                    value = queryField,
+                    onValueChange = { queryField = it },
                     onSubmit = {
                         val q = query.trim()
                         if (q.isNotEmpty()) onAskQizai(q)
@@ -615,7 +638,8 @@ fun AppCenterContent(
                 }
             }
             // R2 UI（10-21 新规格）：「问七仔」行——有输入时出现，整句交给七仔理解（回首页提交协调器）
-            if (searching) {
+            // 意图改进一批：本行跟随原始文本即时出现（不等防抖落定），文案与提交都用原句
+            if (query.isNotBlank()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -670,8 +694,10 @@ fun AppCenterContent(
                 onHeaderSwipeRight = { onHeaderSwipeRightState.value() },
                 onBottomSwipeUp = { onBottomSwipeUpState.value() },
                 // v0.68.82（横屏专项第 2 项）：真搜索框（状态层复用竖屏）
+                // 意图改进一批：横屏仍是 String 契约——向下传文本、向上把整串包回
+                // TextFieldValue（光标置尾）；横屏自己的输入框 UI 不动（归横屏专项）
                 query = query,
-                onQueryChange = { query = it },
+                onQueryChange = { queryField = TextFieldValue(it, TextRange(it.length)) },
                 searchResults = searchResults,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -704,7 +730,7 @@ fun AppCenterContent(
                     if (results.isEmpty()) {
                         item(key = "search-empty") {
                             Text(
-                                text = "没有找到「${query.trim()}」相关的应用",
+                                text = "没有找到「${filterQuery.trim()}」相关的应用",
                                 fontSize = 14.sp,
                                 color = AILauncherColors.Hint,
                                 modifier = Modifier.padding(

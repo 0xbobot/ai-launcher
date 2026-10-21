@@ -36,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,8 +50,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -59,6 +63,7 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,7 +80,13 @@ import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.island.IslandToasts
+import com.bobot.ailauncher.ui.pet.CalEvent
+import com.bobot.ailauncher.ui.pet.TodayEventsHolder
+import com.bobot.ailauncher.ui.pet.joinCalendarEvent
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -92,11 +103,15 @@ private val RESULT_BAR_MAX_HEIGHT = 180.dp
  *
  * [showClearButton]（2026-10-21 Bob 批准）：仅应用中心变体开启——有文本时在提交钮左侧
  * 出 ✕ 一键清空（点后文本清空、网格恢复全量）；首页胶囊保持原设计不开，避免和提交钮抢位。
+ *
+ * 输入状态用 [TextFieldValue]（意图改进一批）：为了感知中文输入法的 composing
+ * （拼音组合）区间——组合未上屏时金色钮与 IME Done 都不许提交半成品文本；
+ * 宿主侧据此在组合期间暂停本地搜索更新并做防抖。首页与应用中心同享这套语义。
  */
 @Composable
 fun IntentCapsuleField(
-    text: String,
-    onTextChange: (String) -> Unit,
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
     placeholder: String = "想做什么？",
@@ -106,7 +121,9 @@ fun IntentCapsuleField(
     onFocusChanged: (Boolean) -> Unit = {}
 ) {
     val focusRequester = remember { FocusRequester() }
-    val canSubmit = text.isNotBlank() && !planning
+    // composing 中（拼音未上屏）禁止提交：组合区间的拉丁字母不是用户最终输入
+    val composing = value.composition != null
+    val canSubmit = value.text.isNotBlank() && !planning && !composing
     Row(
         modifier = modifier
             // R3-A：最小高度策略——fontScale 放大时允许胶囊长高，不定死 56dp 裁字；
@@ -127,8 +144,8 @@ fun IntentCapsuleField(
         )
         Spacer(modifier = Modifier.width(10.dp))
         BasicTextField(
-            value = text,
-            onValueChange = onTextChange,
+            value = value,
+            onValueChange = onValueChange,
             modifier = Modifier
                 .weight(1f)
                 .focusRequester(focusRequester)
@@ -149,7 +166,7 @@ fun IntentCapsuleField(
             keyboardActions = KeyboardActions(onDone = { if (canSubmit) onSubmit() }),
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (text.isEmpty()) {
+                    if (value.text.isEmpty()) {
                         Text(
                             text = placeholder,
                             fontSize = 15.sp,
@@ -164,14 +181,14 @@ fun IntentCapsuleField(
             }
         )
         Spacer(modifier = Modifier.width(10.dp))
-        // ✕ 一键清空（仅应用中心变体开启）：有文本时才出现，清空走 onTextChange("")，
+        // ✕ 一键清空（仅应用中心变体开启）：有文本时才出现，清空走 onValueChange(空值)，
         // 宿主状态层（应用中心 query）随之回空、网格自动恢复，不另设回调。
         // R3-C 无障碍：触控目标 48dp（外框可点），视觉小圆仍 28dp，不改外观尺寸感。
-        if (showClearButton && text.isNotEmpty()) {
+        if (showClearButton && value.text.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .clickable { onTextChange("") },
+                    .clickable { onValueChange(TextFieldValue("")) },
                 contentAlignment = Alignment.Center
             ) {
                 Box(
@@ -254,43 +271,101 @@ fun IntentEntry(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var text by remember { mutableStateOf("") }
+    // 输入状态（意图改进一批）：String → TextFieldValue，感知中文输入法 composing
+    // 区间；text 是其已上屏文本的派生读法，下游沿用。
+    var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
+    val text = fieldValue.text
+    val composing = fieldValue.composition != null
     // 已提交的文本：与当前文本相同期间不再出本地结果（提交后清掉本地层）
     var submittedText by remember { mutableStateOf<String?>(null) }
     val planning = state is IntentUiState.Planning
     // R3-C：胶囊焦点（驱动七仔倾听姿态）
     var capsuleFocused by remember { mutableStateOf(false) }
 
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    // 提交即收键盘（意图改进一批）：提交/点开结果/回复错误呈现后统一走这里——
+    // 清焦点 + 收 IME，用户不用再手动收键盘。
+    fun releaseInputFocus() {
+        focusManager.clearFocus()
+        keyboardController?.hide()
+    }
+
+    // 本地搜索词（意图改进一批·防抖+组合暂停）：fieldValue 每次变化重启计时，
+    // 组合中（拼音未上屏）直接返回不落定——组合区间的拉丁串不触发搜索重算，
+    // 组合结束/停键 120ms 后才把文本落定为搜索词（与索引懒构建共用同一落定值）。
+    var committedQuery by remember { mutableStateOf("") }
+    LaunchedEffect(fieldValue) {
+        if (fieldValue.composition != null) return@LaunchedEffect
+        delay(120)
+        committedQuery = fieldValue.text
+    }
+
     // 本地直达层数据源：与应用中心 azApps 完全一致（listLaunchableApps 去自己、去隐藏），
     // 匹配复用 AppSearchIndex.build/search 同一实现，不另写一套。
     // R3-D：懒构建——原实现在首页首帧同步查 PackageManager + 加载拼音字典建索引，
     // 压在启动路径上；改为用户第一次真打字时才在 IO 线程建（建好前本地层暂不出
-    // 结果，意图层提交不受影响），启动路径零索引成本。
+    // 结果，意图层提交不受影响），启动路径零索引成本。原始应用列表同时供建议面
+    // 的「此刻常用」复用（launchableApps），避免重复查 PackageManager。
+    var launchableApps by remember { mutableStateOf<List<AppInfo>?>(null) }
     var localIndex by remember { mutableStateOf<List<AppSearchIndex.Entry>?>(null) }
-    LaunchedEffect(text) {
-        if (text.isNotBlank() && localIndex == null) {
+    LaunchedEffect(committedQuery) {
+        if (committedQuery.isNotBlank() && localIndex == null) {
             val built = withContext(Dispatchers.IO) {
                 val hidden = HiddenApps.getHidden(context)
                 val apps = listLaunchableApps(context).filter {
                     it.packageName != context.packageName && it.packageName !in hidden
                 }
-                AppSearchIndex.build(context, apps)
+                apps to AppSearchIndex.build(context, apps)
             }
-            if (localIndex == null) localIndex = built
+            if (launchableApps == null) launchableApps = built.first
+            if (localIndex == null) localIndex = built.second
         }
     }
-    val localResults = remember(text, localIndex, submittedText) {
+    val localResults = remember(committedQuery, localIndex, submittedText) {
         val idx = localIndex
-        if (text.isBlank() || text == submittedText || idx == null) emptyList()
-        else AppSearchIndex.search(context, text, idx).take(4)
+        if (committedQuery.isBlank() || committedQuery == submittedText || idx == null) emptyList()
+        else AppSearchIndex.search(context, committedQuery, idx).take(4)
     }
 
     fun submitIfReady() {
-        if (text.isNotBlank() && !planning) {
+        // 组合中不提交：拼音未上屏的文本不是用户的最终输入（金色钮与 IME Done 同守卫，
+        // 胶囊组件内的 canSubmit 也已挡住，这里是宿主侧的第二道）
+        if (text.isNotBlank() && !planning && !composing) {
             submittedText = text
             onSubmit(text)
+            releaseInputFocus()
         }
     }
+
+    // 零打字第一屏（意图改进一批）：胶囊聚焦且文本为空时，结果条槽位最低优先序
+    // 出建议面——「此刻常用」Top 应用（AppUsageTracker.topApps：频次+当前时段亲和）
+    // + 下一会议一行（若有）。会议数据经 TodayEventsHolder 从 PetZone 共享
+    // （原本只活在 PetZone 的 Composable 状态里）；建议面只展示，点选才打开/入会。
+    val nextEvent by TodayEventsHolder.nextEvent.collectAsState()
+    var suggestionApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
+    LaunchedEffect(capsuleFocused) {
+        if (capsuleFocused) {
+            val apps = launchableApps ?: withContext(Dispatchers.IO) {
+                val hidden = HiddenApps.getHidden(context)
+                listLaunchableApps(context).filter {
+                    it.packageName != context.packageName && it.packageName !in hidden
+                }
+            }.also { launchableApps = it }
+            suggestionApps = withContext(Dispatchers.IO) {
+                AppUsageTracker.topApps(context, apps, 4)
+            }
+        }
+    }
+    // 布局防线（Bob 2026-10-21）：最紧配置（字体 1.3 + 矮屏）下建议面先降级自身
+    // ——砍示例句、Top 减到 2，绝不挤压胶囊/TODAY/Dock 等其他槽位；
+    // 字体放大（>1.15）时先砍示例句（文字行变高，示例是第一牺牲位）。
+    val densityNow = LocalDensity.current
+    val configurationNow = LocalConfiguration.current
+    val tightLayout = densityNow.fontScale >= 1.3f &&
+        configurationNow.screenHeightDp <= 800
+    val showSuggestionExample = densityNow.fontScale <= 1.15f
+    val visibleSuggestionApps = if (tightLayout) suggestionApps.take(2) else suggestionApps
 
     // R3-C 七仔反应（对话感）：姿态只跟状态走，不说话、不弹气泡，克制优先——
     // Planning=思考（SORTING+头顶点点）> 本地结果/回复=呈现（HAPPY 原地放大弹跳"找到了"）
@@ -314,6 +389,11 @@ fun IntentEntry(
 
     // 回复小条短时呈现：5 秒后自动收起（协调器 dismiss 回编辑态，原话不丢）
     LaunchedEffect(state) {
+        // 提交即收键盘（意图改进一批）：回复/错误一呈现就释放焦点、收 IME——
+        // 结果已经端出来了，输入的使命完成，用户不用手动收键盘。
+        if (state is IntentUiState.Reply || state is IntentUiState.Error) {
+            releaseInputFocus()
+        }
         if (state is IntentUiState.Reply) {
             delay(5_000)
             onDismiss()
@@ -323,8 +403,8 @@ fun IntentEntry(
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         // ---- 胶囊本体（与应用中心同一组件） ----
         IntentCapsuleField(
-            text = text,
-            onTextChange = { text = it },
+            value = fieldValue,
+            onValueChange = { fieldValue = it },
             onSubmit = { submitIfReady() },
             planning = planning,
             onFocusChanged = { capsuleFocused = it },
@@ -348,7 +428,11 @@ fun IntentEntry(
                 if (localResults.isNotEmpty() && state !is IntentUiState.NeedsConfirmation) {
                     LocalResultsBar(
                         apps = localResults,
-                        onOpen = { app -> launchLocalApp(context, app) }
+                        onOpen = { app ->
+                            // 点开即收键盘（意图改进一批）：应用要打开了，先释放输入
+                            releaseInputFocus()
+                            launchLocalApp(context, app)
+                        }
                     )
                 } else when (s) {
                     is IntentUiState.Reply -> {
@@ -366,7 +450,38 @@ fun IntentEntry(
                             onClose = onDismiss
                         )
                     }
-                    else -> Unit
+                    else -> {
+                        // 建议面（意图改进一批）：槽位最低优先序——仅在聚焦 + 空文本
+                        // + Idle/Editing 时出现；文本一旦非空，本地结果立即接管槽位。
+                        // 会议只取尚未结束的（holder 里可能是刚过期的上一场）。
+                        val upcomingEvent = nextEvent?.takeIf {
+                            it.end > System.currentTimeMillis()
+                        }
+                        if (capsuleFocused && text.isEmpty() &&
+                            (s is IntentUiState.Idle || s is IntentUiState.Editing) &&
+                            (visibleSuggestionApps.isNotEmpty() || upcomingEvent != null)
+                        ) {
+                            SuggestionsBar(
+                                apps = visibleSuggestionApps,
+                                event = upcomingEvent,
+                                showExample = showSuggestionExample,
+                                onOpenApp = { app ->
+                                    releaseInputFocus()
+                                    launchLocalApp(context, app)
+                                },
+                                onOpenEvent = { e -> joinCalendarEvent(context, e) },
+                                onExample = {
+                                    // 示例句：点 = 填入并提交（走与手输提交同一路径）
+                                    fieldValue = TextFieldValue(SUGGESTION_EXAMPLE)
+                                    if (!planning) {
+                                        submittedText = SUGGESTION_EXAMPLE
+                                        onSubmit(SUGGESTION_EXAMPLE)
+                                        releaseInputFocus()
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -464,41 +579,169 @@ private fun LocalResultsBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             apps.forEach { app ->
-                Column(
-                    modifier = Modifier
-                        .width(64.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onOpen(app) }
-                        .padding(vertical = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    AppIconImage(
-                        drawable = app.icon,
-                        contentDescription = app.label.toString(),
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(9.dp))
-                    )
-                    Text(
-                        text = app.label.toString(),
-                        fontSize = 11.sp,
-                        color = AILauncherColors.Body,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                        style = TextStyle(
-                            lineHeight = 13.sp,
-                            platformStyle = PlatformTextStyle(includeFontPadding = false)
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 3.dp)
-                    )
-                }
+                ResultAppItem(app = app, onOpen = onOpen)
             }
         }
     }
 }
+
+/** 结果条与建议面共用的应用项：图标 + 名称，点选才打开（触控区 64dp 宽、约 60dp 高 ≥48dp）。 */
+@Composable
+private fun ResultAppItem(
+    app: AppInfo,
+    onOpen: (AppInfo) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onOpen(app) }
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        AppIconImage(
+            drawable = app.icon,
+            contentDescription = app.label.toString(),
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(9.dp))
+        )
+        Text(
+            text = app.label.toString(),
+            fontSize = 11.sp,
+            color = AILauncherColors.Body,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            style = TextStyle(
+                lineHeight = 13.sp,
+                platformStyle = PlatformTextStyle(includeFontPadding = false)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 3.dp)
+        )
+    }
+}
+
+/** 建议面唯一一条示例句（克制：只放一条，不做推广位）；点它 = 填入并提交。 */
+private const val SUGGESTION_EXAMPLE = "打车去机场"
+
+/**
+ * 七仔结果条·零打字建议面（意图改进一批）：胶囊刚聚焦、一个字还没打时端出来的
+ * 「此刻常用」——Top 应用（频次+时段亲和，与本地结果同一 [ResultAppItem]，点一下
+ * 直达打开）+ 下一会议一行（若有，与封面「接下来」条同一文案语言，点按走
+ * [joinCalendarEvent] 同一条入会路径）。只展示不执行，点选才发生动作。
+ *
+ * 布局防线（Bob 2026-10-21）：与本地结果共用同一槽位、同一 180dp 上限
+ * （[RESULT_BAR_MAX_HEIGHT]），超限条内滚动，不新开浮层、不挤其他槽位；
+ * 最紧配置的降级（Top 减量、砍示例句）在 IntentEntry 按配置算好传入；
+ * 会议在场时不再叠示例句（内容优先序：会议 > 示例，示例只是发现引导）。
+ * 触控目标：应用项与本地结果同构 ≥48dp，会议行/示例行高度下限 48dp。
+ */
+@Composable
+private fun SuggestionsBar(
+    apps: List<AppInfo>,
+    event: CalEvent?,
+    showExample: Boolean,
+    onOpenApp: (AppInfo) -> Unit,
+    onOpenEvent: (CalEvent) -> Unit,
+    onExample: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
+            .clip(RoundedCornerShape(16.dp))
+            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            .verticalScroll(rememberScrollState())
+            // 与本地结果同款：出现时 TalkBack 礼貌播报，不用手动找焦点
+            .semantics { liveRegion = LiveRegionMode.Polite }
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        if (event != null) {
+            // 会议行：与封面 NextUpStrip 同一文案语言（接下来 · 时间 / 标题 · 点一下加入）
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onOpenEvent(event) }
+                    .padding(vertical = 6.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "接下来 · ${formatEventTime(event.begin)}",
+                    fontSize = 12.sp,
+                    color = AILauncherColors.Accent,
+                    style = TextStyle(
+                        lineHeight = 15.sp,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    )
+                )
+                Text(
+                    text = "${event.title.ifBlank { "日程" }} · 点一下加入",
+                    fontSize = 13.sp,
+                    color = AILauncherColors.Title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(
+                        lineHeight = 16.sp,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    ),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+        if (apps.isNotEmpty()) {
+            Text(
+                text = "七仔猜你现在想用",
+                fontSize = 12.sp,
+                color = AILauncherColors.Hint,
+                style = TextStyle(
+                    lineHeight = 15.sp,
+                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                ),
+                modifier = if (event != null) Modifier.padding(top = 6.dp) else Modifier
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                apps.forEach { app ->
+                    ResultAppItem(app = app, onOpen = onOpenApp)
+                }
+            }
+        }
+        if (showExample && event == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onExample() },
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(
+                    text = "试试说：「$SUGGESTION_EXAMPLE」",
+                    fontSize = 12.sp,
+                    color = AILauncherColors.Accent,
+                    style = TextStyle(
+                        lineHeight = 15.sp,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    )
+                )
+            }
+        }
+    }
+}
+
+/** 会议开始时间 HH:mm（与封面条/提醒文案同一格式口径）。 */
+private fun formatEventTime(beginMillis: Long): String =
+    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(beginMillis))
 
 /** 本地直达打开应用：与应用中心 launchApp 同一做法（记使用统计 + 系统启动意图 + 失败 toast）。 */
 private fun launchLocalApp(context: Context, app: AppInfo) {

@@ -45,6 +45,28 @@ object AppUsageTracker {
     }
 
     /**
+     * 单个应用的智能排序分（与 [topApps] 同一口径：总频次 + 3×当前时段亲和度
+     * - 30 分钟内刚用过的重复惩罚 2 分）。供搜索同档分 tie-break 使用
+     * （意图改进一批）——只破同分，绝不压过更高档的精确命中。
+     */
+    fun usageScore(context: Context, packageName: String): Double {
+        val p = try {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        } catch (_: Exception) {
+            null
+        } ?: return 0.0
+        val slot = ContextEngine.currentSlot().name
+        val c = p.getInt(KEY_COUNT_PREFIX + packageName, 0)
+        val sc = p.getInt(KEY_SLOT_PREFIX + slot + "_" + packageName, 0)
+        val last = p.getLong(KEY_LAST_PREFIX + packageName, 0L)
+        var score = c + 3.0 * sc
+        if (System.currentTimeMillis() - last < 30 * 60 * 1000) {
+            score -= 2.0
+        }
+        return score
+    }
+
+    /**
      * 取 [count] 个最常用应用。
      * @param smartSort true=智能排序（PRD §三十二：总频次 + 3×当前时段亲和度，并列按最近）；
      *   false=按名称排列（用户在设置里关闭智能排序时用，可预期）。
@@ -67,19 +89,12 @@ object AppUsageTracker {
         } catch (_: Exception) {
             null
         }
-        val slot = ContextEngine.currentSlot().name
-        val now = System.currentTimeMillis()
         data class Scored(val app: AppInfo, val score: Double, val last: Long)
         val scored = candidates.map { app ->
-            val c = p?.getInt(KEY_COUNT_PREFIX + app.packageName, 0) ?: 0
-            val sc = p?.getInt(KEY_SLOT_PREFIX + slot + "_" + app.packageName, 0) ?: 0
             val last = p?.getLong(KEY_LAST_PREFIX + app.packageName, 0L) ?: 0L
-            // v0.26.0 PRD §三十二：总频次 + 3×时段亲和度 - 重复惩罚（30 分钟内用过 -2，避免单调）
-            var score = c + 3.0 * sc
-            if (now - last < 30 * 60 * 1000) {
-                score -= 2.0 // Repetition 惩罚
-            }
-            Scored(app, score, last)
+            // 分数口径统一走 usageScore（v0.26.0 PRD §三十二：总频次 + 3×时段亲和度
+            // - 重复惩罚 30 分钟内用过 -2，避免单调）；last 仍单独读出做并列参考
+            Scored(app, usageScore(context, app.packageName), last)
         }
         val byUsage = scored.filter { it.score > 0 }
             .sortedWith(compareByDescending<Scored> { it.score }.thenByDescending { it.last })

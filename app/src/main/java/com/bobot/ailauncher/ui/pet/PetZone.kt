@@ -397,52 +397,9 @@ fun PetZone(
         // v0.51.2：日历只走 TODAY，不再走整理员（避免多重重复）
     }
     // 封面紧凑条点按（文案承诺"点一下加入"，必须真入会/打开日程，不能只提醒）：
-    // 1) 事件里有可解析的在线会议链接 → 直开链接（会议 App/浏览器接管）；
-    // 2) 无链接 → 与非封面 TODAY 会议行同款三级兜底打开日历/事件详情；
-    // 3) 全失败 → 七仔说话兜底，绝不无反应。不走 remindMeeting 的去重（点按每次都要有结果）。
-    fun joinMeeting(e: CalEvent) {
-        val url = getValidMeetingUrl(context, e)
-        if (url != null) {
-            try {
-                context.startActivity(
-                    android.content.Intent(
-                        android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse(url)
-                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-                return
-            } catch (_: Exception) { /* 链接打开失败 → 落日历兜底 */ }
-        }
-        var opened = false
-        try {
-            val intent = android.content.Intent(
-                android.content.Intent.ACTION_MAIN
-            ).addCategory(
-                android.content.Intent.CATEGORY_APP_CALENDAR
-            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (intent.resolveActivity(context.packageManager) != null) {
-                context.startActivity(intent)
-                opened = true
-            }
-        } catch (_: Exception) { }
-        if (!opened && e.eventId > 0) {
-            try {
-                val uri = android.net.Uri.parse(
-                    "content://com.android.calendar/events/${e.eventId}"
-                )
-                val viewIntent = android.content.Intent(
-                    android.content.Intent.ACTION_VIEW, uri
-                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                if (viewIntent.resolveActivity(context.packageManager) != null) {
-                    context.startActivity(viewIntent)
-                    opened = true
-                }
-            } catch (_: Exception) { }
-        }
-        if (!opened) {
-            PetRepository.say("没找到日历应用")
-        }
-    }
+    // 实现已抽为文件级 joinCalendarEvent（意图入口建议面的会议行共用同一条入会
+    // 路径，三级路径说明见该函数）；不走 remindMeeting 的去重（点按每次都要有结果）。
+    fun joinMeeting(e: CalEvent) = joinCalendarEvent(context, e)
     // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
     var jellyTick by remember { mutableIntStateOf(0) }
 
@@ -451,6 +408,11 @@ fun PetZone(
     // v0.68.44：封面模式状态（hero 标题/下个会议）
     var coverSummary by remember { mutableStateOf("难得清闲") }
     var coverNextEvent by remember { mutableStateOf<CalEvent?>(null) }
+    // 意图改进一批：下一会议同步到共享 holder——首页意图入口的零打字建议面要读
+    // （会议数据原本只活在本 Composable 的状态里，IntentEntry 够不着）；
+    // PetZone 离场时清空，避免建议面读到陈旧会议。TODAY 数据流本身不改。
+    LaunchedEffect(coverNextEvent) { TodayEventsHolder.update(coverNextEvent) }
+    DisposableEffect(Unit) { onDispose { TodayEventsHolder.update(null) } }
     val coverPalette = remember {
         coverPaletteFor(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
     }
@@ -2594,6 +2556,56 @@ private fun extractMeetingUrl(event: CalEvent): String? {
             val lower = url.lowercase()
             MEETING_DOMAINS.any { lower.contains(it) }
         }
+}
+
+/**
+ * 点按入会（封面紧凑条与意图入口建议面的会议行共用同一条路径，2026-10-21 抽出）：
+ * 1) 事件里有可解析的在线会议链接 → 直开链接（会议 App/浏览器接管）；
+ * 2) 无链接 → 打开日历 App / 事件详情（三级兜底，与非封面 TODAY 会议行同款）；
+ * 3) 全失败 → 七仔说话兜底，绝不无反应。
+ */
+fun joinCalendarEvent(context: android.content.Context, e: CalEvent) {
+    val url = getValidMeetingUrl(context, e)
+    if (url != null) {
+        try {
+            context.startActivity(
+                android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse(url)
+                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            return
+        } catch (_: Exception) { /* 链接打开失败 → 落日历兜底 */ }
+    }
+    var opened = false
+    try {
+        val intent = android.content.Intent(
+            android.content.Intent.ACTION_MAIN
+        ).addCategory(
+            android.content.Intent.CATEGORY_APP_CALENDAR
+        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (intent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(intent)
+            opened = true
+        }
+    } catch (_: Exception) { }
+    if (!opened && e.eventId > 0) {
+        try {
+            val uri = android.net.Uri.parse(
+                "content://com.android.calendar/events/${e.eventId}"
+            )
+            val viewIntent = android.content.Intent(
+                android.content.Intent.ACTION_VIEW, uri
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (viewIntent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(viewIntent)
+                opened = true
+            }
+        } catch (_: Exception) { }
+    }
+    if (!opened) {
+        PetRepository.say("没找到日历应用")
+    }
 }
 
 // v0.63.1：验证会议 URL 有效且系统能解析，避免无效 URL 弹出应用选择器

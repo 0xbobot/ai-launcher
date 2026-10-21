@@ -8,11 +8,14 @@
 # intent-home.png / intent-nokey.png / intent-local.png / intent-opened.png / appcenter2.png /
 # appcenter-filter.png / appcenter-cleared.png / intent-tpl-giant.png / intent-tpl-headline.png /
 # intent-tpl-minimal.png（含各自 -local 结果条图），供人工验证。
+# 意图改进一批追加：intent-tpl-<tpl>-suggest.png（三模板建议面）/ intent-suggest.png /
+# intent-suggest-full.png（第 15 段：键盘弹起态与收键盘全布局态各一张）。
 # 首启对话框（onboarding 引导、低电量保护询问）用 run-as 预写 SharedPreferences 跳过，
 # 不依赖 UI 坐标；若预写失败，用固定坐标点按做兜底（pixel_6 1080x2400，对话框位置稳定）。
 # R4 矩阵化：写死坐标一律按 1080x2400 基准经 SX/SY 按实际分辨率换算；SMOKE_FONT_SCALE /
 # SMOKE_NIGHT / SMOKE_LABEL 环境参数供 smoke-matrix.yml 多组合复用（不带 env 时行为不变）；
-# 第 15 段为 a11y 触控目标尺寸断言（scripts/a11y_check.py 量 uiautomator dump）。
+# 第 15 段为意图改进一批（零打字建议面 + 提交后焦点释放），第 16 段为 a11y 触控目标
+# 尺寸断言（scripts/a11y_check.py 量 uiautomator dump，含建议面布局不变量）。
 
 PKG="com.bobot.ailauncher"
 APK="apk/app-debug.apk"
@@ -130,7 +133,7 @@ sleep 2
 
 # --- 5b. 扇形语义 dump（R4 a11y）：基线恢复后单独再起一次 6 秒拖动，2.5 秒时 dump ---
 # uiautomator 读树需 1-2 秒，必须落在按住窗口内（第一段拖动中实测读到的是松手后首页）。
-# dump 内容供第 15 段逐节点列出量尺寸；松手后照旧 force-stop 清理恢复基线。
+# dump 内容供第 16 段逐节点列出量尺寸；松手后照旧 force-stop 清理恢复基线。
 adb shell input swipe "$(SX 900)" "$(SY 1400)" "$(SX 300)" "$(SY 1400)" 6000 &
 SWIPE2_PID=$!
 sleep 2.5
@@ -538,6 +541,16 @@ for OFF in 0 1 2; do
       TCX=$(( (TX1 + TX2) / 2 )); TCY=$(( (TY1 + TY2) / 2 ))
       adb shell input swipe "$TCX" "$TCY" "$TCX" "$TCY" 150 || true
       sleep 2
+      # 意图改进一批：聚焦+空文本先截建议面（三模板各一张供人工亲验）并断言标题在场；
+      # 之后照旧输 "clo" 验本地结果（文本非空后建议面必须让位给本地结果）
+      shot "intent-tpl-$TPL-suggest"
+      adb shell uiautomator dump /sdcard/tpl_dump_s.xml > /dev/null 2>&1 || true
+      adb pull /sdcard/tpl_dump_s.xml "$OUT/tpl_${TPL}_suggest.xml" > /dev/null 2>&1 || true
+      if [ -f "$OUT/tpl_${TPL}_suggest.xml" ] && grep -q '七仔猜你现在想用' "$OUT/tpl_${TPL}_suggest.xml"; then
+        ok "tpl-$TPL-suggest"
+      else
+        ng "tpl-$TPL-suggest"
+      fi
       adb shell input text "clo" || true
       sleep 1
       adb shell input keyevent KEYCODE_BACK || true
@@ -955,7 +968,151 @@ else
   fi
 fi
 
-# --- 15. 无障碍触控尺寸断言（R4）：量已拉取 dump 里关键目标的实际 dp 尺寸（>=48dp）---
+# --- 15. 意图改进一批：零打字建议面 + 点 Top1 打开 + 提交后焦点释放 ---
+# force-stop 回首页基线 -> press 点胶囊（聚焦+空文本）-> 结果条槽位应出建议面
+# （标题"七仔猜你现在想用"在 dump 中）；press 点第一个建议应用 -> 前台离开本包
+# （或 logcat 有目标 START 派发）；再聚焦输整句、在键盘弹起状态下定位提交钮直接
+# 提交（不预收键盘）-> 无 Key 错误条出现且 dump 无 focused="true" 节点，即焦点
+# 已释放——clearFocus+收 IME 的可观测代理证据（IME 本体可见性在 CI 无稳定读法，
+# 以焦点状态取证，报告中如实标注）。会议行在 CI 无日历事件，不在此段覆盖。
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+SGX=$(SX 540); SGY=$(SY 1247)
+adb shell uiautomator dump /sdcard/suggest_dump0.xml > /dev/null 2>&1 || true
+adb pull /sdcard/suggest_dump0.xml "$OUT/suggest_dump0.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/suggest_dump0.xml" ]; then
+  SNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/suggest_dump0.xml" | head -1)
+  if [ -n "$SNODE" ]; then
+    SNUMS=$(echo "$SNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    SX1=$(echo "$SNUMS" | sed -n 1p); SY1=$(echo "$SNUMS" | sed -n 2p)
+    SX2=$(echo "$SNUMS" | sed -n 3p); SY2=$(echo "$SNUMS" | sed -n 4p)
+    if [ -n "$SX1" ] && [ -n "$SY2" ]; then
+      SGX=$(( (SX1 + SX2) / 2 )); SGY=$(( (SY1 + SY2) / 2 ))
+      log "suggest capsule at ($SGX,$SGY)"
+    fi
+  fi
+fi
+adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
+sleep 2
+shot "intent-suggest"
+# 量测用 dump 在收键盘后拉：键盘弹起时窗口 resize、Dock 被遮挡，坐标与层级都不可靠；
+# BACK 只收键盘，焦点与建议面保留（同第 10 段法），再截一张全布局图供验 Dock 在位
+adb shell input keyevent KEYCODE_BACK || true
+sleep 1
+shot "intent-suggest-full"
+adb shell uiautomator dump /sdcard/suggest_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/suggest_dump.xml "$OUT/suggest_dump.xml" > /dev/null 2>&1 || true
+if ! grep -q '七仔猜你现在想用' "$OUT/suggest_dump.xml" 2>/dev/null; then
+  sleep 1
+  adb shell uiautomator dump /sdcard/suggest_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/suggest_dump.xml "$OUT/suggest_dump.xml" > /dev/null 2>&1 || true
+fi
+if [ -f "$OUT/suggest_dump.xml" ] && grep -q '七仔猜你现在想用' "$OUT/suggest_dump.xml"; then
+  ok "suggest-panel"
+else
+  ng "suggest-panel"
+fi
+# 点第一个建议应用：标题文本之后（文档序≈布局序）第一个带 content-desc 的节点即
+# Top1 应用项的合并语义节点，其 bounds 中心落在可点容器内。打开证据同第 10 段双路。
+T1X=""; T1Y=""
+if [ -f "$OUT/suggest_dump.xml" ]; then
+  AFTER=$(sed 's/.*七仔猜你现在想用//' "$OUT/suggest_dump.xml")
+  INODE=$(echo "$AFTER" | grep -o '<node[^>]*content-desc="[^"]\{1,\}"[^>]*>' | head -1)
+  if [ -n "$INODE" ]; then
+    INUMS=$(echo "$INODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    IX1=$(echo "$INUMS" | sed -n 1p); IY1=$(echo "$INUMS" | sed -n 2p)
+    IX2=$(echo "$INUMS" | sed -n 3p); IY2=$(echo "$INUMS" | sed -n 4p)
+    if [ -n "$IX1" ] && [ -n "$IY2" ]; then
+      T1X=$(( (IX1 + IX2) / 2 )); T1Y=$(( (IY1 + IY2) / 2 ))
+      log "suggest top1 at ($T1X,$T1Y) node: $INODE"
+    fi
+  fi
+fi
+if [ -n "$T1X" ]; then
+  adb logcat -c > /dev/null 2>&1 || true
+  adb shell input swipe "$T1X" "$T1Y" "$T1X" "$T1Y" 150 || true
+  OPENED2=0
+  FG2=""
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    sleep 0.5
+    FG2=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
+    if [ -n "$FG2" ] && ! echo "$FG2" | grep -q "$PKG"; then OPENED2=1; break; fi
+  done
+  shot "intent-suggest-opened"
+  log "foreground after suggest open: $FG2"
+  if [ "$OPENED2" = "1" ]; then
+    ok "suggest-open-app"
+  elif adb logcat -d 2>/dev/null | grep "START u0" | grep -v "$PKG" | grep -q .; then
+    log "suggest target start dispatched (foreground did not stick)"
+    ok "suggest-open-app"
+  else
+    ng "suggest-open-app"
+  fi
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+else
+  ng "suggest-open-app"
+fi
+# 提交后焦点释放：重新聚焦 -> 输整句 -> 键盘弹起时重新 dump 定位提交钮（坐标随
+# 窗口 resize 变）-> 直接点提交 -> 错误条在场且无 focused 节点
+# 注（首轮实测）：输完 "open wechat" 后末词在 LatinIME 里仍处 composing（下划线+
+# 候选栏），新 composing 守卫会正确挡下提交（截图中提交钮呈禁用暗色，即守卫实证）；
+# 真实中文输入法流程同样是先点候选上屏再提交——这里补输一个空格让组合上屏，
+# 与真实流程对齐后再验提交+收键盘。
+adb shell uiautomator dump /sdcard/suggest_dump1.xml > /dev/null 2>&1 || true
+adb pull /sdcard/suggest_dump1.xml "$OUT/suggest_dump1.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/suggest_dump1.xml" ]; then
+  SNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/suggest_dump1.xml" | head -1)
+  if [ -n "$SNODE" ]; then
+    SNUMS=$(echo "$SNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    SX1=$(echo "$SNUMS" | sed -n 1p); SY1=$(echo "$SNUMS" | sed -n 2p)
+    SX2=$(echo "$SNUMS" | sed -n 3p); SY2=$(echo "$SNUMS" | sed -n 4p)
+    if [ -n "$SX1" ] && [ -n "$SY2" ]; then
+      SGX=$(( (SX1 + SX2) / 2 )); SGY=$(( (SY1 + SY2) / 2 ))
+    fi
+  fi
+fi
+adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
+sleep 2
+adb shell input text "open%swechat" || true
+sleep 1
+adb shell input text "%s" || true
+sleep 1
+adb shell uiautomator dump /sdcard/suggest_kb.xml > /dev/null 2>&1 || true
+adb pull /sdcard/suggest_kb.xml "$OUT/suggest_kb.xml" > /dev/null 2>&1 || true
+SUBX=""; SUBY=""
+if [ -f "$OUT/suggest_kb.xml" ]; then
+  BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/suggest_kb.xml" | head -1)
+  if [ -n "$BNODE" ]; then
+    BNUMS=$(echo "$BNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    BX1=$(echo "$BNUMS" | sed -n 1p); BY1=$(echo "$BNUMS" | sed -n 2p)
+    BX2=$(echo "$BNUMS" | sed -n 3p); BY2=$(echo "$BNUMS" | sed -n 4p)
+    if [ -n "$BX1" ] && [ -n "$BY2" ]; then
+      SUBX=$(( (BX1 + BX2) / 2 )); SUBY=$(( (BY1 + BY2) / 2 ))
+      log "submit button (keyboard up) at ($SUBX,$SUBY)"
+    fi
+  fi
+fi
+if [ -n "$SUBX" ]; then
+  adb shell input swipe "$SUBX" "$SUBY" "$SUBX" "$SUBY" 150 || true
+  sleep 2
+  shot "intent-submit-nokeyboard"
+  adb shell uiautomator dump /sdcard/suggest_after.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/suggest_after.xml "$OUT/suggest_after.xml" > /dev/null 2>&1 || true
+  if grep -q "先在设置里配置大模型" "$OUT/suggest_after.xml" 2>/dev/null && ! grep -q 'focused="true"' "$OUT/suggest_after.xml"; then
+    ok "submit-releases-focus"
+  else
+    ng "submit-releases-focus"
+  fi
+else
+  ng "submit-releases-focus"
+fi
+
+# --- 16. 无障碍触控尺寸断言（R4）：量已拉取 dump 里关键目标的实际 dp 尺寸（>=48dp）---
 # 覆盖：提交按钮（intent_dump）/ 清空按钮 + 问七仔行（ac_dump2）/ 本地结果项（local_dump）。
 # 扇形段（fan_dump）只测量记录：扇形是 Canvas 手势面，无段语义节点即记为发现项，
 # TalkBack 走查归真机验收，CI 不冒充已验；liveRegion/stateDescription 不出现在
@@ -973,7 +1130,7 @@ else
   log "python3 unavailable - a11y check skipped (not counted)"
 fi
 
-# --- 16. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 17. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

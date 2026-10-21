@@ -12,6 +12,11 @@
 横屏（landscape=1）时 ac_dump2 来自横屏旧搜索框流程，无清空/问七仔控件，
 这两项缺失记 INFO 跳过（横屏未并入统一胶囊，R4 发现 F2），在场则照常测量。
 
+意图改进一批追加（suggest_dump.xml，smoke.sh 第 15 段在收键盘后拉取，建议面在场）：
+布局不变量——建议项触控 >=48dp（标题后第一个应用项的可点祖先）；胶囊占位节点
+与建议面标题节点 bounds 不重叠；建议项完整落在屏内；Dock 仍在屏内（底部带内
+存在完整落在屏内的可点节点）。任一不满足输出 A11Y FAIL。
+
 只测量不判失败：
 - 扇形段（fan_dump.xml）：扇形是 Canvas 手势面，统计可点节点；无段语义节点时
   输出 FAN-NO-SEMANTICS 记为发现项（TalkBack 可用性归真机验收）。
@@ -103,6 +108,68 @@ def main():
             # 尺寸仍量其可点祖先（结果项容器），口径不变
             item = find_first(root, lambda n: n.get("class") == "android.view.View" and n.get("content-desc") == "Clock")
         report("result-item", item, density, pm)
+
+    # 意图改进一批：建议面布局不变量（suggest_dump.xml，聚焦+空文本+收键盘后拉取）
+    root = parse(os.path.join(out, "suggest_dump.xml"))
+    if root is not None:
+        pm = parent_map(root)
+        first = find_first(root, lambda n: True)
+        rb = bounds(first) if first is not None else None  # 首节点=根窗口，bounds 即屏面
+        title = find_first(root, lambda n: n.get("text") == "七仔猜你现在想用")
+        if title is None:
+            print("A11Y FAIL suggest-panel: title node missing in suggest_dump")
+        else:
+            # 建议项：标题之后（文档序≈布局序）第一个带 content-desc 的节点
+            seen_title = False
+            item = None
+            for n in root.iter("node"):
+                if n is title:
+                    seen_title = True
+                    continue
+                if seen_title and (n.get("content-desc") or ""):
+                    item = n
+                    break
+            report("suggest-item", item, density, pm)
+            # 胶囊（占位节点）与建议面标题不重叠
+            cap = find_first(root, lambda n: n.get("text") == "想做什么？")
+            tb = bounds(title)
+            cb = bounds(cap) if cap is not None else None
+            if tb and cb:
+                overlap = not (cb[2] <= tb[0] or tb[2] <= cb[0] or
+                               cb[3] <= tb[1] or tb[3] <= cb[1])
+                print(f"A11Y {'FAIL' if overlap else 'OK'} suggest-overlap: "
+                      f"capsule={cb} suggest-title={tb}")
+            # 建议项完整落在屏内
+            if rb and item is not None:
+                ib = bounds(clickable_ancestor(item, pm))
+                if ib:
+                    inside = (ib[0] >= rb[0] and ib[1] >= rb[1] and
+                              ib[2] <= rb[2] and ib[3] <= rb[3])
+                    print(f"A11Y {'OK' if inside else 'FAIL'} suggest-in-bounds: "
+                          f"item={ib} screen={rb}")
+            # Dock 仍在屏内：底部带（中心 y > 85% 屏高）存在完整落在屏内的可点节点
+            if rb:
+                dock = None
+                for n in root.iter("node"):
+                    if n.get("clickable") != "true":
+                        continue
+                    b = bounds(n)
+                    if not b:
+                        continue
+                    w = (b[2] - b[0]) * 160.0 / density
+                    h = (b[3] - b[1]) * 160.0 / density
+                    if w > 300 and h > 300:  # 排除全屏根容器
+                        continue
+                    cy = (b[1] + b[3]) / 2.0
+                    if cy > rb[3] * 0.85 and b[2] <= rb[2] and b[3] <= rb[3]:
+                        dock = b
+                        break
+                if dock:
+                    print(f"A11Y OK dock-in-bounds: bottom clickable node={dock} "
+                          f"screen={rb}")
+                else:
+                    print("A11Y FAIL dock-in-bounds: no clickable node in bottom "
+                          "band of suggest_dump")
 
     # 扇形：只测量，逐节点列出（smoke.sh 第 5b 段在按住窗口内 dump）。
     # 扇区为 Canvas 绘制，是否有语义节点、尺寸多大，由报告人工据此判定，不自动下结论。

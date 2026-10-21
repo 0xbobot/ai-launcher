@@ -205,10 +205,18 @@ private fun HomeHost(
     val intentCoordinator = remember { com.bobot.ailauncher.core.intent.IntentCoordinatorFactory.create(context) }
     val intentState by intentCoordinator.state.collectAsState()
     val intentScope = rememberCoroutineScope()
+    // 意图改进一批·防重：宿主保留在途 Job——新提交先 cancel 旧 Job 再 launch
+    // （顶替语义）；被顶替的旧提交在协调器内交还编辑态，不会卡死 Planning。
+    // 与协调器 submit 入口的 Planning 守卫叠加：连点不会重复规划/重复执行。
+    var intentJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun submitIntent(text: String) {
+        intentJob?.cancel()
+        intentJob = intentScope.launch { intentCoordinator.submit(text) }
+    }
     // 应用中心「问七仔」：先回首页（离 D3），再把整句交给协调器理解
     val onAskQizai: (String) -> Unit = { text ->
         onD3SwipeUpToHome()
-        intentScope.launch { intentCoordinator.submit(text) }
+        submitIntent(text)
     }
     // v0.64.2：更新弹窗走共享流（自动检查 / TODAY 卡片"有新版本"行点击）
     val updatePrompt by OtaUpdater.updatePrompt.collectAsState()
@@ -287,7 +295,7 @@ private fun HomeHost(
             onOpenSettings = onOpenSettings,
             // R2 UI：意图状态与回调（协调器在 HomeHost）
             intentState = intentState,
-            onIntentSubmit = { t -> intentScope.launch { intentCoordinator.submit(t) } },
+            onIntentSubmit = { t -> submitIntent(t) },
             onIntentConfirm = { req -> intentCoordinator.confirm(req) },
             onIntentDismiss = { intentCoordinator.dismiss() },
         )
