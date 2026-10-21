@@ -28,7 +28,9 @@ data class OtaInfo(
     val apkUrl: String,
     val changelog: String,
     val forceUpdate: Boolean = false,
-    val prerelease: Boolean = false // v0.68.80：测试版标记（publish-ota 的 prerelease 输入写入）
+    val prerelease: Boolean = false, // v0.68.80：测试版标记（publish-ota 的 prerelease 输入写入）
+    /** v0.68.89：发布时对最终 APK 算出的 SHA-256（小写 hex）；旧 manifest 无此字段时为空串，下载端跳过该项校验 */
+    val sha256: String = ""
 )
 
 /** OTA 检查结果：设置页手动检查需要区分"无更新"和"检查失败" */
@@ -103,7 +105,8 @@ object OtaUpdater {
                         changelog = json.optString("changelog", "")
                             .ifBlank { "常规更新与问题修复" },
                         forceUpdate = json.optBoolean("forceUpdate", false),
-                        prerelease = json.optBoolean("prerelease", false)
+                        prerelease = json.optBoolean("prerelease", false),
+                        sha256 = json.optString("sha256", "")
                     )
                     // v0.68.80：测试版只推给开了"接收测试版"开关的用户；
                     // 未开启则视为无更新（正式版用户不受测试包打扰）

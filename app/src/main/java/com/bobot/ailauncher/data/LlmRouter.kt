@@ -2,6 +2,8 @@ package com.bobot.ailauncher.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -26,17 +28,59 @@ sealed interface LlmCallResult {
     data class Err(val message: String) : LlmCallResult
 }
 
-/** 大模型配置：存 SharedPreferences "llm" */
+/**
+ * 大模型配置：base_url / model 存 SharedPreferences "llm"；
+ * api_key 自 v0.68.89 起存 EncryptedSharedPreferences "llm_secure"，
+ * 旧明文 Key 首次读取时自动迁移（迁移逻辑见 [LlmKeyStore]，失败回退明文不丢 Key）。
+ */
 object LlmConfig {
     private const val PREFS = "llm"
+    private const val SECURE_PREFS = "llm_secure"
     const val DEFAULT_BASE_URL = "https://api.deepseek.com"
     const val DEFAULT_MODEL = "deepseek-flash"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    @Volatile
+    private var securePrefsCache: SharedPreferences? = null
+
+    /** 加密存储；初始化失败（Keystore 异常等）返回 null，调用方回退明文路径 */
+    private fun securePrefs(context: Context): SharedPreferences? {
+        securePrefsCache?.let { return it }
+        val created = runCatching {
+            val appContext = context.applicationContext
+            val masterKey = MasterKey.Builder(appContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                appContext,
+                SECURE_PREFS,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }.getOrNull()
+        if (created != null) securePrefsCache = created
+        return created
+    }
+
+    private fun SharedPreferences.asStore(): LlmKeyStore.Store =
+        object : LlmKeyStore.Store {
+            override fun read(key: String): String? = getString(key, null)
+            override fun write(key: String, value: String) {
+                edit().putString(key, value).apply()
+            }
+            override fun delete(key: String) {
+                edit().remove(key).apply()
+            }
+        }
+
     fun getApiKey(context: Context): String =
-        prefs(context).getString("api_key", "").orEmpty()
+        LlmKeyStore.readApiKey(
+            prefs(context).asStore(),
+            securePrefs(context)?.asStore()
+        )
 
     fun getBaseUrl(context: Context): String =
         prefs(context).getString("base_url", DEFAULT_BASE_URL).orEmpty()
@@ -49,8 +93,13 @@ object LlmConfig {
     fun hasKey(context: Context): Boolean = getApiKey(context).isNotBlank()
 
     fun save(context: Context, apiKey: String, baseUrl: String, model: String) {
-        prefs(context).edit()
-            .putString("api_key", apiKey.trim())
+        val plain = prefs(context)
+        LlmKeyStore.writeApiKey(
+            plain.asStore(),
+            securePrefs(context)?.asStore(),
+            apiKey.trim()
+        )
+        plain.edit()
             .putString("base_url", normalizeBaseUrl(baseUrl).ifBlank { DEFAULT_BASE_URL })
             .putString("model", model.trim())
             .apply()

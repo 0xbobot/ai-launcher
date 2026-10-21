@@ -109,6 +109,8 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.squareup.okhttp)
+    // v0.68.89：API Key 加密存储（EncryptedSharedPreferences）
+    implementation(libs.androidx.security.crypto)
     // R2：IntentCoordinator 纯逻辑单测（JVM，不走 Android 运行时）
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
