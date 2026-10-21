@@ -19,6 +19,19 @@
 # 第 17 段为意图改进二批：本机 mock LLM（scripts/mock_llm.py）+ 预写 llm prefs 把
 # 协调器逼进缺参追问态实拍（intent-needsinput.png / intent-needsinput-answered.png），
 # 并断言发往模型的请求体含带参数说明的 hints 与上下文包。
+# 体检批D ⑥（testTag 分段改造）：关键 composable 已加 testTag（intent_input /
+# intent_submit / intent_clear / result_item / pet_qizai / today_nextup /
+# appcenter_settings / dock_item），MainActivity 根容器开 testTagsAsResourceId，
+# dump 里以 resource-id 暴露。各点按段的定位优先序：testTag 节点 > 原文本/
+# content-desc 定位 > SX/SY 兜底坐标；断言口径未动。
+# 剩余硬编码坐标清单（无法或不宜语义定位，保留并在此登记）：
+#  1) 第 2 段兜底：onboarding「跳过」(950,130)、低电量「不用」(585,1310)——
+#     仅 prefs 预写失败时走；该路径历史上 uiautomator 解析翻过车（见段内注释），
+#     且属兜底的兜底，坐标经 SX/SY 换算，保留。
+#  2) 手势类 swipe（第 5/5b 段扇形展开、第 7/10/12 段上滑开应用中心）：
+#     起点必须落在空白背景/避开 Dock 与卡片，节点定位无意义，保留坐标。
+#  3) 各段 dump 定位失败时的 SX/SY 兜底值（胶囊 540,1247、宠物 540,950 等）：
+#     三级定位的最后一级，保留。
 
 PKG="com.bobot.ailauncher"
 APK="apk/app-debug.apk"
@@ -57,6 +70,31 @@ if [ "$SCR_W" -gt "$SCR_H" ]; then
   log "landscape leg: app-center assertions follow AppCenterLandscape expectations"
 fi
 
+# --- 体检批D ⑥：testTag 语义定位 helper ---
+# center_rid <dumpfile> <resource-id>：在已拉取的 dump 里按 resource-id（=testTag）
+# 找第一个节点，命中打印其 bounds 中心 "X Y"，未命中无输出、返回 1。
+# tap_rid <dumpfile> <resource-id>：同上并直接 press 该中心，命中返回 0。
+center_rid() {
+  local F="$1" RID="$2" NODE NUMS X1 Y1 X2 Y2
+  [ -f "$F" ] || return 1
+  NODE=$(grep -o "<node[^>]*resource-id=\"$RID\"[^>]*>" "$F" | head -1)
+  [ -n "$NODE" ] || return 1
+  NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+  X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+  [ -n "$X1" ] && [ -n "$Y2" ] || return 1
+  echo "$(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 ))"
+}
+tap_rid() {
+  local F="$1" RID="$2" CTR
+  CTR=$(center_rid "$F" "$RID") || return 1
+  [ -n "$CTR" ] || return 1
+  log "tap by testTag $RID at ($CTR)"
+  adb shell input swipe $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) \
+    $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) 150 || true
+  return 0
+}
+
 # --- 1. 安装 ---
 if [ -f "$APK" ]; then
   if adb install -r -g "$APK"; then ok "install"; else ng "install"; fi
@@ -65,6 +103,9 @@ else
 fi
 
 # --- 2. 预写 SharedPreferences：跳过 onboarding（onboarded）+ 低电量保护询问（battery_asked）---
+# 体检批D ⑥ 登记：本段失败兜底的两处坐标点按（onboarding「跳过」950,130 /
+# 低电量「不用」585,1310）为剩余硬编码段之一——仅 prefs 预写失败时才进兜底，
+# 且该路径历史上 uiautomator 解析翻过车（见下文注），保留坐标（经 SX/SY 换算）不迁语义定位。
 # MainActivity 读 ai_launcher SP 的这两个 key；debug 包可用 run-as 写入（文件归属 app uid）。
 # 写法：本地生成 xml -> adb push 到 /data/local/tmp -> run-as cp 进 app 私有目录（避免 heredoc 嵌套引号坑）。
 printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
@@ -150,10 +191,15 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 
-# --- 6. 点七仔（宠物区中央；果冻反馈+开心表情 1.2 秒，0.5 秒后截图抓反应中途）---
-# 坐标按当前首页布局实测：七仔在 home 截图约 (540,950)；旧坐标 840,630 点空导致 pet 与 home 同帧（R1 实测）。
+# --- 6. 点七仔（宠物区中央；果冻反馈+开心表情 1.2 秒，0.7 秒后截图抓反应中途）---
+# 体检批D ⑥：优先 dump 按 testTag pet_qizai 定位七仔本体中心；未命中才走旧坐标
+# （按当前首页布局实测约 (540,950)；旧坐标 840,630 点空导致 pet 与 home 同帧，R1 实测）。
 # press 150ms 模拟真手指（瞬时 tap 会被首页手势层取消，见第 9 段注）
-adb shell input swipe "$(SX 540)" "$(SY 950)" "$(SX 540)" "$(SY 950)" 150 || true
+adb shell uiautomator dump /sdcard/pet_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/pet_dump.xml "$OUT/pet_dump.xml" > /dev/null 2>&1 || true
+if ! tap_rid "$OUT/pet_dump.xml" "pet_qizai"; then
+  adb shell input swipe "$(SX 540)" "$(SY 950)" "$(SX 540)" "$(SY 950)" 150 || true
+fi
 sleep 0.7
 shot "pet"
 
@@ -190,6 +236,9 @@ if [ -f "$OUT/set_dump.xml" ]; then
     fi
   fi
 fi
+# 体检批D ⑥：testTag 优先（命中则覆盖 content-desc 定位结果）
+CTR=$(center_rid "$OUT/set_dump.xml" "appcenter_settings")
+if [ -n "$CTR" ]; then SGX=$(echo "$CTR" | cut -d' ' -f1); SGY=$(echo "$CTR" | cut -d' ' -f2); log "settings gear by tag at ($SGX,$SGY)"; fi
 adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
 sleep 3
 shot "dark-settings"
@@ -245,6 +294,11 @@ if [ -f "$OUT/intent_dump.xml" ]; then
     fi
   fi
 fi
+# 体检批D ⑥：testTag 优先（命中则覆盖文本/content-desc 定位结果）
+CTR=$(center_rid "$OUT/intent_dump.xml" "intent_input")
+if [ -n "$CTR" ]; then CX=$(echo "$CTR" | cut -d' ' -f1); CY=$(echo "$CTR" | cut -d' ' -f2); log "intent capsule by tag at ($CX,$CY)"; fi
+CTR=$(center_rid "$OUT/intent_dump.xml" "intent_submit")
+if [ -n "$CTR" ]; then BX=$(echo "$CTR" | cut -d' ' -f1); BY=$(echo "$CTR" | cut -d' ' -f2); log "intent submit by tag at ($BX,$BY)"; fi
 # 点按用带时长的 press（swipe 同点 150ms）模拟真手指：adb 瞬时 tap 在本应用首页
 # 手势层下会被取消（实测：瞬时 tap 点提交/点宠物均不触发，IME Done 与长按压正常）。
 adb shell input swipe "$CX" "$CY" "$CX" "$CY" 150 || true
@@ -306,6 +360,9 @@ if [ -f "$OUT/local_dump0.xml" ]; then
     fi
   fi
 fi
+# 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
+CTR=$(center_rid "$OUT/local_dump0.xml" "intent_input")
+if [ -n "$CTR" ]; then LCX=$(echo "$CTR" | cut -d' ' -f1); LCY=$(echo "$CTR" | cut -d' ' -f2); log "local capsule by tag at ($LCX,$LCY)"; fi
 adb shell input swipe "$LCX" "$LCY" "$LCX" "$LCY" 150 || true
 sleep 2
 adb shell input text "clo" || true
@@ -435,6 +492,9 @@ if [ -f "$OUT/ac_dump.xml" ]; then
     fi
   fi
 fi
+# 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
+CTR=$(center_rid "$OUT/ac_dump.xml" "intent_input")
+if [ -n "$CTR" ]; then ACX=$(echo "$CTR" | cut -d' ' -f1); ACY=$(echo "$CTR" | cut -d' ' -f2); log "appcenter capsule by tag at ($ACX,$ACY)"; fi
 adb shell input swipe "$ACX" "$ACY" "$ACX" "$ACY" 150 || true
 sleep 2
 adb shell input text "clo" || true
@@ -473,6 +533,11 @@ if [ -f "$OUT/ac_dump2.xml" ]; then
   else
     ng "appcenter-clear-btn"
   fi
+fi
+# 体检批D ⑥：testTag 优先（命中则覆盖 content-desc 定位结果；ok/ng 口径不动）
+if [ -f "$OUT/ac_dump2.xml" ]; then
+  CTR=$(center_rid "$OUT/ac_dump2.xml" "intent_clear")
+  if [ -n "$CTR" ]; then KX=$(echo "$CTR" | cut -d' ' -f1); KY=$(echo "$CTR" | cut -d' ' -f2); log "appcenter clear by tag at ($KX,$KY)"; fi
 fi
 if [ -n "$KX" ]; then
   adb shell input swipe "$KX" "$KY" "$KX" "$KY" 150 || true
@@ -542,6 +607,9 @@ for OFF in 0 1 2; do
     TX2=$(echo "$TNUMS" | sed -n 3p); TY2=$(echo "$TNUMS" | sed -n 4p)
     if [ -n "$TX1" ] && [ -n "$TY2" ]; then
       TCX=$(( (TX1 + TX2) / 2 )); TCY=$(( (TY1 + TY2) / 2 ))
+      # 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
+      CTR=$(center_rid "$OUT/tpl_${TPL}.xml" "intent_input")
+      if [ -n "$CTR" ]; then TCX=$(echo "$CTR" | cut -d' ' -f1); TCY=$(echo "$CTR" | cut -d' ' -f2); log "tpl capsule by tag at ($TCX,$TCY)"; fi
       adb shell input swipe "$TCX" "$TCY" "$TCX" "$TCY" 150 || true
       sleep 2
       # 意图改进一批：聚焦+空文本先截建议面（三模板各一张供人工亲验）并断言标题在场；
@@ -638,6 +706,9 @@ if [ -f "$OUT/focus_dump.xml" ]; then
     fi
   fi
 fi
+# 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
+CTR=$(center_rid "$OUT/focus_dump.xml" "intent_input")
+if [ -n "$CTR" ]; then FCX=$(echo "$CTR" | cut -d' ' -f1); FCY=$(echo "$CTR" | cut -d' ' -f2); log "reaction capsule by tag at ($FCX,$FCY)"; fi
 adb shell input swipe "$FCX" "$FCY" "$FCX" "$FCY" 150 || true
 sleep 2
 shot "intent-focus"
@@ -830,6 +901,14 @@ PYEOF
   else
     log "nextup-$ANAME-clickable: python3 unavailable, skipped (not counted)"
   fi
+  # 体检批D ⑥：点按点优先用会议卡 testTag 节点（today_nextup）中心——卡面即点按面；
+  # 标题中心保留给上面的可点祖先断言。未命中则沿用标题中心（原行为）。
+  local CTR2
+  CTR2=$(center_rid "$OUT/nextup_${ANAME}.xml" "today_nextup")
+  if [ -n "$CTR2" ]; then
+    TX=$(echo "$CTR2" | cut -d' ' -f1); TY=$(echo "$CTR2" | cut -d' ' -f2)
+    log "nextup-$ANAME tap by tag at ($TX,$TY)"
+  fi
   adb logcat -c > /dev/null 2>&1 || true
   adb shell input swipe "$TX" "$TY" "$TX" "$TY" 150 || true
   shot "nextup-$ANAME-imm"
@@ -999,6 +1078,9 @@ if [ -f "$OUT/suggest_dump0.xml" ]; then
     fi
   fi
 fi
+# 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
+CTR=$(center_rid "$OUT/suggest_dump0.xml" "intent_input")
+if [ -n "$CTR" ]; then SGX=$(echo "$CTR" | cut -d' ' -f1); SGY=$(echo "$CTR" | cut -d' ' -f2); log "suggest capsule by tag at ($SGX,$SGY)"; fi
 adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
 sleep 2
 shot "intent-suggest"
@@ -1019,10 +1101,17 @@ if [ -f "$OUT/suggest_dump.xml" ] && grep -q '七仔猜你现在想用' "$OUT/su
 else
   ng "suggest-panel"
 fi
-# 点第一个建议应用：标题文本之后（文档序≈布局序）第一个带 content-desc 的节点即
-# Top1 应用项的合并语义节点，其 bounds 中心落在可点容器内。打开证据同第 10 段双路。
+# 点第一个建议应用：体检批D ⑥ 起优先按 testTag result_item 取第一个节点
+# （文档序≈布局序，第一项即 Top1，其 bounds 即整项可点容器）；
+# 未命中退回旧启发式：标题文本之后第一个带 content-desc 的节点（应用项图标的
+# 合并语义节点）。打开证据同第 10 段双路。
 T1X=""; T1Y=""
-if [ -f "$OUT/suggest_dump.xml" ]; then
+CTR=$(center_rid "$OUT/suggest_dump.xml" "result_item")
+if [ -n "$CTR" ]; then
+  T1X=$(echo "$CTR" | cut -d' ' -f1); T1Y=$(echo "$CTR" | cut -d' ' -f2)
+  log "suggest top1 by tag at ($T1X,$T1Y)"
+fi
+if [ -z "$T1X" ] && [ -f "$OUT/suggest_dump.xml" ]; then
   AFTER=$(sed 's/.*七仔猜你现在想用//' "$OUT/suggest_dump.xml")
   INODE=$(echo "$AFTER" | grep -o '<node[^>]*content-desc="[^"]\{1,\}"[^>]*>' | head -1)
   if [ -n "$INODE" ]; then
@@ -1079,6 +1168,9 @@ if [ -f "$OUT/suggest_dump1.xml" ]; then
     fi
   fi
 fi
+# 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
+CTR=$(center_rid "$OUT/suggest_dump1.xml" "intent_input")
+if [ -n "$CTR" ]; then SGX=$(echo "$CTR" | cut -d' ' -f1); SGY=$(echo "$CTR" | cut -d' ' -f2); log "suggest capsule2 by tag at ($SGX,$SGY)"; fi
 adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
 sleep 2
 adb shell input text "open%swechat" || true
@@ -1100,6 +1192,9 @@ if [ -f "$OUT/suggest_kb.xml" ]; then
     fi
   fi
 fi
+# 体检批D ⑥：testTag 优先（命中则覆盖 content-desc 定位结果）
+CTR=$(center_rid "$OUT/suggest_kb.xml" "intent_submit")
+if [ -n "$CTR" ]; then SUBX=$(echo "$CTR" | cut -d' ' -f1); SUBY=$(echo "$CTR" | cut -d' ' -f2); log "submit button by tag at ($SUBX,$SUBY)"; fi
 if [ -n "$SUBX" ]; then
   adb shell input swipe "$SUBX" "$SUBY" "$SUBX" "$SUBY" 150 || true
   sleep 2
@@ -1170,11 +1265,17 @@ if command -v python3 > /dev/null 2>&1; then
   done
 fi
 
-# 定位胶囊 -> CGX/CGY（dump 找占位文案，与第 15 段同法）
+# 定位胶囊 -> CGX/CGY（体检批D ⑥：优先 testTag intent_input；未命中退回 dump 占位文案，与第 15 段同法）
 ni_locate_capsule() {
   CGX=""; CGY=""
   adb shell uiautomator dump /sdcard/ni_dump0.xml > /dev/null 2>&1 || true
   adb pull /sdcard/ni_dump0.xml "$OUT/ni_dump0.xml" > /dev/null 2>&1 || true
+  local CTR=$(center_rid "$OUT/ni_dump0.xml" "intent_input")
+  if [ -n "$CTR" ]; then
+    CGX=$(echo "$CTR" | cut -d' ' -f1); CGY=$(echo "$CTR" | cut -d' ' -f2)
+    log "ni capsule by tag at ($CGX,$CGY)"
+    return 0
+  fi
   if [ -f "$OUT/ni_dump0.xml" ]; then
     local CNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/ni_dump0.xml" | head -1)
     if [ -n "$CNODE" ]; then
@@ -1189,10 +1290,13 @@ ni_locate_capsule() {
   [ -n "$CGX" ]
 }
 
-# 定位并点按金色提交钮（content-desc=提交）；成功返回 0
+# 定位并点按金色提交钮（体检批D ⑥：优先 testTag intent_submit；未命中退回 content-desc=提交）；成功返回 0
 ni_tap_submit() {
   adb shell uiautomator dump /sdcard/ni_btn.xml > /dev/null 2>&1 || true
   adb pull /sdcard/ni_btn.xml "$OUT/ni_btn.xml" > /dev/null 2>&1 || true
+  if tap_rid "$OUT/ni_btn.xml" "intent_submit"; then
+    return 0
+  fi
   local BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/ni_btn.xml" 2> /dev/null | head -1)
   [ -n "$BNODE" ] || return 1
   local BNUMS=$(echo "$BNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')

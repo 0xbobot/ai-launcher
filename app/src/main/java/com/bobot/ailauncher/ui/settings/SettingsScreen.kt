@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.bobot.ailauncher.ui.settings
 
 import android.content.Intent
@@ -42,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
@@ -66,6 +69,8 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
 import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
@@ -432,8 +437,10 @@ fun SettingsScreen(
                     } else if (onCardClick != null) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowForward,
+                            // 体检批D ⑨：装饰（整卡可点、状态由卡内文字表达）标装饰语义
                             contentDescription = null,
-                            tint = AILauncherColors.current.Hint
+                            tint = AILauncherColors.current.Hint,
+                            modifier = Modifier.semantics { invisibleToUser() }
                         )
                     }
                 }

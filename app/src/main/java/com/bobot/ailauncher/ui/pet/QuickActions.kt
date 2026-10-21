@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.bobot.ailauncher.ui.pet
 
 import android.content.Context
@@ -38,6 +40,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
@@ -58,6 +61,8 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -312,8 +317,12 @@ internal fun QuickActionAddFlow(
                                                 }
                                                 if (bmp != null) Image(
                                                     bitmap = bmp,
+                                                    // 体检批D ⑨：装饰（同行标题/副标题已表达）标装饰语义
                                                     contentDescription = null,
-                                                    modifier = Modifier.size(30.dp).clip(RoundedCornerShape(6.dp))
+                                                    modifier = Modifier
+                                                        .size(30.dp)
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .semantics { invisibleToUser() }
                                                 )
                                             }
                                         },
@@ -440,8 +449,12 @@ private fun AppIconDrawable(drawable: Drawable, size: Dp) {
     if (bmp != null) {
         Image(
             bitmap = bmp,
+            // 体检批D ⑨：装饰（调用处行内均有应用名文字）标装饰语义
             contentDescription = null,
-            modifier = Modifier.size(size).clip(RoundedCornerShape(8.dp))
+            modifier = Modifier
+                .size(size)
+                .clip(RoundedCornerShape(8.dp))
+                .semantics { invisibleToUser() }
         )
     } else {
         Box(Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(AILauncherColors.current.AccentSoft))
@@ -456,8 +469,12 @@ private fun ShortcutIconDrawable(context: Context, packageName: String, shortcut
     if (bmp != null) {
         Image(
             bitmap = bmp,
+            // 体检批D ⑨：装饰（调用处行内均有快捷方式文字）标装饰语义
             contentDescription = null,
-            modifier = Modifier.size(size).clip(RoundedCornerShape(6.dp))
+            modifier = Modifier
+                .size(size)
+                .clip(RoundedCornerShape(6.dp))
+                .semantics { invisibleToUser() }
         )
     } else {
         Box(Modifier.size(size).clip(RoundedCornerShape(6.dp)).background(AILauncherColors.current.AccentSoft))

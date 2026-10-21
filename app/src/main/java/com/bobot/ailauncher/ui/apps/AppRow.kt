@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.bobot.ailauncher.ui.apps
 
 import androidx.compose.animation.core.Animatable
@@ -48,6 +50,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -61,6 +64,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -364,10 +369,12 @@ internal fun AppRow(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = if (onUnhide != null) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                    // 体检批D ⑨：投影副本（正下方同形图标带正式描述）标装饰语义
                                     contentDescription = null,
                                     tint = Color.Black.copy(alpha = 0.16f),
                                     modifier = Modifier
                                         .size(26.dp)
+                                        .semantics { invisibleToUser() }
                                 )
                                 Icon(
                                     imageVector = if (onUnhide != null) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
@@ -403,10 +410,12 @@ internal fun AppRow(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Filled.Star,
+                                    // 体检批D ⑨：投影副本（正下方同形图标带正式描述）标装饰语义
                                     contentDescription = null,
                                     tint = Color.Black.copy(alpha = 0.16f),
                                     modifier = Modifier
                                         .size(26.dp)
+                                        .semantics { invisibleToUser() }
                                 )
                                 Icon(
                                     imageVector = Icons.Filled.Star,

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.bobot.ailauncher
 
 import android.content.Context
@@ -13,7 +15,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.bobot.ailauncher.core.brain.AiBrain
@@ -96,7 +101,12 @@ class MainActivity : FragmentActivity() {
                 // v0.38.0：全屏 intent 权限引导（被关掉会降级成普通通知）
                 var showFullScreenGuide by remember { mutableStateOf(false) }
                 // v0.37.2：系统壁纸直接透出（windowShowWallpaper），不再手动绘制
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier
+                    .fillMaxSize()
+                    // 体检批D ⑥：全 App testTag 经此暴露为 uiautomator resource-id，
+                    // 供冒烟脚本语义定位（semantics 修饰不影响布局与长相）
+                    .semantics { testTagsAsResourceId = true }
+                ) {
                     if (onboarded) {
                         MainScreen()
                     } else {

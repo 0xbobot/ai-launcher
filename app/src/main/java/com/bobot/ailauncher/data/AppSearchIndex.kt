@@ -145,37 +145,74 @@ object AppSearchIndex {
         val q = query.trim().lowercase().replace(" ", "")
         if (q.isBlank()) return index.map { it.app }
         ensureKeywordsLoaded(context)
-        data class Hit(val app: AppInfo, val score: Int, val usage: Double)
-        val hits = mutableListOf<Hit>()
-        // 自然语言关键词：查询包含关键词（或关键词拼音）→ 相关包名
-        val keywordPkgs: Set<String> = buildSet {
-            for ((k, pkgs) in keywordPackages) {
-                if (q.contains(k) || k.contains(q)) {
+        val keywordPkgs = keywordPackagesFor(q, keywordPinyin)
+        return rank(index, q, keywordPkgs) { pkg ->
+            AppUsageTracker.usageScore(context, pkg)
+        }
+    }
+
+    /**
+     * 体检批D ⑥：纯逻辑接缝——由归一化查询算出命中的自然语言关键词包名片段集合。
+     * 中文路径：查询包含关键词、或关键词包含查询（如只打了「打」）；
+     * 拼音路径：需先经 [ensureKeywordsLoaded] 备好 [keywordPinyin]（测试可直接传合成表），
+     * 且查询至少 2 个字符，避免单字母噪音。行为与原内联实现等价。
+     */
+    internal fun keywordPackagesFor(
+        q: String,
+        keywordPinyin: Map<String, List<String>>
+    ): Set<String> = buildSet {
+        for ((k, pkgs) in keywordPackages) {
+            if (q.contains(k) || k.contains(q)) {
+                addAll(pkgs)
+                continue
+            }
+            // 拼音关键词：q 至少 2 个字符才参与，避免单字母噪音
+            if (q.length >= 2) {
+                val kps = keywordPinyin[k].orEmpty()
+                if (kps.any { it.isNotEmpty() && (it.contains(q) || q.contains(it)) }) {
                     addAll(pkgs)
-                    continue
-                }
-                // 拼音关键词：q 至少 2 个字符才参与，避免单字母噪音
-                if (q.length >= 2) {
-                    val kps = keywordPinyin[k].orEmpty()
-                    if (kps.any { it.isNotEmpty() && (it.contains(q) || q.contains(it)) }) {
-                        addAll(pkgs)
-                    }
                 }
             }
         }
+    }
+
+    /** 体检批D ⑥：纯逻辑接缝——单个条目的六档命中分（0 表示未命中），档位口径见类头注释。 */
+    internal fun scoreFor(
+        q: String,
+        name: String,
+        pkg: String,
+        pinyinFull: String,
+        pinyinInitials: String,
+        keywordPkgs: Set<String>
+    ): Int = when {
+        name.contains(q) -> 100
+        keywordPkgs.isNotEmpty() && keywordPkgs.any { pkg.contains(it) } -> 80
+        pinyinFull.contains(q) -> 70
+        pinyinInitials.contains(q) && q.length >= 2 -> 60
+        pkg.contains(q) -> 40
+        isSubsequence(q, name) -> 30
+        else -> 0
+    }
+
+    /**
+     * 体检批D ⑥：纯逻辑接缝——打分 + 排序。空查询返回全部（保持原序）；
+     * 排序键 = 档分降序、同档内使用频次降序破同分（频次经 [usageOf] 注入，
+     * 生产传 AppUsageTracker 口径、测试传假表）；频次也并列时稳定排序保持索引原序。
+     */
+    internal fun rank(
+        index: List<Entry>,
+        q: String,
+        keywordPkgs: Set<String>,
+        usageOf: (String) -> Double
+    ): List<AppInfo> {
+        if (q.isBlank()) return index.map { it.app }
+        data class Hit(val app: AppInfo, val score: Int, val usage: Double)
+        val hits = mutableListOf<Hit>()
         for (e in index) {
             val name = e.app.label.toString().lowercase().replace(" ", "")
             val pkg = e.app.packageName.lowercase()
-            val score = when {
-                name.contains(q) -> 100
-                keywordPkgs.isNotEmpty() && keywordPkgs.any { pkg.contains(it) } -> 80
-                e.pinyinFull.contains(q) -> 70
-                e.pinyinInitials.contains(q) && q.length >= 2 -> 60
-                pkg.contains(q) -> 40
-                isSubsequence(q, name) -> 30
-                else -> 0
-            }
-            if (score > 0) hits += Hit(e.app, score, AppUsageTracker.usageScore(context, e.app.packageName))
+            val score = scoreFor(q, name, pkg, e.pinyinFull, e.pinyinInitials, keywordPkgs)
+            if (score > 0) hits += Hit(e.app, score, usageOf(e.app.packageName))
         }
         // 意图改进一批：同档分内按使用频次破同分（只破同分——排序键档分在前，
         // 频次再高也压不过更高档的精确命中）；频次也并列时 sortedWith 稳定排序
@@ -186,7 +223,7 @@ object AppSearchIndex {
     }
 
     /** 子序列模糊：q 的字符按序出现在目标里即可 */
-    private fun isSubsequence(q: String, target: String): Boolean {
+    internal fun isSubsequence(q: String, target: String): Boolean {
         if (q.length < 2 || q.length > target.length) return false
         var i = 0
         for (c in target) {
@@ -199,7 +236,7 @@ object AppSearchIndex {
     }
 
     /** 中文→拼音全拼/首字母（内置字典，多音字取第一读音；缺字自动降级） */
-    private fun pinyinOf(label: String, dict: Map<String, String>): Pair<String, String> {
+    internal fun pinyinOf(label: String, dict: Map<String, String>): Pair<String, String> {
         val full = StringBuilder()
         val initials = StringBuilder()
         for (ch in label) {

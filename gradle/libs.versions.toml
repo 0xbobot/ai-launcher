@@ -8,6 +8,7 @@ composeBom = "2024.10.01"
 navigationCompose = "2.7.1"
 okhttp = "4.12.0"
 junit = "4.13.2"
+orgJson = "20240303"
 kotlinxCoroutines = "1.8.1"
 securityCrypto = "1.1.0-alpha06"
 
@@ -27,6 +28,7 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 squareup-okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 

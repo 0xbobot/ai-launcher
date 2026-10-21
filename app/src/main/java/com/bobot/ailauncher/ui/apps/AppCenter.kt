@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
@@ -91,6 +93,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -106,6 +109,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -630,7 +636,11 @@ fun AppCenterContent(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 // v0.41.9（Bob 选 B）：设置齿轮缩小弱化，仍在右上
-                IconButton(onClick = onOpenSettings) {
+                IconButton(
+                    onClick = onOpenSettings,
+                    // 体检批D ⑥：冒烟语义定位锚点（应用中心设置齿轮）
+                    modifier = Modifier.testTag("appcenter_settings")
+                ) {
                     Icon(
                         Icons.Filled.Settings,
                         contentDescription = "设置",
@@ -654,9 +664,12 @@ fun AppCenterContent(
                 ) {
                     Icon(
                         Icons.Filled.AutoAwesome,
+                        // 体检批D ⑨：装饰图标（行文案「问七仔：「…」」已表达含义）标装饰语义
                         contentDescription = null,
                         tint = AILauncherColors.current.Accent,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier
+                            .size(16.dp)
+                            .semantics { invisibleToUser() }
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -670,9 +683,12 @@ fun AppCenterContent(
                     )
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowForward,
+                        // 体检批D ⑨：装饰图标（同问七仔行）标装饰语义
                         contentDescription = null,
                         tint = AILauncherColors.current.Accent,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier
+                            .size(16.dp)
+                            .semantics { invisibleToUser() }
                     )
                 }
             }
@@ -838,12 +854,14 @@ fun AppCenterContent(
                             // 导致拖动手柄的 pointerInput 重建、手势取消、顺序没保存
                             Icon(
                                 imageVector = Icons.Filled.Star,
+                                // 体检批D ⑨：幽灵占位（alpha 0/0.14 纯视觉）标装饰语义
                                 contentDescription = null,
                                 tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) 0.14f else 0f),
                                 modifier = Modifier
                                     .align(Alignment.CenterStart)
                                     .padding(start = 20.dp)
                                     .size(36.dp)
+                                    .semantics { invisibleToUser() }
                             )
                             // v0.68.53（Bob）：生长式
                             val isPopupExpandedX = popupApp?.packageName == app.packageName
@@ -1036,12 +1054,14 @@ fun AppCenterContent(
                             Box(modifier = Modifier.fillMaxWidth()) {
                                 Icon(
                                     imageVector = Icons.Outlined.Lock,
+                                    // 体检批D ⑨：幽灵占位（alpha 0.14 纯视觉）标装饰语义
                                     contentDescription = null,
                                     tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
                                         .padding(start = 20.dp)
                                         .size(36.dp)
+                                        .semantics { invisibleToUser() }
                                 )
                                 Row(
                                     modifier = Modifier
@@ -1061,9 +1081,12 @@ fun AppCenterContent(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Filled.Fingerprint,
+                                        // 体检批D ⑨：装饰图标（同行文字「点击解锁查看」已表达）标装饰语义
                                         contentDescription = null,
                                         tint = AILauncherColors.current.Hint,
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .semantics { invisibleToUser() }
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
@@ -1082,12 +1105,14 @@ fun AppCenterContent(
                             Box(modifier = Modifier.fillMaxWidth()) {
                                 Icon(
                                     imageVector = Icons.Filled.VisibilityOff,
+                                    // 体检批D ⑨：幽灵占位（alpha 0/0.14 纯视觉）标装饰语义
                                     contentDescription = null,
                                     tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) 0.14f else 0f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
                                         .padding(start = 20.dp)
                                         .size(36.dp)
+                                        .semantics { invisibleToUser() }
                                 )
                                 // v0.68.53（Bob）：生长式
                                 val isPopupExpandedX = popupApp?.packageName == app.packageName
@@ -1160,12 +1185,14 @@ fun AppCenterContent(
                     // v0.41.31：Dock 分区悬停——幽灵 ★（与第一行幽灵一致）
                     Icon(
                         imageVector = Icons.Filled.Star,
+                        // 体检批D ⑨：悬停幽灵（纯视觉）标装饰语义
                         contentDescription = null,
                         tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 20.dp, top = 12.dp)
                             .size(36.dp)
+                            .semantics { invisibleToUser() }
                             .offset { IntOffset(0, animatedDockPushPx.roundToInt()) }
                     )
                 } else if (stuckHidden) {
@@ -1173,12 +1200,14 @@ fun AppCenterContent(
                     Icon(
                         imageVector = if (hiddenUnlocked) Icons.Filled.VisibilityOff
                             else Icons.Filled.VisibilityOff,
+                        // 体检批D ⑨：悬停幽灵（纯视觉）标装饰语义
                         contentDescription = null,
                         tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 20.dp, top = 12.dp)
                             .size(36.dp)
+                            .semantics { invisibleToUser() }
                     )
                 } else if (sl != null && !isLandscapeAc) {
                     Text(

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.bobot.ailauncher.ui.home
 
 import android.content.Context
@@ -43,6 +45,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -56,7 +59,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -140,9 +145,13 @@ fun IntentCapsuleField(
     ) {
         Icon(
             imageVector = Icons.Filled.AutoAwesome,
+            // 体检批D ⑨：装饰图标（输入框用途由占位文案表达）——明确标装饰语义，
+            // 不进无障碍树，避免 TalkBack 在输入框旁多读一个无名节点
             contentDescription = null,
             tint = AILauncherColors.current.Accent,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier
+                .size(18.dp)
+                .semantics { invisibleToUser() }
         )
         Spacer(modifier = Modifier.width(10.dp))
         BasicTextField(
@@ -150,6 +159,9 @@ fun IntentCapsuleField(
             onValueChange = onValueChange,
             modifier = Modifier
                 .weight(1f)
+                // 体检批D ⑥：冒烟语义定位锚点（testTag 经根容器 testTagsAsResourceId
+                // 暴露为 uiautomator resource-id；对用户界面零影响）
+                .testTag("intent_input")
                 .focusRequester(focusRequester)
                 .onFocusChanged { onFocusChanged(it.isFocused) }
                 // R3-C 无障碍：Planning 时给 TalkBack 一个状态说明（"七仔思考中"），
@@ -190,6 +202,8 @@ fun IntentCapsuleField(
             Box(
                 modifier = Modifier
                     .size(48.dp)
+                    // 体检批D ⑥：冒烟语义定位锚点（清空钮）
+                    .testTag("intent_clear")
                     .clickable { onValueChange(TextFieldValue("")) },
                 contentAlignment = Alignment.Center
             ) {
@@ -214,6 +228,8 @@ fun IntentCapsuleField(
         Box(
             modifier = Modifier
                 .size(48.dp)
+                // 体检批D ⑥：冒烟语义定位锚点（提交钮）
+                .testTag("intent_submit")
                 .clickable(enabled = canSubmit) { onSubmit() },
             contentAlignment = Alignment.Center
         ) {
@@ -624,6 +640,8 @@ private fun ResultAppItem(
     Column(
         modifier = Modifier
             .width(64.dp)
+            // 体检批D ⑥：冒烟语义定位锚点（结果条/建议面应用项，文档序即布局序）
+            .testTag("result_item")
             .clip(RoundedCornerShape(12.dp))
             .clickable { onOpen(app) }
             .padding(vertical = 4.dp),

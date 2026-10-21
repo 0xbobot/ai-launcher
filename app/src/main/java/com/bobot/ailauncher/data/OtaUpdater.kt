@@ -91,29 +91,7 @@ object OtaUpdater {
                 client.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return@withContext OtaCheckResult.Failed
                     val body = resp.body?.string() ?: return@withContext OtaCheckResult.Failed
-                    val json = JSONObject(body)
-                    val remoteCode = json.optInt("versionCode", 0)
-                    if (remoteCode <= 0 || remoteCode <= BuildConfig.VERSION_CODE) {
-                        return@withContext OtaCheckResult.UpToDate
-                    }
-                    val apkUrl = json.optString("apkUrl", "")
-                    if (apkUrl.isBlank()) return@withContext OtaCheckResult.Failed
-                    val info = OtaInfo(
-                        versionCode = remoteCode,
-                        versionName = json.optString("versionName", ""),
-                        apkUrl = apkUrl,
-                        changelog = json.optString("changelog", "")
-                            .ifBlank { "常规更新与问题修复" },
-                        forceUpdate = json.optBoolean("forceUpdate", false),
-                        prerelease = json.optBoolean("prerelease", false),
-                        sha256 = json.optString("sha256", "")
-                    )
-                    // v0.68.80：测试版只推给开了"接收测试版"开关的用户；
-                    // 未开启则视为无更新（正式版用户不受测试包打扰）
-                    if (info.prerelease && !isBetaOptIn(context)) {
-                        return@withContext OtaCheckResult.UpToDate
-                    }
-                    OtaCheckResult.UpdateAvailable(info)
+                    evaluateManifest(body, BuildConfig.VERSION_CODE, isBetaOptIn(context))
                 }
             } catch (e: IOException) {
                 OtaCheckResult.Failed
@@ -121,6 +99,46 @@ object OtaUpdater {
                 OtaCheckResult.Failed
             }
         }
+
+    /**
+     * 体检批D ⑥：manifest 判定纯函数接缝——把 update.json 文本判成检查结果，
+     * 网络与 Context 读开关留在 [checkForUpdateResult] 外层，本函数只做
+     * 解析 + 版本比较 + prerelease 门控，供 JVM 单测覆盖（行为与原内联实现等价：
+     * JSON 坏 → Failed；版本号不大于当前 → UpToDate；有新版但 apkUrl 空 → Failed）。
+     */
+    internal fun evaluateManifest(
+        body: String,
+        currentVersionCode: Int,
+        betaOptIn: Boolean
+    ): OtaCheckResult {
+        val json = try {
+            JSONObject(body)
+        } catch (e: Exception) {
+            return OtaCheckResult.Failed
+        }
+        val remoteCode = json.optInt("versionCode", 0)
+        if (remoteCode <= 0 || remoteCode <= currentVersionCode) {
+            return OtaCheckResult.UpToDate
+        }
+        val apkUrl = json.optString("apkUrl", "")
+        if (apkUrl.isBlank()) return OtaCheckResult.Failed
+        val info = OtaInfo(
+            versionCode = remoteCode,
+            versionName = json.optString("versionName", ""),
+            apkUrl = apkUrl,
+            changelog = json.optString("changelog", "")
+                .ifBlank { "常规更新与问题修复" },
+            forceUpdate = json.optBoolean("forceUpdate", false),
+            prerelease = json.optBoolean("prerelease", false),
+            sha256 = json.optString("sha256", "")
+        )
+        // v0.68.80：测试版只推给开了"接收测试版"开关的用户；
+        // 未开启则视为无更新（正式版用户不受测试包打扰）
+        if (info.prerelease && !betaOptIn) {
+            return OtaCheckResult.UpToDate
+        }
+        return OtaCheckResult.UpdateAvailable(info)
+    }
 
     /** 每天最多自动检查一次 */
     fun shouldAutoCheck(context: Context): Boolean {

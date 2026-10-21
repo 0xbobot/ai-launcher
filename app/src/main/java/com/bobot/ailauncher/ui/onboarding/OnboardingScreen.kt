@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.bobot.ailauncher.ui.onboarding
 
 import android.content.Context
@@ -28,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
 import androidx.core.app.NotificationManagerCompat
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.util.rebindListener
@@ -129,9 +134,12 @@ private fun StepWelcome(onNext: () -> Unit, onSkip: () -> Unit) {
     StepScaffold(step = 0, onSkip = onSkip) {
         Icon(
             Icons.Filled.AutoAwesome,
+            // 体检批D ⑨：装饰（下方标题已表达）标装饰语义
             contentDescription = null,
             tint = AILauncherColors.current.Accent,
-            modifier = Modifier.size(64.dp)
+            modifier = Modifier
+                .size(64.dp)
+                .semantics { invisibleToUser() }
         )
         Spacer(modifier = Modifier.height(24.dp))
         Text(
@@ -256,9 +264,12 @@ private fun StepDone(onFinish: () -> Unit) {
     StepScaffold(step = 3, onSkip = onFinish) {
         Icon(
             Icons.Filled.Check,
+            // 体检批D ⑨：装饰（下方标题「一切就绪」已表达）标装饰语义
             contentDescription = null,
             tint = AILauncherColors.current.Success,
-            modifier = Modifier.size(64.dp)
+            modifier = Modifier
+                .size(64.dp)
+                .semantics { invisibleToUser() }
         )
         Spacer(modifier = Modifier.height(24.dp))
         Text(
@@ -285,9 +296,12 @@ private fun StatusRow(done: Boolean, doneText: String, todoText: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
             Icons.Filled.Check,
+            // 体检批D ⑨：状态含义由同行文字（完成/待办文案不同）表达，图标标装饰语义
             contentDescription = null,
             tint = if (done) AILauncherColors.current.Success else AILauncherColors.current.Hint,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier
+                .size(20.dp)
+                .semantics { invisibleToUser() }
         )
         Spacer(modifier = Modifier.size(8.dp))
         Text(

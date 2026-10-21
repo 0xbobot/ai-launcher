@@ -66,6 +66,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -390,6 +391,8 @@ fun PetZone(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
+                                // 体检批D ⑥：冒烟语义定位锚点（七仔本体，封面形态）
+                                .testTag("pet_qizai")
                                 .combinedClickable(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
@@ -579,6 +582,8 @@ fun PetZone(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = petTop) // v0.66.9：七仔靠近宠物区底部（petTop = stageH - 140dp，离卡片 40dp）
+                    // 体检批D ⑥：冒烟语义定位锚点（七仔本体，非封面形态）
+                    .testTag("pet_qizai")
                     // v0.64.0：十万火急跳动（3 次快速上下）
                     .graphicsLayer { translationY = urgentBounce.value }
                     // 场景播放时给宽舞台（同中心，宠物视觉大小不变）；常态保持 100dp
