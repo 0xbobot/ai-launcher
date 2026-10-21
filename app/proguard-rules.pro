@@ -24,3 +24,7 @@
 -keep class androidx.compose.runtime.** { *; }
 -keep class androidx.compose.animation.** { *; }
 -dontwarn androidx.compose.**
+
+# EncryptedSharedPreferences / Tink（v0.68.89 API Key 加密存储）：
+# Tink 类引用了不在 classpath 的 errorprone 注解（仅编译期注解），R8 忽略即可
+-dontwarn com.google.errorprone.annotations.**

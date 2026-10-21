@@ -15,6 +15,9 @@ name: Publish OTA
 #   APK 照走 GitHub Releases 直链（OkHttp 默认跟随 releases/download 的 302）。
 # - workflow_dispatch 接口不变（另一会话照常用），prerelease 输入同时控制
 #   GitHub Release 的预发布标记和 update.json 里的 prerelease 字段。
+# - update.json 新增 sha256 字段（v0.68.89）：对最终 APK 计算的 SHA-256；
+#   新版 App 下载后校验，不符不安装；老版本 App 忽略未知字段不受影响。
+# - changelog 输入应与仓库 CHANGELOG.md 顶部条目保持一致（约定见该文件头）。
 
 on:
   workflow_dispatch:
@@ -87,20 +90,25 @@ jobs:
           # 文件名带版本号：每个版本 URL 唯一，彻底避开各层缓存拿到旧包
           APK_FILE="ai-launcher-v${NAME}.apk"
           mv ota/app-debug.apk "ota/$APK_FILE"
+          # v0.68.89：对改名后的最终 APK 算 SHA-256，写进 update.json 供 App 端校验
+          SHA256=$(sha256sum "ota/$APK_FILE" | cut -d' ' -f1)
+          echo "APK sha256=$SHA256"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "apk_file=$APK_FILE" >> "$GITHUB_OUTPUT"
           ls -la ota/
-          python3 - "$CODE" "$NAME" "$CHANGELOG" "$PRERELEASE" <<'EOF'
+          python3 - "$CODE" "$NAME" "$CHANGELOG" "$PRERELEASE" "$SHA256" <<'EOF'
           import json, sys
           code = int(sys.argv[1])
           name = sys.argv[2]
           changelog = sys.argv[3].strip() or "常规更新"
           prerelease = sys.argv[4] == "true"
+          sha256 = sys.argv[5].strip().lower()
           data = {
               "versionCode": code,
               "versionName": name,
               "apkUrl": f"https://github.com/0xbobot/ai-launcher/releases/download/v{name}/ai-launcher-v{name}.apk",
+              "sha256": sha256,
               "changelog": changelog,
               "forceUpdate": False,
               "prerelease": prerelease,

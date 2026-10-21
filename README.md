@@ -1,15 +1,30 @@
 # AI桌面（AI Launcher）
 
-> **v0.5**：自动 OTA 升级——版本 manifest 与安装包托管在 GitHub Pages（bobot.is-a.dev/ai-launcher/）；App 启动每天自动检查一次 + 设置页可手动触发；DownloadManager 后台下载 + 下载完成自动弹安装（FileProvider）；发布走 `publish-ota` workflow 手动触发（需配 PAGES_DEPLOY_TOKEN）。
-> **v0.4**：首页通知卡片可点（打开对应 App）；日历三层重设计（下一个日程大卡片+倒计时 / 全天小字 / 后续小行）；能力页分类行重设计（折叠态直接横排真实 App 图标可点，展开态动画铺 4 列网格）；大模型报错透出（HTTP 状态码+服务端 error.message，baseUrl 自动规范化）；全部应用 A-Z 快速索引（右侧纵条+中央悬浮大字母）；首页/能力页底部小圆点 pager 指示器。
-> **v0.3**：修真机反馈 4 问题 + 能力分类动态化——`QUERY_ALL_PACKAGES` 取全量应用；通知授权后自动重绑监听；语音改系统 RecognizerIntent（国产机可用）；首页排版收紧；能力页分组只显示本机已安装的真实应用（空分组隐藏）。
-> **v0.2**：真桌面的全屏手势导航（去掉底部 tab；首页左滑进能力页、上滑打开应用抽屉）；意图框接大模型路由（设置页配 Key，默认 DeepSeek）；首页新增今日日程（日历）与语音输入。
-
 AI 时代的 Android 启动桌面：不是图标货架，而是 **"意图入口 + 正在进行时"** 的系统级 AI 空间。
+吉祥物是宠物「七仔」（毛绒 3D 小流星），它负责讲述信息、承接意图、给出下一步动作。
 
-- **首页**：问候 + 意图输入框 + 「正在进行时」信息流（通知监听驱动）
-- **能力**：按意图组织应用（出行 / 支付 / 办公 / 生活 / 购物），App 是能力的供应商
-- **应用**：全部应用列表（中文排序）+ 搜索
+当前版本见 [CHANGELOG.md](CHANGELOG.md)（版本档案，v0.68.84 起）与线上
+`update.json`；架构与专题文档在 `docs/`（`TECHNICAL_DESIGN.md`、
+`INTERACTION_GUIDELINES.md`、`PET_WORLD_ARCHITECTURE.md`、`live2d-mvp/`）。
+
+> **分发方式：仅限侧载。** 本应用使用较重的系统权限（见下「安装与分发」），
+> 不以 Google Play 上架为目标，只通过 GitHub Releases + OTA 直分发。
+
+## 现在的功能
+
+- **首页**：每日封面（3 模板轮换）+ 时钟/天气/一句话 + 七仔 + 意图胶囊 + TODAY 信息流
+  （下一会议、待回消息、待办等，每条信息都带用户最可能的下一步动作）。
+- **意图入口**：点开胶囊先出「此刻常用 Top + 下一会议」（零打字第一屏）；
+  打字时本地搜索秒出应用直达（名称/拼音/首字母 + 使用频次排序）；
+  整句提交走大模型规划——模型带情境（时间、下一场日程、天气、常用与已装应用），
+  选能力执行；缺必填参数时七仔追问补参，不缺参假执行；高风险动作先弹窗确认。
+  首页胶囊与应用中心搜索是同一个入口的两层（应用中心顶部同款胶囊 + 「问七仔」）。
+- **能力注册表**：`app/src/main/assets/capabilities.json` 定义能力（见下），
+  运行时按本机**实际已装应用**动态绑定提供方；没装的能力不向模型许诺；
+  装/卸应用后自动刷新。深链模板参数未填全不会被打开。
+- **应用中心**：全部应用 A–Z 字母索引 + 搜索；Dock 与扇形菜单。
+- **外观**：浅色暖纸面主题 + 深色模式（跟随系统），字阶/颜色 token 在 `ui/theme/`。
+- **OTA 升级**：App 内检查更新、分片下载、断点续传、完整性校验后弹安装（见下）。
 
 ## 技术栈
 
@@ -18,95 +33,98 @@ AGP 8.5.2，minSdk 29 / targetSdk 34，Gradle Kotlin DSL。
 
 ## 冷启动流程（第一印象）
 
-首次打开走 3 步引导（`ui/onboarding/OnboardingScreen.kt`），每步都可跳过：
-
-1. **欢迎**：「把手机变成会干活的空间 / 说出你想干嘛，不用找 App」
-2. **设为默认桌面**：跳 `Settings.ACTION_HOME_SETTINGS`，用 `PackageManager.resolveActivity`
-   检测是否已是默认（点"下一步"时实时检测）
-3. **通知读取**：跳 `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`，用
-   `NotificationManagerCompat.getEnabledListenerPackages` 检测；这是「正在进行时」
-   的数据来源
-4. **一切就绪**：写 `SharedPreferences("ai_launcher").onboarded=true`，进入主界面
+首次打开走引导（`ui/onboarding/OnboardingScreen.kt`），每步都可跳过：
+欢迎 → 设为默认桌面（`Settings.ACTION_HOME_SETTINGS`，实时检测）→
+通知读取授权（「正在进行时」的数据来源）→ 写
+`SharedPreferences("ai_launcher").onboarded=true` 进入主界面。
 
 ## 能力注册表（Capability Registry）
 
-`app/src/main/assets/capabilities.json` 定义全部能力，`data/CapabilityRegistry.kt`
-负责加载与跳转。Schema：
+`app/src/main/assets/capabilities.json` 定义全部分组与能力，
+`data/CapabilityRegistry.kt` 负责加载、解析与跳转。单个能力示意（导航）：
 
 ```json
 {
-  "groups": [
-    {
-      "id": "travel", "label": "出行", "icon": "directions_car",
-      "capabilities": [
-        {
-          "id": "ditie",
-          "label": "地铁",
-          "icon": "directions_subway",
-          "packageName": "com.autonavi.minimap",
-          "deeplink": "amap://route?sourceApplication=ai-launcher&dlat={lat}&dlon={lon}&dev=0&t=1",
-          "fallbackToLauncher": true,
-          "note": "需真机验证"
-        }
-      ]
-    }
-  ]
+  "id": "daohang",
+  "label": "导航",
+  "packageNames": ["com.autonavi.minimap", "com.baidu.BaiduMap", "com.tencent.map"],
+  "providers": [
+    {"name": "高德地图", "packageNames": ["com.autonavi.minimap"],
+     "deeplink": "amap://route?sourceApplication=ai-launcher&dname={to}&dev=0&t=1"},
+    {"name": "百度地图", "packageNames": ["com.baidu.BaiduMap"],
+     "deeplink": "baidumap://map/direction?destination={to}&mode=driving&src=ai-launcher"},
+    {"name": "腾讯地图", "packageNames": ["com.tencent.map"], "deeplink": null}
+  ],
+  "geoFallback": "name",
+  "fallbackToLauncher": true,
+  "params": [{"name": "to", "label": "目的地", "required": true, "ask": "导航去哪儿？"}]
 }
 ```
 
-跳转策略（`resolveAndLaunch`）：deep link 直达 App 内页面 → 失败则打开 App 主页
-→ 都失败返回 false（调用方 toast 降级）。`deeplink` 支持 `{param}` 占位符，
-调用时传入 `params` 替换，未传入的占位符会被清空。
-
-首页意图框当前是演示版路由：关键词小写匹配（打车/叫车→滴滴、地铁→高德、
-火车→12306、航班/飞机→航旅纵横、酒店→携程），后续可替换为大模型意图理解。
+解析策略：按 `providers` 候选链顺序，选第一个本机已安装的提供方拼深链直达；
+深链打不开换下一家，再不行走 geo 兜底 / 打开应用主页；全部落空如实报错。
+`params` 声明必填参数与缺参追问句，协调器在执行前校验，缺参先追问、不执行。
 
 ## CI 出包
 
 `.github/workflows/build-apk.yml`：push / PR 自动跑
-`gradle :app:assembleDebug`，产物 `app-debug.apk` 以 artifact
+`gradle :app:assembleDebug` + 单元测试，产物 `app-debug.apk` 以 artifact
 `ai-launcher-debug-apk` 上传。仓库不提交 gradle wrapper，CI 用
-`gradle/actions/setup-gradle` 提供 Gradle。
+`gradle/actions/setup-gradle` 提供 Gradle。另有冒烟（`smoke-test.yml`，
+GitHub Actions 模拟器）与五配置回归矩阵（`smoke-matrix.yml`，发版前手动跑）。
 
 ## OTA 自动升级
 
-版本信息与安装包托管在 Bob 的 GitHub Pages 站：
+- manifest：`https://bobot.is-a.dev/ai-launcher/update.json`（GitHub Pages 只托管
+  这一个文件），字段含 `versionCode / versionName / apkUrl / sha256 / changelog /
+  forceUpdate / prerelease`；`sha256` 是发布时对最终 APK 计算的摘要
+  （v0.68.89 起），App 下载后校验，不符不安装；无此字段的旧 manifest 自动跳过该项。
+- 安装包：GitHub Releases 直链（`releases/download/v<版本>/ai-launcher-v<版本>.apk`）。
+- App 侧（`data/OtaUpdater.kt` + `data/OtaDownloader.kt` + `data/ChunkedDownloader.kt`）：
+  启动每天最多自动检查一次，设置页可手动触发，测试版（prerelease）只推给开启
+  「接收测试版」开关的用户；下载为 App 内 OkHttp **分片并行 + 片级断点续传**
+  （服务端不支持 Range 时自动退回单流），进度带实时速度；拼装后依次校验
+  长度 → APK 可解析 → 包内 versionCode 与 manifest 一致 → SHA-256（有字段时），
+  全部通过才标记完成并弹安装。
+- 发布流程：手动触发 `Publish OTA` workflow（填 changelog，应与 `CHANGELOG.md`
+  顶部条目一致），它取最近一次构建成功的 APK，从 APK 本体解析版本号，
+  生成 update.json 推到 `clawbobot.github.io` 仓库的 `ai-launcher/` 目录，
+  APK 上传到 GitHub Releases。需在仓库 Settings > Secrets 配
+  `PAGES_DEPLOY_TOKEN`（对该 Pages 仓库 Contents 读写权限的 fine-grained PAT）。
+- 签名：debug 包签名固定（`app/debug.keystore` 已入库），OTA 覆盖安装不报签名冲突；
+  完整性由 SHA-256 + 托管账号安全兜底（换私有签名的影响见内部评估，未执行）。
 
-- manifest：`https://bobot.is-a.dev/ai-launcher/update.json`
-  ```json
-  {"versionCode":7,"versionName":"0.5.0",
-   "apkUrl":"https://bobot.is-a.dev/ai-launcher/ai-launcher-latest.apk",
-   "changelog":"…","forceUpdate":false}
-  ```
-- 安装包：`https://bobot.is-a.dev/ai-launcher/ai-launcher-latest.apk`
+## 安装与分发（仅限侧载）
 
-App 侧（`data/OtaUpdater.kt`）：启动时每天最多自动检查一次（`SharedPreferences("ota")`
-记 lastCheck），设置页可手动触发；有新版弹更新对话框（changelog + 立即更新/稍后，
-`forceUpdate=true` 时不给"稍后"）；下载走系统 DownloadManager（通知栏可见进度），
-下载完成广播 + 每次 onResume 检查到包下好就弹安装（FileProvider 授权给系统安装器，
-只弹一次）；无"安装未知应用"权限时先引导去系统设置开启。
+从 GitHub Releases 下载 APK 侧载安装。主要权限（`AndroidManifest.xml`）：
+INTERNET、QUERY_ALL_PACKAGES、PACKAGE_USAGE_STATS、READ_CALENDAR、
+POST_NOTIFICATIONS、SYSTEM_ALERT_WINDOW、USE_FULL_SCREEN_INTENT、
+FOREGROUND_SERVICE、REQUEST_INSTALL_PACKAGES、VIBRATE。
+因权限面较重，本应用**仅限侧载分发，不上架 Google Play**。
 
-发布流程：到仓库 Actions 页手动触发 `Publish OTA` workflow（可填 changelog），它会
-取最近一次构建成功的 APK + 当前 versionCode/versionName 生成 update.json，一起推到
-`clawbobot.github.io` 仓库的 `ai-launcher/` 目录。需要先在仓库 Settings > Secrets 配好
-`PAGES_DEPLOY_TOKEN`：对 `clawbobot/clawbobot.github.io` 有 Contents 读写权限的
-fine-grained PAT（只勾选该仓库）。注意 debug 包签名固定（`app/debug.keystore` 已入库），
-OTA 覆盖安装不会报签名冲突。
+## Live2D SDK（仅 demo，未进生产）
+
+Live2D 只用于七仔渲染验证 demo（debug 接线），**生产宠物走静态 3D 渲染资源**。
+SDK 是专有许可，**不随仓库分发**，需要时自行获取：
+
+1. 从 Live2D 官网下载 **Cubism SDK**（本仓库验证基线：Cubism SDK for Java **5-r.5**，
+   与官方 `CubismJavaSamples` 同步；原生示例流程见 `docs/live2d-mvp/RUNBOOK.md`）。
+2. 把 `Live2DCubismCore.aar` 放到 `third_party/live2d/sdk/Core/android/`。
+3. 仅当该 AAR 存在时，构建才纳入 `:live2d` 模块与 `live2dDebug` 源码
+   （`settings.gradle.kts` / `app/build.gradle.kts` 条件接线）；不存在时
+   正常构建、CI 与本机产物在 Live2D 部分的差异是显式设计。
+   细节见 `docs/live2d-mvp/ANDROID_RENDERING.md`。
 
 ## 已知待验证（真机清单）
 
-- [ ] 高德 `amap://route?...&t=1` 地铁/公交规划 deep link 是否可用（高德有公开文档，优先级最高）
-- [ ] 滴滴 `com.sdu.didi.psnger` 包名与叫车页 deep link
-- [ ] 航旅纵横 `com.umetrip.android.msky` 包名与航班号查询 deep link
-- [ ] 12306 `com.MobileTicket` 包名（无公开 deep link，走 App 主页兜底）
-- [ ] 携程 `ctrip.android.view` 包名（租车/酒店暂走 App 主页兜底）
-- [ ] 支付宝 / 微信 / 美团 / 饿了么 / 大众点评 / 京东 / 淘宝 / 拼多多 / 飞书包名
-- [ ] 银行 / 日历 / 邮箱为占位项，需接入具体 App 包名
+- [ ] 三家地图深链真机实开（高德 route / 百度 direction / 腾讯走 geo 兜底或打开应用）
+- [ ] 26 个能力的包名抽验（纯打开型能力，如滴滴、航旅纵横、12306、携程等）
+- [ ] 意图追问态、TODAY 无障碍（TalkBack）在真机的最终验收
 - [ ] 通知监听在各厂商 ROM（小米/华为/OPPO/vivo）上的存活与自启动
-- [ ] UsageStats 在未授权时返回空列表，兜底逻辑已覆盖
 
 ## 视觉规范
 
-浅色主题，背景 `#F4F2EE` 暖灰，白卡片 + 柔和阴影，圆角 20dp，
-深色中文排版，sparkle 金（`#C9A227`）点缀。定义在 `ui/theme/Theme.kt`
-（`AILauncherColors` / `AILauncherTheme`），后续原型图与实现都按此执行。
+浅色主题以暖纸面为基调（背景 `#F4F2EE` 系）、白卡片 + 柔和阴影、圆角 20dp、
+sparkle 金（`#C9A227`）点缀，并提供深色模式。定义在 `ui/theme/Theme.kt`
+（`AILauncherColors` / `AILauncherTheme`）与 `ui/theme/Type.kt` 字阶 token，
+原型图与实现都按此执行。

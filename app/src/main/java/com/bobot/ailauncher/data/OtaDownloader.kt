@@ -185,6 +185,16 @@ object OtaDownloader {
                 if (apkVersion != null && apkVersion != info.versionCode) {
                     throw IOException("apk version mismatch: $apkVersion != ${info.versionCode}")
                 }
+                // v0.68.89：SHA-256 校验（update.json 带 sha256 字段时）——拼装出的
+                // 字节流必须与发布时对最终 APK 算出的摘要一致。对不上说明包被
+                // 替换/损坏：删正式包并清掉分片（留着只会拼出同样的坏字节），
+                // 判失败；complete 标记从未置位，不会误弹安装。
+                // manifest 无 sha256（旧包）时 matchesSha256 直接放行，防自锁。
+                if (!ApkIntegrity.matchesSha256(outFile, info.sha256)) {
+                    outFile.delete()
+                    workDir.deleteRecursively()
+                    throw IOException("apk sha256 mismatch")
+                }
                 _state.value = State.Downloading(1f, outFile.length(), outFile.length(), 0L)
                 _state.value = State.Success(outFile)
                 // 下载完成直接弹安装（Bob 要求）
