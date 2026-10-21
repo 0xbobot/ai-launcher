@@ -1327,7 +1327,7 @@ if [ "$MOCK_UP" = "1" ]; then
             FG_B=""
             for _try in 1 2 3 4 5; do
               sleep 3
-              FG_B=$(adb shell dumpsys activity activities 2> /dev/null | grep -m1 "topResumedActivity" || true)
+              FG_B=$(adb shell dumpsys activity activities 2> /dev/null | grep -m1 -E "topResumedActivity|ResumedActivity" || true)
               if echo "$FG_B" | grep -q "com.tencent.map"; then break; fi
             done
             shot "intent-tencent-bound"
