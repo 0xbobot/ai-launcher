@@ -750,11 +750,27 @@ nextup_tap_flow() {
   sleep 4
   adb shell input keyevent KEYCODE_HOME || true
   sleep 2
+  # 诊断：dump 前确认种子事件还在表里、且 Instances 展开视图能看到它（区分种子丢失 vs App 侧问题）
+  local DIAG_EV DIAG_IN WIN_B WIN_E
+  DIAG_EV=$(adb shell content query --uri content://com.android.calendar/events --projection title,dtstart 2>&1 | head -4 | tr '\n' ' ')
+  WIN_B=$(( (EMU_S - 86400) * 1000 )); WIN_E=$(( (EMU_S + 86400) * 1000 ))
+  DIAG_IN=$(adb shell content query --uri "content://com.android.calendar/instances/when/$WIN_B/$WIN_E" --projection title,begin 2>&1 | head -4 | tr '\n' ' ')
+  log "nextup-$ANAME diag events: $DIAG_EV"
+  log "nextup-$ANAME diag instances: $DIAG_IN"
   adb shell uiautomator dump /sdcard/nextup_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/nextup_dump.xml "$OUT/nextup_${ANAME}.xml" > /dev/null 2>&1 || true
   local NODE=""
   if [ -f "$OUT/nextup_${ANAME}.xml" ]; then
     NODE=$(grep -o "<node[^>]*text=\"[^\"]*${TITLE}[^\"]*\"[^>]*>" "$OUT/nextup_${ANAME}.xml" | head -1)
+  fi
+  if [ -z "$NODE" ]; then
+    # 日历加载是 IO 异步，给一次 +3s 重 dump 机会再判
+    sleep 3
+    adb shell uiautomator dump /sdcard/nextup_dump.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/nextup_dump.xml "$OUT/nextup_${ANAME}.xml" > /dev/null 2>&1 || true
+    if [ -f "$OUT/nextup_${ANAME}.xml" ]; then
+      NODE=$(grep -o "<node[^>]*text=\"[^\"]*${TITLE}[^\"]*\"[^>]*>" "$OUT/nextup_${ANAME}.xml" | head -1)
+    fi
   fi
   if [ -z "$NODE" ]; then
     ng "nextup-$ANAME-card"
