@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +57,8 @@ fun NextUpStrip(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            // 体检批D ⑥：冒烟语义定位锚点（TODAY 接下来会议卡）
+            .testTag("today_nextup")
             .padding(horizontal = 20.dp)
             .shadow(8.dp, RoundedCornerShape(20.dp), spotColor = palette.title.copy(alpha = 0.08f))
             .clip(RoundedCornerShape(20.dp))

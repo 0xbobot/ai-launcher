@@ -55,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -519,6 +520,8 @@ private fun DockIconButton(
             modifier = Modifier
                 .size(iconSize)
                 .clip(RoundedCornerShape(corner))
+                // 体检批D ⑥：冒烟语义定位锚点（Dock 应用项）
+                .testTag("dock_item")
                 .combinedClickable(
                     onClick = { onLaunch(app) },
                     onLongClick = {

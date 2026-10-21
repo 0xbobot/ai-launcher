@@ -32,6 +32,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.ui.components.AppIconImage
@@ -74,10 +76,12 @@ fun AppPopupMenu(
         ) {
             AppIconImage(
                 drawable = app.icon,
+                // 体检批D ⑨：装饰（同行已有应用名文字）标装饰语义
                 contentDescription = null,
                 modifier = Modifier
                     .size(32.dp)
                     .clip(RoundedCornerShape(8.dp))
+                    .semantics { invisibleToUser() }
             )
             Spacer(modifier = Modifier.width(10.dp))
             Text(
@@ -127,10 +131,12 @@ fun AppPopupMenu(
                     {
                         AppIconImage(
                             drawable = icon,
+                            // 体检批D ⑨：装饰（菜单项已有文字标签）标装饰语义
                             contentDescription = null,
                             modifier = Modifier
                                 .size(26.dp)
                                 .clip(RoundedCornerShape(7.dp))
+                                .semantics { invisibleToUser() }
                         )
                     }
                 } else null,
@@ -160,9 +166,12 @@ fun AppPopupMenu(
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Outlined.Delete,
+                    // 体检批D ⑨：装饰（菜单项文字「卸载」已表达）标装饰语义
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier
+                        .size(22.dp)
+                        .semantics { invisibleToUser() }
                 )
             },
             onClick = {
@@ -220,10 +229,12 @@ fun AppShortcutInline(
                 if (icon != null) {
                     AppIconImage(
                         drawable = icon,
+                        // 体检批D ⑨：装饰（同行已有快捷方式文字）标装饰语义
                         contentDescription = null,
                         modifier = Modifier
                             .size(26.dp)
                             .clip(RoundedCornerShape(7.dp))
+                            .semantics { invisibleToUser() }
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                 }
@@ -261,9 +272,12 @@ fun AppShortcutInline(
         ) {
             Icon(
                 imageVector = Icons.Outlined.Delete,
+                // 体检批D ⑨：装饰（同行文字「卸载」已表达）标装饰语义
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier
+                    .size(22.dp)
+                    .semantics { invisibleToUser() }
             )
             Spacer(modifier = Modifier.width(12.dp))
             Text(

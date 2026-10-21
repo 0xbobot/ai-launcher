@@ -33,6 +33,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -125,9 +127,12 @@ fun IslandToastHost(
                     t.icon?.let {
                         Icon(
                             imageVector = it,
+                            // 体检批D ⑨：装饰（Toast 含义由同行文字表达）标装饰语义
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier
+                                .size(18.dp)
+                                .semantics { invisibleToUser() }
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                     }
