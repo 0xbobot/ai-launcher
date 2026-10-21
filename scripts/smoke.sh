@@ -731,6 +731,7 @@ if [ -z "$CAL_ID" ]; then
       add_col allowedReminders "'0,1,2,3,4'"
       add_col allowedAvailability "'0,1,2'"
       add_col allowedAttendeeTypes "'0,1,2'"
+      add_col deleted "0"
       DB_OUT=$(adb shell "sqlite3 $CALDB \"INSERT INTO Calendars ($COLS) VALUES ($VALS); SELECT last_insert_rowid();\"" 2>&1 || true)
       log "nextup calendars db-insert: $(echo "$DB_OUT" | head -3 | tr '\n' ' ')"
       CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
@@ -751,12 +752,15 @@ nextup_tap_flow() {
   adb shell input keyevent KEYCODE_HOME || true
   sleep 2
   # 诊断：dump 前确认种子事件还在表里、且 Instances 展开视图能看到它（区分种子丢失 vs App 侧问题）
-  local DIAG_EV DIAG_IN WIN_B WIN_E
-  DIAG_EV=$(adb shell content query --uri content://com.android.calendar/events --projection title,dtstart 2>&1 | head -4 | tr '\n' ' ')
+  # projection 只能单列（实测逗号串会被当成一个列名报 Invalid column）。
+  local DIAG_EV DIAG_IN DIAG_DB WIN_B WIN_E
+  DIAG_EV=$(adb shell content query --uri content://com.android.calendar/events --projection title 2>&1 | head -4 | tr '\n' ' ')
   WIN_B=$(( (EMU_S - 86400) * 1000 )); WIN_E=$(( (EMU_S + 86400) * 1000 ))
-  DIAG_IN=$(adb shell content query --uri "content://com.android.calendar/instances/when/$WIN_B/$WIN_E" --projection title,begin 2>&1 | head -4 | tr '\n' ' ')
+  DIAG_IN=$(adb shell content query --uri "content://com.android.calendar/instances/when/$WIN_B/$WIN_E" --projection title 2>&1 | head -4 | tr '\n' ' ')
+  DIAG_DB=$(adb shell "sqlite3 /data/data/com.android.providers.calendar/databases/calendar.db \"SELECT 'cal',_id,visible,sync_events,deleted FROM Calendars; SELECT 'ev',_id,title,calendar_id FROM Events;\"" 2>&1 | head -6 | tr '\n' ' ')
   log "nextup-$ANAME diag events: $DIAG_EV"
   log "nextup-$ANAME diag instances: $DIAG_IN"
+  log "nextup-$ANAME diag db: $DIAG_DB"
   adb shell uiautomator dump /sdcard/nextup_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/nextup_dump.xml "$OUT/nextup_${ANAME}.xml" > /dev/null 2>&1 || true
   local NODE=""
