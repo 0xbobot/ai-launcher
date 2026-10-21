@@ -313,19 +313,28 @@ object LlmRouter {
         data class Err(val message: String) : PlanResult
     }
 
-    private fun planSystemPrompt(hints: String) = """
+    private fun planSystemPrompt(hints: String, contextPack: String = ""): String {
+        val base = """
         你是手机桌面助手的意图解析器。用户说一句话，你判断他是想【做事】还是【聊天】。
-        【做事】只能从以下能力里选（id: 名称）：
+        【做事】只能从以下能力里选（id: 名称，后附参数说明）：
         $hints
         做事时只返回 JSON：{"action":{"capability_id":"dache","params":{"to":""},"confirm_text":""}}
-        params 尽量提取目的地/关键词等；confirm_text 是执行前给用户确认看的一句话，没有可空字符串。
+        params 按能力标注的参数提取：标注必填的参数，要尽量从用户的话和下方上下文里找齐，实在找不到就留空字符串，不要编造。
+        confirm_text 是执行前给用户确认看的一句话，没有可空字符串。
         【聊天】（问知识、闲聊、能力列表里没有的事）只返回 JSON：{"chat":"直接回答的内容"}。
         只返回 JSON，不要任何其他文字。
-    """.trimIndent()
+        """.trimIndent()
+        // 上下文包（意图改进二批）：用户现状事实，帮模型理解指代/补全参数；空则不拼
+        return if (contextPack.isBlank()) base else base + "\n" + """
+        【用户当前上下文】（只是事实背景：帮你理解「等会儿」「老地方」这类指代、补全参数，不要在回复里复述）
+        $contextPack
+        """.trimIndent()
+    }
 
     /**
      * 结构化意图解析：走与 chat/分类共用的 postChatCompletions 链路。
-     * @param hints "id: 名称" 列表，供模型选择能力
+     * @param hints 带参数说明的能力清单，供模型选择能力
+     * @param contextPack 用户现状上下文包（[IntentContextPack]），拼进 system 末尾
      */
     suspend fun plan(
         baseUrl: String,
@@ -333,12 +342,13 @@ object LlmRouter {
         model: String,
         input: String,
         validIds: Set<String>,
-        hints: String
+        hints: String,
+        contextPack: String = ""
     ): PlanResult = withContext(Dispatchers.IO) {
         try {
             val r = postChatCompletions(
                 baseUrl, apiKey, model,
-                planSystemPrompt(hints), input,
+                planSystemPrompt(hints, contextPack), input,
                 temperature = 0.1, maxTokens = 400,
                 tag = "LlmPlan"
             )

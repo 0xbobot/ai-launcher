@@ -16,6 +16,9 @@
 # SMOKE_NIGHT / SMOKE_LABEL 环境参数供 smoke-matrix.yml 多组合复用（不带 env 时行为不变）；
 # 第 15 段为意图改进一批（零打字建议面 + 提交后焦点释放），第 16 段为 a11y 触控目标
 # 尺寸断言（scripts/a11y_check.py 量 uiautomator dump，含建议面布局不变量）。
+# 第 17 段为意图改进二批：本机 mock LLM（scripts/mock_llm.py）+ 预写 llm prefs 把
+# 协调器逼进缺参追问态实拍（intent-needsinput.png / intent-needsinput-answered.png），
+# 并断言发往模型的请求体含带参数说明的 hints 与上下文包。
 
 PKG="com.bobot.ailauncher"
 APK="apk/app-debug.apk"
@@ -1130,7 +1133,161 @@ else
   log "python3 unavailable - a11y check skipped (not counted)"
 fi
 
-# --- 17. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 17. 缺参追问态实拍 + planner 注入端到端取证（意图改进二批）---
+# 手段（仅测试路径，生产逻辑零改动）：LlmConfig 读 SharedPreferences "llm"——
+# run-as 预写 api_key/base_url/model，把 base_url 指向 runner 本机 mock LLM
+#（scripts/mock_llm.py，模拟器经 10.0.2.2 访问宿主机）。mock 对任何输入都回
+# daohang 且 params 为空 → 协调器执行前校验必然拦下、进 NeedsInput 追问态；
+# 再补一句参数，应合并走执行（CI 未装高德/百度地图，执行如实失败
+#「本机没有安装支持」——恰好证明合并后真的到了执行，而不是又被追问/吞掉）。
+# 顺带断言发往 mock 的请求体含带参数说明的 hints 与上下文包（二批注入取证）。
+# mock 起不来或 prefs 预写失败时整段跳过不计 FAIL（环境问题不冒充产品失败）；
+# 段末清掉 llm prefs 并 force-stop，不污染后续段落与真机配置。
+MOCK_PORT=18741
+MOCK_LOG="$OUT/mock_llm_requests.log"
+MOCK_PID=""
+MOCK_UP=0
+if command -v python3 > /dev/null 2>&1; then
+  rm -f "$MOCK_LOG"
+  python3 scripts/mock_llm.py "$MOCK_PORT" "$MOCK_LOG" &
+  MOCK_PID=$!
+  for i in $(seq 1 20); do
+    if curl -s "http://127.0.0.1:$MOCK_PORT/health" 2> /dev/null | grep -q ok; then
+      MOCK_UP=1; break
+    fi
+    sleep 0.5
+  done
+fi
+if [ "$MOCK_UP" = "1" ]; then
+  adb shell am force-stop "$PKG" || true
+  printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
+    '    <string name="api_key">sk-mock</string>' \
+    "    <string name=\"base_url\">http://10.0.2.2:$MOCK_PORT</string>" \
+    '    <string name="model">mock-model</string>' "</map>" > "$OUT/llm.xml"
+  adb push "$OUT/llm.xml" /data/local/tmp/llm.xml > /dev/null 2>&1 || true
+  adb shell "run-as $PKG cp /data/local/tmp/llm.xml shared_prefs/llm.xml" || true
+  adb shell "run-as $PKG chmod 660 shared_prefs/llm.xml" || true
+  if adb shell "run-as $PKG cat shared_prefs/llm.xml" 2> /dev/null | grep -q '10.0.2.2'; then
+    adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+    sleep 5
+    adb shell input keyevent KEYCODE_HOME || true
+    sleep 2
+    # 定位胶囊（dump 找占位文案，与第 15 段同法）
+    CGX=""; CGY=""
+    adb shell uiautomator dump /sdcard/ni_dump0.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/ni_dump0.xml "$OUT/ni_dump0.xml" > /dev/null 2>&1 || true
+    if [ -f "$OUT/ni_dump0.xml" ]; then
+      CNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/ni_dump0.xml" | head -1)
+      if [ -n "$CNODE" ]; then
+        CNUMS=$(echo "$CNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+        CX1=$(echo "$CNUMS" | sed -n 1p); CY1=$(echo "$CNUMS" | sed -n 2p)
+        CX2=$(echo "$CNUMS" | sed -n 3p); CY2=$(echo "$CNUMS" | sed -n 4p)
+        if [ -n "$CX1" ] && [ -n "$CY2" ]; then
+          CGX=$(( (CX1 + CX2) / 2 )); CGY=$(( (CY1 + CY2) / 2 ))
+        fi
+      fi
+    fi
+    if [ -n "$CGX" ]; then
+      # 聚焦 -> 输词（补空格让 LatinIME 组合上屏，同第 15 段注）-> 定位提交钮 -> 提交
+      adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 || true
+      sleep 2
+      adb shell input text "daohang" || true
+      sleep 1
+      adb shell input text "%s" || true
+      sleep 1
+      SUBX=""; SUBY=""
+      adb shell uiautomator dump /sdcard/ni_kb.xml > /dev/null 2>&1 || true
+      adb pull /sdcard/ni_kb.xml "$OUT/ni_kb.xml" > /dev/null 2>&1 || true
+      if [ -f "$OUT/ni_kb.xml" ]; then
+        BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/ni_kb.xml" | head -1)
+        if [ -n "$BNODE" ]; then
+          BNUMS=$(echo "$BNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+          BX1=$(echo "$BNUMS" | sed -n 1p); BY1=$(echo "$BNUMS" | sed -n 2p)
+          BX2=$(echo "$BNUMS" | sed -n 3p); BY2=$(echo "$BNUMS" | sed -n 4p)
+          if [ -n "$BX1" ] && [ -n "$BY2" ]; then
+            SUBX=$(( (BX1 + BX2) / 2 )); SUBY=$(( (BY1 + BY2) / 2 ))
+          fi
+        fi
+      fi
+      if [ -n "$SUBX" ]; then
+        adb shell input swipe "$SUBX" "$SUBY" "$SUBX" "$SUBY" 150 || true
+        # 轮询等追问出现（plan 走本机 mock 应很快，给足慢腿余量）
+        FOUND_Q=0
+        for i in $(seq 1 12); do
+          sleep 1
+          adb shell uiautomator dump /sdcard/ni_q.xml > /dev/null 2>&1 || true
+          adb pull /sdcard/ni_q.xml "$OUT/ni_q.xml" > /dev/null 2>&1 || true
+          if grep -q "去哪儿" "$OUT/ni_q.xml" 2> /dev/null; then FOUND_Q=1; break; fi
+        done
+        shot "intent-needsinput"
+        if [ "$FOUND_Q" = "1" ]; then
+          ok "needsinput-question"
+        else
+          ng "needsinput-question"
+        fi
+        # planner 注入取证：请求体里应有带参数说明的 hints 与上下文包
+        if grep -q "必填 to=目的地" "$MOCK_LOG" 2> /dev/null && grep -q "【现在】" "$MOCK_LOG" 2> /dev/null; then
+          ok "planner-pack-injected"
+        else
+          ng "planner-pack-injected"
+        fi
+        # 补参：再聚焦（追问态下输入框已清空）-> 输目的地 -> 提交 -> 应离开追问态走到执行
+        adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 || true
+        sleep 2
+        adb shell input text "jichang" || true
+        sleep 1
+        adb shell input text "%s" || true
+        sleep 1
+        SUBX2=""; SUBY2=""
+        adb shell uiautomator dump /sdcard/ni_kb2.xml > /dev/null 2>&1 || true
+        adb pull /sdcard/ni_kb2.xml "$OUT/ni_kb2.xml" > /dev/null 2>&1 || true
+        if [ -f "$OUT/ni_kb2.xml" ]; then
+          BNODE2=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/ni_kb2.xml" | head -1)
+          if [ -n "$BNODE2" ]; then
+            BNUMS2=$(echo "$BNODE2" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+            BX21=$(echo "$BNUMS2" | sed -n 1p); BY21=$(echo "$BNUMS2" | sed -n 2p)
+            BX22=$(echo "$BNUMS2" | sed -n 3p); BY22=$(echo "$BNUMS2" | sed -n 4p)
+            if [ -n "$BX21" ] && [ -n "$BY22" ]; then
+              SUBX2=$(( (BX21 + BX22) / 2 )); SUBY2=$(( (BY21 + BY22) / 2 ))
+            fi
+          fi
+        fi
+        if [ -n "$SUBX2" ]; then
+          adb shell input swipe "$SUBX2" "$SUBY2" "$SUBX2" "$SUBY2" 150 || true
+          sleep 4
+          shot "intent-needsinput-answered"
+          adb shell uiautomator dump /sdcard/ni_a.xml > /dev/null 2>&1 || true
+          adb pull /sdcard/ni_a.xml "$OUT/ni_a.xml" > /dev/null 2>&1 || true
+          if grep -q "本机没有安装支持" "$OUT/ni_a.xml" 2> /dev/null && ! grep -q "去哪儿" "$OUT/ni_a.xml" 2> /dev/null; then
+            ok "needsinput-fill-executes"
+          else
+            ng "needsinput-fill-executes"
+          fi
+        else
+          ng "needsinput-fill-executes"
+        fi
+      else
+        ng "needsinput-question"
+        ng "planner-pack-injected"
+        ng "needsinput-fill-executes"
+      fi
+    else
+      ng "needsinput-question"
+      ng "planner-pack-injected"
+      ng "needsinput-fill-executes"
+    fi
+    # 清理：删 llm prefs + force-stop 掉 SP 缓存，恢复无 Key 基线
+    adb shell "run-as $PKG rm -f shared_prefs/llm.xml" || true
+    adb shell am force-stop "$PKG" || true
+  else
+    log "llm prefs seed failed - needsinput segment skipped (not counted)"
+  fi
+else
+  log "mock llm unavailable - needsinput segment skipped (not counted)"
+fi
+if [ -n "$MOCK_PID" ]; then kill "$MOCK_PID" 2> /dev/null || true; fi
+
+# --- 18. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

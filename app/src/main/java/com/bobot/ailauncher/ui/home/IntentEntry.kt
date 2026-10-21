@@ -377,6 +377,8 @@ fun IntentEntry(
     val intentPose = when {
         planning -> PetMood.SORTING
         presenting -> PetMood.HAPPY
+        // 追问态（意图改进二批）：七仔在等你补参数——倾听姿态，不装开心也不思考
+        state is IntentUiState.NeedsInput -> PetMood.FETCH
         capsuleFocused -> PetMood.FETCH
         else -> null
     }
@@ -389,6 +391,12 @@ fun IntentEntry(
 
     // 回复小条短时呈现：5 秒后自动收起（协调器 dismiss 回编辑态，原话不丢）
     LaunchedEffect(state) {
+        // 追问态（意图改进二批）：清空输入框等用户补参数——原话由协调器保存，
+        // 关掉追问条 dismiss 时带回；文本清空后本地层也不会拿原话再出结果。
+        if (state is IntentUiState.NeedsInput) {
+            fieldValue = TextFieldValue("")
+            submittedText = null
+        }
         // 提交即收键盘（意图改进一批）：回复/错误一呈现就释放焦点、收 IME——
         // 结果已经端出来了，输入的使命完成，用户不用手动收键盘。
         if (state is IntentUiState.Reply || state is IntentUiState.Error) {
@@ -422,6 +430,14 @@ fun IntentEntry(
                         onDismiss()
                     },
                     onDismiss = onDismiss
+                )
+            }
+            // 追问条（意图改进二批）：优先序仅次于权限说明——用户正被问着，
+            // 本地结果/建议面都让位；常驻不自动收起，✕ = 放弃这单（协调器清 pending）
+            is IntentUiState.NeedsInput -> {
+                NeedsInputStrip(
+                    question = s.question,
+                    onClose = onDismiss
                 )
             }
             else -> {
@@ -811,6 +827,61 @@ private fun StatusStrip(
                 Icon(
                     imageVector = Icons.Filled.Close,
                     contentDescription = "关闭",
+                    tint = AILauncherColors.Hint,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 七仔结果条·缺参追问条（意图改进二批）：必填参数没凑齐时七仔在这里把问题问出来，
+ * 常驻不自动收起——用户下一句提交即按参数补进 pending 动作（协调器状态契约）；
+ * ✕ 关掉 = 放弃这一单（协调器 dismiss 清 pending 回编辑态）。
+ * 与回复/错误小条同一槽位、同一 Card 语言；高度守 [RESULT_BAR_MAX_HEIGHT]，
+ * 关闭钮触控 48dp（同 StatusStrip 的 R3-C 口径）。
+ */
+@Composable
+private fun NeedsInputStrip(
+    question: String,
+    onClose: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
+            .clip(RoundedCornerShape(16.dp))
+            .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            // 问题出现时 TalkBack 礼貌播报，用户不用找焦点也知道被问了什么
+            .semantics { liveRegion = LiveRegionMode.Polite }
+            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = question,
+            fontSize = 13.sp,
+            color = AILauncherColors.Title,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clickable { onClose() },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "取消这件事",
                     tint = AILauncherColors.Hint,
                     modifier = Modifier.size(16.dp)
                 )
