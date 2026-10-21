@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -114,6 +116,9 @@ fun IslandToastHost(
                     modifier = Modifier
                         .clip(RoundedCornerShape(28.dp))
                         .background(Color.Black.copy(alpha = 0.92f))
+                        // R3-B：深色下黑胶囊与深底融为一体，加 1dp 描边保住边界
+                        // （Divider token 深浅自适应；浅色下几乎不可见，不改原观感）
+                        .border(1.dp, AILauncherColors.Divider, RoundedCornerShape(28.dp))
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {

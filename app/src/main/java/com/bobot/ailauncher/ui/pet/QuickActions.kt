@@ -40,7 +40,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -163,7 +162,7 @@ private fun QuickActionIcon(item: QuickActionItem, size: Dp) {
             modifier = Modifier
                 .size(size)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFFE5E0D8))
+                .background(AILauncherColors.AccentSoft)
         )
     }
 }
@@ -284,7 +283,7 @@ internal fun QuickActionAddFlow(
                         Text(
                             text = app?.label?.toString().orEmpty(),
                             fontSize = 12.sp,
-                            color = Color(0xFFAEAEB2)
+                            color = AILauncherColors.Hint
                         )
                         Spacer(Modifier.height(8.dp))
                         // 加载快捷方式
@@ -399,7 +398,7 @@ internal fun QuickActionAddFlow(
                                         )
                                     )
                                 }
-                            ) { Text("保存", color = Color(0xFF007AFF)) }
+                            ) { Text("保存", color = AILauncherColors.Accent) }
                         }
                     }
                 }
@@ -427,7 +426,7 @@ private fun ShortcutRow(
         Column {
             Text(text = title, fontSize = 14.sp, color = AILauncherColors.Title, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotEmpty()) {
-                Text(text = subtitle, fontSize = 12.sp, color = Color(0xFFAEAEB2), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(text = subtitle, fontSize = 12.sp, color = AILauncherColors.Hint, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -445,7 +444,7 @@ private fun AppIconDrawable(drawable: Drawable, size: Dp) {
             modifier = Modifier.size(size).clip(RoundedCornerShape(8.dp))
         )
     } else {
-        Box(Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(Color(0xFFE5E0D8)))
+        Box(Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(AILauncherColors.AccentSoft))
     }
 }
 
@@ -461,6 +460,6 @@ private fun ShortcutIconDrawable(context: Context, packageName: String, shortcut
             modifier = Modifier.size(size).clip(RoundedCornerShape(6.dp))
         )
     } else {
-        Box(Modifier.size(size).clip(RoundedCornerShape(6.dp)).background(Color(0xFFE5E0D8)))
+        Box(Modifier.size(size).clip(RoundedCornerShape(6.dp)).background(AILauncherColors.AccentSoft))
     }
 }

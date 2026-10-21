@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -67,7 +66,9 @@ import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /** 结果条槽位高度上限：三种内容（本地结果/回复错误/权限卡）共用，超限不挤压 Dock。 */
 private val RESULT_BAR_MAX_HEIGHT = 180.dp
@@ -96,12 +97,14 @@ fun IntentCapsuleField(
     val canSubmit = text.isNotBlank() && !planning
     Row(
         modifier = modifier
-            .height(56.dp)
+            // R3-A：最小高度策略——fontScale 放大时允许胶囊长高，不定死 56dp 裁字；
+            // 1.0 字号下内容（40dp 提交钮）+上下 8dp 内边距 = 56dp，外观与原规格一致
+            .heightIn(min = 56.dp)
             .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.Title.copy(alpha = 0.08f))
             .clip(RoundedCornerShape(28.dp))
             .background(AILauncherColors.Card.copy(alpha = 0.88f))
             .clickable { focusRequester.requestFocus() }
-            .padding(horizontal = 18.dp),
+            .padding(horizontal = 18.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -132,7 +135,10 @@ fun IntentCapsuleField(
                         Text(
                             text = placeholder,
                             fontSize = 15.sp,
-                            color = AILauncherColors.Hint
+                            color = AILauncherColors.Hint,
+                            // R3-A：大字体下占位文案单行省略，不溢出胶囊
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     innerTextField()
@@ -223,16 +229,26 @@ fun IntentEntry(
 
     // 本地直达层数据源：与应用中心 azApps 完全一致（listLaunchableApps 去自己、去隐藏），
     // 匹配复用 AppSearchIndex.build/search 同一实现，不另写一套。
-    val localApps = remember {
-        val hidden = HiddenApps.getHidden(context)
-        listLaunchableApps(context).filter {
-            it.packageName != context.packageName && it.packageName !in hidden
+    // R3-D：懒构建——原实现在首页首帧同步查 PackageManager + 加载拼音字典建索引，
+    // 压在启动路径上；改为用户第一次真打字时才在 IO 线程建（建好前本地层暂不出
+    // 结果，意图层提交不受影响），启动路径零索引成本。
+    var localIndex by remember { mutableStateOf<List<AppSearchIndex.Entry>?>(null) }
+    LaunchedEffect(text) {
+        if (text.isNotBlank() && localIndex == null) {
+            val built = withContext(Dispatchers.IO) {
+                val hidden = HiddenApps.getHidden(context)
+                val apps = listLaunchableApps(context).filter {
+                    it.packageName != context.packageName && it.packageName !in hidden
+                }
+                AppSearchIndex.build(context, apps)
+            }
+            if (localIndex == null) localIndex = built
         }
     }
-    val localIndex = remember(localApps) { AppSearchIndex.build(context, localApps) }
     val localResults = remember(text, localIndex, submittedText) {
-        if (text.isBlank() || text == submittedText) emptyList()
-        else AppSearchIndex.search(context, text, localIndex).take(4)
+        val idx = localIndex
+        if (text.isBlank() || text == submittedText || idx == null) emptyList()
+        else AppSearchIndex.search(context, text, idx).take(4)
     }
 
     fun submitIfReady() {

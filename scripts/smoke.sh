@@ -3,6 +3,8 @@
 # 跑在 reactivecircus/android-emulator-runner 的 script 里（adb 已就绪，工作目录为仓库根）。
 # 每步容错：失败记 FAIL 继续往下走，不设 -e；最后汇总 PASS/FAIL 并以 FAIL 数作为退出码。
 # 截图（smoke-out/）：home.png / fan.png / pet.png / appcenter.png / dark-home.png / dark-appcenter.png /
+# dark-settings.png（R3-B 设置页深色）/
+# font13-home.png / font13-appcenter.png / font15-home.png / font15-appcenter.png（R3-A 字体缩放）/
 # intent-home.png / intent-nokey.png / intent-local.png / intent-opened.png / appcenter2.png /
 # appcenter-filter.png / appcenter-cleared.png / intent-tpl-giant.png / intent-tpl-headline.png /
 # intent-tpl-minimal.png（含各自 -local 结果条图），供人工验证。
@@ -120,6 +122,35 @@ shot "dark-home"
 adb shell input swipe 540 2000 540 800 300 || true
 sleep 3
 shot "dark-appcenter"
+# R3-B：设置页深色亲验——点应用中心齿轮（content-desc="设置"，dump 定位，兜底坐标按
+# dark-appcenter 截图实测齿轮约 (985,505)）进设置页，断言"让七仔更聪明"卡在场后截图，BACK 返回。
+SGX=985; SGY=505
+adb shell uiautomator dump /sdcard/set_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/set_dump.xml "$OUT/set_dump.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/set_dump.xml" ]; then
+  SNODE=$(grep -o '<node[^>]*content-desc="设置"[^>]*>' "$OUT/set_dump.xml" | head -1)
+  if [ -n "$SNODE" ]; then
+    SNUMS=$(echo "$SNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    SX1=$(echo "$SNUMS" | sed -n 1p); SY1=$(echo "$SNUMS" | sed -n 2p)
+    SX2=$(echo "$SNUMS" | sed -n 3p); SY2=$(echo "$SNUMS" | sed -n 4p)
+    if [ -n "$SX1" ] && [ -n "$SY2" ]; then
+      SGX=$(( (SX1 + SX2) / 2 )); SGY=$(( (SY1 + SY2) / 2 ))
+      log "settings gear at ($SGX,$SGY)"
+    fi
+  fi
+fi
+adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
+sleep 3
+shot "dark-settings"
+adb shell uiautomator dump /sdcard/set_dump2.xml > /dev/null 2>&1 || true
+adb pull /sdcard/set_dump2.xml "$OUT/set_dump2.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/set_dump2.xml" ] && grep -q "让七仔更聪明" "$OUT/set_dump2.xml"; then
+  ok "dark-settings"
+else
+  ng "dark-settings"
+fi
+adb shell input keyevent KEYCODE_BACK || true
+sleep 2
 adb shell cmd uimode night auto || true
 sleep 2
 
@@ -433,7 +464,37 @@ if [ "$TPL_ALL" = "1" ]; then
   log "cover templates exercised: giant/headline/minimal"
 fi
 
-# --- 12. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 12. 字体缩放（R3-A）：font_scale 1.3 / 1.5 下首页与应用中心不溢出崩坏 ---
+# settings 改系统 font_scale（sp 随之放大、dp 布局不变）；每档 force-stop 重启回首页基线，
+# 截 home + appcenter 供人工逐张验（胶囊/结果条/应用行/刊头无重叠截断灾难）；验完恢复 1.0。
+for FS in 1.3 1.5; do
+  FTAG=$(echo "$FS" | tr -d .)
+  adb shell settings put system font_scale "$FS" > /dev/null 2>&1 || true
+  sleep 1
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  shot "font$FTAG-home"
+  adb shell input swipe 540 2000 540 800 300 || true
+  sleep 3
+  shot "font$FTAG-appcenter"
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 1
+done
+adb shell settings put system font_scale 1.0 > /dev/null 2>&1 || true
+sleep 1
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+adb shell pidof "$PKG" | grep -q . && ok "font-scale-alive" || ng "font-scale-alive"
+
+# --- 13. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

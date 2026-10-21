@@ -74,6 +74,8 @@ fun PetView(
     val inScene = scene != QizaiScene.NONE
     // 场景播放时 mood 驱动的位移动作归零（场景自带动作），拖拽/果冻保留
     val moodM = if (inScene) 0f else 1f
+    // R3-D：系统减动效时装饰循环（浮动/呼吸/摆动/害羞轻颤）全部静止，姿态图与状态切换保留
+    val reduceMotion = com.bobot.ailauncher.ui.theme.rememberReduceMotion()
     val density = LocalDensity.current
     // v0.28.1：低电量省电模式——七仔变困、动画降频
     val lowPower by com.bobot.ailauncher.data.BatteryState.isLowPower
@@ -250,14 +252,14 @@ fun PetView(
     )
     val loopTheta = (loopPhase * 2 * Math.PI).toFloat()
     val loopRot = when {
-        lowPower -> 0f
+        lowPower || reduceMotion -> 0f
         mood == PetMood.HAPPY -> 0f // 开心用小跳，不转
         mood == PetMood.IDLE || effectiveSleepy -> sin(loopTheta) * 2.5f * nightSlow
         mood == PetMood.FILE -> sin(loopTheta) * 3f * nightSlow
         else -> sin(loopTheta) * 5f * nightSlow // SORTING / FETCH 挥手摆动
     }
     val loopYdp = when {
-        lowPower -> 0f
+        lowPower || reduceMotion -> 0f
         mood == PetMood.HAPPY -> -abs(sin(loopTheta)) * 8f * nightSlow // 开心小跳，只往上，落点回 0
         else -> 0f
     }
@@ -344,15 +346,18 @@ fun PetView(
             .graphicsLayer {
                 // v0.56.0 M1 巡看：瞳孔 6px 先行 + 头部 10px 延迟跟随
                 // v0.56.0 M2 害羞轻颤
-                val tremble = if (mood == PetMood.SHY) shyTremble else 0f
+                // R3-D：减动效时浮动（bob）与轻颤归零，宠物静止在原位
+                val tremble = if (mood == PetMood.SHY && !reduceMotion) shyTremble else 0f
+                val bobEff = if (reduceMotion) 0f else bob
                 translationX = with(density) { offX.dp.toPx() } + dragX + pupilX + headX + tremble
-                translationY = with(density) { (offY + bob * moodM + loopYdp * moodM).dp.toPx() } + dragY
+                translationY = with(density) { (offY + bobEff * moodM + loopYdp * moodM).dp.toPx() } + dragY
                 // v0.56.0 M2 晕眩旋转
                 rotationZ = (tilt + loopRot) * moodM + dizzyRot
                 // v0.56.0 M2：非对称果冻
                 val jx = if (inScene) 1f else jellyX
                 val jy = if (inScene) 1f else jellyY
-                val s = scale * breathe * posePop
+                val breatheEff = if (reduceMotion) 1f else breathe // R3-D：减动效停呼吸缩放
+                val s = scale * breatheEff * posePop
                 scaleX = s * jx
                 scaleY = s * jy
             }

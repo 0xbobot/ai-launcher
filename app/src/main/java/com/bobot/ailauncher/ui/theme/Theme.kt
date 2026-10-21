@@ -9,6 +9,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -167,6 +168,29 @@ object MotionTokens {
     val Easing = androidx.compose.animation.core.EaseOutCubic
     val SpringStiff = androidx.compose.animation.core.Spring.StiffnessMedium
     val SpringDamp = 0.85f
+}
+
+/**
+ * R3-D：系统减动效——读 ANIMATOR_DURATION_SCALE（无障碍"移除动画"开启或
+ * 开发者选项把动画缩放关到 0 时为 0）。Compose 动画默认不读这个系统设置，
+ * 装饰性循环动画（宠物浮动/呼吸/摆动等）须经此判断后自行静止；
+ * 状态切换类动画（弹簧/淡入）不在此列——状态不依赖动画完成事件，关掉循环即可。
+ * 注意：CI 模拟器以 disable-animations 运行，本判断在冒烟里恒为 true。
+ */
+@Composable
+fun rememberReduceMotion(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return remember(context) {
+        try {
+            android.provider.Settings.Global.getFloat(
+                context.contentResolver,
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) == 0f
+        } catch (_: Exception) {
+            false
+        }
+    }
 }
 
 /**

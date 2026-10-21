@@ -17,6 +17,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
@@ -27,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -152,7 +152,7 @@ fun AppPopupMenu(
                 Text(
                     text = "卸载",
                     fontSize = 14.sp,
-                    color = Color(0xFFD16A6A),
+                    color = MaterialTheme.colorScheme.error,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -161,7 +161,7 @@ fun AppPopupMenu(
                 Icon(
                     imageVector = Icons.Outlined.Delete,
                     contentDescription = null,
-                    tint = Color(0xFFD16A6A),
+                    tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(22.dp)
                 )
             },
@@ -177,7 +177,7 @@ fun AppPopupMenu(
                 }
                 onDismiss()
             },
-            colors = MenuDefaults.itemColors(textColor = Color(0xFFD16A6A)),
+            colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.error),
             contentPadding = MenuDefaults.DropdownMenuItemContentPadding
         )
     }
@@ -262,14 +262,14 @@ fun AppShortcutInline(
             Icon(
                 imageVector = Icons.Outlined.Delete,
                 contentDescription = null,
-                tint = Color(0xFFD16A6A),
+                tint = MaterialTheme.colorScheme.error,
                 modifier = Modifier.size(22.dp)
             )
             Spacer(modifier = Modifier.width(12.dp))
             Text(
                 text = "卸载",
                 fontSize = 14.sp,
-                color = Color(0xFFD16A6A)
+                color = MaterialTheme.colorScheme.error
             )
         }
         Spacer(modifier = Modifier.height(8.dp))
