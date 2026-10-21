@@ -94,6 +94,26 @@ object PetRepository {
         _speech.value = null
     }
 
+    // ============ R3-C：意图交互反应（对话感，Bob 2026-10-21 拍板） ============
+    // 意图层（IntentEntry）按交互状态写入临时姿态，PetZone 渲染时优先于 mood：
+    // 聚焦=倾听（FETCH 上浮举手）、Planning=思考（SORTING + 思考点点）、
+    // 结果/回复呈现=HAPPY（原地放大弹跳）。这是覆盖层，不动整理员主状态机——
+    // 通知流程并发写 mood 不受影响，反应结束置回 null 即恢复原姿态。
+    private val _intentPose = MutableStateFlow<PetMood?>(null)
+    val intentPose: StateFlow<PetMood?> get() = _intentPose.asStateFlow()
+    private val _intentThinking = MutableStateFlow(false)
+    val intentThinking: StateFlow<Boolean> get() = _intentThinking.asStateFlow()
+
+    fun setIntentReaction(pose: PetMood?, thinking: Boolean = false) {
+        _intentPose.value = pose
+        _intentThinking.value = thinking
+    }
+
+    fun clearIntentReaction() {
+        _intentPose.value = null
+        _intentThinking.value = false
+    }
+
     // ============ v0.56.0 M2/M3/M4：播报链与时段 ============
 
     /** M3：同一应用 30 秒内合并——普通消息气泡 */

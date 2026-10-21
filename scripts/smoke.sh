@@ -3,7 +3,7 @@
 # 跑在 reactivecircus/android-emulator-runner 的 script 里（adb 已就绪，工作目录为仓库根）。
 # 每步容错：失败记 FAIL 继续往下走，不设 -e；最后汇总 PASS/FAIL 并以 FAIL 数作为退出码。
 # 截图（smoke-out/）：home.png / fan.png / pet.png / appcenter.png / dark-home.png / dark-appcenter.png /
-# dark-settings.png（R3-B 设置页深色）/
+# dark-settings.png（R3-B 设置页深色）/ intent-focus.png / intent-present.png（R3-C 七仔反应）/
 # font13-home.png / font13-appcenter.png / font15-home.png / font15-appcenter.png（R3-A 字体缩放）/
 # intent-home.png / intent-nokey.png / intent-local.png / intent-opened.png / appcenter2.png /
 # appcenter-filter.png / appcenter-cleared.png / intent-tpl-giant.png / intent-tpl-headline.png /
@@ -494,7 +494,48 @@ adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 adb shell pidof "$PKG" | grep -q . && ok "font-scale-alive" || ng "font-scale-alive"
 
-# --- 13. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 13. 七仔反应（R3-C 对话感）：聚焦倾听态 / 本地结果呈现态 ---
+# force-stop 回首页基线 -> press 点胶囊（键盘弹起、七仔应进倾听姿态 FETCH）截 intent-focus；
+# 输 "cam" 收键盘截 intent-present（结果条在场 + 七仔应为呈现姿态 FILE 抱卡片）。
+# Planning 思考态在无 Key 环境瞬时跳过（协调器无 Key 直接进 Error），本轮取不到图，如实标注未验。
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+FCX=540; FCY=1247
+adb shell uiautomator dump /sdcard/focus_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/focus_dump.xml "$OUT/focus_dump.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/focus_dump.xml" ]; then
+  FNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/focus_dump.xml" | head -1)
+  if [ -n "$FNODE" ]; then
+    FNUMS=$(echo "$FNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    FX1=$(echo "$FNUMS" | sed -n 1p); FY1=$(echo "$FNUMS" | sed -n 2p)
+    FX2=$(echo "$FNUMS" | sed -n 3p); FY2=$(echo "$FNUMS" | sed -n 4p)
+    if [ -n "$FX1" ] && [ -n "$FY2" ]; then
+      FCX=$(( (FX1 + FX2) / 2 )); FCY=$(( (FY1 + FY2) / 2 ))
+      log "reaction capsule at ($FCX,$FCY)"
+    fi
+  fi
+fi
+adb shell input swipe "$FCX" "$FCY" "$FCX" "$FCY" 150 || true
+sleep 2
+shot "intent-focus"
+adb shell input text "cam" || true
+sleep 1
+adb shell input keyevent KEYCODE_BACK || true
+sleep 1
+shot "intent-present"
+adb shell uiautomator dump /sdcard/present_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/present_dump.xml "$OUT/present_dump.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/present_dump.xml" ] && grep -q 'text="Camera"' "$OUT/present_dump.xml"; then
+  ok "intent-present-results"
+else
+  ng "intent-present-results"
+fi
+
+# --- 14. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true
