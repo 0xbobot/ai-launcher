@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -79,7 +80,9 @@ fun NextUpStrip(
                 fontSize = 20.sp,
                 lineHeight = 27.sp,
                 color = palette.title,
-                maxLines = 2
+                maxLines = 2,
+                // R3-A：大字体（fontScale 1.3/1.5）下超 2 行时省略收尾，不硬裁切半个字
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

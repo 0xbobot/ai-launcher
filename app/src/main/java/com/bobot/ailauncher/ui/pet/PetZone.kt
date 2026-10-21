@@ -807,10 +807,13 @@ fun PetZone(
 /** 思考中的三个跳动点 */
 @Composable
 private fun ThinkDots(modifier: Modifier = Modifier) {
+    // R3-D：系统减动效时三点静止（只表"思考中"，不跳动）
+    val reduceMotion = com.bobot.ailauncher.ui.theme.rememberReduceMotion()
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
         repeat(3) { i ->
             var up by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) {
+            LaunchedEffect(reduceMotion) {
+                if (reduceMotion) return@LaunchedEffect
                 delay(i * 150L)
                 while (true) {
                     up = !up
