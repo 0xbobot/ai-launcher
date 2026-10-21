@@ -3,6 +3,7 @@ package com.bobot.ailauncher.core.intent
 import com.bobot.ailauncher.core.action.ActionRequest
 import com.bobot.ailauncher.core.action.ActionResult
 import com.bobot.ailauncher.data.Capability
+import com.bobot.ailauncher.data.CapabilityParam
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,7 +28,16 @@ interface IntentConfig {
 
 /** 意图解析（生产实现 = LlmRouter.plan 的适配器） */
 interface IntentPlanner {
-    suspend fun plan(input: String, validIds: Set<String>, hints: String): PlanOutcome
+    /**
+     * @param hints 带参数说明的能力清单（[CapabilityHints] 生成）
+     * @param contextPack 用户现状上下文包（[IntentContextPack] 拼装，可为空串）
+     */
+    suspend fun plan(
+        input: String,
+        validIds: Set<String>,
+        hints: String,
+        contextPack: String
+    ): PlanOutcome
 }
 
 /** 能力注册表读取（生产实现 = CapabilityRegistry） */
@@ -64,6 +74,11 @@ interface IntentSpeaker {
  * - 失败如实进 [IntentUiState.Error]，文案绝不声称已完成（PRD §六十四）。
  * - 15 秒超时（[timeoutMillis]）：模型层本身也有 15 秒 callTimeout，这里再兜一层，
  *   保证 UI 不会无限停在 Planning。
+ * - 执行前参数校验（意图改进二批）：必填参数缺失/空白绝不执行——进
+ *   [IntentUiState.NeedsInput] 由七仔追问，pending 动作保存在协调器里；
+ *   此态下的下一次提交按契约视为补参（多参逐个问），补齐合并后才执行。
+ *   这是杀掉「抹掉占位符开空目的地还报已打开」假成功的核心闸门；
+ *   注册表底层另有 DeeplinkTemplate 残缺链接防线兜底。
  */
 class IntentCoordinator(
     private val config: IntentConfig,
@@ -71,13 +86,23 @@ class IntentCoordinator(
     private val capabilities: IntentCapabilities,
     private val executor: IntentActionExecutor,
     private val speaker: IntentSpeaker,
-    private val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS
+    private val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
+    /** 上下文包采集（生产实现 = IntentContextProvider；采集失败/为空不影响提交） */
+    private val contextProvider: suspend () -> String = { "" }
 ) {
     private val _state = MutableStateFlow<IntentUiState>(IntentUiState.Idle)
     val state: StateFlow<IntentUiState> = _state.asStateFlow()
 
     /** 最近一次提交的原文，dismiss 后回到 Editing 时带回 */
     private var lastText: String = ""
+
+    /** 缺参追问中挂起的动作：已凑齐的参数在 request.params 里，[missing] 是还没问完的 */
+    private data class PendingInput(
+        val request: ActionRequest,
+        val missing: List<CapabilityParam>
+    )
+
+    private var pendingInput: PendingInput? = null
 
     /**
      * 提交一句话。空输入直接返回（不发请求、不改状态）。
@@ -90,6 +115,15 @@ class IntentCoordinator(
         // 不得重复规划、重复执行。宿主另有「先 cancel 旧 Job 再 launch」的顶替语义，
         // 被顶替的旧协程在下方 CancellationException 分支交还编辑态，不会卡死在 Planning。
         if (_state.value is IntentUiState.Planning) return
+
+        // 缺参补参（意图改进二批）：追问态下的提交不走 planner——按状态契约
+        // 视为「给当前所问参数赋值」，合并 pending 动作后重新校验/执行。
+        // lastText 不被参数值覆盖（仍是原话，dismiss 回编辑态带回原话）。
+        pendingInput?.let { pending ->
+            fillPending(pending, input)
+            return
+        }
+
         lastText = input
         _state.value = IntentUiState.Planning(input)
 
@@ -100,9 +134,11 @@ class IntentCoordinator(
         }
 
         capabilities.ensureLoaded()
+        // 上下文包：采集失败绝不拖垮提交，拿不到就空串照常规划
+        val contextPack = runCatching { contextProvider() }.getOrDefault("")
         val outcome = try {
             withTimeoutOrNull(timeoutMillis) {
-                planner.plan(input, capabilities.validIds(), capabilities.hints())
+                planner.plan(input, capabilities.validIds(), capabilities.hints(), contextPack)
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 宿主顶替取消（新提交 cancel 旧 Job）：若还停在 Planning 就交还编辑态
@@ -131,8 +167,9 @@ class IntentCoordinator(
         execute(request.copy(confirmed = true), isConfirm = true)
     }
 
-    /** 取消/关闭当前反馈：回到最近输入的编辑态，没有输入则回 Idle */
+    /** 取消/关闭当前反馈：回到最近输入的编辑态，没有输入则回 Idle；追问态下同时清掉 pending（改办别的事的出口） */
     fun dismiss() {
+        pendingInput = null
         _state.value = if (lastText.isNotBlank()) {
             IntentUiState.Editing(lastText)
         } else {
@@ -153,7 +190,58 @@ class IntentCoordinator(
             params = action.params,
             riskLevel = cap.riskLevel
         )
+        // 执行前参数校验（意图改进二批）：必填缺失/空白 → 不执行，进追问态。
+        // 模型给了空串（如 {"to":""}）同样算缺失——校验只认非空白真值。
+        val missing = cap.missingRequiredParams(action.params)
+        if (missing.isNotEmpty()) {
+            askForInput(cap, request, missing)
+            return
+        }
         execute(request, isConfirm = false)
+    }
+
+    /** 进入/推进追问态：保存 pending，七仔在结果条里问出 [missing] 的第一个 */
+    private fun askForInput(cap: Capability, request: ActionRequest, missing: List<CapabilityParam>) {
+        pendingInput = PendingInput(request, missing)
+        val param = missing.first()
+        val question = questionFor(cap, param)
+        _state.value = IntentUiState.NeedsInput(
+            question = question,
+            capabilityId = cap.id,
+            paramName = param.name,
+            originalText = request.intent
+        )
+        speaker.say(question)
+    }
+
+    /** 缺参问句：优先用参数声明里的 ask，没有就按「能力+参数名」拼兜底问句 */
+    private fun questionFor(cap: Capability, param: CapabilityParam): String =
+        param.ask?.takeIf { it.isNotBlank() }
+            ?: "「${cap.label}」还需要${param.label}，告诉我一下"
+
+    /**
+     * 补参：把用户这句当作当前所问参数的值合并进 pending。
+     * 还缺下一个 → 继续追问（仍不执行）；齐了 → 清 pending 并执行
+     *（风险门/权限等后续闸门与正常提交完全同路，含确认态）。
+     */
+    private fun fillPending(pending: PendingInput, value: String) {
+        val current = pending.missing.first()
+        val merged = pending.request.copy(
+            params = pending.request.params + (current.name to value)
+        )
+        val rest = pending.missing.drop(1)
+        if (rest.isNotEmpty()) {
+            val cap = capabilities.find(merged.capabilityId)
+            if (cap == null) {
+                pendingInput = null
+                fail("找不到这个能力，无法执行")
+                return
+            }
+            askForInput(cap, merged, rest)
+            return
+        }
+        pendingInput = null
+        execute(merged, isConfirm = false)
     }
 
     private fun execute(request: ActionRequest, isConfirm: Boolean) {

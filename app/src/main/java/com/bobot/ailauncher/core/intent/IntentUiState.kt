@@ -24,6 +24,19 @@ sealed interface IntentUiState {
     /** 缺权限：message 说明用途，UI 负责引导授权 */
     data class NeedsPermission(val permission: String, val message: String) : IntentUiState
 
+    /**
+     * 缺必填参数（意图改进二批）：七仔已在结果条里按 [question] 追问，
+     * 协调器内部保存着 pending 动作——此态下的下一次提交按状态契约视为
+     * 「补当前问的这个参数」，合并后重新校验，齐了才执行。
+     * 想改办别的事：先关掉追问条（dismiss 清 pending），再正常提交。
+     */
+    data class NeedsInput(
+        val question: String,
+        val capabilityId: String,
+        val paramName: String,
+        val originalText: String
+    ) : IntentUiState
+
     /** 纯文本回复（含动作执行成功文案），走七仔气泡呈现 */
     data class Reply(val text: String) : IntentUiState
 

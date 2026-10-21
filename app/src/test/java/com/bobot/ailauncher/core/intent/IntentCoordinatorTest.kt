@@ -26,17 +26,22 @@ class IntentCoordinatorTest {
 
     private class FakePlanner(var outcome: PlanOutcome) : IntentPlanner {
         var calls = 0
+        var lastInput: String = ""
         var lastValidIds: Set<String> = emptySet()
         var lastHints: String = ""
+        var lastContextPack: String = ""
 
         override suspend fun plan(
             input: String,
             validIds: Set<String>,
-            hints: String
+            hints: String,
+            contextPack: String
         ): PlanOutcome {
             calls++
+            lastInput = input
             lastValidIds = validIds
             lastHints = hints
+            lastContextPack = contextPack
             return outcome
         }
     }
@@ -84,7 +89,8 @@ class IntentCoordinatorTest {
         override suspend fun plan(
             input: String,
             validIds: Set<String>,
-            hints: String
+            hints: String,
+            contextPack: String
         ): PlanOutcome {
             calls++
             return gate.await()
@@ -98,13 +104,18 @@ class IntentCoordinatorTest {
         }
     }
 
-    private fun cap(id: String, risk: RiskLevel) = Capability(
+    private fun cap(
+        id: String,
+        risk: RiskLevel,
+        params: List<com.bobot.ailauncher.data.CapabilityParam> = emptyList()
+    ) = Capability(
         id = id,
-        label = "打车",
+        label = if (id == "daohang") "导航" else "打车",
         iconName = "",
         packageNames = listOf("com.example.taxi"),
         deeplinkTemplate = null,
-        riskLevel = risk
+        riskLevel = risk,
+        params = params
     )
 
     private fun coordinator(
@@ -112,8 +123,12 @@ class IntentCoordinatorTest {
         planner: IntentPlanner,
         capabilities: FakeCapabilities = FakeCapabilities(emptyMap()),
         executor: FakeExecutor = FakeExecutor(),
-        speaker: FakeSpeaker = FakeSpeaker()
-    ) = IntentCoordinator(config, planner, capabilities, executor, speaker)
+        speaker: FakeSpeaker = FakeSpeaker(),
+        contextProvider: suspend () -> String = { "" }
+    ) = IntentCoordinator(
+        config, planner, capabilities, executor, speaker,
+        contextProvider = contextProvider
+    )
 
     // ---------- 1. 空输入不发请求 ----------
 
@@ -306,5 +321,161 @@ class IntentCoordinatorTest {
         assertEquals(1, executor.realExecutions)
         assertEquals(2, executor.submitted.size)
         assertEquals(IntentUiState.Reply("已为你打开打车"), c.state.value)
+    }
+
+    // ---------- 10. 缺参追问（二批）：必填缺失/空白 → NeedsInput 且零执行 ----------
+
+    private val navParam = com.bobot.ailauncher.data.CapabilityParam(
+        name = "to", label = "目的地", required = true, ask = "导航去哪儿？"
+    )
+
+    @Test
+    fun `missing required param asks and never executes`() = runTest {
+        // 模型一个参数都没给
+        run {
+            val planner = FakePlanner(PlanOutcome.Action("daohang", emptyMap(), null))
+            val caps = FakeCapabilities(
+                mapOf("daohang" to cap("daohang", RiskLevel.LOW_RISK, listOf(navParam)))
+            )
+            val executor = FakeExecutor()
+            val speaker = FakeSpeaker()
+            val c = coordinator(planner = planner, capabilities = caps, executor = executor, speaker = speaker)
+
+            c.submit("导航")
+            val s = c.state.value
+            assertTrue(s is IntentUiState.NeedsInput)
+            s as IntentUiState.NeedsInput
+            assertEquals("导航去哪儿？", s.question)
+            assertEquals("daohang", s.capabilityId)
+            assertEquals("to", s.paramName)
+            assertEquals("导航", s.originalText)
+            // 一次都没碰执行器——假成功从源头断掉；七仔把问题说出来了
+            assertTrue(executor.submitted.isEmpty())
+            assertTrue(speaker.said.contains("导航去哪儿？"))
+        }
+        // 模型给了空串参数：同样算缺失（旧链路会抹占位符开空目的地）
+        run {
+            val planner = FakePlanner(PlanOutcome.Action("daohang", mapOf("to" to "  "), null))
+            val caps = FakeCapabilities(
+                mapOf("daohang" to cap("daohang", RiskLevel.LOW_RISK, listOf(navParam)))
+            )
+            val executor = FakeExecutor()
+            val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+
+            c.submit("导航一下")
+            assertTrue(c.state.value is IntentUiState.NeedsInput)
+            assertTrue(executor.submitted.isEmpty())
+        }
+    }
+
+    // ---------- 11. 补参（二批）：下一句合并执行一次且参数正确，不再过 planner ----------
+
+    @Test
+    fun `filling the param merges and executes once without replanning`() = runTest {
+        val planner = FakePlanner(PlanOutcome.Action("daohang", emptyMap(), null))
+        val caps = FakeCapabilities(
+            mapOf("daohang" to cap("daohang", RiskLevel.LOW_RISK, listOf(navParam)))
+        )
+        val executor = FakeExecutor()
+        val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+
+        c.submit("导航")
+        assertTrue(c.state.value is IntentUiState.NeedsInput)
+        assertEquals(1, planner.calls)
+
+        c.submit("机场")
+        // 补参不重新规划；合并后执行一次，参数就是用户补的这句
+        assertEquals(1, planner.calls)
+        assertEquals(1, executor.submitted.size)
+        val req = executor.submitted.single()
+        assertEquals("daohang", req.capabilityId)
+        assertEquals("机场", req.params["to"])
+        assertEquals("导航", req.intent)
+        assertEquals(1, executor.realExecutions)
+        assertTrue(c.state.value is IntentUiState.Reply)
+    }
+
+    // ---------- 12. 多参（二批）：逐个问，齐了才执行 ----------
+
+    @Test
+    fun `multiple missing params are asked one by one`() = runTest {
+        val lat = com.bobot.ailauncher.data.CapabilityParam(
+            name = "lat", label = "目的地纬度", required = true, ask = "目的地纬度是多少？"
+        )
+        val lon = com.bobot.ailauncher.data.CapabilityParam(
+            name = "lon", label = "目的地经度", required = true, ask = "目的地经度是多少？"
+        )
+        val planner = FakePlanner(PlanOutcome.Action("ditie", emptyMap(), null))
+        val caps = FakeCapabilities(
+            mapOf("ditie" to cap("ditie", RiskLevel.LOW_RISK, listOf(lat, lon)))
+        )
+        val executor = FakeExecutor()
+        val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+
+        c.submit("坐地铁去机场")
+        var s = c.state.value
+        assertTrue(s is IntentUiState.NeedsInput)
+        assertEquals("lat", (s as IntentUiState.NeedsInput).paramName)
+
+        c.submit("31.2")
+        s = c.state.value
+        assertTrue(s is IntentUiState.NeedsInput)
+        assertEquals("lon", (s as IntentUiState.NeedsInput).paramName)
+        // 还差一个：仍然零执行
+        assertTrue(executor.submitted.isEmpty())
+
+        c.submit("121.5")
+        assertEquals(1, executor.submitted.size)
+        val req = executor.submitted.single()
+        assertEquals("31.2", req.params["lat"])
+        assertEquals("121.5", req.params["lon"])
+        assertTrue(c.state.value is IntentUiState.Reply)
+    }
+
+    // ---------- 13. dismiss 清 pending（二批）：关掉追问后下一句是全新提交 ----------
+
+    @Test
+    fun `dismiss clears pending input - next submit is a fresh plan`() = runTest {
+        val planner = FakePlanner(PlanOutcome.Action("daohang", emptyMap(), null))
+        val caps = FakeCapabilities(
+            mapOf("daohang" to cap("daohang", RiskLevel.LOW_RISK, listOf(navParam)))
+        )
+        val executor = FakeExecutor()
+        val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+
+        c.submit("导航")
+        assertTrue(c.state.value is IntentUiState.NeedsInput)
+
+        c.dismiss()
+        // pending 已清：下一句走 planner 全新规划，而不是被当成目的地补进导航
+        planner.outcome = PlanOutcome.Chat("好的")
+        c.submit("今天天气怎么样")
+        assertEquals(2, planner.calls)
+        assertEquals("今天天气怎么样", planner.lastInput)
+        assertEquals(IntentUiState.Reply("好的"), c.state.value)
+        assertTrue(executor.submitted.isEmpty())
+    }
+
+    // ---------- 14. 上下文包（二批）：contextProvider 的产物原样传给 planner ----------
+
+    @Test
+    fun `context pack from provider is passed to planner`() = runTest {
+        val planner = FakePlanner(PlanOutcome.Chat("你好"))
+        val c = coordinator(
+            planner = planner,
+            contextProvider = { "【现在】2026年10月21日 星期三 22:20（晚上）" }
+        )
+        c.submit("你好")
+        assertEquals("【现在】2026年10月21日 星期三 22:20（晚上）", planner.lastContextPack)
+
+        // 采集抛异常也不拖垮提交：空包照常规划
+        val planner2 = FakePlanner(PlanOutcome.Chat("你好"))
+        val c2 = coordinator(
+            planner = planner2,
+            contextProvider = { throw RuntimeException("采集失败") }
+        )
+        c2.submit("你好")
+        assertEquals("", planner2.lastContextPack)
+        assertEquals(IntentUiState.Reply("你好"), c2.state.value)
     }
 }

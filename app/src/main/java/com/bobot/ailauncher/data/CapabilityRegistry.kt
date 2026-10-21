@@ -3,7 +3,6 @@ package com.bobot.ailauncher.data
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Drawable
-import java.net.URLEncoder
 import org.json.JSONObject
 
 /**
@@ -19,6 +18,19 @@ import org.json.JSONObject
  * 2. 意图路由（关键词/LLM）：resolveAndLaunch(capabilityId) —— 取该能力
  *    第一个已安装的包名，优先走 deep link，失败降级到 App 主页。
  */
+/**
+ * 能力参数声明（意图改进二批）：与 deeplinkTemplate 里的 {占位符} 一一对应，
+ * 是「模型该提取什么 / 执行前必须有什么」的唯一事实源。
+ * - [required] 为 true 且执行时缺失/空白 → 不执行，由七仔按 [ask] 追问补参；
+ * - [ask] 是缺参时七仔的问句，缺省由协调器按「label 需要 name」拼兜底问句。
+ */
+data class CapabilityParam(
+    val name: String,
+    val label: String,
+    val required: Boolean = false,
+    val ask: String? = null
+)
+
 data class Capability(
     val id: String,
     val label: String,
@@ -30,8 +42,14 @@ data class Capability(
     // v0.17.0（PRD §六十一/§二十三）：风险分级与执行方式，JSON 可选字段，缺省安全值
     val riskLevel: RiskLevel = RiskLevel.LOW_RISK,
     val executionMethod: ExecutionMethod = ExecutionMethod.LAUNCH,
-    val permission: String? = null
-)
+    val permission: String? = null,
+    // 意图改进二批：参数 schema（JSON 可选字段 "params"，缺省无参）
+    val params: List<CapabilityParam> = emptyList()
+) {
+    /** 执行前校验：返回缺失（未传或空白）的必填参数，按声明顺序 */
+    fun missingRequiredParams(filled: Map<String, String>): List<CapabilityParam> =
+        params.filter { it.required && filled[it.name].isNullOrBlank() }
+}
 
 /** Action 风险分级（PRD §二十三）：A=读，B=导航，C=低风险，D=中风险，E=高风险（必须用户确认） */
 enum class RiskLevel { READ, NAVIGATE, LOW_RISK, MEDIUM_RISK, HIGH_RISK }
@@ -75,6 +93,22 @@ data class ResolvedGroup(
 object CapabilityRegistry {
     private var groups: List<CapabilityGroup> = emptyList()
 
+    /** 解析能力 JSON 的可选 "params" 数组；字段缺失/格式不对一律按无参处理（不让坏数据拖垮整表加载） */
+    private fun parseParams(c: JSONObject): List<CapabilityParam> {
+        val arr = c.optJSONArray("params") ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val p = arr.optJSONObject(i) ?: return@mapNotNull null
+            val name = p.optString("name", "").trim()
+            if (name.isEmpty()) return@mapNotNull null
+            CapabilityParam(
+                name = name,
+                label = p.optString("label", name).ifBlank { name },
+                required = p.optBoolean("required", false),
+                ask = p.optString("ask").ifBlank { null }
+            )
+        }
+    }
+
     fun load(context: Context) {
         if (groups.isNotEmpty()) return
         val json = context.assets.open("capabilities.json").bufferedReader().use { it.readText() }
@@ -104,7 +138,9 @@ object CapabilityRegistry {
                     executionMethod = runCatching {
                         ExecutionMethod.valueOf(c.optString("execution", "LAUNCH"))
                     }.getOrDefault(ExecutionMethod.LAUNCH),
-                    permission = c.optString("permission").ifBlank { null }
+                    permission = c.optString("permission").ifBlank { null },
+                    // 意图改进二批：参数 schema（可选字段，老 JSON 不写即无参）
+                    params = parseParams(c)
                 )
             }
             result += CapabilityGroup(
@@ -241,21 +277,22 @@ object CapabilityRegistry {
         val cap = resolved.capability
 
         // 1) Deep Link 直达 App 内页面（限定到解析出的包，避免跳错 App）
+        // 意图改进二批·兜底防线：模板填充走 DeeplinkTemplate——任一占位符没值
+        // 整条链接作废，直接降级到第 2 步打开 App 主页，绝不打开残缺链接
+        //（旧实现抹掉占位符开空目的地页，是「假成功」的源头）。
         cap.deeplinkTemplate?.let { template ->
-            try {
-                var uri = template
-                params.forEach { (k, v) ->
-                    uri = uri.replace("{$k}", URLEncoder.encode(v, "UTF-8"))
+            val uri = DeeplinkTemplate.fill(template, params)
+            if (uri != null) {
+                try {
+                    val intent = Intent.parseUri(uri, Intent.URI_INTENT_SCHEME)
+                    intent.setPackage(resolved.packageName)
+                    intent.addCategory(Intent.CATEGORY_BROWSABLE)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                    return true
+                } catch (_: Exception) {
+                    // 降级到 launcher intent
                 }
-                uri = uri.replace(Regex("\\{[^}]*\\}"), "") // 清掉未传入的参数占位符
-                val intent = Intent.parseUri(uri, Intent.URI_INTENT_SCHEME)
-                intent.setPackage(resolved.packageName)
-                intent.addCategory(Intent.CATEGORY_BROWSABLE)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                return true
-            } catch (_: Exception) {
-                // 降级到 launcher intent
             }
         }
 

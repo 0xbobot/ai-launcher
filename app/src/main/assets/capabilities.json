@@ -126,6 +126,20 @@
           "packageNames": [
             "com.autonavi.minimap",
             "com.baidu.BaiduMap"
+          ],
+          "params": [
+            {
+              "name": "lat",
+              "label": "目的地纬度",
+              "required": true,
+              "ask": "目的地纬度是多少？"
+            },
+            {
+              "name": "lon",
+              "label": "目的地经度",
+              "required": true,
+              "ask": "目的地经度是多少？"
+            }
           ]
         },
         {
@@ -138,7 +152,15 @@
           ],
           "deeplink": "amap://route?sourceApplication=ai-launcher&dname={to}&dev=0&t=1",
           "fallbackToLauncher": true,
-          "note": "需真机验证"
+          "note": "需真机验证",
+          "params": [
+            {
+              "name": "to",
+              "label": "目的地",
+              "required": true,
+              "ask": "导航去哪儿？"
+            }
+          ]
         },
         {
           "deeplink": null,

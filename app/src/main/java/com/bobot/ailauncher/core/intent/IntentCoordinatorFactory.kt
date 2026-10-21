@@ -24,7 +24,8 @@ object IntentCoordinatorFactory {
             planner = LlmPlannerAdapter(appContext),
             capabilities = RegistryAdapter(appContext),
             executor = EngineAdapter(appContext),
-            speaker = PetSpeaker
+            speaker = PetSpeaker,
+            contextProvider = { IntentContextProvider.current(appContext) }
         )
     }
 
@@ -36,7 +37,8 @@ object IntentCoordinatorFactory {
         override suspend fun plan(
             input: String,
             validIds: Set<String>,
-            hints: String
+            hints: String,
+            contextPack: String
         ): PlanOutcome =
             when (
                 val r = LlmRouter.plan(
@@ -45,7 +47,8 @@ object IntentCoordinatorFactory {
                     model = LlmConfig.getModel(context),
                     input = input,
                     validIds = validIds,
-                    hints = hints
+                    hints = hints,
+                    contextPack = contextPack
                 )
             ) {
                 is LlmRouter.PlanResult.Chat -> PlanOutcome.Chat(r.text)
@@ -60,10 +63,11 @@ object IntentCoordinatorFactory {
 
         override fun validIds(): Set<String> = CapabilityRegistry.validIds()
 
+        /** 带参数说明的能力清单（意图改进二批：[CapabilityHints] 纯函数生成） */
         override fun hints(): String =
-            CapabilityRegistry.groups()
-                .flatMap { it.capabilities }
-                .joinToString("\n") { "${it.id}: ${it.label}" }
+            CapabilityHints.build(
+                CapabilityRegistry.groups().flatMap { it.capabilities }
+            )
 
         override fun find(id: String): Capability? = CapabilityRegistry.find(id)
     }
