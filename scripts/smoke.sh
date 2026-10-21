@@ -704,7 +704,34 @@ if [ -z "$CAL_ID" ]; then
     if [ -n "$HAS_SQLITE" ]; then
       adb shell am force-stop com.android.providers.calendar > /dev/null 2>&1 || true
       sleep 1
-      DB_OUT=$(adb shell "sqlite3 $CALDB \"INSERT INTO Calendars (account_name, account_type, name, calendar_displayName, calendar_color, calendar_access_level, visible, sync_events, calendar_timezone, ownerAccount, canOrganizerRespond, canModifyEvents, canPartiallyUpdate, maxReminders, allowedReminders, allowedAvailability, allowedAttendeeTypes) VALUES ('smoke@local', 'LOCAL', 'SmokeCal', 'SmokeCal', -16733440, 700, 1, 1, 'UTC', 'smoke@local', 1, 1, 1, 5, '0,1,2,3,4', '0,1,2', '0,1,2'); SELECT last_insert_rowid();\"" 2>&1 || true)
+      # 按真实 schema 拼列（实测本镜像 Calendars 无 canModifyEvents 列，写死列名必翻车）：
+      # 读 pragma_table_info 的列名全集，候选列只保留实际存在的。
+      SCHEMA=$(adb shell "sqlite3 $CALDB \"SELECT name FROM pragma_table_info('Calendars');\"" 2>/dev/null | tr -d '\r')
+      log "nextup Calendars schema: $(echo "$SCHEMA" | tr '\n' ' ')"
+      COLS=""; VALS=""
+      add_col() {
+        if echo "$SCHEMA" | grep -qx "$1"; then
+          COLS="${COLS:+$COLS,}$1"; VALS="${VALS:+$VALS,}$2"
+        fi
+      }
+      add_col account_name "'smoke@local'"
+      add_col account_type "'LOCAL'"
+      add_col name "'SmokeCal'"
+      add_col calendar_displayName "'SmokeCal'"
+      add_col calendar_color "-16733440"
+      add_col calendar_access_level "700"
+      add_col visible "1"
+      add_col sync_events "1"
+      add_col calendar_timezone "'UTC'"
+      add_col ownerAccount "'smoke@local'"
+      add_col canOrganizerRespond "1"
+      add_col canModifyEvents "1"
+      add_col canPartiallyUpdate "1"
+      add_col maxReminders "5"
+      add_col allowedReminders "'0,1,2,3,4'"
+      add_col allowedAvailability "'0,1,2'"
+      add_col allowedAttendeeTypes "'0,1,2'"
+      DB_OUT=$(adb shell "sqlite3 $CALDB \"INSERT INTO Calendars ($COLS) VALUES ($VALS); SELECT last_insert_rowid();\"" 2>&1 || true)
       log "nextup calendars db-insert: $(echo "$DB_OUT" | head -3 | tr '\n' ' ')"
       CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
       log "nextup calendars query#4: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
