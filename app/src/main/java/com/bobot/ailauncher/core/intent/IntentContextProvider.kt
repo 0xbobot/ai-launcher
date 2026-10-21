@@ -2,11 +2,11 @@ package com.bobot.ailauncher.core.intent
 
 import android.content.Context
 import com.bobot.ailauncher.core.context.ContextEngine
+import com.bobot.ailauncher.data.AiInsight
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.WeatherState
-import com.bobot.ailauncher.data.analyzeReplyNeed
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import java.text.SimpleDateFormat
@@ -20,7 +20,7 @@ import kotlinx.coroutines.withContext
  * App 现有数据源里凑齐。原则：
  * - **只读已缓存/已在内存的数据**：天气只读 [WeatherState] 缓存，绝不为 plan 新拉网络；
  *   会议读第一批的 [TodayEventsHolder] 镜像；待回数对内存通知列表跑现成的
- *   [analyzeReplyNeed] 规则（与 TODAY 摘要同一口径）。
+ *   [AiInsight.analyzeReplyNeed] 规则（与 TODAY 摘要同一口径）。
  * - 每一项独立 runCatching：任何一项失败只省略该项，永远不让上下文采集拖垮提交。
  * - PackageManager 查询走 IO 线程，不压主线程。
  */
@@ -97,6 +97,6 @@ object IntentContextProvider {
     private fun pendingReplies(): Int? {
         val list = NotificationRepository.notifications.value
         if (list.isEmpty()) return null
-        return list.count { analyzeReplyNeed(it.title, it.text).needsReply }
+        return list.count { AiInsight.analyzeReplyNeed(it.title, it.text).needsReply }
     }
 }
