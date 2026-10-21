@@ -1323,9 +1323,14 @@ if [ "$MOCK_UP" = "1" ]; then
             ng "planner-pack-injected"
           fi
           if ni_type_submit "jichang"; then
-            sleep 4
+            # 前台切换在慢腿上可能晚于单次 sleep：轮询最多约 15s（api29 首跑单探落空）
+            FG_B=""
+            for _try in 1 2 3 4 5; do
+              sleep 3
+              FG_B=$(adb shell dumpsys activity activities 2> /dev/null | grep -m1 "topResumedActivity" || true)
+              if echo "$FG_B" | grep -q "com.tencent.map"; then break; fi
+            done
             shot "intent-tencent-bound"
-            FG_B=$(adb shell dumpsys activity activities 2> /dev/null | grep -m1 "topResumedActivity" || true)
             log "phaseB foreground: $FG_B"
             if echo "$FG_B" | grep -q "com.tencent.map"; then
               ok "needsinput-fill-executes"
