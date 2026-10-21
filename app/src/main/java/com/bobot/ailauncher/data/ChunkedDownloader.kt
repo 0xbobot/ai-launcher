@@ -181,7 +181,7 @@ class ChunkedDownloader(
                             throw IOException("chunk $i: expected 206, got ${resp.code}")
                         }
                         val body = resp.body ?: throw IOException("chunk $i: empty body")
-                        val tmp = File(workDir, "$partName(i).tmp")
+                        val tmp = File(workDir, "${partName(i)}.tmp")
                         body.byteStream().use { input ->
                             FileOutputStream(tmp).use { out ->
                                 val buf = ByteArray(BUFFER_SIZE)
