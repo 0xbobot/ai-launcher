@@ -798,6 +798,9 @@ PYEOF
   done
   shot "nextup-$ANAME"
   log "nextup-$ANAME foreground after tap: $FG"
+  if [ "$ANAME" = "withlink" ] && ! echo "$FG" | grep -qi "$EXPECT"; then
+    log "nextup-withlink: link target NOT in foreground - either calendar fallback (no URL handler on this image) or failure; see foreground line above"
+  fi
   if [ "$OPENED" = "1" ]; then
     ok "nextup-$ANAME-open"
   elif adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "$EXPECT"; then
@@ -815,35 +818,95 @@ if [ -n "$CAL_ID" ]; then
   if [ -z "$EMU_S" ]; then EMU_S=$(date +%s); fi
   EV_BEGIN=$(( (EMU_S + 1200) * 1000 ))
   EV_END=$(( (EMU_S + 4800) * 1000 ))
+  # 事件种入：先走 content provider；被拒（本镜像实测 provider 对 CLI 写全拒）则
+  # root 直写 Events 表（schema 驱动列集，同日历行法）。删除同理双路兜底。
+  EV_SCHEMA_LOGGED=0
+  nextup_db_event() {
+    # $1=title $2=description(可空)
+    local DBF=/data/data/com.android.providers.calendar/databases/calendar.db
+    local SCH
+    SCH=$(adb shell "sqlite3 $DBF \"SELECT name FROM pragma_table_info('Events');\"" 2>/dev/null | tr -d '\r')
+    if [ "$EV_SCHEMA_LOGGED" = "0" ]; then
+      log "nextup Events schema: $(echo "$SCH" | tr '\n' ' ')"
+      EV_SCHEMA_LOGGED=1
+    fi
+    local C="" V=""
+    ev_col() {
+      if echo "$SCH" | grep -qx "$1"; then C="${C:+$C,}$1"; V="${V:+$V,}$2"; fi
+    }
+    ev_col calendar_id "$CAL_ID"
+    ev_col title "'$1'"
+    if [ -n "$2" ]; then ev_col description "'$2'"; fi
+    ev_col dtstart "$EV_BEGIN"
+    ev_col dtend "$EV_END"
+    ev_col eventTimezone "'UTC'"
+    ev_col allDay "0"
+    ev_col eventStatus "1"
+    ev_col visibility "0"
+    ev_col hasAlarm "0"
+    ev_col hasAttendeeData "0"
+    ev_col selfAttendeeStatus "0"
+    ev_col accessLevel "0"
+    ev_col availability "0"
+    ev_col guestsCanModify "0"
+    ev_col guestsCanInviteOthers "0"
+    ev_col guestsCanSeeGuests "0"
+    ev_col deleted "0"
+    ev_col dirty "0"
+    adb shell am force-stop com.android.providers.calendar > /dev/null 2>&1 || true
+    sleep 1
+    local OUT
+    OUT=$(adb shell "sqlite3 $DBF \"INSERT INTO Events ($C) VALUES ($V); SELECT last_insert_rowid();\"" 2>&1 || true)
+    log "nextup db-event '$1': $(echo "$OUT" | head -2 | tr '\n' ' ')"
+    echo "$OUT" | grep -qE '^[0-9]+$'
+  }
+  nextup_seed_event() {
+    # $1=title $2=description(可空)；任一路种入成功返回 0
+    local INS
+    if [ -n "$2" ]; then
+      INS=$(adb shell content insert --uri "content://com.android.calendar/events?caller_is_syncadapter=true" \
+        --bind calendar_id:i:"$CAL_ID" --bind title:s:"$1" --bind description:s:"$2" \
+        --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
+        --bind eventTimezone:s:UTC 2>&1 || true)
+    else
+      INS=$(adb shell content insert --uri "content://com.android.calendar/events?caller_is_syncadapter=true" \
+        --bind calendar_id:i:"$CAL_ID" --bind title:s:"$1" \
+        --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
+        --bind eventTimezone:s:UTC 2>&1 || true)
+    fi
+    log "nextup content-event '$1': $(echo "$INS" | head -2 | tr '\n' ' ')"
+    if echo "$INS" | grep -q "Row:"; then return 0; fi
+    if [ -n "$HAS_SQLITE" ] && nextup_db_event "$1" "$2"; then return 0; fi
+    return 1
+  }
+  nextup_delete_event() {
+    adb shell content delete --uri content://com.android.calendar/events --where "title='$1'" > /dev/null 2>&1 || true
+    if [ -n "$HAS_SQLITE" ]; then
+      adb shell am force-stop com.android.providers.calendar > /dev/null 2>&1 || true
+      sleep 1
+      adb shell "sqlite3 /data/data/com.android.providers.calendar/databases/calendar.db \"DELETE FROM Events WHERE title='$1';\"" > /dev/null 2>&1 || true
+    fi
+  }
+  HAS_SQLITE=$(adb shell "command -v sqlite3" 2>/dev/null | head -1 | tr -d '\r ')
   # 事件 A：无链接 → 点卡应打开日历（CATEGORY_APP_CALENDAR / 事件详情）
-  INS_A=$(adb shell content insert --uri "content://com.android.calendar/events?caller_is_syncadapter=true" \
-    --bind calendar_id:i:"$CAL_ID" --bind title:s:SmokeNoLink \
-    --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
-    --bind eventTimezone:s:UTC 2>&1 || true)
-  log "nextup insert A: $INS_A"
-  if echo "$INS_A" | grep -q "Row:"; then
+  if nextup_seed_event "SmokeNoLink" ""; then
     nextup_tap_flow "SmokeNoLink" "nolink" "calendar"
   elif [ -z "$SMOKE_LABEL" ]; then
     ng "nextup-seed"
   else
-    log "nextup seed insert failed on this leg - skipped (not counted)"
+    log "nextup seed-event failed on this leg - skipped (not counted)"
   fi
-  adb shell content delete --uri content://com.android.calendar/events --where "title='SmokeNoLink'" > /dev/null 2>&1 || true
-  # 事件 B：描述带 Zoom 链接 → 点卡应直开链接（前台离开本包 / 派发含 zoom）
-  INS_B=$(adb shell content insert --uri "content://com.android.calendar/events?caller_is_syncadapter=true" \
-    --bind calendar_id:i:"$CAL_ID" --bind title:s:SmokeWithLink \
-    --bind description:s:https://zoom.us/j/1234567890 \
-    --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
-    --bind eventTimezone:s:UTC 2>&1 || true)
-  log "nextup insert B: $INS_B"
-  if echo "$INS_B" | grep -q "Row:"; then
+  nextup_delete_event "SmokeNoLink"
+  # 事件 B：描述带 Zoom 链接 → 有解析者时点卡直开链接；本镜像无浏览器/Zoom 时
+  # getValidMeetingUrl 按设计判无效、回落打开日历（flow 内以日志明示哪条路径）。
+  if nextup_seed_event "SmokeWithLink" "https://zoom.us/j/1234567890"; then
     nextup_tap_flow "SmokeWithLink" "withlink" "zoom"
   elif [ -z "$SMOKE_LABEL" ]; then
     ng "nextup-seed-link"
   else
-    log "nextup seed-link insert failed on this leg - skipped (not counted)"
+    log "nextup seed-link failed on this leg - skipped (not counted)"
   fi
-  adb shell content delete --uri content://com.android.calendar/events --where "title='SmokeWithLink'" > /dev/null 2>&1 || true
+  nextup_delete_event "SmokeWithLink"
 else
   if [ -z "$SMOKE_LABEL" ]; then
     ng "nextup-seed"
