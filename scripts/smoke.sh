@@ -1136,7 +1136,10 @@ fi
 # --- 17. 缺参追问态实拍 + planner 注入端到端取证（意图改进二批）---
 # 手段（仅测试路径，生产逻辑零改动）：LlmConfig 读 SharedPreferences "llm"——
 # run-as 预写 api_key/base_url/model，把 base_url 指向 runner 本机 mock LLM
-#（scripts/mock_llm.py，模拟器经 10.0.2.2 访问宿主机）。mock 对任何输入都回
+#（scripts/mock_llm.py）。mock 对任何输入都回
+# 通路（首轮实测教训）：base_url 不能用 10.0.2.2——targetSdk 34 默认禁明文 HTTP、
+# 无 networkSecurityConfig 时请求直接被系统拦下（界面只报「网络超时」）。
+# 改走 adb reverse + 127.0.0.1：回环地址在明文豁免内，零生产配置改动。
 # daohang 且 params 为空 → 协调器执行前校验必然拦下、进 NeedsInput 追问态；
 # 再补一句参数，应合并走执行（CI 未装高德/百度地图，执行如实失败
 #「本机没有安装支持」——恰好证明合并后真的到了执行，而不是又被追问/吞掉）。
@@ -1159,15 +1162,17 @@ if command -v python3 > /dev/null 2>&1; then
   done
 fi
 if [ "$MOCK_UP" = "1" ]; then
+  # 设备侧 127.0.0.1:$MOCK_PORT -> runner 本机 mock（回环转发，段末撤销）
+  adb reverse "tcp:$MOCK_PORT" "tcp:$MOCK_PORT" > /dev/null 2>&1 || true
   adb shell am force-stop "$PKG" || true
   printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
     '    <string name="api_key">sk-mock</string>' \
-    "    <string name=\"base_url\">http://10.0.2.2:$MOCK_PORT</string>" \
+    "    <string name=\"base_url\">http://127.0.0.1:$MOCK_PORT</string>" \
     '    <string name="model">mock-model</string>' "</map>" > "$OUT/llm.xml"
   adb push "$OUT/llm.xml" /data/local/tmp/llm.xml > /dev/null 2>&1 || true
   adb shell "run-as $PKG cp /data/local/tmp/llm.xml shared_prefs/llm.xml" || true
   adb shell "run-as $PKG chmod 660 shared_prefs/llm.xml" || true
-  if adb shell "run-as $PKG cat shared_prefs/llm.xml" 2> /dev/null | grep -q '10.0.2.2'; then
+  if adb shell "run-as $PKG cat shared_prefs/llm.xml" 2> /dev/null | grep -q '127.0.0.1'; then
     adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
     sleep 5
     adb shell input keyevent KEYCODE_HOME || true
@@ -1278,6 +1283,7 @@ if [ "$MOCK_UP" = "1" ]; then
     fi
     # 清理：删 llm prefs + force-stop 掉 SP 缓存，恢复无 Key 基线
     adb shell "run-as $PKG rm -f shared_prefs/llm.xml" || true
+    adb reverse --remove "tcp:$MOCK_PORT" > /dev/null 2>&1 || true
     adb shell am force-stop "$PKG" || true
   else
     log "llm prefs seed failed - needsinput segment skipped (not counted)"
