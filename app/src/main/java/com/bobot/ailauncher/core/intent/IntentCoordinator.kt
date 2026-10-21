@@ -86,6 +86,10 @@ class IntentCoordinator(
     suspend fun submit(text: String) {
         val input = text.trim()
         if (input.isBlank()) return
+        // 防重守卫（意图改进一批）：Planning 在途时直接忽略新提交——连点/双击提交
+        // 不得重复规划、重复执行。宿主另有「先 cancel 旧 Job 再 launch」的顶替语义，
+        // 被顶替的旧协程在下方 CancellationException 分支交还编辑态，不会卡死在 Planning。
+        if (_state.value is IntentUiState.Planning) return
         lastText = input
         _state.value = IntentUiState.Planning(input)
 
@@ -101,6 +105,9 @@ class IntentCoordinator(
                 planner.plan(input, capabilities.validIds(), capabilities.hints())
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
+            // 宿主顶替取消（新提交 cancel 旧 Job）：若还停在 Planning 就交还编辑态
+            // （带回原文可直接改/重提），避免状态永久卡在思考中；随后照常上抛。
+            if (_state.value is IntentUiState.Planning) dismiss()
             throw e
         } catch (e: Exception) {
             PlanOutcome.Err("请求失败：${e.message.orEmpty().ifBlank { "未知错误" }}")
@@ -115,6 +122,12 @@ class IntentCoordinator(
 
     /** 用户在确认态点了"执行"：以 confirmed=true 重新提交，只执行一次 */
     fun confirm(request: ActionRequest) {
+        // 一次性守卫（意图改进一批）：只认当前正挂起的这一单——连点「执行」、
+        // 或旧弹窗的迟到回调，看到的已不是确认态（或不是同一单），直接忽略。
+        val pending = _state.value as? IntentUiState.NeedsConfirmation ?: return
+        if (pending.request != request) return
+        // 先离开确认态再执行：执行期间的第二次 confirm 必然落空，不会重复执行。
+        _state.value = IntentUiState.Planning(request.intent)
         execute(request.copy(confirmed = true), isConfirm = true)
     }
 

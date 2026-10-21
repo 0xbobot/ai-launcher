@@ -145,7 +145,7 @@ object AppSearchIndex {
         val q = query.trim().lowercase().replace(" ", "")
         if (q.isBlank()) return index.map { it.app }
         ensureKeywordsLoaded(context)
-        data class Hit(val app: AppInfo, val score: Int)
+        data class Hit(val app: AppInfo, val score: Int, val usage: Double)
         val hits = mutableListOf<Hit>()
         // 自然语言关键词：查询包含关键词（或关键词拼音）→ 相关包名
         val keywordPkgs: Set<String> = buildSet {
@@ -175,9 +175,14 @@ object AppSearchIndex {
                 isSubsequence(q, name) -> 30
                 else -> 0
             }
-            if (score > 0) hits += Hit(e.app, score)
+            if (score > 0) hits += Hit(e.app, score, AppUsageTracker.usageScore(context, e.app.packageName))
         }
-        return hits.sortedByDescending { it.score }.map { it.app }
+        // 意图改进一批：同档分内按使用频次破同分（只破同分——排序键档分在前，
+        // 频次再高也压不过更高档的精确命中）；频次也并列时 sortedWith 稳定排序
+        // 保持索引原序。首页本地结果与应用中心搜索共用本函数，同享此排序。
+        return hits.sortedWith(
+            compareByDescending<Hit> { it.score }.thenByDescending { it.usage }
+        ).map { it.app }
     }
 
     /** 子序列模糊：q 的字符按序出现在目标里即可 */

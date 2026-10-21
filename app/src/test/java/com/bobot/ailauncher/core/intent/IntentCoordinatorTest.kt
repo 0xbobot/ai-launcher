@@ -4,6 +4,9 @@ import com.bobot.ailauncher.core.action.ActionRequest
 import com.bobot.ailauncher.core.action.ActionResult
 import com.bobot.ailauncher.data.Capability
 import com.bobot.ailauncher.data.RiskLevel
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -71,6 +74,23 @@ class IntentCoordinatorTest {
         }
     }
 
+    /** 挂起型 planner（意图改进一批·防重测试用）：进 plan 后停在 gate 上，
+     * 让协调器稳定停留在 Planning 态，等测试放行才返回。 */
+    private class BlockingPlanner(
+        private val gate: CompletableDeferred<PlanOutcome>
+    ) : IntentPlanner {
+        var calls = 0
+
+        override suspend fun plan(
+            input: String,
+            validIds: Set<String>,
+            hints: String
+        ): PlanOutcome {
+            calls++
+            return gate.await()
+        }
+    }
+
     private class FakeSpeaker : IntentSpeaker {
         val said = mutableListOf<String>()
         override fun say(text: String) {
@@ -89,7 +109,7 @@ class IntentCoordinatorTest {
 
     private fun coordinator(
         config: FakeConfig = FakeConfig(),
-        planner: FakePlanner,
+        planner: IntentPlanner,
         capabilities: FakeCapabilities = FakeCapabilities(emptyMap()),
         executor: FakeExecutor = FakeExecutor(),
         speaker: FakeSpeaker = FakeSpeaker()
@@ -236,5 +256,55 @@ class IntentCoordinatorTest {
             c.submit("帮我打车去机场")
             assertTrue(c.state.value is IntentUiState.Error)
         }
+    }
+
+    // ---------- 8. 防重（意图改进一批）：Planning 在途的连点提交只规划一次 ----------
+
+    @Test
+    fun `submit while planning is ignored - planner called once`() = runTest {
+        val gate = CompletableDeferred<PlanOutcome>()
+        val planner = BlockingPlanner(gate)
+        val c = coordinator(planner = planner)
+
+        val first = async { c.submit("打开微信") }
+        runCurrent()
+        assertEquals(1, planner.calls)
+        assertTrue(c.state.value is IntentUiState.Planning)
+
+        // 在途期间连点第二次：守卫直接挡下——不进 planner、不改状态
+        c.submit("再打开一次")
+        assertEquals(1, planner.calls)
+        assertTrue(c.state.value is IntentUiState.Planning)
+
+        gate.complete(PlanOutcome.Chat("好的"))
+        first.await()
+        assertEquals(IntentUiState.Reply("好的"), c.state.value)
+        assertEquals(1, planner.calls)
+    }
+
+    // ---------- 9. 防重（意图改进一批）：confirm 连点只执行一次 ----------
+
+    @Test
+    fun `confirm twice executes only once`() = runTest {
+        val planner = FakePlanner(PlanOutcome.Action("dache", emptyMap(), null))
+        val caps = FakeCapabilities(mapOf("dache" to cap("dache", RiskLevel.HIGH_RISK)))
+        val executor = FakeExecutor()
+        val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+
+        c.submit("帮我打车")
+        val pending = (c.state.value as IntentUiState.NeedsConfirmation).request
+
+        // 不是同一单的 confirm（旧弹窗迟到回调/冒充）：挡下，确认态保持
+        c.confirm(pending.copy(intent = "别的事"))
+        assertEquals(0, executor.realExecutions)
+        assertTrue(c.state.value is IntentUiState.NeedsConfirmation)
+
+        c.confirm(pending)
+        // 连点第二次「执行」：确认态已离开（一次性守卫），不得重复执行
+        c.confirm(pending)
+
+        assertEquals(1, executor.realExecutions)
+        assertEquals(2, executor.submitted.size)
+        assertEquals(IntentUiState.Reply("已为你打开打车"), c.state.value)
     }
 }
