@@ -1059,6 +1059,10 @@ else
 fi
 # 提交后焦点释放：重新聚焦 -> 输整句 -> 键盘弹起时重新 dump 定位提交钮（坐标随
 # 窗口 resize 变）-> 直接点提交 -> 错误条在场且无 focused 节点
+# 注（首轮实测）：输完 "open wechat" 后末词在 LatinIME 里仍处 composing（下划线+
+# 候选栏），新 composing 守卫会正确挡下提交（截图中提交钮呈禁用暗色，即守卫实证）；
+# 真实中文输入法流程同样是先点候选上屏再提交——这里补输一个空格让组合上屏，
+# 与真实流程对齐后再验提交+收键盘。
 adb shell uiautomator dump /sdcard/suggest_dump1.xml > /dev/null 2>&1 || true
 adb pull /sdcard/suggest_dump1.xml "$OUT/suggest_dump1.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/suggest_dump1.xml" ]; then
@@ -1075,6 +1079,8 @@ fi
 adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
 sleep 2
 adb shell input text "open%swechat" || true
+sleep 1
+adb shell input text "%s" || true
 sleep 1
 adb shell uiautomator dump /sdcard/suggest_kb.xml > /dev/null 2>&1 || true
 adb pull /sdcard/suggest_kb.xml "$OUT/suggest_kb.xml" > /dev/null 2>&1 || true
