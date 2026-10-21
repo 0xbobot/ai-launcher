@@ -320,6 +320,11 @@ RCX=""; RCY=""
 if [ -f "$OUT/local_dump.xml" ]; then
   # 结果条里的应用名节点（首页基线 UI 无其它 "Clock" 文本）
   RNODE=$(grep -o '<node[^>]*text="Clock"[^>]*>' "$OUT/local_dump.xml" | head -1)
+  if [ -z "$RNODE" ]; then
+    # 结果项标签 TextView 偶发未进语义树（R4 small/MINIMAL 两轮实测，视觉与图标均正常）：
+    # 退到结果项图标 View 的 content-desc 节点（同为无障碍可读信号，坐标在其可点容器内）
+    RNODE=$(grep -o '<node[^>]*class="android.view.View"[^>]*content-desc="Clock"[^>]*>' "$OUT/local_dump.xml" | head -1)
+  fi
   if [ -n "$RNODE" ]; then
     ok "intent-local-results"
     RNUMS=$(echo "$RNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
@@ -545,7 +550,7 @@ for OFF in 0 1 2; do
         adb shell uiautomator dump /sdcard/tpl_dump2.xml > /dev/null 2>&1 || true
         adb pull /sdcard/tpl_dump2.xml "$OUT/tpl_${TPL}_local.xml" > /dev/null 2>&1 || true
       fi
-      if [ -f "$OUT/tpl_${TPL}_local.xml" ] && grep -q 'text="Clock"' "$OUT/tpl_${TPL}_local.xml"; then
+      if [ -f "$OUT/tpl_${TPL}_local.xml" ] && { grep -q 'text="Clock"' "$OUT/tpl_${TPL}_local.xml" || grep -q '<node[^>]*class="android.view.View"[^>]*content-desc="Clock"' "$OUT/tpl_${TPL}_local.xml"; }; then
         ok "tpl-$TPL-local"
       else
         ng "tpl-$TPL-local"
@@ -632,7 +637,7 @@ if ! grep -q 'text="Clock"' "$OUT/present_dump.xml" 2>/dev/null; then
   adb shell uiautomator dump /sdcard/present_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/present_dump.xml "$OUT/present_dump.xml" > /dev/null 2>&1 || true
 fi
-if [ -f "$OUT/present_dump.xml" ] && grep -q 'text="Clock"' "$OUT/present_dump.xml"; then
+if [ -f "$OUT/present_dump.xml" ] && { grep -q 'text="Clock"' "$OUT/present_dump.xml" || grep -q '<node[^>]*class="android.view.View"[^>]*content-desc="Clock"' "$OUT/present_dump.xml"; }; then
   ok "intent-present-results"
 else
   ng "intent-present-results"

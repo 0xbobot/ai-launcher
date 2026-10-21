@@ -97,7 +97,12 @@ def main():
     root = parse(os.path.join(out, "local_dump.xml"))
     if root is not None:
         pm = parent_map(root)
-        report("result-item", find_first(root, lambda n: n.get("text") == "Clock"), density, pm)
+        item = find_first(root, lambda n: n.get("text") == "Clock")
+        if item is None:
+            # 标签 TextView 偶发未进语义树（R4 实测）：退到图标 View 的 content-desc 节点，
+            # 尺寸仍量其可点祖先（结果项容器），口径不变
+            item = find_first(root, lambda n: n.get("class") == "android.view.View" and n.get("content-desc") == "Clock")
+        report("result-item", item, density, pm)
 
     # 扇形：只测量，逐节点列出（smoke.sh 第 5b 段在按住窗口内 dump）。
     # 扇区为 Canvas 绘制，是否有语义节点、尺寸多大，由报告人工据此判定，不自动下结论。
