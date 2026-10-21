@@ -598,6 +598,9 @@ fun AppCenterContent(
                         val q = query.trim()
                         if (q.isNotEmpty()) onAskQizai(q)
                     },
+                    // 应用中心变体专属（10-21 Bob 批准）：✕ 一键清空，清空后网格恢复全量；
+                    // 首页胶囊不开启，保持原设计。
+                    showClearButton = true,
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(modifier = Modifier.width(4.dp))

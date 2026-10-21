@@ -4,8 +4,8 @@
 # 每步容错：失败记 FAIL 继续往下走，不设 -e；最后汇总 PASS/FAIL 并以 FAIL 数作为退出码。
 # 截图（smoke-out/）：home.png / fan.png / pet.png / appcenter.png / dark-home.png / dark-appcenter.png /
 # intent-home.png / intent-nokey.png / intent-local.png / intent-opened.png / appcenter2.png /
-# appcenter-filter.png / intent-tpl-giant.png / intent-tpl-headline.png / intent-tpl-minimal.png
-#（含各自 -local 结果条图），供人工验证。
+# appcenter-filter.png / appcenter-cleared.png / intent-tpl-giant.png / intent-tpl-headline.png /
+# intent-tpl-minimal.png（含各自 -local 结果条图），供人工验证。
 # 首启对话框（onboarding 引导、低电量保护询问）用 run-as 预写 SharedPreferences 跳过，
 # 不依赖 UI 坐标；若预写失败，用固定坐标点按做兜底（pixel_6 1080x2400，对话框位置稳定）。
 
@@ -321,6 +321,38 @@ if [ -f "$OUT/ac_dump2.xml" ]; then
   else
     ng "appcenter-filter"
   fi
+fi
+# ✕ 一键清空（10-21 追加，应用中心变体专属）：ac_dump2 里应有 content-desc="清空" 节点；
+# press 点它后文本清空——占位"想做什么？"回来、「问七仔」行消失（网格恢复由截图人工验）。
+KX=""; KY=""
+if [ -f "$OUT/ac_dump2.xml" ]; then
+  KNODE=$(grep -o '<node[^>]*content-desc="清空"[^>]*>' "$OUT/ac_dump2.xml" | head -1)
+  if [ -n "$KNODE" ]; then
+    ok "appcenter-clear-btn"
+    KNUMS=$(echo "$KNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    KX1=$(echo "$KNUMS" | sed -n 1p); KY1=$(echo "$KNUMS" | sed -n 2p)
+    KX2=$(echo "$KNUMS" | sed -n 3p); KY2=$(echo "$KNUMS" | sed -n 4p)
+    if [ -n "$KX1" ] && [ -n "$KY2" ]; then
+      KX=$(( (KX1 + KX2) / 2 )); KY=$(( (KY1 + KY2) / 2 ))
+      log "appcenter clear button at ($KX,$KY)"
+    fi
+  else
+    ng "appcenter-clear-btn"
+  fi
+fi
+if [ -n "$KX" ]; then
+  adb shell input swipe "$KX" "$KY" "$KX" "$KY" 150 || true
+  sleep 2
+  shot "appcenter-cleared"
+  adb shell uiautomator dump /sdcard/ac_dump3.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/ac_dump3.xml "$OUT/ac_dump3.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/ac_dump3.xml" ] && grep -q 'text="想做什么？"' "$OUT/ac_dump3.xml" && ! grep -q '问七仔' "$OUT/ac_dump3.xml"; then
+    ok "appcenter-cleared"
+  else
+    ng "appcenter-cleared"
+  fi
+else
+  ng "appcenter-cleared"
 fi
 
 # --- 11. 封面 3 模板下的胶囊 + 结果条（R2 UI 10-21 追加：Bob 提醒主页有 3 模板轮换）---

@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -45,6 +48,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -65,12 +69,18 @@ import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.delay
 
+/** 结果条槽位高度上限：三种内容（本地结果/回复错误/权限卡）共用，超限不挤压 Dock。 */
+private val RESULT_BAR_MAX_HEIGHT = 180.dp
+
 /**
  * 意图胶囊输入行（2026-10-21 新规格：胶囊与应用中心搜索合二为一的同一组件）。
  *
  * 首页与应用中心共用这一行：✨ + 输入框 + 金色提交按钮，无麦克风。
  * 组件本身只管输入与提交；"打字时出什么"由宿主决定——
  * 首页在胶囊下方结果条出本地应用直达，应用中心用同一文本过滤网格。
+ *
+ * [showClearButton]（2026-10-21 Bob 批准）：仅应用中心变体开启——有文本时在提交钮左侧
+ * 出 ✕ 一键清空（点后文本清空、网格恢复全量）；首页胶囊保持原设计不开，避免和提交钮抢位。
  */
 @Composable
 fun IntentCapsuleField(
@@ -79,7 +89,8 @@ fun IntentCapsuleField(
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
     placeholder: String = "想做什么？",
-    planning: Boolean = false
+    planning: Boolean = false,
+    showClearButton: Boolean = false
 ) {
     val focusRequester = remember { FocusRequester() }
     val canSubmit = text.isNotBlank() && !planning
@@ -129,6 +140,25 @@ fun IntentCapsuleField(
             }
         )
         Spacer(modifier = Modifier.width(10.dp))
+        // ✕ 一键清空（仅应用中心变体开启）：有文本时才出现，清空走 onTextChange("")，
+        // 宿主状态层（应用中心 query）随之回空、网格自动恢复，不另设回调。
+        if (showClearButton && text.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .clickable { onTextChange("") },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "清空",
+                    tint = AILauncherColors.Hint,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+        }
         // 提交区：Planning 时换轻量进度（文字保留、不可重复提交）
         Box(
             modifier = Modifier
@@ -312,6 +342,10 @@ fun IntentEntry(
  * 七仔结果条·本地直达：打字时实时出的本地应用匹配（图标+名称，最多 4 个）。
  * 与回复/错误小条同一槽位、同一 Card 语言；文案以七仔口吻呈现——结果是七仔端出来的。
  * 只展示，点选才打开，绝不自动执行。
+ *
+ * 高度贴合内容（2026-10-21 Bob 批准）：文字关字体内边距（includeFontPadding=false）+
+ * 显式行高 + 收紧内边距，消除单个结果时卡片下方的大片空白；整体上限 180dp
+ * （[RESULT_BAR_MAX_HEIGHT]），超限条内滚动，不挤 Dock。
  */
 @Composable
 private fun LocalResultsBar(
@@ -322,19 +356,25 @@ private fun LocalResultsBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp)
+            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
             .clip(RoundedCornerShape(16.dp))
             .background(AILauncherColors.Card.copy(alpha = 0.88f))
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Text(
             text = "七仔找到了这些，点一下打开",
             fontSize = 12.sp,
-            color = AILauncherColors.Hint
+            color = AILauncherColors.Hint,
+            style = TextStyle(
+                lineHeight = 15.sp,
+                platformStyle = PlatformTextStyle(includeFontPadding = false)
+            )
         )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
+                .padding(top = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             apps.forEach { app ->
@@ -343,7 +383,7 @@ private fun LocalResultsBar(
                         .width(64.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { onOpen(app) }
-                        .padding(vertical = 6.dp),
+                        .padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     AppIconImage(
@@ -360,9 +400,13 @@ private fun LocalResultsBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center,
+                        style = TextStyle(
+                            lineHeight = 13.sp,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 4.dp)
+                            .padding(top = 3.dp)
                     )
                 }
             }
@@ -405,6 +449,9 @@ private fun StatusStrip(
             text = text,
             fontSize = 13.sp,
             color = AILauncherColors.Body,
+            // 短时小条：最多 3 行，超长截断，保证结果条高度有上限（见 RESULT_BAR_MAX_HEIGHT）
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
         if (actionLabel != null && onAction != null) {
@@ -445,8 +492,10 @@ private fun PermissionExplainCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp)
+            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
             .clip(RoundedCornerShape(16.dp))
             .background(AILauncherColors.Card.copy(alpha = 0.92f))
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
