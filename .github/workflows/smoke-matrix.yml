@@ -1,0 +1,102 @@
+name: Smoke Matrix (Regression)
+
+# R4 设备/无障碍回归矩阵：同一套 scripts/smoke.sh 在多配置组合上并行跑，
+# 抓单配置（现行 smoke-test.yml 的 API 34 / pixel_6 基线）看不见的布局/兼容问题。
+# 定位：发版前门禁，手动 dispatch；每版自动冒烟仍走 smoke-test.yml，两者互不替代。
+# 组合经环境变量传给 smoke.sh：SMOKE_FONT_SCALE（整轮环境字体）/ SMOKE_NIGHT=yes
+# （整轮深色）/ SMOKE_LABEL（日志标识）；截图与 a11y 报告按组合名存 artifact。
+# dispatch 口径同 smoke-test：取 dispatch 所在 ref 最近一次成功构建的 APK。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  matrix-smoke:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 基线：与 smoke-test.yml 同配置，意图全量断言 + a11y 断言的参照组
+          - label: base-api34-pixel6
+            api-level: 34
+            profile: pixel_6
+            font-scale: ""
+            night: ""
+          # 小屏紧凑：pixel_2（1080x1920，比 pixel_6 矮 480px）+ 整轮字体 1.3，
+          # 压胶囊/Dock 挤压与大字体溢出
+          - label: small-api34-pixel2-font13
+            api-level: 34
+            profile: pixel_2
+            font-scale: "1.3"
+            night: ""
+          # 大屏/平板形态：Nexus 9（2048x1536）。横屏呈现只观察记录，
+          # 横屏实现归横屏专项（冲突 4），本矩阵不据此改版式
+          - label: tablet-api34-nexus9
+            api-level: 34
+            profile: "Nexus 9"
+            font-scale: ""
+            night: ""
+          # 低版本兼容：API 29 = minSdk 下限
+          - label: api29-pixel6
+            api-level: 29
+            profile: pixel_6
+            font-scale: ""
+            night: ""
+          # 整轮深色：意图段也在深色下跑（smoke.sh 第 8 段不再复原浅色）
+          - label: dark-api34-pixel6
+            api-level: 34
+            profile: pixel_6
+            font-scale: ""
+            night: "yes"
+    steps:
+      - name: Checkout dispatch ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download debug APK artifact (latest success on this ref)
+        uses: dawidd6/action-download-artifact@v27
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: build-apk.yml
+          branch: ${{ github.ref_name }}
+          workflow_conclusion: success
+          name: ai-launcher-debug-apk
+          path: apk
+
+      - name: Install emulator system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpulse0
+          sudo chmod 666 /dev/kvm || true
+          ls -la /dev/kvm
+
+      - name: Run smoke matrix leg on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          SMOKE_FONT_SCALE: ${{ matrix.font-scale }}
+          SMOKE_NIGHT: ${{ matrix.night }}
+          SMOKE_LABEL: ${{ matrix.label }}
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: default
+          arch: x86_64
+          profile: ${{ matrix.profile }}
+          disable-animations: true
+          emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu swiftshader_indirect
+          script: bash scripts/smoke.sh
+
+      - name: Upload matrix screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-matrix-${{ matrix.label }}
+          path: smoke-out/
+          retention-days: 14
