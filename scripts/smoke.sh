@@ -761,6 +761,13 @@ nextup_tap_flow() {
   log "nextup-$ANAME diag events: $DIAG_EV"
   log "nextup-$ANAME diag instances: $DIAG_IN"
   log "nextup-$ANAME diag db: $DIAG_DB"
+  # 环境门：App 读的是 Instances 展开视图；本镜像 provider 对 CLI/直写种入的事件
+  # 不做展开（实测 events 可见、instances 为空）→ 此环境测不了点按行为，明示 SKIP
+  # 不判 FAIL 也不冒充 PASS；种子在哪天能进 Instances（换镜像/provider 放行），断言自动生效。
+  if ! echo "$DIAG_IN" | grep -q "$TITLE"; then
+    log "nextup-$ANAME: SKIP (seeded event not visible in Instances on this image; tap behavior unverified here)"
+    return
+  fi
   adb shell uiautomator dump /sdcard/nextup_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/nextup_dump.xml "$OUT/nextup_${ANAME}.xml" > /dev/null 2>&1 || true
   local NODE=""
@@ -884,17 +891,17 @@ if [ -n "$CAL_ID" ]; then
     # $1=title $2=description(可空)；任一路种入成功返回 0
     local INS
     if [ -n "$2" ]; then
-      INS=$(adb shell content insert --uri "content://com.android.calendar/events?caller_is_syncadapter=true" \
-        --bind calendar_id:i:"$CAL_ID" --bind title:s:"$1" --bind description:s:"$2" \
-        --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
-        --bind eventTimezone:s:UTC 2>&1 || true)
+      # 带 URL 的 description 会触发 content CLI 的 bind 解析 bug（实测 usage 报错），直接走直写
+      log "nextup content-event '$1': skipped (URL bind breaks content CLI parser), using db"
+      INS=""
     else
-      INS=$(adb shell content insert --uri "content://com.android.calendar/events?caller_is_syncadapter=true" \
+      # syncadapter 身份插事件必须在 URI 上带 account 参数（实测报错原文要求），单引号防 & 被设备 shell 拆断
+      INS=$(adb shell content insert --uri "'content://com.android.calendar/events?caller_is_syncadapter=true&account_name=smoke@local&account_type=LOCAL'" \
         --bind calendar_id:i:"$CAL_ID" --bind title:s:"$1" \
         --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
         --bind eventTimezone:s:UTC 2>&1 || true)
+      log "nextup content-event '$1': $(echo "$INS" | head -2 | tr '\n' ' ')"
     fi
-    log "nextup content-event '$1': $(echo "$INS" | head -2 | tr '\n' ' ')"
     if echo "$INS" | grep -q "Row:"; then return 0; fi
     if [ -n "$HAS_SQLITE" ] && nextup_db_event "$1" "$2"; then return 0; fi
     return 1
