@@ -652,21 +652,33 @@ fi
 # 离开本包 / logcat 有目标 START 派发。种事件失败时：基线腿（无 SMOKE_LABEL，
 # per-commit 门禁）判 FAIL；矩阵腿只记 INFO 跳过（不冒充已验）。
 adb shell pm grant "$PKG" android.permission.READ_CALENDAR > /dev/null 2>&1 || true
-CAL_ID=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>/dev/null | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+# content 操作走 root（本镜像 §11 已证 root 可用）：CalendarProvider 按调用 UID 查权限，
+# shell 身份在部分镜像上查不到日历表；root 后可绕过。后续段落不受影响（§11 本就会 root）。
+adb root > /dev/null 2>&1 || true
+adb wait-for-device > /dev/null 2>&1 || true
+sleep 1
+CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
+log "nextup calendars query#1: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
+CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
 if [ -z "$CAL_ID" ]; then
   # 冷启动日历 App 一次促其建本地日历，再查
   adb shell am start -a android.intent.action.MAIN -c android.intent.category.APP_CALENDAR > /dev/null 2>&1 || true
   sleep 3
   adb shell input keyevent KEYCODE_HOME || true
   sleep 1
-  CAL_ID=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>/dev/null | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+  CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
+  log "nextup calendars query#2: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
+  CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
 fi
 if [ -z "$CAL_ID" ]; then
-  adb shell content insert --uri content://com.android.calendar/calendars \
+  INS_CAL=$(adb shell content insert --uri content://com.android.calendar/calendars \
     --bind account_name:s:smoke@local --bind account_type:s:LOCAL \
     --bind name:s:SmokeCal --bind calendar_displayName:s:SmokeCal \
-    --bind calendar_access_level:i:700 --bind visible:i:1 --bind sync_events:i:1 > /dev/null 2>&1 || true
-  CAL_ID=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>/dev/null | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+    --bind calendar_access_level:i:700 --bind visible:i:1 --bind sync_events:i:1 2>&1 || true)
+  log "nextup calendars insert: $INS_CAL"
+  CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
+  log "nextup calendars query#3: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
+  CAL_ID=$(echo "$CAL_RAW" | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
 fi
 log "nextup seed calendar_id=${CAL_ID:-none}"
 
