@@ -33,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,9 +45,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -62,6 +68,8 @@ import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
+import com.bobot.ailauncher.data.PetMood
+import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.island.IslandToasts
@@ -91,20 +99,22 @@ fun IntentCapsuleField(
     modifier: Modifier = Modifier,
     placeholder: String = "想做什么？",
     planning: Boolean = false,
-    showClearButton: Boolean = false
+    showClearButton: Boolean = false,
+    // R3-C：焦点变化回调（首页用来驱动七仔倾听姿态；应用中心不传，保持纯过滤）
+    onFocusChanged: (Boolean) -> Unit = {}
 ) {
     val focusRequester = remember { FocusRequester() }
     val canSubmit = text.isNotBlank() && !planning
     Row(
         modifier = modifier
             // R3-A：最小高度策略——fontScale 放大时允许胶囊长高，不定死 56dp 裁字；
-            // 1.0 字号下内容（40dp 提交钮）+上下 8dp 内边距 = 56dp，外观与原规格一致
+            // 内容最高项是提交钮触控外框 48dp（R3-C），< 56dp 下限，外观仍是原规格 56dp
             .heightIn(min = 56.dp)
             .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.Title.copy(alpha = 0.08f))
             .clip(RoundedCornerShape(28.dp))
             .background(AILauncherColors.Card.copy(alpha = 0.88f))
             .clickable { focusRequester.requestFocus() }
-            .padding(horizontal = 18.dp, vertical = 8.dp),
+            .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -119,7 +129,13 @@ fun IntentCapsuleField(
             onValueChange = onTextChange,
             modifier = Modifier
                 .weight(1f)
-                .focusRequester(focusRequester),
+                .focusRequester(focusRequester)
+                .onFocusChanged { onFocusChanged(it.isFocused) }
+                // R3-C 无障碍：Planning 时给 TalkBack 一个状态说明（"七仔思考中"），
+                // 不必等结果条出现才知道提交已受理
+                .semantics {
+                    if (planning) stateDescription = "七仔思考中"
+                },
             enabled = !planning,
             singleLine = true,
             textStyle = TextStyle(
@@ -148,48 +164,62 @@ fun IntentCapsuleField(
         Spacer(modifier = Modifier.width(10.dp))
         // ✕ 一键清空（仅应用中心变体开启）：有文本时才出现，清空走 onTextChange("")，
         // 宿主状态层（应用中心 query）随之回空、网格自动恢复，不另设回调。
+        // R3-C 无障碍：触控目标 48dp（外框可点），视觉小圆仍 28dp，不改外观尺寸感。
         if (showClearButton && text.isNotEmpty()) {
             Box(
                 modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
+                    .size(48.dp)
                     .clickable { onTextChange("") },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = "清空",
-                    tint = AILauncherColors.Hint,
-                    modifier = Modifier.size(15.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "清空",
+                        tint = AILauncherColors.Hint,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
             }
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(2.dp))
         }
         // 提交区：Planning 时换轻量进度（文字保留、不可重复提交）
+        // R3-C 无障碍：触控目标 48dp（外框可点），金色视觉圆仍 40dp
         Box(
             modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(
-                    if (canSubmit || planning) AILauncherColors.Accent
-                    else AILauncherColors.Accent.copy(alpha = 0.35f)
-                )
+                .size(48.dp)
                 .clickable(enabled = canSubmit) { onSubmit() },
             contentAlignment = Alignment.Center
         ) {
-            if (planning) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = "提交",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (canSubmit || planning) AILauncherColors.Accent
+                        else AILauncherColors.Accent.copy(alpha = 0.35f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (planning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = "提交",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }
@@ -226,6 +256,8 @@ fun IntentEntry(
     // 已提交的文本：与当前文本相同期间不再出本地结果（提交后清掉本地层）
     var submittedText by remember { mutableStateOf<String?>(null) }
     val planning = state is IntentUiState.Planning
+    // R3-C：胶囊焦点（驱动七仔倾听姿态）
+    var capsuleFocused by remember { mutableStateOf(false) }
 
     // 本地直达层数据源：与应用中心 azApps 完全一致（listLaunchableApps 去自己、去隐藏），
     // 匹配复用 AppSearchIndex.build/search 同一实现，不另写一套。
@@ -258,6 +290,26 @@ fun IntentEntry(
         }
     }
 
+    // R3-C 七仔反应（对话感）：姿态只跟状态走，不说话、不弹气泡，克制优先——
+    // Planning=思考（SORTING+头顶点点）> 有结果/回复/错误/权限卡=呈现（FILE 抱卡片端出）
+    // > 聚焦编辑=倾听（FETCH 上浮举手"说吧")；其余回落整理员原姿态。
+    // 姿态经 PetRepository 覆盖层下发，IntentEntry 离场时清掉，不污染通知流程。
+    val presenting = localResults.isNotEmpty() ||
+        state is IntentUiState.Reply || state is IntentUiState.Error ||
+        state is IntentUiState.NeedsPermission
+    val intentPose = when {
+        planning -> PetMood.SORTING
+        presenting -> PetMood.FILE
+        capsuleFocused -> PetMood.FETCH
+        else -> null
+    }
+    LaunchedEffect(intentPose, planning) {
+        PetRepository.setIntentReaction(intentPose, thinking = planning)
+    }
+    DisposableEffect(Unit) {
+        onDispose { PetRepository.clearIntentReaction() }
+    }
+
     // 回复小条短时呈现：5 秒后自动收起（协调器 dismiss 回编辑态，原话不丢）
     LaunchedEffect(state) {
         if (state is IntentUiState.Reply) {
@@ -273,6 +325,7 @@ fun IntentEntry(
             onTextChange = { text = it },
             onSubmit = { submitIfReady() },
             planning = planning,
+            onFocusChanged = { capsuleFocused = it },
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -376,6 +429,8 @@ private fun LocalResultsBar(
             .clip(RoundedCornerShape(16.dp))
             .background(AILauncherColors.Card.copy(alpha = 0.88f))
             .verticalScroll(rememberScrollState())
+            // R3-C 无障碍：结果一出现 TalkBack 礼貌播报（标题+应用名），不用手动找焦点
+            .semantics { liveRegion = LiveRegionMode.Polite }
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Text(
@@ -458,6 +513,8 @@ private fun StatusStrip(
             .padding(top = 8.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(AILauncherColors.Card.copy(alpha = 0.88f))
+            // R3-C 无障碍：回复/错误出现时 TalkBack 礼貌播报条内文案
+            .semantics { liveRegion = LiveRegionMode.Polite }
             .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -480,19 +537,26 @@ private fun StatusStrip(
                 )
             }
         }
+        // R3-C 无障碍：关闭钮触控目标 48dp（外框可点），视觉圆仍 32dp
         Box(
             modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
+                .size(48.dp)
                 .clickable { onClose() },
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = "关闭",
-                tint = AILauncherColors.Hint,
-                modifier = Modifier.size(16.dp)
-            )
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "关闭",
+                    tint = AILauncherColors.Hint,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }
@@ -512,6 +576,8 @@ private fun PermissionExplainCard(
             .clip(RoundedCornerShape(16.dp))
             .background(AILauncherColors.Card.copy(alpha = 0.92f))
             .verticalScroll(rememberScrollState())
+            // R3-C 无障碍：权限说明出现时 TalkBack 礼貌播报
+            .semantics { liveRegion = LiveRegionMode.Polite }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {

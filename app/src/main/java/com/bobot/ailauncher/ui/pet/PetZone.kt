@@ -175,6 +175,10 @@ fun PetZone(
     coverIntentSlot: @Composable () -> Unit = {}
 ) {
     val mood by PetRepository.mood.collectAsState()
+    // R3-C：意图反应姿态覆盖（对话感）——非空时优先于整理员 mood 渲染，通知流程不受影响
+    val intentPose by PetRepository.intentPose.collectAsState()
+    val intentThinking by PetRepository.intentThinking.collectAsState()
+    val displayMood = intentPose ?: mood
     val mouth by PetRepository.mouth.collectAsState()
     val dingText by PetRepository.dingText.collectAsState()
     val carryText by PetRepository.carryText.collectAsState()
@@ -441,7 +445,7 @@ fun PetZone(
                                 )
                         ) {
                             PetView(
-                                mood = mood,
+                                mood = displayMood,
                                 mouth = mouth,
                                 blinking = blinking,
                                 sleepy = petState == PetState.SLEEPY,
@@ -450,6 +454,21 @@ fun PetZone(
                                 onSceneDone = { demoScene = QizaiScene.NONE },
                                 modifier = Modifier.fillMaxSize()
                             )
+                        }
+                        // R3-C：意图思考态——七仔头顶冒思考点点（深色小药丸保底，
+                        // 任何封面底色上都看得清；与非封面模式的 ThinkDots 同一语言）
+                        if (intentThinking) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .background(
+                                        Color(0xFF141428).copy(alpha = 0.72f),
+                                        RoundedCornerShape(99.dp)
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                            ) {
+                                ThinkDots()
+                            }
                         }
                     }
                 }
@@ -557,8 +576,8 @@ fun PetZone(
                         .padding(horizontal = 12.dp, vertical = 7.dp)
                 )
             }
-            // 思考省略号
-            if (showDots) {
+            // 思考省略号（整理员思考中 / R3-C 意图 Planning 思考中，共用同一呈现）
+            if (showDots || intentThinking) {
                 ThinkDots(modifier = Modifier.align(Alignment.TopCenter).padding(top = 44.dp))
             }
             // v0.29.0：升级礼物盒——有新版时七仔头顶抱礼物盒
@@ -591,7 +610,7 @@ fun PetZone(
     // v0.56.0 M2 抚摸：长按 + 滑动 = 抚摸（害羞+腮红+轻颤）
     var pettedThisGesture by remember { mutableStateOf(false) }
     PetView(
-                mood = mood,
+                mood = displayMood,
                 mouth = mouth,
                 blinking = blinking,
                 sleepy = petState == PetState.SLEEPY,
