@@ -108,18 +108,30 @@ shot "home"
 # 必须落在空白背景上（y=1400 为 TODAY 卡片与 Dock 之间的空白）；落在卡片上会被吃掉。
 # 注意 2：扇形只在按住拖动期间可见——松手即触发（段外/拍照段进相机、⊕段进编辑）。
 # 所以用后台长 swipe（3 秒），在拖动中途截图，才能抓到展开中的扇形。
-adb shell input swipe "$(SX 900)" "$(SY 1400)" "$(SX 300)" "$(SY 1400)" 4000 &
+adb shell input swipe "$(SX 900)" "$(SY 1400)" "$(SX 300)" "$(SY 1400)" 3000 &
 SWIPE_PID=$!
 sleep 1.5
 shot "fan"
-# R4 a11y：拖动中 dump 一次供第 15 段查扇形段语义节点（扇形为 Canvas 手势面，
-# dump 里无段节点属预期内发现，只记录不判失败）；dump 赶不上拖动窗口时 pull 失败自动跳过。
-adb shell uiautomator dump /sdcard/fan_dump.xml > /dev/null 2>&1 || true
 wait $SWIPE_PID || true
-adb pull /sdcard/fan_dump.xml "$OUT/fan_dump.xml" > /dev/null 2>&1 || true
 # 清理松手后的状态：扇形编辑的 bottom sheet（选择应用/快捷方式）BACK 关不掉，
 # 本 App 就是桌面、HOME 也重置不了 Compose 状态（R1 二、三轮实测，清理 tap 还会误触推进流程）
 # → force-stop 重启进程，确定性回到首页基线
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+
+# --- 5b. 扇形语义 dump（R4 a11y）：基线恢复后单独再起一次 6 秒拖动，2.5 秒时 dump ---
+# uiautomator 读树需 1-2 秒，必须落在按住窗口内（第一段拖动中实测读到的是松手后首页）。
+# dump 内容供第 15 段逐节点列出量尺寸；松手后照旧 force-stop 清理恢复基线。
+adb shell input swipe "$(SX 900)" "$(SY 1400)" "$(SX 300)" "$(SY 1400)" 6000 &
+SWIPE2_PID=$!
+sleep 2.5
+adb shell uiautomator dump /sdcard/fan_dump.xml > /dev/null 2>&1 || true
+adb pull /sdcard/fan_dump.xml "$OUT/fan_dump.xml" > /dev/null 2>&1 || true
+wait $SWIPE2_PID || true
 adb shell am force-stop "$PKG" || true
 sleep 1
 adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true

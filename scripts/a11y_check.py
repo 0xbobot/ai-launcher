@@ -93,12 +93,13 @@ def main():
         pm = parent_map(root)
         report("result-item", find_first(root, lambda n: n.get("text") == "Camera"), density, pm)
 
-    # 扇形：只测量。段节点若存在，其包围盒必然很大；以「全屏以下的可点节点」为候选。
+    # 扇形：只测量，逐节点列出（smoke.sh 第 5b 段在按住窗口内 dump）。
+    # 扇区为 Canvas 绘制，是否有语义节点、尺寸多大，由报告人工据此判定，不自动下结论。
     root = parse(os.path.join(out, "fan_dump.xml"))
     if root is None:
         print("A11Y INFO fan: dump unavailable (not measured)")
     else:
-        cands = []
+        nodes = []
         for n in root.iter("node"):
             if n.get("clickable") == "true":
                 b = bounds(n)
@@ -106,14 +107,14 @@ def main():
                     w = (b[2] - b[0]) * 160.0 / density
                     h = (b[3] - b[1]) * 160.0 / density
                     if not (w > 300 and h > 300):  # 排除全屏根容器
-                        cands.append((w, h, n.get("content-desc") or n.get("text") or ""))
-        if not cands:
-            print("A11Y FAN-NO-SEMANTICS: no clickable sector nodes in fan dump "
+                        nodes.append((b, w, h, n.get("content-desc") or "", n.get("text") or ""))
+        if not nodes:
+            print("A11Y FAN-NO-SEMANTICS: no clickable nodes in fan dump "
                   "(canvas gesture surface) -> real-device TalkBack item")
         else:
-            smallest = min(cands, key=lambda c: min(c[0], c[1]))
-            print(f"A11Y INFO fan: {len(cands)} clickable nodes, smallest "
-                  f"{smallest[0]:.1f}x{smallest[1]:.1f}dp ('{smallest[2]}')")
+            for b, w, h, desc, text in nodes[:14]:
+                print(f"A11Y INFO fan-node: {w:.1f}x{h:.1f}dp bounds={b} desc='{desc}' text='{text}'")
+            print(f"A11Y INFO fan: {len(nodes)} clickable nodes during drag (see fan-node lines)")
 
     print("A11Y INFO liveRegion/stateDescription: not exposed in uiautomator dump "
           "-> real-device TalkBack item")
