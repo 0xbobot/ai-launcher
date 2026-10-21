@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- debug-only manifest：Live2D 渲染验证 demo 入口（live2d-mvp 分支）。
-     不影响 release 包，不碰主 manifest。 -->
+     不影响 release 包，不碰主 manifest。
+     意图改进二批追加：application 挂冒烟 mock 网络配置（仅放行 127.0.0.1 明文，
+     供 CI 第 17 段经 adb reverse 访问本机 mock LLM；见 res/xml/smoke_mock_network.xml）。 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+    <application android:networkSecurityConfig="@xml/smoke_mock_network">
         <activity
             android:name="com.bobot.ailauncher.debug.Live2DDemoActivity"
             android:exported="true"

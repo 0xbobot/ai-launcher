@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 debug 构建（src/debug）：放行到 127.0.0.1 的明文 HTTP，其余域名维持系统默认
+  （targetSdk 34 默认禁明文）。用途单一：冒烟第 17 段经 adb reverse 访问 runner
+  本机的 mock LLM 端点（scripts/mock_llm.py），让缺参追问态能在 CI 里实拍。
+  回环流量不出设备；生产端点均为 https，不受此配置影响。
+  若不接受这份配置：删掉本文件与 src/debug/AndroidManifest.xml 即可，
+  第 17 段会自动跳过（needsinput 三项断言不计入，追问态退回仅单测覆盖）。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
