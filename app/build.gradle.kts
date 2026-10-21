@@ -12,8 +12,8 @@ android {
         applicationId = "com.bobot.ailauncher"
         minSdk = 29
         targetSdk = 34
-        versionCode = 296
-        versionName = "0.68.88"
+        versionCode = 297
+        versionName = "0.68.89"
     }
 
     // 固定 debug 签名：所有 CI 构建共用 app/debug.keystore（个人实验项目，
