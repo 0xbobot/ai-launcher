@@ -291,15 +291,15 @@ fun IntentEntry(
     }
 
     // R3-C 七仔反应（对话感）：姿态只跟状态走，不说话、不弹气泡，克制优先——
-    // Planning=思考（SORTING+头顶点点）> 有结果/回复/错误/权限卡=呈现（FILE 抱卡片端出）
-    // > 聚焦编辑=倾听（FETCH 上浮举手"说吧")；其余回落整理员原姿态。
+    // Planning=思考（SORTING+头顶点点）> 本地结果/回复=呈现（HAPPY 原地放大弹跳"找到了"）
+    // > 聚焦编辑=倾听（FETCH 上浮举手"说吧")；错误/权限不给姿态（出错不装开心，
+    // 回落倾听或整理员原姿态）。呈现不用 FILE：FILE 自带 +104dp 右移（归档动线），
+    // 在封面右侧位模板会把七仔推出屏幕（冒烟 intent-present 实拍翻车后改）。
     // 姿态经 PetRepository 覆盖层下发，IntentEntry 离场时清掉，不污染通知流程。
-    val presenting = localResults.isNotEmpty() ||
-        state is IntentUiState.Reply || state is IntentUiState.Error ||
-        state is IntentUiState.NeedsPermission
+    val presenting = localResults.isNotEmpty() || state is IntentUiState.Reply
     val intentPose = when {
         planning -> PetMood.SORTING
-        presenting -> PetMood.FILE
+        presenting -> PetMood.HAPPY
         capsuleFocused -> PetMood.FETCH
         else -> null
     }
