@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """R4 无障碍触控尺寸检查：解析 uiautomator dump，量关键触控目标的实际 dp 尺寸。
 
-用法：a11y_check.py <density> <dump_dir>
+用法：a11y_check.py <density> <dump_dir> [landscape=0|1]
 输出行前缀 A11Y OK / A11Y FAIL / A11Y INFO / A11Y FAN-*，smoke.sh 以 FAIL 行判定断言。
 
 硬断言（>=48dp，量可点祖先节点的 bounds）：
 - 提交按钮：intent_dump.xml 中 content-desc="提交"
 - 清空按钮：ac_dump2.xml 中 content-desc="清空"
 - 问七仔行：ac_dump2.xml 中 text 含「问七仔」
-- 本地结果项：local_dump.xml 中 text="Camera" 的可点祖先
+- 本地结果项：local_dump.xml 中 text="Clock" 的可点祖先（探针选 Clock：API 29 镜像无相机）
+横屏（landscape=1）时 ac_dump2 来自横屏旧搜索框流程，无清空/问七仔控件，
+这两项缺失记 INFO 跳过（横屏未并入统一胶囊，R4 发现 F2），在场则照常测量。
 
 只测量不判失败：
 - 扇形段（fan_dump.xml）：扇形是 Canvas 手势面，统计可点节点；无段语义节点时
@@ -58,9 +60,12 @@ def clickable_ancestor(node, pmap):
     return node
 
 
-def report(name, node, density, pmap):
+def report(name, node, density, pmap, missing_ok=False):
     if node is None:
-        print(f"A11Y FAIL {name}: node missing in dump")
+        if missing_ok:
+            print(f"A11Y INFO {name}: skipped in landscape (control not present)")
+        else:
+            print(f"A11Y FAIL {name}: node missing in dump")
         return
     target = clickable_ancestor(node, pmap)
     b = bounds(target)
@@ -82,16 +87,17 @@ def main():
         pm = parent_map(root)
         report("submit-btn", find_first(root, lambda n: n.get("content-desc") == "提交"), density, pm)
 
+    landscape = len(sys.argv) > 3 and sys.argv[3] == "1"
     root = parse(os.path.join(out, "ac_dump2.xml"))
     if root is not None:
         pm = parent_map(root)
-        report("clear-btn", find_first(root, lambda n: n.get("content-desc") == "清空"), density, pm)
-        report("ask-row", find_first(root, lambda n: "问七仔" in (n.get("text") or "")), density, pm)
+        report("clear-btn", find_first(root, lambda n: n.get("content-desc") == "清空"), density, pm, missing_ok=landscape)
+        report("ask-row", find_first(root, lambda n: "问七仔" in (n.get("text") or "")), density, pm, missing_ok=landscape)
 
     root = parse(os.path.join(out, "local_dump.xml"))
     if root is not None:
         pm = parent_map(root)
-        report("result-item", find_first(root, lambda n: n.get("text") == "Camera"), density, pm)
+        report("result-item", find_first(root, lambda n: n.get("text") == "Clock"), density, pm)
 
     # 扇形：只测量，逐节点列出（smoke.sh 第 5b 段在按住窗口内 dump）。
     # 扇区为 Canvas 绘制，是否有语义节点、尺寸多大，由报告人工据此判定，不自动下结论。
