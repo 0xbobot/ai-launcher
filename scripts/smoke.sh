@@ -1164,6 +1164,7 @@ fi
 if [ "$MOCK_UP" = "1" ]; then
   # 设备侧 127.0.0.1:$MOCK_PORT -> runner 本机 mock（回环转发，段末撤销）
   adb reverse "tcp:$MOCK_PORT" "tcp:$MOCK_PORT" > /dev/null 2>&1 || true
+  log "reverse list: $(adb reverse --list 2> /dev/null | tr '\n' ' ')"
   adb shell am force-stop "$PKG" || true
   printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
     '    <string name="api_key">sk-mock</string>' \
@@ -1225,6 +1226,10 @@ if [ "$MOCK_UP" = "1" ]; then
           if grep -q "去哪儿" "$OUT/ni_q.xml" 2> /dev/null; then FOUND_Q=1; break; fi
         done
         shot "intent-needsinput"
+        # 诊断（mock 通路排障）：把 LlmPlan 的网络异常原文打进冒烟日志并存档，
+        # 区分「明文被拦 / 转发未生效 / 连接拒绝」，不靠猜。
+        adb logcat -d 2> /dev/null | grep "LlmPlan" | tail -4 | while IFS= read -r line; do log "llm: $line"; done
+        adb logcat -d 2> /dev/null | grep "LlmPlan" > "$OUT/ni_logcat.txt" || true
         if [ "$FOUND_Q" = "1" ]; then
           ok "needsinput-question"
         else
