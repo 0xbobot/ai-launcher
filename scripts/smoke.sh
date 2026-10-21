@@ -249,14 +249,25 @@ if [ -f "$OUT/local_dump.xml" ]; then
     ng "intent-local-results"
   fi
 fi
-# press 点结果 -> 前台应切到相机（模拟器相机包 com.android.camera2）
+# press 点结果 -> 相机应被打开。先清 logcat 再点；本模拟器 -camera-back none 无相机硬件，
+# AOSP Camera2 可能被拉起后立即退出（3 秒后单次前台采样会错过），故双路取证：
+# 前台轮询 6 秒任一命中 camera，或 logcat 出现目标包的 START 派发记录，都算链路通。
 if [ -n "$RCX" ]; then
+  adb logcat -c > /dev/null 2>&1 || true
   adb shell input swipe "$RCX" "$RCY" "$RCX" "$RCY" 150 || true
-  sleep 3
+  OPENED=0
+  FG=""
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    sleep 0.5
+    FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
+    if echo "$FG" | grep -qi "camera"; then OPENED=1; break; fi
+  done
   shot "intent-opened"
-  FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
   log "foreground after open: $FG"
-  if echo "$FG" | grep -qi "camera"; then
+  if [ "$OPENED" = "1" ]; then
+    ok "intent-open-app"
+  elif adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "camera"; then
+    log "camera start dispatched (foreground did not stick: no camera HAL in this emulator)"
     ok "intent-open-app"
   else
     ng "intent-open-app"
