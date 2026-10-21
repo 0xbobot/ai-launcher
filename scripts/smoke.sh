@@ -643,6 +643,144 @@ else
   ng "intent-present-results"
 fi
 
+# --- 14. 封面会议卡点按入会（2026-10-21 真机 Bug：文案"点一下加入"点了没反应）---
+# 根因：封面 NextUpStrip 的 onMeetingTap 误接提醒函数 remindMeeting（只让七仔说话、
+# 且带去重——第二次点按字面无反应），从未打开会议链接/日历。修复后点按必须兑现文案：
+# 有可解析会议链接 → 直开链接；无链接 → 打开日历/事件详情；全失败七仔说话兜底。
+# 取证：往设备日历种两条事件（先无链接、后带 Zoom 链接），每次 force-stop 重启让
+# TodaySection 读到，dump 定位卡片标题、量其 clickable 祖先，press 点按后断言前台
+# 离开本包 / logcat 有目标 START 派发。种事件失败时：基线腿（无 SMOKE_LABEL，
+# per-commit 门禁）判 FAIL；矩阵腿只记 INFO 跳过（不冒充已验）。
+adb shell pm grant "$PKG" android.permission.READ_CALENDAR > /dev/null 2>&1 || true
+CAL_ID=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>/dev/null | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+if [ -z "$CAL_ID" ]; then
+  # 冷启动日历 App 一次促其建本地日历，再查
+  adb shell am start -a android.intent.action.MAIN -c android.intent.category.APP_CALENDAR > /dev/null 2>&1 || true
+  sleep 3
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 1
+  CAL_ID=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>/dev/null | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+fi
+if [ -z "$CAL_ID" ]; then
+  adb shell content insert --uri content://com.android.calendar/calendars \
+    --bind account_name:s:smoke@local --bind account_type:s:LOCAL \
+    --bind name:s:SmokeCal --bind calendar_displayName:s:SmokeCal \
+    --bind calendar_access_level:i:700 --bind visible:i:1 --bind sync_events:i:1 > /dev/null 2>&1 || true
+  CAL_ID=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>/dev/null | grep -o '_id=[0-9]*' | head -1 | cut -d= -f2)
+fi
+log "nextup seed calendar_id=${CAL_ID:-none}"
+
+nextup_tap_flow() {
+  # $1=事件标题 $2=断言名 $3=期望前台/派发关键词
+  local TITLE="$1" ANAME="$2" EXPECT="$3"
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  adb shell uiautomator dump /sdcard/nextup_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/nextup_dump.xml "$OUT/nextup_${ANAME}.xml" > /dev/null 2>&1 || true
+  local NODE=""
+  if [ -f "$OUT/nextup_${ANAME}.xml" ]; then
+    NODE=$(grep -o "<node[^>]*text=\"[^\"]*${TITLE}[^\"]*\"[^>]*>" "$OUT/nextup_${ANAME}.xml" | head -1)
+  fi
+  if [ -z "$NODE" ]; then
+    ng "nextup-$ANAME-card"
+    return
+  fi
+  ok "nextup-$ANAME-card"
+  shot "nextup-$ANAME-card"
+  local NUMS X1 Y1 X2 Y2 TX TY
+  NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+  X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+  TX=$(( (X1 + X2) / 2 )); TY=$(( (Y1 + Y2) / 2 ))
+  # clickable 祖先量测（python3 在场时）：标题节点中心须落在某个 clickable=true 节点内
+  if command -v python3 > /dev/null 2>&1; then
+    if python3 - "$OUT/nextup_${ANAME}.xml" "$TX" "$TY" <<'PYEOF'
+import re, sys
+data = open(sys.argv[1], encoding='utf-8', errors='ignore').read()
+tx, ty = int(sys.argv[2]), int(sys.argv[3])
+for m in re.finditer(r'<node[^>]*clickable="true"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', data):
+    x1, y1, x2, y2 = map(int, m.groups())
+    if x1 <= tx <= x2 and y1 <= ty <= y2:
+        sys.exit(0)
+sys.exit(1)
+PYEOF
+    then
+      ok "nextup-$ANAME-clickable"
+    else
+      ng "nextup-$ANAME-clickable"
+    fi
+  else
+    log "nextup-$ANAME-clickable: python3 unavailable, skipped (not counted)"
+  fi
+  adb logcat -c > /dev/null 2>&1 || true
+  adb shell input swipe "$TX" "$TY" "$TX" "$TY" 150 || true
+  local OPENED=0 FG="" i
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    sleep 0.5
+    FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
+    if echo "$FG" | grep -qi "$EXPECT"; then OPENED=1; break; fi
+    if [ -n "$FG" ] && ! echo "$FG" | grep -q "$PKG"; then OPENED=1; break; fi
+  done
+  shot "nextup-$ANAME"
+  log "nextup-$ANAME foreground after tap: $FG"
+  if [ "$OPENED" = "1" ]; then
+    ok "nextup-$ANAME-open"
+  elif adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "$EXPECT"; then
+    log "nextup-$ANAME start dispatched (foreground did not stick)"
+    ok "nextup-$ANAME-open"
+  else
+    ng "nextup-$ANAME-open"
+  fi
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+}
+
+if [ -n "$CAL_ID" ]; then
+  EMU_S=$(adb shell date +%s 2>/dev/null | tr -d '\r ')
+  if [ -z "$EMU_S" ]; then EMU_S=$(date +%s); fi
+  EV_BEGIN=$(( (EMU_S + 1200) * 1000 ))
+  EV_END=$(( (EMU_S + 4800) * 1000 ))
+  # 事件 A：无链接 → 点卡应打开日历（CATEGORY_APP_CALENDAR / 事件详情）
+  INS_A=$(adb shell content insert --uri content://com.android.calendar/events \
+    --bind calendar_id:i:"$CAL_ID" --bind title:s:SmokeNoLink \
+    --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
+    --bind eventTimezone:s:UTC 2>&1 || true)
+  log "nextup insert A: $INS_A"
+  if echo "$INS_A" | grep -q "Row:"; then
+    nextup_tap_flow "SmokeNoLink" "nolink" "calendar"
+  elif [ -z "$SMOKE_LABEL" ]; then
+    ng "nextup-seed"
+  else
+    log "nextup seed insert failed on this leg - skipped (not counted)"
+  fi
+  adb shell content delete --uri content://com.android.calendar/events --where "title='SmokeNoLink'" > /dev/null 2>&1 || true
+  # 事件 B：描述带 Zoom 链接 → 点卡应直开链接（前台离开本包 / 派发含 zoom）
+  INS_B=$(adb shell content insert --uri content://com.android.calendar/events \
+    --bind calendar_id:i:"$CAL_ID" --bind title:s:SmokeWithLink \
+    --bind description:s:https://zoom.us/j/1234567890 \
+    --bind dtstart:l:"$EV_BEGIN" --bind dtend:l:"$EV_END" \
+    --bind eventTimezone:s:UTC 2>&1 || true)
+  log "nextup insert B: $INS_B"
+  if echo "$INS_B" | grep -q "Row:"; then
+    nextup_tap_flow "SmokeWithLink" "withlink" "zoom"
+  elif [ -z "$SMOKE_LABEL" ]; then
+    ng "nextup-seed-link"
+  else
+    log "nextup seed-link insert failed on this leg - skipped (not counted)"
+  fi
+  adb shell content delete --uri content://com.android.calendar/events --where "title='SmokeWithLink'" > /dev/null 2>&1 || true
+else
+  if [ -z "$SMOKE_LABEL" ]; then
+    ng "nextup-seed"
+  else
+    log "nextup seed unavailable on this leg - skipped (not counted)"
+  fi
+fi
+
 # --- 15. 无障碍触控尺寸断言（R4）：量已拉取 dump 里关键目标的实际 dp 尺寸（>=48dp）---
 # 覆盖：提交按钮（intent_dump）/ 清空按钮 + 问七仔行（ac_dump2）/ 本地结果项（local_dump）。
 # 扇形段（fan_dump）只测量记录：扇形是 Canvas 手势面，无段语义节点即记为发现项，

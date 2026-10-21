@@ -396,6 +396,53 @@ fun PetZone(
         demoScene = QizaiScene.READING
         // v0.51.2：日历只走 TODAY，不再走整理员（避免多重重复）
     }
+    // 封面紧凑条点按（文案承诺"点一下加入"，必须真入会/打开日程，不能只提醒）：
+    // 1) 事件里有可解析的在线会议链接 → 直开链接（会议 App/浏览器接管）；
+    // 2) 无链接 → 与非封面 TODAY 会议行同款三级兜底打开日历/事件详情；
+    // 3) 全失败 → 七仔说话兜底，绝不无反应。不走 remindMeeting 的去重（点按每次都要有结果）。
+    fun joinMeeting(e: CalEvent) {
+        val url = getValidMeetingUrl(context, e)
+        if (url != null) {
+            try {
+                context.startActivity(
+                    android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(url)
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+                return
+            } catch (_: Exception) { /* 链接打开失败 → 落日历兜底 */ }
+        }
+        var opened = false
+        try {
+            val intent = android.content.Intent(
+                android.content.Intent.ACTION_MAIN
+            ).addCategory(
+                android.content.Intent.CATEGORY_APP_CALENDAR
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (intent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(intent)
+                opened = true
+            }
+        } catch (_: Exception) { }
+        if (!opened && e.eventId > 0) {
+            try {
+                val uri = android.net.Uri.parse(
+                    "content://com.android.calendar/events/${e.eventId}"
+                )
+                val viewIntent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW, uri
+                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (viewIntent.resolveActivity(context.packageManager) != null) {
+                    context.startActivity(viewIntent)
+                    opened = true
+                }
+            } catch (_: Exception) { }
+        }
+        if (!opened) {
+            PetRepository.say("没找到日历应用")
+        }
+    }
     // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
     var jellyTick by remember { mutableIntStateOf(0) }
 
@@ -488,7 +535,7 @@ fun PetZone(
                         summary = coverSummary,
                         nextEvent = coverNextEvent,
                         palette = coverPalette,
-                        onMeetingTap = { e -> remindMeeting(e, "cover") },
+                        onMeetingTap = { e -> joinMeeting(e) },
                         modifier = if (isLandscapeCover) Modifier.fillMaxWidth(0.62f) else Modifier.fillMaxWidth()
                     )
                 }
