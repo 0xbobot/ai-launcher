@@ -178,8 +178,19 @@ tap_rid() {
 # 自行先 BACK 再重 dump（第 9 段法）。
 enter_input_mode() {
   local F="$1"
-  adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
+  # eim_dump：dump+pull 一次；拉回为空（uiautomator 0 字节偶发）时重拉一次。
+  # 空文件是「未知」不是「不在场」——dark 腿两轮实测：校验 dump 为空被误判
+  # 未进入，调用段随后用兜底坐标误点建议面应用（Contacts 被打开）级联失败。
+  eim_dump() {
+    adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
+    if [ ! -s "$F" ]; then
+      sleep 1
+      adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
+      adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
+    fi
+  }
+  eim_dump
   if [ -f "$F" ] && grep -q 'resource-id="intent_input"' "$F"; then
     log "enter_input_mode: capsule already present"
     return 0
@@ -188,21 +199,23 @@ enter_input_mode() {
     tap_rid "$F" "pet_qizai" || true
   fi
   sleep 2
-  adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
+  eim_dump
   if [ -f "$F" ] && grep -q 'resource-id="intent_input"' "$F"; then
     log "enter_input_mode: capsule present after pet-cell tap"
     return 0
   fi
   # uiautomator 偶发残缺 dump 会让第一份 dump 缺七仔格、点按落空（R-1 二轮
   # 实测 giant 模板中招，同第 10 段登记过的残缺层级现象）：第二份 dump 里
-  # 七仔格在场则再点一次重试，不把偶发当产品失败。
-  if [ -f "$F" ] && grep -q 'resource-id="dock_pet_cell"' "$F"; then
+  # 七仔格在场则再点一次重试，不把偶发当产品失败。校验 dump 既无胶囊又无
+  # 七仔格（层级残缺/未知）时同样重试一次。
+  if [ -f "$F" ] && { grep -q 'resource-id="dock_pet_cell"' "$F" || \
+      ! grep -q 'resource-id="pet_qizai"' "$F"; }; then
     log "enter_input_mode: retrying pet-cell tap (first dump may have been partial)"
-    tap_rid "$F" "dock_pet_cell" || true
+    if ! tap_rid "$F" "dock_pet_cell"; then
+      tap_rid "$F" "pet_qizai" || true
+    fi
     sleep 2
-    adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
-    adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
+    eim_dump
     if [ -f "$F" ] && grep -q 'resource-id="intent_input"' "$F"; then
       log "enter_input_mode: capsule present after retry"
       return 0
