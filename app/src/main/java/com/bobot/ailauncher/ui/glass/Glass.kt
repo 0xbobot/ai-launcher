@@ -69,8 +69,18 @@ class GlassBackdropState internal constructor() {
     /** 背景容器左上角的窗口坐标（玻璃面据此换算自身相对位置）。 */
     var originInWindow by mutableStateOf(IntOffset.Zero)
 
-    /** 背景是照片/场景还是纯纸面（强度随背景走，见 GlassPolicy.paramsFor）。 */
-    var backdropKind by mutableStateOf(BackdropKind.FLAT)
+    /** 背景源高度（窗口 px），玻璃面按自身纵向位置取所在水平带的分类用。 */
+    var backdropHeightPx by mutableIntStateOf(0)
+
+    /**
+     * 背景的水平带分类（自上而下，见 GlassPolicy.classifyBands）：强度随背景走
+     * 且随位置走——同一张壁纸，Dock 带（画面下部）与气泡带可不同档。
+     * v0.68.96 前是整图单一分类，被大面积低纹理区域稀释后会误判轻霜。
+     */
+    var backdropBands by mutableStateOf<List<BackdropKind>>(listOf(BackdropKind.FLAT))
+
+    /** 整图概览（无位置信息时的兜底）：任一带为照片即按照片对待。 */
+    val backdropKind: BackdropKind get() = GlassPolicy.overallKind(backdropBands)
 
     /** 桌面可见且未被全屏层（D3）遮挡时才为 true；false → 全面回模拟档（省电）。 */
     var active by mutableStateOf(false)
@@ -89,6 +99,7 @@ fun Modifier.glassBackdropSource(state: GlassBackdropState): Modifier = this
     .onGloballyPositioned {
         val p = it.positionInWindow()
         state.originInWindow = IntOffset(p.x.roundToInt(), p.y.roundToInt())
+        state.backdropHeightPx = it.size.height
     }
     .drawWithContent {
         val layer = state.layer
@@ -147,12 +158,11 @@ fun Modifier.glassSurface(
         lowBattery = state.lowBattery,
         lowRam = state.lowRam,
     )
-    val params = GlassPolicy.paramsFor(tier, state.backdropKind)
-    if (tier == GlassTier.SIMULATED || params == null) {
+    if (tier == GlassTier.SIMULATED) {
         return this.background(fallbackColor, RoundedCornerShape(cornerRadius))
     }
     return this.then(
-        glassDraw(state, tier, params, cornerRadius, tintColor, fallbackColor, tintBoost)
+        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost)
     )
 }
 
@@ -185,7 +195,6 @@ private class PatchCache {
 private fun glassDraw(
     state: GlassBackdropState,
     tier: GlassTier,
-    params: GlassParams,
     cornerRadius: Dp,
     tintColor: Color,
     fallbackColor: Color,
@@ -194,6 +203,22 @@ private fun glassDraw(
     val composeDensity = LocalDensity.current.density
     val patchBlur = rememberGraphicsLayer()
     val patchSharp = rememberGraphicsLayer()
+    var posInWindow by remember { mutableStateOf(Offset.Zero) }
+    var elemSize by remember { mutableStateOf(IntSize.Zero) }
+    // v0.68.96：参数按「表面所在水平带」的背景分类取——同一张壁纸上，
+    // Dock 带（下部远山）走照片全开、顶部天空带可走轻霜，不再被整图均值绑架。
+    val bandKind = if (state.backdropHeightPx > 0 && elemSize.height > 0) {
+        val centerFraction =
+            (posInWindow.y - state.originInWindow.y + elemSize.height / 2f) /
+                state.backdropHeightPx
+        GlassPolicy.kindAtFraction(state.backdropBands, centerFraction)
+    } else {
+        state.backdropKind
+    }
+    val params = GlassPolicy.paramsFor(tier, bandKind)
+    if (params == null) {
+        return Modifier.background(fallbackColor, RoundedCornerShape(cornerRadius))
+    }
     // AGSL 只在 API 33+ 创建；创建失败（个别驱动编译不过）→ 强玻璃自动降中玻璃绘制
     val shader = remember {
         if (Build.VERSION.SDK_INT >= GlassPolicy.API_RUNTIME_SHADER) {
@@ -220,12 +245,14 @@ private fun glassDraw(
         }
     }
     val strong = tier == GlassTier.STRONG && shaderEffect != null
-    var posInWindow by remember { mutableStateOf(Offset.Zero) }
     val cache = remember { PatchCache() }
     val boost = tintBoost.coerceIn(0f, 1f)
 
     return Modifier
-        .onGloballyPositioned { posInWindow = it.positionInWindow() }
+        .onGloballyPositioned {
+            posInWindow = it.positionInWindow()
+            elemSize = it.size
+        }
         .drawWithContent {
             val backdrop = state.layer
             val tick = state.recordTick // 订阅背景重录
@@ -266,6 +293,25 @@ private fun glassDraw(
             }
             if (blurSatEffect != null) patchBlur.renderEffect = blurSatEffect
             patchBlur.topLeft = IntOffset(-cache.margin, -cache.margin)
+            // v0.68.96：外侧暗描边——线心压在几何边缘上，外半线落在玻璃之外，
+            // 在亮背景上衬出切面轮廓（亮边在浅色场景里单独不够辨认）。
+            if (params.rimAlpha > 0f) {
+                val rimHalf = 0.5.dp.toPx()
+                val rimPath = Path().apply {
+                    addRoundRect(
+                        RoundRect(
+                            -rimHalf, -rimHalf,
+                            size.width + rimHalf, size.height + rimHalf,
+                            CornerRadius(radiusPx + rimHalf),
+                        )
+                    )
+                }
+                drawPath(
+                    path = rimPath,
+                    color = Color.Black.copy(alpha = params.rimAlpha),
+                    style = Stroke(width = 1.dp.toPx()),
+                )
+            }
             val shapePath = Path().apply {
                 addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radiusPx)))
             }

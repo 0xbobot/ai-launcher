@@ -40,7 +40,7 @@ internal fun SystemWallpaperLayer(state: GlassBackdropState, modifier: Modifier 
         }
         if (loaded != null) {
             bitmap = loaded.first
-            state.backdropKind = loaded.second
+            state.backdropBands = loaded.second
         }
     }
     val bmp = bitmap ?: return
@@ -52,7 +52,7 @@ internal fun SystemWallpaperLayer(state: GlassBackdropState, modifier: Modifier 
     )
 }
 
-private fun loadSystemWallpaper(context: Context): Pair<Bitmap, BackdropKind>? {
+private fun loadSystemWallpaper(context: Context): Pair<Bitmap, List<BackdropKind>>? {
     val wm = WallpaperManager.getInstance(context) ?: return null
     val drawable = runCatching { wm.drawable }.getOrNull() ?: return null
     val dm = context.resources.displayMetrics
@@ -70,10 +70,13 @@ private fun loadSystemWallpaper(context: Context): Pair<Bitmap, BackdropKind>? {
     val top = (h - dh) / 2
     drawable.setBounds(left, top, left + dw, top + dh)
     drawable.draw(canvas)
-    // 背景分类：24×24 缩略图统计亮度起伏与色彩（纯逻辑在 GlassPolicy）
-    val small = Bitmap.createScaledBitmap(bmp, 24, 24, true)
-    val pixels = IntArray(24 * 24)
-    small.getPixels(pixels, 0, 24, 0, 0, 24, 24)
-    val (stdDev, satMean) = GlassPolicy.backdropStats(pixels)
-    return bmp to GlassPolicy.classifyBackdrop(stdDev, satMean)
+    // 背景分类（v0.68.96 区域版）：48×48 缩略图按水平带统计（亮度起伏/饱和/
+    // 局部细节），逐带分类——整图均值会被大面积低纹理区域（如浅蓝天）稀释，
+    // 曾把蓝天+远山照片误判成轻霜（叠白 0.38 吃掉通透感）。位图即屏幕尺寸
+    // （cover 绘制），缩略图的带与画面纵向位置一一对应。
+    val thumb = 48
+    val small = Bitmap.createScaledBitmap(bmp, thumb, thumb, true)
+    val pixels = IntArray(thumb * thumb)
+    small.getPixels(pixels, 0, thumb, 0, 0, thumb, thumb)
+    return bmp to GlassPolicy.classifyBands(pixels, thumb, thumb)
 }

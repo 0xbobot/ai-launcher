@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.ui.home
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +23,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.CalEvent
+import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
+import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.CoverPalette
 import java.text.SimpleDateFormat
@@ -62,7 +63,16 @@ fun NextUpStrip(
             .padding(horizontal = 20.dp)
             .shadow(8.dp, RoundedCornerShape(20.dp), spotColor = palette.title.copy(alpha = 0.08f))
             .clip(RoundedCornerShape(20.dp))
-            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
+            // v0.68.96（F-02）：换中玻璃——封面模式下真正露出的 TODAY 表面此前
+            // 一直是 alpha 0.88 半透明模拟底（.94 试点把中玻璃误落到了不可达的
+            // 全量 TODAY 卡上，该卡已随 F-01 退役）。模拟档 fallback 回原 0.88 底，
+            // 圆角/阴影/尺寸不动。
+            .glassSurface(
+                kind = GlassSurfaceKind.MEDIUM,
+                cornerRadius = 20.dp,
+                tintColor = AILauncherColors.current.Card,
+                fallbackColor = AILauncherColors.current.Card.copy(alpha = 0.88f)
+            )
             .then(if (hasMeeting) Modifier.clickable { nextEvent?.let(onMeetingTap) } else Modifier)
             .padding(horizontal = 22.dp, vertical = 18.dp)
     ) {

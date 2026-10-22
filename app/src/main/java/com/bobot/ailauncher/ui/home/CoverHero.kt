@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
@@ -197,7 +198,9 @@ fun CoverHeroGiantTime(
                     lineHeight = (titleSize.value + 10).sp,
                     letterSpacing = 2.sp,
                     color = palette.title,
-                    maxLines = 3
+                    maxLines = 3,
+                    // v0.68.96（F-07）：超行省略收尾，不硬裁切半个字（下同）
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -318,7 +321,7 @@ fun CoverHeroHeadline(
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
-                        color = palette.title, maxLines = 3)
+                        color = palette.title, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(text = "$timeText · $weatherDesc", fontSize = 16.sp,
                         color = palette.title.copy(alpha = 0.6f))
@@ -336,7 +339,7 @@ fun CoverHeroHeadline(
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
-                        letterSpacing = 2.sp, color = palette.title, maxLines = 4)
+                        letterSpacing = 2.sp, color = palette.title, maxLines = 4, overflow = TextOverflow.Ellipsis)
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(text = "$timeText · $weatherDesc", fontSize = 16.sp,
                         color = palette.title.copy(alpha = 0.6f))
@@ -452,7 +455,8 @@ fun CoverHeroLandscape(
                     fontWeight = FontWeight.Bold,
                     fontSize = 20.sp,
                     color = palette.title,
-                    maxLines = 2
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))

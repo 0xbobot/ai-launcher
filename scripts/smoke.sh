@@ -1601,7 +1601,9 @@ else
   ng "focus-cancel-outside"
 fi
 
-# --- 19. 玻璃试点批：双背景取证（照片壁纸全开强玻璃 / 纯纸面轻霜）---
+# --- 19. 玻璃试点批：三背景取证（照片壁纸全开强玻璃 / 蓝天远山 / 纯纸面轻霜）---
+# v0.68.96 起三张壁纸（sky 排首位，离第 14 段种子事件最近）：每张全景 +
+# NextUp 聚焦图（F-02 中玻璃补到紧凑条）+ 气泡图，走 glass_wallpaper_round。
 # 应用在第 17 段末尾被 force-stop，这里重新拉起走正常冷启路径。
 # v2 教训（实测）：本镜像 cmd wallpaper 没有 set 动词（help 只有 dim 相关，见
 # glass-wp-debug.txt），命令式换壁纸无解；v3 改走 root 直换壁纸文件 + 重启
@@ -1690,27 +1692,48 @@ glass_root_swap_wallpaper() {
   echo "== dumpsys wallpaper (initial) =="
   adb shell dumpsys wallpaper 2>/dev/null | head -25
 } > "$OUT/glass-wp-debug.txt" 2>&1 || true
-if python3 scripts/gen_wallpaper.py photo /tmp/glass-photo.png > /dev/null 2>&1 &&    python3 scripts/gen_wallpaper.py paper /tmp/glass-paper.png > /dev/null 2>&1; then
-  if glass_root_swap_wallpaper /tmp/glass-photo.png; then
-    glass_relaunch_home
-    shot "glass-photo"
-    glass_bubble_shot "glass-bubble-photo"
+glass_nextup_shot() {
+  # $1=截图名。NextUp 紧凑条取证（v0.68.96 F-02：该条本批换中玻璃）：
+  # 第 14 段种子事件窗口（+20~+80 分钟）仍覆盖本段时，聚焦胶囊→BACK 收键盘，
+  # 建议面与 NextUp 同屏入图（同 §14 dedupe 流）；事件不在场只记日志不判负
+  # （玻璃证据以本图为准，无事件时 NextUp 不渲染、由 glass-<mode> 全景图兜底）。
+  local name="$1"
+  adb shell uiautomator dump /sdcard/glass_nu_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/glass_nu_dump.xml "$OUT/glass_nu_dump.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/glass_nu_dump.xml" ] && grep -q 'resource-id="today_nextup"' "$OUT/glass_nu_dump.xml"; then
+    local DX DY CTR
+    DX=$(SX 540); DY=$(SY 1247)
+    CTR=$(center_rid "$OUT/glass_nu_dump.xml" "intent_input")
+    if [ -n "$CTR" ]; then DX=$(echo "$CTR" | cut -d' ' -f1); DY=$(echo "$CTR" | cut -d' ' -f2); fi
+    adb shell input swipe "$DX" "$DY" "$DX" "$DY" 150 > /dev/null 2>&1 || true
+    sleep 2
+    adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1 || true
+    sleep 1
+    shot "$name"
+    log "glass: nextup shot taken ($name)"
   else
-    log "glass: root swap failed (photo) - photo shots fall back to current wallpaper"
-    glass_relaunch_home
-    shot "glass-photo"
-    glass_bubble_shot "glass-bubble-photo"
+    log "glass: nextup absent for $name (seeded event window passed or not seeded)"
+    shot "$name"
   fi
-  if glass_root_swap_wallpaper /tmp/glass-paper.png; then
-    glass_relaunch_home
-    shot "glass-paper"
-    glass_bubble_shot "glass-bubble-paper"
-  else
-    log "glass: root swap failed (paper) - paper shots fall back to current wallpaper"
-    glass_relaunch_home
-    shot "glass-paper"
-    glass_bubble_shot "glass-bubble-paper"
+}
+glass_wallpaper_round() {
+  # $1=模式名（sky/photo/paper） $2=本地图路径。换壁纸→回桌面→全景/NextUp/气泡三拍。
+  local mode="$1" img="$2"
+  if ! glass_root_swap_wallpaper "$img"; then
+    log "glass: root swap failed ($mode) - shots fall back to current wallpaper"
   fi
+  glass_relaunch_home
+  shot "glass-$mode"
+  glass_nextup_shot "glass-$mode-nextup"
+  glass_bubble_shot "glass-bubble-$mode"
+}
+if python3 scripts/gen_wallpaper.py sky /tmp/glass-sky.png > /dev/null 2>&1 && \
+   python3 scripts/gen_wallpaper.py photo /tmp/glass-photo.png > /dev/null 2>&1 && \
+   python3 scripts/gen_wallpaper.py paper /tmp/glass-paper.png > /dev/null 2>&1; then
+  # sky 排第一：离第 14 段种子事件窗口最近，NextUp 取证成功率最高
+  glass_wallpaper_round sky /tmp/glass-sky.png
+  glass_wallpaper_round photo /tmp/glass-photo.png
+  glass_wallpaper_round paper /tmp/glass-paper.png
 else
   log "glass: wallpaper generation failed - set-based shots skipped"
 fi

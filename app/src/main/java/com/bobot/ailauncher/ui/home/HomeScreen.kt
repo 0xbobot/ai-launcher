@@ -4,8 +4,6 @@ import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
 import android.provider.Settings
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -126,12 +124,6 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(blindActive) {
         onBlindActiveChange(blindActive)
     }
-    // v0.68.34（Bob）：扇形展开时 TODAY 卡片淡出到 0.3（视觉让位，和 Dock 同逻辑）
-    val todayAlpha by animateFloatAsState(
-        targetValue = if (blindActive) 0.3f else 1f,
-        animationSpec = tween(200),
-        label = "todayAlpha",
-    )
     // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
     // v0.68.35：旧"自定义☆"固定槽位已作废——扇形快捷段直接读七仔装备列表，
     // 增删复用七仔装备长按/+ 流程，不再需要扇形侧配置弹窗
@@ -328,9 +320,9 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // v0.68.44（Bob）：杂志封面模式
+            // v0.68.96（F-01 退役）：PetZone 的非封面分支已删除，todayCardAlpha
+            // 参数随之移除——该淡出原本只作用于已退役的 TODAY 卡，封面形态从未吃到。
             PetZone(
-                todayCardAlpha = todayAlpha,
-                coverMode = true,
                 coverIntentSlot = {
                     // v0.68.93：包裹层只为捕获意图区在根坐标中的范围（焦点观察者用）
                     Box(

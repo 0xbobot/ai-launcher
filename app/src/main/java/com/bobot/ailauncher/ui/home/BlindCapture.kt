@@ -760,7 +760,9 @@ private fun FanIndicatorIcon(seg: FanSegment) {
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
                         color = iconTint,
-                        maxLines = 1
+                        maxLines = 1,
+                        // v0.68.96（F-07）：单字标签形式对齐（与段标题 :1282 同口径）
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

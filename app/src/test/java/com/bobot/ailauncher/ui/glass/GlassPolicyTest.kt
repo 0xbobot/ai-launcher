@@ -59,13 +59,20 @@ class GlassPolicyTest {
     }
 
     @Test
-    fun `strong textured params follow the design doc calibration`() {
+    fun `strong textured params after v0-68-96 recalibration for real-device feedback`() {
+        // Bob .94 真机反馈「完全没有玻璃的感觉」后的再标定：叠白大降、饱和
+        // 上调、折射加宽加强、亮边提亮，并新增外侧暗描边。
         val p = GlassPolicy.paramsFor(GlassTier.STRONG, BackdropKind.TEXTURED)!!
         assertTrue("blur 24..28dp", p.blurRadiusDp in 24f..28f)
-        assertTrue("saturation 130..140%", p.saturation in 1.30f..1.40f)
-        assertTrue("tint 12..15%", p.tintAlpha in 0.12f..0.15f)
-        assertTrue("refraction present", p.refractionDp > 0f)
-        assertTrue("specular present", p.specularStrength > 0f)
+        assertTrue("saturation raised to ~1.45", p.saturation in 1.40f..1.50f)
+        assertTrue("tint lowered to ~0.07", p.tintAlpha in 0.05f..0.10f)
+        assertTrue("refraction strengthened", p.refractionDp >= 14f)
+        assertTrue("refraction band widened", p.bandDp >= 26f)
+        assertTrue("edge highlight raised", p.edgeTopAlpha >= 0.70f)
+        assertTrue("outer rim present on textured", p.rimAlpha > 0f)
+        val m = GlassPolicy.paramsFor(GlassTier.MEDIUM, BackdropKind.TEXTURED)!!
+        assertTrue("medium tint lowered too", m.tintAlpha in 0.05f..0.10f)
+        assertTrue("medium saturation matches strong", m.saturation == p.saturation)
     }
 
     @Test
@@ -134,5 +141,105 @@ class GlassPolicyTest {
     fun `empty pixels classify as flat`() {
         val (std, sat) = GlassPolicy.backdropStats(IntArray(0))
         assertEquals(BackdropKind.FLAT, GlassPolicy.classifyBackdrop(std, sat))
+    }
+
+    // ---------- v0.68.96 区域分类 ----------
+
+    private fun argb(r: Int, g: Int, b: Int): Int =
+        (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+
+    @Test
+    fun `local detail - smooth gradient is near zero, checker is high`() {
+        val w = 48
+        val h = 48
+        // 平滑竖直渐变（纸面）：相邻步差 < 1
+        val gradient = IntArray(w * h) { i ->
+            val y = i / w
+            argb(200 + y / 4, 195 + y / 4, 185 + y / 4)
+        }
+        assertTrue(GlassPolicy.localDetail(gradient, w, h) < GlassPolicy.DETAIL_TEXTURED_MIN)
+        // 棋盘纹理：每步差都大
+        val checker = IntArray(w * h) { i ->
+            val x = i % w
+            val y = i / w
+            if ((x + y) % 2 == 0) argb(128, 128, 128) else argb(96, 96, 96)
+        }
+        assertTrue(GlassPolicy.localDetail(checker, w, h) >= GlassPolicy.DETAIL_TEXTURED_MIN)
+    }
+
+    @Test
+    fun `photo with real texture never classifies flat even when global stats are diluted`() {
+        // 复现 Bob 壁纸的误判结构：整图大面积平滑低饱和（灰），只有底部一条带
+        // 有真实纹理（灰色棋盘：饱和 0、与全局同亮度带）——整图统计 std<8、
+        // sat<0.06 会判 FLAT，但底部带必须判 TEXTURED。
+        val w = 48
+        val h = 48
+        val px = IntArray(w * h) { i ->
+            val x = i % w
+            val y = i / w
+            if (y >= h * 5 / 6) {
+                if ((x + y) % 2 == 0) argb(128, 128, 128) else argb(112, 112, 112)
+            } else {
+                argb(120, 120, 120)
+            }
+        }
+        val (gStd, gSat) = GlassPolicy.backdropStats(px)
+        assertEquals(
+            "precondition: global rule dilutes to FLAT",
+            BackdropKind.FLAT, GlassPolicy.classifyBackdrop(gStd, gSat)
+        )
+        val bands = GlassPolicy.classifyBands(px, w, h)
+        assertEquals(GlassPolicy.BACKDROP_BANDS, bands.size)
+        assertEquals("bottom band sees the texture", BackdropKind.TEXTURED, bands.last())
+        assertEquals(BackdropKind.TEXTURED, GlassPolicy.overallKind(bands))
+        assertEquals(
+            BackdropKind.TEXTURED,
+            GlassPolicy.kindAtFraction(bands, 0.95f)
+        )
+    }
+
+    @Test
+    fun `paper gradient classifies flat in every band`() {
+        val w = 48
+        val h = 48
+        // 暖纸渐变：上亮下略暗、无纹理、低饱和
+        val paper = IntArray(w * h) { i ->
+            val y = i / w
+            val t = y * 10 / h
+            argb(244 - t, 242 - t, 238 - t)
+        }
+        val bands = GlassPolicy.classifyBands(paper, w, h)
+        assertTrue(bands.all { it == BackdropKind.FLAT })
+        assertEquals(BackdropKind.FLAT, GlassPolicy.overallKind(bands))
+    }
+
+    @Test
+    fun `sky over mountains - dock band textured while sky band stays calm`() {
+        // Bob 的壁纸结构：上部平滑浅蓝天（低纹理），下部远山（噪点纹理）。
+        val w = 48
+        val h = 48
+        val px = IntArray(w * h) { i ->
+            val x = i % w
+            val y = i / w
+            if (y < h * 3 / 5) {
+                // 浅蓝天：平滑渐变
+                argb(168 + y / 6, 198 + y / 6, 228)
+            } else {
+                // 远山：蓝绿基底 + 确定性噪点（模拟树冠/山脊纹理）
+                val noise = ((x * 31 + y * 17) % 23) - 11
+                argb(86 + noise, 116 + noise, 84 + noise)
+            }
+        }
+        val bands = GlassPolicy.classifyBands(px, w, h)
+        assertEquals("dock band (bottom) is textured", BackdropKind.TEXTURED, bands.last())
+        assertEquals(BackdropKind.TEXTURED, GlassPolicy.kindAtFraction(bands, 0.92f))
+    }
+
+    @Test
+    fun `classify bands guards bad input`() {
+        val bands = GlassPolicy.classifyBands(IntArray(0), 0, 0)
+        assertEquals(GlassPolicy.BACKDROP_BANDS, bands.size)
+        assertTrue(bands.all { it == BackdropKind.FLAT })
+        assertEquals(BackdropKind.FLAT, GlassPolicy.kindAtFraction(emptyList(), 0.5f))
     }
 }
