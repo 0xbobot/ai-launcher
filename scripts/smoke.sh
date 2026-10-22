@@ -27,6 +27,12 @@
 # v0.68.95（布局与交互 Loop 二批-A）追加：第 20 段为数据新鲜度（装/卸桩应用
 # 在应用中心开着时实时刷新 A-Z 列表，catalog-install/uninstall-refresh），
 # crash 检查再顺延为第 21 段。
+# v0.68.97（布局普查批）追加：第 21 段为布局几何断言（scripts/layout_check.py
+# 量 tpl_*.xml / fan_dump.xml 与本段新拉的 layout_home/ac/settings dump：
+# cover_hero / 胶囊 / 发送键 / NextUp / 七仔 / Dock 面板两两不相交 + 关键元素
+# 完整在屏内），crash 检查再顺延为第 22 段。形态 env 追加 SMOKE_WM_SIZE /
+# SMOKE_USER_ROTATION：第 0 段几何读取前覆写显示尺寸与旋转锁定（矩阵的
+# 横屏手机短高、平板竖屏腿用），不带 env 时行为不变。
 # 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
 # 生成）/ 纯纸面三态各截首页（Dock+TODAY 卡），照片与纸面下再长按七仔截气泡
 # （glass-default / glass-photo / glass-bubble-photo / glass-paper /
@@ -69,8 +75,42 @@ adb wait-for-device
 adb shell input keyevent KEYCODE_WAKEUP || true
 sleep 2
 
+# --- 0a. 形态覆写（v0.68.97 布局普查批）：在几何读取前把基线设备改造成
+# 横屏手机短高 / 平板竖屏等形态；不带 env 时整段跳过、行为不变 ---
+if [ -n "$SMOKE_WM_SIZE" ]; then
+  adb shell wm size "$SMOKE_WM_SIZE" || true
+  log "wm size override -> $SMOKE_WM_SIZE"
+fi
+if [ -n "$SMOKE_USER_ROTATION" ]; then
+  adb shell settings put system accelerometer_rotation 0 || true
+  adb shell settings put system user_rotation "$SMOKE_USER_ROTATION" || true
+  log "user rotation lock -> $SMOKE_USER_ROTATION"
+fi
+if [ -n "$SMOKE_WM_SIZE" ] || [ -n "$SMOKE_USER_ROTATION" ]; then
+  # v0.68.97 实测：覆写不重启只部分生效——wm 尺寸先行、旋转迟迟不跟随，
+  # 横屏腿前半程（模板段等）仍按竖屏跑，直到玻璃段换壁纸重启后才横过来，
+  # 且 SCR 几何与真实坐标系脱节导致多段坐标断言误伤。覆写后立即重启一次，
+  # 让整个运行期形态一致；覆写值重启后保持（同轮实测）。
+  log "form-factor override: rebooting to apply"
+  adb reboot > /dev/null 2>&1 || true
+  adb wait-for-device > /dev/null 2>&1 || true
+  BOOTED=""
+  for i in $(seq 1 40); do
+    if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then BOOTED=1; break; fi
+    sleep 3
+  done
+  [ -n "$BOOTED" ] || log "form-factor override: boot wait timeout, continuing anyway"
+  adb shell input keyevent KEYCODE_WAKEUP || true
+  sleep 2
+fi
+
 # --- 0. 屏幕几何（R4）：基准 1080x2400 的写死坐标经 SX/SY 换算到实际分辨率；密度供 a11y 的 px->dp ---
-SIZE_LINE=$(adb shell wm size 2>/dev/null | grep -o '[0-9]\+x[0-9]\+' | head -1)
+# v0.68.97 教训：wm size 输出首行是 Physical size，有形态覆写时必须取 Override 行，
+# 否则 SCR_W/H 与真实 UI 坐标系脱节（横屏腿首轮实测：几何读成竖屏、全程坐标错位）。
+SIZE_LINE=$(adb shell wm size 2>/dev/null | grep -i "override" | grep -o '[0-9]\+x[0-9]\+' | head -1)
+if [ -z "$SIZE_LINE" ]; then
+  SIZE_LINE=$(adb shell wm size 2>/dev/null | grep -o '[0-9]\+x[0-9]\+' | head -1)
+fi
 SCR_W=$(echo "$SIZE_LINE" | cut -dx -f1); SCR_H=$(echo "$SIZE_LINE" | cut -dx -f2)
 if [ -z "$SCR_W" ] || [ -z "$SCR_H" ]; then SCR_W=1080; SCR_H=2400; fi
 DENSITY=$(adb shell wm density 2>/dev/null | grep -o '[0-9]\+' | head -1)
@@ -1832,7 +1872,115 @@ fi
 adb shell input keyevent KEYCODE_HOME || true
 sleep 1
 
-# --- 21. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 21. 布局几何断言（v0.68.97 布局普查批）：关键元素两两不相交 + 完整在屏内 ---
+# 量各段已产出的 tpl_*.xml / fan_dump.xml 与本段新拉的 layout_home / layout_ac /
+# layout_settings（scripts/layout_check.py，testTag 定位：cover_hero /
+# intent_input / intent_submit / today_nextup / pet_qizai / dock_panel，
+# dock_panel 缺失退化为 dock_item 并集）。聚焦态不查 Dock（IME 升起时
+# dump 中的 Dock bounds 是被键盘覆盖的不可见几何）。
+log "layout: segment start"
+# NextUp 几何要有「即将开始」的事件在场才查得到：第 14 段种的事件到本段
+# （约 25 分钟后）多已开始/被删，home-current 首轮实测 nextup 恒缺席、这条
+# 核心对（NextUp x Dock/胶囊）永远查不到。重启前复用第 14 段的 seed 函数
+# 现种一条 +10 分钟开始的探针事件；函数不在场/种失败只记日志跳过。
+if type nextup_seed_event > /dev/null 2>&1; then
+  LAYOUT_NOW_S=$(adb shell date +%s 2>/dev/null | tr -d '\r')
+  if [ -n "$LAYOUT_NOW_S" ]; then
+    EV_BEGIN=$(( (LAYOUT_NOW_S + 600) * 1000 ))
+    EV_END=$(( (LAYOUT_NOW_S + 4200) * 1000 ))
+    if nextup_seed_event "LayoutProbe" ""; then
+      log "layout: probe event seeded (starts in 10min)"
+    else
+      log "layout: probe event seed failed, nextup pair checks may skip"
+    fi
+  fi
+else
+  log "layout: nextup_seed_event unavailable on this leg, nextup pair checks may skip"
+fi
+# 上一段结束时停在 D3 应用中心（Dock 状态在 MainActivity 内，am start/HOME 回不到
+# 首页视图，同第 9 段实测结论）→ force-stop 重启回首页基线再取 dump；
+# 日历事件在 provider 侧，重启不丢，NextUp 检查不受影响。
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+# 到家自验（首轮实测：个别腿重启后仍停在应用中心/权限引导层，layout_home
+# 误拍成应用中心、断言对象张冠李戴）：探针 dump 循环——见「暂不」点掉权限
+# 引导层；仍在应用中心（齿轮在场）按返回键走 BackHandler（D3->记住的行数）
+# 退出；cover_hero 在场且齿轮缺席才算到家。验不过也继续（checker 对缺席
+# 元素 INFO 跳过、不假 FAIL），但日志留痕供定性。
+HOME_OK=0
+for TRY in 1 2 3 4; do
+  adb shell uiautomator dump /sdcard/layout_probe.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/layout_probe.xml "$OUT/layout_probe.xml" > /dev/null 2>&1 || true
+  [ -f "$OUT/layout_probe.xml" ] || break
+  if grep -q 'text="暂不"' "$OUT/layout_probe.xml"; then
+    PNODE=$(grep -o '<node[^>]*text="暂不"[^>]*>' "$OUT/layout_probe.xml" | head -1)
+    PNUMS=$(echo "$PNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    PX1=$(echo "$PNUMS" | sed -n 1p); PY1=$(echo "$PNUMS" | sed -n 2p)
+    PX2=$(echo "$PNUMS" | sed -n 3p); PY2=$(echo "$PNUMS" | sed -n 4p)
+    if [ -n "$PX1" ] && [ -n "$PY2" ]; then
+      adb shell input tap $(( (PX1 + PX2) / 2 )) $(( (PY1 + PY2) / 2 )) || true
+      log "layout: permission sheet dismissed via 暂不 (try $TRY)"
+    fi
+    sleep 1
+    continue
+  fi
+  if grep -q 'resource-id="cover_hero"' "$OUT/layout_probe.xml" && ! grep -q 'resource-id="appcenter_settings"' "$OUT/layout_probe.xml"; then
+    HOME_OK=1
+    break
+  fi
+  if grep -q 'resource-id="appcenter_settings"' "$OUT/layout_probe.xml"; then
+    adb shell input keyevent KEYCODE_BACK || true
+    log "layout: still in app center, BACK to exit D3 (try $TRY)"
+    sleep 1
+    continue
+  fi
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 1
+done
+log "layout: home arrival verified=$HOME_OK"
+shot "layout-home"
+adb shell uiautomator dump /sdcard/layout_home.xml > /dev/null 2>&1 || true
+adb pull /sdcard/layout_home.xml "$OUT/layout_home.xml" > /dev/null 2>&1 || true
+# 进应用中心：多泳道上滑 + 每轮 dump 自验（横屏短高时中泳道起点落在
+# NextUp 条上会被卡片吞掉手势——run2 landphone 实测；左泳道起点在条下方
+# 空区可用）。命中齿轮即停，最多三轮。
+AC_OK=0
+for LANE in "540 2000 540 800" "200 2250 200 1000" "200 1600 200 600"; do
+  set -- $LANE
+  adb shell input swipe "$(SX $1)" "$(SY $2)" "$(SX $3)" "$(SY $4)" 300 || true
+  sleep 3
+  adb shell uiautomator dump /sdcard/layout_ac.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/layout_ac.xml "$OUT/layout_ac.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/layout_ac.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/layout_ac.xml"; then
+    AC_OK=1
+    break
+  fi
+  log "layout: app center not reached via lane ($LANE), trying next"
+done
+log "layout: app center reached=$AC_OK"
+shot "layout-appcenter"
+if tap_rid "$OUT/layout_ac.xml" "appcenter_settings"; then
+  sleep 3
+  shot "layout-settings"
+  adb shell uiautomator dump /sdcard/layout_set.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/layout_set.xml "$OUT/layout_settings.xml" > /dev/null 2>&1 || true
+  adb shell input keyevent KEYCODE_BACK || true
+  sleep 1
+else
+  log "layout: settings gear not tappable on this leg, settings state skipped"
+fi
+adb shell input keyevent KEYCODE_HOME || true
+sleep 1
+LAYOUT_OUT=$(python3 scripts/layout_check.py "$OUT" "$SCR_W" "$SCR_H" 2>&1)
+echo "$LAYOUT_OUT" | while IFS= read -r line; do log "$line"; done
+LAYOUT_FAILS=$(echo "$LAYOUT_OUT" | grep -c "LAYOUT FAIL" || true)
+if [ "$LAYOUT_FAILS" -gt 0 ]; then ng "layout-geometry($LAYOUT_FAILS)"; else ok "layout-geometry"; fi
+
+# --- 22. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

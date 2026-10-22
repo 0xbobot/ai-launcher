@@ -5,6 +5,10 @@ name: Smoke Matrix (Regression)
 # 定位：发版前门禁，手动 dispatch；每版自动冒烟仍走 smoke-test.yml，两者互不替代。
 # 组合经环境变量传给 smoke.sh：SMOKE_FONT_SCALE（整轮环境字体）/ SMOKE_NIGHT=yes
 # （整轮深色）/ SMOKE_LABEL（日志标识）；截图与 a11y 报告按组合名存 artifact。
+# v0.68.97（布局普查批）追加两腿：横屏手机短高（pixel_6 + SMOKE_WM_SIZE
+# 2400x1080 + 旋转锁定横屏——Bob 真机横屏重叠缺陷的形态）、平板竖屏
+# （Nexus 9 + 1536x2048 + 旋转 0）；smoke.sh 第 0a 段在几何读取前覆写，
+# 第 21 段 layout_check.py 做元素两两不相交的几何断言，全腿常驻。
 # dispatch 口径同 smoke-test：取 dispatch 所在 ref 最近一次成功构建的 APK。
 
 on:
@@ -55,6 +59,23 @@ jobs:
             profile: pixel_6
             font-scale: ""
             night: "yes"
+          # 横屏手机短高（布局普查批）：宽而矮的横屏手机/折叠屏形态，
+          # 专抓竖屏与平板横屏都看不见的封面重叠（胶囊×Dock 面板）
+          - label: landphone-api34-pixel6
+            api-level: 34
+            profile: pixel_6
+            font-scale: ""
+            night: ""
+            wm-size: "2400x1080"
+            user-rotation: "1"
+          # 平板竖屏（布局普查批）：补齐平板双向形态
+          - label: tabletport-api34-nexus9
+            api-level: 34
+            profile: "Nexus 9"
+            font-scale: ""
+            night: ""
+            wm-size: "1536x2048"
+            user-rotation: "0"
     steps:
       - name: Checkout dispatch ref
         uses: actions/checkout@v4
@@ -84,6 +105,8 @@ jobs:
           SMOKE_FONT_SCALE: ${{ matrix.font-scale }}
           SMOKE_NIGHT: ${{ matrix.night }}
           SMOKE_LABEL: ${{ matrix.label }}
+          SMOKE_WM_SIZE: ${{ matrix.wm-size }}
+          SMOKE_USER_ROTATION: ${{ matrix.user-rotation }}
         with:
           api-level: ${{ matrix.api-level }}
           target: default

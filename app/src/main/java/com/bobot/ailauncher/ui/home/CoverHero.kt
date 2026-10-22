@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,7 +53,8 @@ fun CoverHero(
     // 同拍翻篇，不再「新模板 + 旧日期」。
     val nowMillis by rememberNowMillis()
     // v0.68.60（Bob）：横屏优先——统一紧凑横排，不跟 Dock 抢竖向空间
-    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
+    // v0.68.97（布局普查批）：冒烟几何断言锚点（封面 hero 整体）
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier.testTag("cover_hero")) {
         if (maxWidth > maxHeight) {
             CoverHeroLandscape(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
         } else {
