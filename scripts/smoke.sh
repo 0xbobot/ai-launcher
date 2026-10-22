@@ -1945,20 +1945,24 @@ log "layout: home arrival verified=$HOME_OK"
 shot "layout-home"
 adb shell uiautomator dump /sdcard/layout_home.xml > /dev/null 2>&1 || true
 adb pull /sdcard/layout_home.xml "$OUT/layout_home.xml" > /dev/null 2>&1 || true
-adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
-sleep 3
-shot "layout-appcenter"
-adb shell uiautomator dump /sdcard/layout_ac.xml > /dev/null 2>&1 || true
-adb pull /sdcard/layout_ac.xml "$OUT/layout_ac.xml" > /dev/null 2>&1 || true
-if [ -f "$OUT/layout_ac.xml" ] && ! grep -q 'resource-id="appcenter_settings"' "$OUT/layout_ac.xml"; then
-  # 首滑没进应用中心（状态机/手势识别抖动）时再滑一次重取，避免误报跳过
-  log "layout: app center not reached on first swipe, retrying"
-  adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+# 进应用中心：多泳道上滑 + 每轮 dump 自验（横屏短高时中泳道起点落在
+# NextUp 条上会被卡片吞掉手势——run2 landphone 实测；左泳道起点在条下方
+# 空区可用）。命中齿轮即停，最多三轮。
+AC_OK=0
+for LANE in "540 2000 540 800" "200 2250 200 1000" "200 1600 200 600"; do
+  set -- $LANE
+  adb shell input swipe "$(SX $1)" "$(SY $2)" "$(SX $3)" "$(SY $4)" 300 || true
   sleep 3
-  shot "layout-appcenter"
   adb shell uiautomator dump /sdcard/layout_ac.xml > /dev/null 2>&1 || true
   adb pull /sdcard/layout_ac.xml "$OUT/layout_ac.xml" > /dev/null 2>&1 || true
-fi
+  if [ -f "$OUT/layout_ac.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/layout_ac.xml"; then
+    AC_OK=1
+    break
+  fi
+  log "layout: app center not reached via lane ($LANE), trying next"
+done
+log "layout: app center reached=$AC_OK"
+shot "layout-appcenter"
 if tap_rid "$OUT/layout_ac.xml" "appcenter_settings"; then
   sleep 3
   shot "layout-settings"
