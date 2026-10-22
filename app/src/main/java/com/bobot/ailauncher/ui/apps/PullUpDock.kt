@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -59,10 +60,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.UiPrefs
-import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -113,8 +115,15 @@ fun PullUpDock(
     val onHideDockRequestState = rememberUpdatedState(onHideDockRequest)
     val onAskQizaiState = rememberUpdatedState(onAskQizai)
 
-    val allApps = remember {
-        listLaunchableApps(context).filter { it.packageName != context.packageName }
+    // v0.68.95（F-03）：清单改挂 AppCatalog 仓库快照——此前无 key 的 remember{}
+    // 进程内只算一次，新装应用永不进 Dock、卸载的点开只剩 toast。现与 .88 同源：
+    // InstalledApps.epoch 变化即触发后台重建，快照到了自动换表（IO 构建，
+    // 组合期只读）。快照未就绪时为空表，构建完成即补上（与意图层懒建同口径）。
+    val installedEpoch by InstalledApps.epoch.collectAsState()
+    LaunchedEffect(installedEpoch) { AppCatalog.ensure(context) }
+    val catalog by AppCatalog.snapshot.collectAsState()
+    val allApps = remember(catalog) {
+        catalog?.apps?.filter { it.packageName != context.packageName } ?: emptyList()
     }
     var usageTick by remember { mutableIntStateOf(0) }
     // v0.20：智能排序开关（设置页可关）；key 里带上开关值，切换后返回即生效

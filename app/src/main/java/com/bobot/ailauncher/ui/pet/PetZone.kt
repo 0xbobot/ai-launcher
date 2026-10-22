@@ -77,6 +77,7 @@ import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.core.pet.PetState
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.home.CoverHero
+import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.home.NextUpStrip
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -373,11 +374,15 @@ fun PetZone(
     }
     // 批B ③：coverPaletteFor 是非组合纯函数，深浅由这里从 CompositionLocal 读后传入
     val coverIsDark = AILauncherColors.current.isDark
-    val coverPalette = remember {
-        coverPaletteFor(
-            java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY),
-            coverIsDark
-        )
+    // v0.68.95（F-05）：色板改为从分钟 ticker 按小时派生——此前无 key 的
+    // remember{} 把首帧的小时与深浅模式冻结，跨时段/切换深色后色板不跟随。
+    val coverNowMillis by rememberNowMillis()
+    val coverHour = remember(coverNowMillis) {
+        java.util.Calendar.getInstance().apply { timeInMillis = coverNowMillis }
+            .get(java.util.Calendar.HOUR_OF_DAY)
+    }
+    val coverPalette = remember(coverHour, coverIsDark) {
+        coverPaletteFor(coverHour, coverIsDark)
     }
 
     // v0.68.44（Bob）：封面模式——杂志 hero + 紧凑条；TodaySection 只跑数据不上 UI

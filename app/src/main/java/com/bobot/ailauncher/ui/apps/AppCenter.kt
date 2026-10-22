@@ -86,7 +86,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -130,14 +129,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
+import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.UiPrefs
-import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
@@ -179,43 +179,29 @@ fun AppCenterContent(
     val onPullDownState = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
-    var refreshTick by remember { mutableIntStateOf(0) }
-    // v0.55.2（Bob）：监听应用安装/卸载，刷新列表
-    DisposableEffect(context) {
-        val receiver = object : android.content.BroadcastReceiver() {
-            override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
-                refreshTick++
-            }
-        }
-        val filter = android.content.IntentFilter().apply {
-            addAction(android.content.Intent.ACTION_PACKAGE_ADDED)
-            addAction(android.content.Intent.ACTION_PACKAGE_REMOVED)
-            addAction(android.content.Intent.ACTION_PACKAGE_REPLACED)
-            addDataScheme("package")
-        }
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            context.registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            context.registerReceiver(receiver, filter)
-        }
-        onDispose { context.unregisterReceiver(receiver) }
-    }
+    // v0.68.95（F-04）：装卸失效改走全进程同源机制——自带的 PACKAGE 广播
+    // 接收器删除，改由 InstalledApps.epoch（.88）驱动 AppCatalog 在 IO 线程
+    // 重建全表与搜索索引，本屏组合期只读快照（见下方各列表的派生口径）。
+    val installedEpoch by InstalledApps.epoch.collectAsState()
+    val catalog by AppCatalog.snapshot.collectAsState()
     // v0.40.0：长按 → 真弹窗快捷菜单（与 Dock 长按同一套 AppPopupMenu，替代 bottom sheet）
     var popupApp by remember { mutableStateOf<AppInfo?>(null) }
     // v0.40.2：惯用手设置已删除；右侧一条可见 rail + 左侧隐形触发区，左右手都可操作
     // v0.41.9：已隐藏应用版本号：变化时 A-Z 自动重算过滤
     val hiddenVersion = HiddenApps.version.intValue
-    val hidden = remember(refreshTick, hiddenVersion) { HiddenApps.getHidden(context) }
+    LaunchedEffect(installedEpoch, hiddenVersion) { AppCatalog.ensure(context) }
+    val hidden = remember(hiddenVersion) { HiddenApps.getHidden(context) }
     // v0.41.18（Bob）：隐藏应用不再用独立页面，放到主列表末尾的"隐藏"分组；
     // 解锁后可像正常应用一样直接打开，不用先恢复。
     // v0.41.17：隐藏区解锁状态——未解锁时分组显示锁定占位，点按才触发面部/指纹
     var hiddenUnlocked by remember { mutableStateOf(false) }
-    val hiddenApps = remember(refreshTick, hiddenVersion) {
+    // v0.68.95（F-04）：从仓库快照的原始枚举派生（纯内存过滤/排序）——此前在
+    // 组合期同步 listLaunchableApps 整表查询，装卸一次全表在主线程重跑。
+    val hiddenApps = remember(catalog, hidden) {
         if (hidden.isEmpty()) emptyList()
         else {
             val collator = Collator.getInstance(Locale.CHINA)
-            listLaunchableApps(context)
+            (catalog?.apps ?: emptyList())
                 .filter { it.packageName in hidden }
                 .sortedWith { a, b -> collator.compare(a.label.toString(), b.label.toString()) }
         }
@@ -226,11 +212,11 @@ fun AppCenterContent(
     // v0.56.2（Bob）：Rail 图标闪烁
     val railFlashState by UiPrefs.railFlash.collectAsState()
     val (flashTick, flashTarget) = railFlashState
-    val dockApps = remember(refreshTick, dockTick, hiddenVersion) {
+    val dockApps = remember(catalog, dockTick, hidden) {
         val pinned = UiPrefs.getDockPinned(context)
         if (pinned.isEmpty()) emptyList()
         else {
-            val all = listLaunchableApps(context).associateBy { it.packageName }
+            val all = (catalog?.apps ?: emptyList()).associateBy { it.packageName }
             pinned.mapNotNull { all[it] }.filter { it.packageName !in hidden }
         }
     }
@@ -250,13 +236,11 @@ fun AppCenterContent(
 
     // v0.22：分类区取消（等需要时再重新设计），只保留 A-Z
 
-    // A-Z 数据：全部可启动应用（去自己、去隐藏），中文按拼音首字母排序分组
-    val azApps = remember(refreshTick, hiddenVersion) {
-        val collator = Collator.getInstance(Locale.CHINA)
-        listLaunchableApps(context)
-            .filter { it.packageName != context.packageName && it.packageName !in hidden }
-            .sortedWith { a, b -> collator.compare(a.label.toString(), b.label.toString()) }
-    }
+    // A-Z 数据：全部可启动应用（去自己、去隐藏），中文按拼音首字母排序分组。
+    // v0.68.95（F-04）：直接读仓库快照的可见集（IO 构建、口径与原组合期实现
+    // 逐字一致：去自己/去隐藏 + Collator(CHINA) 排序）；装卸时快照在后台换代，
+    // 结果到了才换表，组合期不再整表同步重建。
+    val azApps = catalog?.visibleApps ?: emptyList()
     val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps) {
         val map = linkedMapOf<Char, MutableList<AppInfo>>()
         // 拼音首字母分组：用字典（20924 字），GB2312 区位码做兜底
@@ -287,7 +271,8 @@ fun AppCenterContent(
     }
     val searching = filterQuery.trim().isNotBlank()
     // v0.25.5：Niagara 式——拖动直接滚完整列表，不做内容过滤，松手零位移
-    val searchIndex = remember(azApps) { AppSearchIndex.build(context, azApps) }
+    // v0.68.95（F-04）：索引随仓库快照在 IO 构建（基于同一份可见集），组合期只读。
+    val searchIndex = catalog?.index ?: emptyList()
     val searchResults = remember(filterQuery, searchIndex) {
         if (filterQuery.trim().isBlank()) null
         else AppSearchIndex.search(context, filterQuery, searchIndex)

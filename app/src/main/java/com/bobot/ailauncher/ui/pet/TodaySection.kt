@@ -68,6 +68,8 @@ import com.bobot.ailauncher.data.PetCat
 import com.bobot.ailauncher.data.PetItem
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.OtaUpdater
+import com.bobot.ailauncher.ui.isWithinWindow
+import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -241,11 +243,14 @@ internal fun TodaySection(
     // v0.62.0 hoist：消息/待办共享数据（供排序后的各区块使用）
         val filed by PetRepository.filed.collectAsState()
         val doneTodos by PetRepository.doneTodos.collectAsState()
-        val now = System.currentTimeMillis()
-        val recentMsgs = remember(filed) {
+        // v0.68.95（F-05）：3 小时窗的 now 改从分钟 ticker 派生并纳入 remember
+        // key——此前 now 在组合期一次性捕获、remember(filed) 不随时间重算，
+        // filed 不变时旧消息一直滞留在已超时的窗口里。
+        val nowMillis by rememberNowMillis()
+        val recentMsgs = remember(filed, nowMillis) {
             filed.values.flatten()
                 .filter { !it.isCalendar }
-                .filter { now - it.time < 3 * 60 * 60 * 1000 }
+                .filter { isWithinWindow(it.time, nowMillis, 3 * 60 * 60 * 1000L) }
                 .sortedWith(
                     compareByDescending<PetItem> {
                         when (it.cat) {
