@@ -269,6 +269,16 @@ fun PetZone(
         modifier = Modifier.fillMaxWidth()
     ) {
         val isLandscapeCover = maxWidth > maxHeight
+        // v0.68.97（布局普查批，Bob 2026-10-22 横屏截图）：横屏封面分区——右侧
+        // 360dp 恒为 Dock 面板区（D1 面板实测宽 312dp＝4×56 图标+间距+内距，
+        // D2 网格 270dp 更窄；加右侧间隙约 28dp 与安全余量），胶囊与 NextUp
+        // 只占左侧区、右缘对齐，永不与面板相交（矩阵横屏腿几何断言常驻回归）。
+        // 竖屏 frac=1，构图不变。
+        val coverLeftFrac = if (isLandscapeCover) {
+            ((maxWidth - 360.dp) / maxWidth).coerceIn(0.5f, 0.72f)
+        } else {
+            1f
+        }
         Column(modifier = Modifier.fillMaxWidth()) {
         CoverHero(
             summary = coverSummary,
@@ -329,7 +339,16 @@ fun PetZone(
         )
         Spacer(modifier = Modifier.height(16.dp))
         // R2 UI：意图入口胶囊（封面与 TODAY 紧凑条之间）
-        coverIntentSlot()
+        // v0.68.97：横屏时胶囊只占左侧区（见 coverLeftFrac），右端不再滑入面板下
+        if (isLandscapeCover) {
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier.fillMaxWidth(coverLeftFrac)
+            ) {
+                coverIntentSlot()
+            }
+        } else {
+            coverIntentSlot()
+        }
         // 有会议才显示——无会时 hero 已有"难得清闲"，不重复
         if (coverNextEvent != null) {
             Spacer(modifier = Modifier.height(12.dp))
@@ -343,7 +362,9 @@ fun PetZone(
                     nextEvent = coverNextEvent,
                     palette = coverPalette,
                     onMeetingTap = { e -> joinMeeting(e) },
-                    modifier = if (isLandscapeCover) Modifier.fillMaxWidth(0.62f) else Modifier.fillMaxWidth()
+                    // v0.68.97：与胶囊同宽分区（原硬编码 0.62 与面板实际左缘只差
+                    // 一线，玻璃面板视觉外扩即压角）——统一走 coverLeftFrac
+                    modifier = Modifier.fillMaxWidth(coverLeftFrac)
                 )
             }
         }

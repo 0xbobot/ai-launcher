@@ -86,10 +86,31 @@ if [ -n "$SMOKE_USER_ROTATION" ]; then
   adb shell settings put system user_rotation "$SMOKE_USER_ROTATION" || true
   log "user rotation lock -> $SMOKE_USER_ROTATION"
 fi
-if [ -n "$SMOKE_WM_SIZE" ] || [ -n "$SMOKE_USER_ROTATION" ]; then sleep 3; fi
+if [ -n "$SMOKE_WM_SIZE" ] || [ -n "$SMOKE_USER_ROTATION" ]; then
+  # v0.68.97 实测：覆写不重启只部分生效——wm 尺寸先行、旋转迟迟不跟随，
+  # 横屏腿前半程（模板段等）仍按竖屏跑，直到玻璃段换壁纸重启后才横过来，
+  # 且 SCR 几何与真实坐标系脱节导致多段坐标断言误伤。覆写后立即重启一次，
+  # 让整个运行期形态一致；覆写值重启后保持（同轮实测）。
+  log "form-factor override: rebooting to apply"
+  adb reboot > /dev/null 2>&1 || true
+  adb wait-for-device > /dev/null 2>&1 || true
+  BOOTED=""
+  for i in $(seq 1 40); do
+    if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then BOOTED=1; break; fi
+    sleep 3
+  done
+  [ -n "$BOOTED" ] || log "form-factor override: boot wait timeout, continuing anyway"
+  adb shell input keyevent KEYCODE_WAKEUP || true
+  sleep 2
+fi
 
 # --- 0. 屏幕几何（R4）：基准 1080x2400 的写死坐标经 SX/SY 换算到实际分辨率；密度供 a11y 的 px->dp ---
-SIZE_LINE=$(adb shell wm size 2>/dev/null | grep -o '[0-9]\+x[0-9]\+' | head -1)
+# v0.68.97 教训：wm size 输出首行是 Physical size，有形态覆写时必须取 Override 行，
+# 否则 SCR_W/H 与真实 UI 坐标系脱节（横屏腿首轮实测：几何读成竖屏、全程坐标错位）。
+SIZE_LINE=$(adb shell wm size 2>/dev/null | grep -i "override" | grep -o '[0-9]\+x[0-9]\+' | head -1)
+if [ -z "$SIZE_LINE" ]; then
+  SIZE_LINE=$(adb shell wm size 2>/dev/null | grep -o '[0-9]\+x[0-9]\+' | head -1)
+fi
 SCR_W=$(echo "$SIZE_LINE" | cut -dx -f1); SCR_H=$(echo "$SIZE_LINE" | cut -dx -f2)
 if [ -z "$SCR_W" ] || [ -z "$SCR_H" ]; then SCR_W=1080; SCR_H=2400; fi
 DENSITY=$(adb shell wm density 2>/dev/null | grep -o '[0-9]\+' | head -1)
@@ -1858,8 +1879,51 @@ sleep 1
 # dock_panel 缺失退化为 dock_item 并集）。聚焦态不查 Dock（IME 升起时
 # dump 中的 Dock bounds 是被键盘覆盖的不可见几何）。
 log "layout: segment start"
+# 上一段结束时停在 D3 应用中心（Dock 状态在 MainActivity 内，am start/HOME 回不到
+# 首页视图，同第 9 段实测结论）→ force-stop 重启回首页基线再取 dump；
+# 日历事件在 provider 侧，重启不丢，NextUp 检查不受影响。
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
+# 到家自验（首轮实测：个别腿重启后仍停在应用中心/权限引导层，layout_home
+# 误拍成应用中心、断言对象张冠李戴）：探针 dump 循环——见「暂不」点掉权限
+# 引导层；仍在应用中心（齿轮在场）按返回键走 BackHandler（D3->记住的行数）
+# 退出；cover_hero 在场且齿轮缺席才算到家。验不过也继续（checker 对缺席
+# 元素 INFO 跳过、不假 FAIL），但日志留痕供定性。
+HOME_OK=0
+for TRY in 1 2 3 4; do
+  adb shell uiautomator dump /sdcard/layout_probe.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/layout_probe.xml "$OUT/layout_probe.xml" > /dev/null 2>&1 || true
+  [ -f "$OUT/layout_probe.xml" ] || break
+  if grep -q 'text="暂不"' "$OUT/layout_probe.xml"; then
+    PNODE=$(grep -o '<node[^>]*text="暂不"[^>]*>' "$OUT/layout_probe.xml" | head -1)
+    PNUMS=$(echo "$PNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    PX1=$(echo "$PNUMS" | sed -n 1p); PY1=$(echo "$PNUMS" | sed -n 2p)
+    PX2=$(echo "$PNUMS" | sed -n 3p); PY2=$(echo "$PNUMS" | sed -n 4p)
+    if [ -n "$PX1" ] && [ -n "$PY2" ]; then
+      adb shell input tap $(( (PX1 + PX2) / 2 )) $(( (PY1 + PY2) / 2 )) || true
+      log "layout: permission sheet dismissed via 暂不 (try $TRY)"
+    fi
+    sleep 1
+    continue
+  fi
+  if grep -q 'resource-id="cover_hero"' "$OUT/layout_probe.xml" && ! grep -q 'resource-id="appcenter_settings"' "$OUT/layout_probe.xml"; then
+    HOME_OK=1
+    break
+  fi
+  if grep -q 'resource-id="appcenter_settings"' "$OUT/layout_probe.xml"; then
+    adb shell input keyevent KEYCODE_BACK || true
+    log "layout: still in app center, BACK to exit D3 (try $TRY)"
+    sleep 1
+    continue
+  fi
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 1
+done
+log "layout: home arrival verified=$HOME_OK"
 shot "layout-home"
 adb shell uiautomator dump /sdcard/layout_home.xml > /dev/null 2>&1 || true
 adb pull /sdcard/layout_home.xml "$OUT/layout_home.xml" > /dev/null 2>&1 || true
@@ -1868,6 +1932,15 @@ sleep 3
 shot "layout-appcenter"
 adb shell uiautomator dump /sdcard/layout_ac.xml > /dev/null 2>&1 || true
 adb pull /sdcard/layout_ac.xml "$OUT/layout_ac.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/layout_ac.xml" ] && ! grep -q 'resource-id="appcenter_settings"' "$OUT/layout_ac.xml"; then
+  # 首滑没进应用中心（状态机/手势识别抖动）时再滑一次重取，避免误报跳过
+  log "layout: app center not reached on first swipe, retrying"
+  adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+  sleep 3
+  shot "layout-appcenter"
+  adb shell uiautomator dump /sdcard/layout_ac.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/layout_ac.xml "$OUT/layout_ac.xml" > /dev/null 2>&1 || true
+fi
 if tap_rid "$OUT/layout_ac.xml" "appcenter_settings"; then
   sleep 3
   shot "layout-settings"
