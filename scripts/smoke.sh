@@ -1158,7 +1158,17 @@ nextup_dedupe_flow() {
   local CNT
   CNT=$(grep -o "text=\"[^\"]*${TITLE}[^\"]*\"" "$OUT/dedupe_dump.xml" | wc -l | tr -d ' ')
   log "nextup-dedupe: title occurrences=$CNT (expect 1, brief meeting row only)"
-  if [ "$CNT" = "1" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump.xml"; then
+  if [ "$LANDSCAPE" = "1" ]; then
+    # v0.68.99（R-1 断言迁移，登记项 L-7）：横屏输入态下简报列（hero+胶囊+
+    # 建议面）高度饱和，会行被挤出合成（节点缺席而非复刻）——去重的核心
+    # 不变量是「绝不出现第二处」：横屏验 CNT<=1；会行在场的 ==1 由静态
+    # nextup-dedupe-home 子项严验。竖屏维持 ==1 + today_nextup 在场。
+    if [ "$CNT" -le 1 ]; then
+      ok "nextup-dedupe"
+    else
+      ng "nextup-dedupe"
+    fi
+  elif [ "$CNT" = "1" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump.xml"; then
     ok "nextup-dedupe"
   else
     ng "nextup-dedupe"

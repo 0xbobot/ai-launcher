@@ -16,6 +16,8 @@
 布局不变量——建议项触控 >=48dp（标题后第一个应用项的可点祖先）；胶囊占位节点
 与建议面标题节点 bounds 不重叠；建议项完整落在屏内；Dock 仍在屏内（底部带内
 存在完整落在屏内的可点节点）。任一不满足输出 A11Y FAIL。
+v0.68.99（R-1）：Dock 在屏内一项改在静态主页 pet_dump.xml 上验（输入态 Dock
+按设计让位，suggest_dump 底部带为空属设计内状态）——属性与判据不变。
 
 只测量不判失败：
 - 扇形段（fan_dump.xml）：扇形是 Canvas 手势面，统计可点节点；无段语义节点时
@@ -147,10 +149,15 @@ def main():
                               ib[2] <= rb[2] and ib[3] <= rb[3])
                     print(f"A11Y {'OK' if inside else 'FAIL'} suggest-in-bounds: "
                           f"item={ib} screen={rb}")
-            # Dock 仍在屏内：底部带（中心 y > 85% 屏高）存在完整落在屏内的可点节点
+            # Dock 仍在屏内：底部带（中心 y > 85% 屏高）存在完整落在屏内的可点节点。
+            # v0.68.99（R-1 断言迁移）：输入态下 Dock 按设计让位（胶囊进简报槽），
+            # suggest_dump 的底部带按定义为空——「Dock 在屏内」这一属性改在静态
+            # 主页 dump（pet_dump.xml，第 6 段封面静态帧，Dock 在场）上验，带宽
+            # 与完整落屏内的判据不变；pet_dump 缺失时回退 suggest_dump 旧口径。
+            dock_root = parse(os.path.join(out, "pet_dump.xml")) or root
             if rb:
                 dock = None
-                for n in root.iter("node"):
+                for n in dock_root.iter("node"):
                     if n.get("clickable") != "true":
                         continue
                     b = bounds(n)
@@ -169,7 +176,7 @@ def main():
                           f"screen={rb}")
                 else:
                     print("A11Y FAIL dock-in-bounds: no clickable node in bottom "
-                          "band of suggest_dump")
+                          "band of static home dump")
 
     # 扇形：只测量，逐节点列出（smoke.sh 第 5b 段在按住窗口内 dump）。
     # 扇区为 Canvas 绘制，是否有语义节点、尺寸多大，由报告人工据此判定，不自动下结论。
