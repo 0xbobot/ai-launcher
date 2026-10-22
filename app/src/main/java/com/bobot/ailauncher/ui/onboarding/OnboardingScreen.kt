@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,14 +35,22 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.core.app.NotificationManagerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.tickHaptic
 import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.island.IslandToasts
 
@@ -56,6 +65,26 @@ fun isDefaultLauncher(context: Context): Boolean {
 /** 检测通知读取权限是否已开启 */
 fun isNotificationAccessGranted(context: Context): Boolean =
     NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+
+/**
+ * v0.68.98（F-12）：随生命周期刷新的状态值——初值组合期读一次，之后每次
+ * ON_RESUME 重读。引导步要跳系统设置页再返回，此前状态行在组合期直读、
+ * 返回后无重组触发就一直说「尚未…」，用户明明设好了还被状态行说谎。
+ * 做法与 PetZone 的 resumeTick 同款（只在用户看得见时刷新，省电原则）。
+ */
+@Composable
+private fun rememberResumeRefreshed(check: () -> Boolean): Boolean {
+    var value by remember { mutableStateOf(check()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) value = check()
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    return value
+}
 
 @Composable
 fun OnboardingNav(onFinish: () -> Unit) {
@@ -75,6 +104,7 @@ private fun StepScaffold(
     onSkip: () -> Unit,
     content: @Composable () -> Unit
 ) {
+    val view = LocalView.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -85,7 +115,8 @@ private fun StepScaffold(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
         ) {
-            TextButton(onClick = onSkip) {
+            // F-10：引导页点按补 tick（走 Haptics 两档门面，下同）
+            TextButton(onClick = { view.tickHaptic(); onSkip() }) {
                 Text("跳过", color = AILauncherColors.current.Hint)
             }
         }
@@ -115,8 +146,10 @@ private fun ProgressDot(active: Boolean) {
 
 @Composable
 private fun PrimaryButton(text: String, onClick: () -> Unit) {
+    val view = LocalView.current
     Button(
-        onClick = onClick,
+        // F-10：引导主按钮（开始/去设置/去开启/进入）统一 confirm 档
+        onClick = { view.confirmHaptic(); onClick() },
         shape = RoundedCornerShape(20.dp),
         colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Title)
     ) {
@@ -165,6 +198,9 @@ private fun StepWelcome(onNext: () -> Unit, onSkip: () -> Unit) {
 @Composable
 private fun StepDefaultLauncher(onNext: () -> Unit, onSkip: () -> Unit) {
     val context = LocalContext.current
+    val view = LocalView.current
+    // F-12：状态行随 ON_RESUME 重读——从系统设置返回即翻新，不再说谎
+    val defaultDone = rememberResumeRefreshed { isDefaultLauncher(context) }
     StepScaffold(step = 1, onSkip = onSkip) {
         Text(
             text = "设为默认桌面",
@@ -182,7 +218,7 @@ private fun StepDefaultLauncher(onNext: () -> Unit, onSkip: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(28.dp))
         StatusRow(
-            done = isDefaultLauncher(context),
+            done = defaultDone,
             doneText = "已设为默认桌面",
             todoText = "尚未设为默认"
         )
@@ -194,6 +230,7 @@ private fun StepDefaultLauncher(onNext: () -> Unit, onSkip: () -> Unit) {
         })
         Spacer(modifier = Modifier.height(8.dp))
         TextButton(onClick = {
+            view.tickHaptic()
             if (isDefaultLauncher(context)) {
                 onNext()
             } else {
@@ -204,7 +241,7 @@ private fun StepDefaultLauncher(onNext: () -> Unit, onSkip: () -> Unit) {
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "从设置返回后，点「下一步」会自动检测",
+            text = "从设置返回后，上面的状态会自动更新",
             fontSize = 12.sp,
             color = AILauncherColors.current.Hint
         )
@@ -215,6 +252,9 @@ private fun StepDefaultLauncher(onNext: () -> Unit, onSkip: () -> Unit) {
 @Composable
 private fun StepNotificationAccess(onNext: () -> Unit, onSkip: () -> Unit) {
     val context = LocalContext.current
+    val view = LocalView.current
+    // F-12：状态行随 ON_RESUME 重读——从系统设置返回即翻新，不再说谎
+    val accessDone = rememberResumeRefreshed { isNotificationAccessGranted(context) }
     StepScaffold(step = 2, onSkip = onSkip) {
         Text(
             text = "开启通知读取",
@@ -225,14 +265,16 @@ private fun StepNotificationAccess(onNext: () -> Unit, onSkip: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "「正在进行时」需要读取通知，才能把会议、快递、消息主动浮上来。",
+            // F-11：旧文案提的「正在进行时」不是现行表面名（已下线）——
+            // 通知的真实去向是首页 TODAY 简报（待回复消息/提醒都从通知来）
+            text = "开启后，七仔能读到新消息和提醒，把要紧的事整理进首页的 TODAY 简报，重要的事不漏掉。",
             fontSize = 16.sp,
             color = AILauncherColors.current.Body,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(28.dp))
         StatusRow(
-            done = isNotificationAccessGranted(context),
+            done = accessDone,
             doneText = "通知读取已开启",
             todoText = "尚未开启"
         )
@@ -245,6 +287,7 @@ private fun StepNotificationAccess(onNext: () -> Unit, onSkip: () -> Unit) {
         })
         Spacer(modifier = Modifier.height(8.dp))
         TextButton(onClick = {
+            view.tickHaptic()
             if (isNotificationAccessGranted(context)) {
                 // 授权发生在 App 运行中，强制重绑让 onListenerConnected 立刻回调
                 rebindListener(context)
@@ -281,7 +324,10 @@ private fun StepDone(onFinish: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "意图入口、正在进行时、能力视图都已准备好。\n按 Home 键，随时回到你的 AI 空间。",
+            // F-11：旧文案宣称「能力视图都已准备好」——能力页早在 v0.14 单页化时
+            // 已移除，引导在介绍不存在的功能；按现行表面重写（审计定案口径：
+            // 意图入口 + TODAY 简报 + 应用中心）
+            text = "意图入口、TODAY 简报、应用中心都已准备好。\n按 Home 键，随时回到你的 AI 空间。",
             fontSize = 16.sp,
             color = AILauncherColors.current.Body,
             textAlign = TextAlign.Center
@@ -293,7 +339,11 @@ private fun StepDone(onFinish: () -> Unit) {
 
 @Composable
 private fun StatusRow(done: Boolean, doneText: String, todoText: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    // F-12：状态行是活区——从设置返回、状态翻新时 TalkBack 礼貌播报新状态
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+    ) {
         Icon(
             Icons.Filled.Check,
             // 体检批D ⑨：状态含义由同行文字（完成/待办文案不同）表达，图标标装饰语义

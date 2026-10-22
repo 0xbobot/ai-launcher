@@ -43,9 +43,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -211,6 +220,18 @@ internal fun QuickActionAddFlow(
     var pickedShortcut by remember { mutableStateOf<ShortcutInfo?>(null) } // null=打开主应用
     var label by remember { mutableStateOf("") }
 
+    // v0.68.98（F-08 ③）：添加流 Dialog 内的搜索/标签输入框同款焦点礼仪——
+    // 与首页/设置页复用同一非消费观察者：聚焦时点框外（Dialog 内空白/列表区）
+    // 清焦 + 收键盘，不必靠关弹窗兜底；点其他行照常响应，观察者不消费事件。
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var qaFieldFocused by remember { mutableStateOf(false) }
+    var qaFieldBounds by remember { mutableStateOf<Rect?>(null) }
+    var qaRootPos by remember { mutableStateOf(Offset.Zero) }
+    val qaFieldMods = Modifier
+        .onFocusChanged { qaFieldFocused = it.isFocused }
+        .onGloballyPositioned { qaFieldBounds = it.boundsInRoot() }
+
     LaunchedEffect(Unit) {
         apps = withContext(Dispatchers.IO) {
             try {
@@ -225,6 +246,20 @@ internal fun QuickActionAddFlow(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .background(AILauncherColors.current.Card.copy(alpha = 0.97f))
+                .onGloballyPositioned { qaRootPos = it.positionInRoot() }
+                .clearIntentFocusOnOutsideTap(
+                    focused = { qaFieldFocused },
+                    targetBoundsInHost = {
+                        qaFieldBounds?.let { b ->
+                            Rect(
+                                b.left - qaRootPos.x, b.top - qaRootPos.y,
+                                b.right - qaRootPos.x, b.bottom - qaRootPos.y
+                            )
+                        }
+                    },
+                    focusManager = focusManager,
+                    keyboardController = keyboardController
+                )
                 .padding(16.dp)
         ) {
             when (step) {
@@ -238,7 +273,7 @@ internal fun QuickActionAddFlow(
                             onValueChange = { search = it },
                             placeholder = { Text("搜索", fontSize = 14.sp) },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().then(qaFieldMods)
                         )
                         Spacer(Modifier.height(8.dp))
                         if (all == null) {
@@ -383,7 +418,7 @@ internal fun QuickActionAddFlow(
                                     )
                                 }
                             }),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().then(qaFieldMods)
                         )
                         Spacer(Modifier.height(12.dp))
                         Row(

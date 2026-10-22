@@ -97,6 +97,23 @@ class IntentCoordinatorTest {
         }
     }
 
+    /** 可换 gate 的挂起型 planner（F-06 取消测试用）：每轮提交换一只新 gate，
+     * 模拟「取消后重新提交」时上一轮的迟到结果与新一轮互不干扰。 */
+    private class SwitchableBlockingPlanner : IntentPlanner {
+        var gate = CompletableDeferred<PlanOutcome>()
+        var calls = 0
+
+        override suspend fun plan(
+            input: String,
+            validIds: Set<String>,
+            hints: String,
+            contextPack: String
+        ): PlanOutcome {
+            calls++
+            return gate.await()
+        }
+    }
+
     private class FakeSpeaker : IntentSpeaker {
         val said = mutableListOf<String>()
         override fun say(text: String) {
@@ -477,5 +494,83 @@ class IntentCoordinatorTest {
         c2.submit("你好")
         assertEquals("", planner2.lastContextPack)
         assertEquals(IntentUiState.Reply("你好"), c2.state.value)
+    }
+
+    // ---------- 15. 取消（F-06）：Planning 中取消 -> 回 Idle，迟到的回复被丢弃 ----------
+
+    @Test
+    fun `cancel planning returns to idle and drops late reply`() = runTest {
+        val planner = SwitchableBlockingPlanner()
+        val speaker = FakeSpeaker()
+        val c = coordinator(planner = planner, speaker = speaker)
+
+        val inFlight = async { c.submit("打开微信") }
+        runCurrent()
+        assertTrue(c.state.value is IntentUiState.Planning)
+
+        c.cancelPlanning()
+        // 立即收回 Idle（结果条收起），不等 planner 回来
+        assertEquals(IntentUiState.Idle, c.state.value)
+
+        // planner 的迟到结果到达：不得上屏、不得让七仔说出来
+        planner.gate.complete(PlanOutcome.Chat("迟到的回复"))
+        inFlight.await()
+        assertEquals(IntentUiState.Idle, c.state.value)
+        assertTrue(speaker.said.isEmpty())
+    }
+
+    // ---------- 16. 取消（F-06）：迟到的动作结果被丢弃，执行器一次都不碰 ----------
+
+    @Test
+    fun `cancel planning drops late action - executor never called`() = runTest {
+        val planner = SwitchableBlockingPlanner()
+        val caps = FakeCapabilities(mapOf("dache" to cap("dache", RiskLevel.READ)))
+        val executor = FakeExecutor()
+        val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+
+        val inFlight = async { c.submit("打车去机场") }
+        runCurrent()
+        assertTrue(c.state.value is IntentUiState.Planning)
+        c.cancelPlanning()
+
+        // 迟到的是一个可执行动作：取消后绝不能因为它的到达而真执行
+        planner.gate.complete(PlanOutcome.Action("dache", mapOf("to" to "机场"), null))
+        inFlight.await()
+        assertEquals(IntentUiState.Idle, c.state.value)
+        assertTrue(executor.submitted.isEmpty())
+        assertEquals(0, executor.realExecutions)
+    }
+
+    // ---------- 17. 取消（F-06）：非 Planning 态取消是无操作；取消后可正常重提 ----------
+
+    @Test
+    fun `cancel outside planning is no-op and resubmit after cancel works`() = runTest {
+        val planner = SwitchableBlockingPlanner()
+        val c = coordinator(planner = planner)
+
+        // Idle 态点取消：无操作
+        c.cancelPlanning()
+        assertEquals(IntentUiState.Idle, c.state.value)
+
+        // 第一轮：提交 -> 取消 -> 迟到结果丢弃
+        val first = async { c.submit("第一句") }
+        runCurrent()
+        c.cancelPlanning()
+        planner.gate.complete(PlanOutcome.Chat("第一句的迟到回复"))
+        first.await()
+        assertEquals(IntentUiState.Idle, c.state.value)
+
+        // 第二轮：换新 gate 正常提交，结果照常落地（代际只作废被取消的那一轮）
+        planner.gate = CompletableDeferred()
+        val second = async { c.submit("第二句") }
+        runCurrent()
+        assertTrue(c.state.value is IntentUiState.Planning)
+        planner.gate.complete(PlanOutcome.Chat("第二句的回复"))
+        second.await()
+        assertEquals(IntentUiState.Reply("第二句的回复"), c.state.value)
+
+        // Reply 态点取消：不得把已呈现的回复误清掉
+        c.cancelPlanning()
+        assertEquals(IntentUiState.Reply("第二句的回复"), c.state.value)
     }
 }

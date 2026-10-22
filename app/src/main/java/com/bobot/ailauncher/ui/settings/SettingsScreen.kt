@@ -37,6 +37,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,8 +48,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -65,6 +73,9 @@ import com.bobot.ailauncher.ui.components.downloadStatusText
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.tickHaptic
+import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
@@ -92,6 +103,32 @@ fun SettingsScreen(
     var llmExpanded by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val hideOnBlur = Modifier.onFocusChanged { if (!it.isFocused) keyboardController?.hide() }
+    val focusManager = LocalFocusManager.current
+    val view = LocalView.current
+
+    // v0.68.98（F-08）：焦点礼仪与 .93 首页同一套语义——三个输入框只有 hideOnBlur
+    // （失焦才收键盘）而页面没有点外部清焦，点空白处焦点不走、键盘收不掉。
+    // 在根容器复用 clearIntentFocusOnOutsideTap 非消费观察者：任一输入框聚焦时，
+    // 按下点落在「当前聚焦框」范围外才清焦 + 收键盘（框间互点不误伤，文本不动）。
+    // focusedField/fieldBounds 由各输入框的 onFocusChanged/onGloballyPositioned 维护。
+    var focusedField by remember { mutableStateOf(-1) }
+    var fieldBounds by remember { mutableStateOf(mapOf<Int, Rect>()) }
+    var rootPosInRoot by remember { mutableStateOf(Offset.Zero) }
+    fun fieldFocusMods(index: Int): Modifier = Modifier
+        .onFocusChanged {
+            if (it.isFocused) focusedField = index
+            else if (focusedField == index) focusedField = -1
+        }
+        .onGloballyPositioned { fieldBounds = fieldBounds + (index to it.boundsInRoot()) }
+
+    // 收起「让七仔更聪明」时输入区连同焦点一起卸载：主动清焦 + 收键盘，
+    // 不把键盘留在已消失的输入框上（F-08：打开子面板/收起时的焦点处理）
+    LaunchedEffect(llmExpanded) {
+        if (!llmExpanded) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        }
+    }
 
     fun persist() = LlmConfig.save(context, apiKey, baseUrl, model)
 
@@ -121,6 +158,20 @@ fun SettingsScreen(
         modifier = Modifier.fillMaxSize()
             .background(AILauncherColors.current.GlassCardStrong)
             .statusBarsTopPadding()
+            .onGloballyPositioned { rootPosInRoot = it.positionInRoot() }
+            .clearIntentFocusOnOutsideTap(
+                focused = { focusedField >= 0 },
+                targetBoundsInHost = {
+                    fieldBounds[focusedField]?.let { b ->
+                        Rect(
+                            b.left - rootPosInRoot.x, b.top - rootPosInRoot.y,
+                            b.right - rootPosInRoot.x, b.bottom - rootPosInRoot.y
+                        )
+                    }
+                },
+                focusManager = focusManager,
+                keyboardController = keyboardController
+            )
             .then(swipeUpToHome),
         contentPadding = PaddingValues(0.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -138,7 +189,12 @@ fun SettingsScreen(
                     modifier = Modifier.clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
-                        onClick = onBack
+                        // F-08：离开设置页前先清焦 + 收键盘，不把键盘带到上一页
+                        onClick = {
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
+                            onBack()
+                        }
                     )
                 ) {
                     Text(
@@ -168,11 +224,18 @@ fun SettingsScreen(
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
-                    .clickable { llmExpanded = !llmExpanded }
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
+                    // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
+                    // F-10：点按补 tick（走 Haptics 两档门面）。
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                view.tickHaptic()
+                                llmExpanded = !llmExpanded
+                            },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
@@ -206,7 +269,7 @@ fun SettingsScreen(
                             placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur)
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
@@ -215,7 +278,7 @@ fun SettingsScreen(
                             label = { Text("接口地址") },
                             placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur)
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
                         )
                         Text(
                             text = "一般不用改。用别的服务商才需要换",
@@ -230,7 +293,7 @@ fun SettingsScreen(
                             label = { Text("用哪个模型") },
                             placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur)
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
                         )
                         Text(
                             text = "填你 Key 对应的模型名，比如 deepseek-flash",
@@ -242,6 +305,8 @@ fun SettingsScreen(
                         Button(
                             onClick = {
                                 if (testing) return@Button
+                                // F-10：主按钮 = confirm 档
+                                view.confirmHaptic()
                                 persist()
                                 if (apiKey.isBlank()) {
                                     IslandToasts.show("请先填写大模型 Key")
@@ -340,7 +405,8 @@ fun SettingsScreen(
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier.padding(horizontal = 20.dp),
-                onClick = { onCardClick?.invoke() }
+                // F-10：整卡点按补 tick（不可点态不震，与视觉禁用一致）
+                onClick = { onCardClick?.let { view.tickHaptic(); it() } }
             ) {
                 Row(
                     modifier = Modifier
@@ -394,6 +460,7 @@ fun SettingsScreen(
                                     Spacer(modifier = Modifier.height(8.dp))
                                     TextButton(
                                         onClick = {
+                                            view.tickHaptic()
                                             try {
                                                 val intent = Intent(
                                                     Intent.ACTION_VIEW,
@@ -479,6 +546,8 @@ fun SettingsScreen(
                     Switch(
                         checked = betaOptIn,
                         onCheckedChange = {
+                            // F-10：开关切换 = confirm 档
+                            view.confirmHaptic()
                             betaOptIn = it
                             OtaUpdater.setBetaOptIn(context, it)
                         }

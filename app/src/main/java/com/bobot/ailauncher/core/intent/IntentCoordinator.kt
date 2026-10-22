@@ -96,6 +96,15 @@ class IntentCoordinator(
     /** 最近一次提交的原文，dismiss 后回到 Editing 时带回 */
     private var lastText: String = ""
 
+    /**
+     * 规划代际（v0.68.98·F-06 取消出口）：[cancelPlanning] 时自增；在途 submit
+     * 在落地结果前比对自己提交时捕获的代际——不一致说明用户已取消，这次的
+     * 迟到结果（回复/动作/追问）一律丢弃，绝不上屏、绝不执行。宿主 Job 的
+     * cancel 只能停协程，停不住「结果已算出、正要落状态」的那一瞬与不响应
+     * 取消的 planner 实现，代际守卫是状态层的最终防线。
+     */
+    private var planGeneration = 0
+
     /** 缺参追问中挂起的动作：已凑齐的参数在 request.params 里，[missing] 是还没问完的 */
     private data class PendingInput(
         val request: ActionRequest,
@@ -126,6 +135,8 @@ class IntentCoordinator(
 
         lastText = input
         _state.value = IntentUiState.Planning(input)
+        // 捕获本次规划的代际：落地前若被 cancelPlanning 顶替过，迟到结果丢弃
+        val generation = planGeneration
 
         if (!config.hasKey()) {
             speaker.say(NO_KEY_MESSAGE)
@@ -148,6 +159,9 @@ class IntentCoordinator(
         } catch (e: Exception) {
             PlanOutcome.Err("请求失败：${e.message.orEmpty().ifBlank { "未知错误" }}")
         }
+        // F-06：规划途中被用户取消——迟到结果直接丢弃（状态已被 cancelPlanning
+        // 收回 Idle），不回复、不执行、不追问。
+        if (generation != planGeneration) return
         when (outcome) {
             null -> fail("模型响应超时，请重试")
             is PlanOutcome.Chat -> reply(outcome.text)
@@ -165,6 +179,18 @@ class IntentCoordinator(
         // 先离开确认态再执行：执行期间的第二次 confirm 必然落空，不会重复执行。
         _state.value = IntentUiState.Planning(request.intent)
         execute(request.copy(confirmed = true), isConfirm = true)
+    }
+
+    /**
+     * 取消在途规划（v0.68.98·F-06）：Planning 态的结果条「取消」钮走这里。
+     * 代际自增作废在途 submit 的落地权，状态立即收回 Idle（结果条随之收起）；
+     * 宿主随后 cancel 掉 Job 本身。非 Planning 态调用是无操作——迟到的取消
+     * 点击（结果刚好同时落地）不得把已呈现的回复/确认态误清掉。
+     */
+    fun cancelPlanning() {
+        if (_state.value !is IntentUiState.Planning) return
+        planGeneration++
+        _state.value = IntentUiState.Idle
     }
 
     /** 取消/关闭当前反馈：回到最近输入的编辑态，没有输入则回 Idle；追问态下同时清掉 pending（改办别的事的出口） */

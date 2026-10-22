@@ -30,7 +30,11 @@
 # v0.68.97（布局普查批）追加：第 21 段为布局几何断言（scripts/layout_check.py
 # 量 tpl_*.xml / fan_dump.xml 与本段新拉的 layout_home/ac/settings dump：
 # cover_hero / 胶囊 / 发送键 / NextUp / 七仔 / Dock 面板两两不相交 + 关键元素
-# 完整在屏内），crash 检查再顺延为第 22 段。形态 env 追加 SMOKE_WM_SIZE /
+# 完整在屏内），crash 检查再顺延为第 22 段。
+# v0.68.98（布局与交互 Loop 二批-C·F-06）追加：第 22 段为 Planning 取消
+# （planning-strip / planning-cancel-dismisses / planning-cancel-drops-late：
+# mock 慢响应把协调器停在 Planning 态 -> 思考条带「取消」-> 点取消后条消失 ->
+# 等迟到结果落地窗口过后断言追问不上屏），crash 检查再顺延为第 23 段。形态 env 追加 SMOKE_WM_SIZE /
 # SMOKE_USER_ROTATION：第 0 段几何读取前覆写显示尺寸与旋转锁定（矩阵的
 # 横屏手机短高、平板竖屏腿用），不带 env 时行为不变。
 # 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
@@ -1980,7 +1984,116 @@ echo "$LAYOUT_OUT" | while IFS= read -r line; do log "$line"; done
 LAYOUT_FAILS=$(echo "$LAYOUT_OUT" | grep -c "LAYOUT FAIL" || true)
 if [ "$LAYOUT_FAILS" -gt 0 ]; then ng "layout-geometry($LAYOUT_FAILS)"; else ok "layout-geometry"; fi
 
-# --- 22. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 22. Planning 取消（v0.68.98 布局与交互 Loop 二批-C：F-06 状态出口）---
+# 手段同第 17 段（mock LLM + 预写 llm prefs），差别在 mock 对含标记词
+# manmanxiang 的请求延迟 10 秒回包——把协调器稳定停在 Planning 态：
+# ①思考条「七仔想想中…」+「取消」钮在场（planning-strip）；
+# ②点「取消」后思考条消失、回 Idle（planning-cancel-dismisses）；
+# ③等过迟到回包的落地窗口，dump 里不得出现追问句「去哪儿」——mock 恒回
+#   daohang 空参，没被真取消的话迟到结果必进 NeedsInput 追问态，出现即
+#   取消没作废（planning-cancel-drops-late）。
+# 宿主 Job 被 cancel 后 HTTP 可能先断、迟到结果到不了客户端——本段验端到端
+# UI 行为；「结果已算出、正落状态」那一瞬的竞态由协调器代际守卫 + 单测覆盖
+# （IntentCoordinatorTest 15/16/17）。mock 起不来或 prefs 预写失败时整段跳过
+# 不计 FAIL（同第 17 段口径）；段末清 llm prefs + force-stop，不污染后续段落。
+PC_PORT=18742
+PC_LOG="$OUT/mock_slow_requests.log"
+PC_PID=""
+PC_UP=0
+if command -v python3 > /dev/null 2>&1; then
+  rm -f "$PC_LOG"
+  python3 scripts/mock_llm.py "$PC_PORT" "$PC_LOG" &
+  PC_PID=$!
+  for i in $(seq 1 20); do
+    if curl -s "http://127.0.0.1:$PC_PORT/health" 2> /dev/null | grep -q ok; then
+      PC_UP=1; break
+    fi
+    sleep 0.5
+  done
+fi
+if [ "$PC_UP" = "1" ]; then
+  adb reverse "tcp:$PC_PORT" "tcp:$PC_PORT" > /dev/null 2>&1 || true
+  adb shell am force-stop "$PKG" || true
+  printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
+    '    <string name="api_key">sk-mock</string>' \
+    "    <string name=\"base_url\">http://127.0.0.1:$PC_PORT</string>" \
+    '    <string name="model">mock-model</string>' "</map>" > "$OUT/llm_slow.xml"
+  adb push "$OUT/llm_slow.xml" /data/local/tmp/llm_slow.xml > /dev/null 2>&1 || true
+  adb shell "run-as $PKG cp /data/local/tmp/llm_slow.xml shared_prefs/llm.xml" || true
+  adb shell "run-as $PKG chmod 660 shared_prefs/llm.xml" || true
+  if adb shell "run-as $PKG cat shared_prefs/llm.xml" 2> /dev/null | grep -q '127.0.0.1'; then
+    adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+    sleep 5
+    adb shell input keyevent KEYCODE_HOME || true
+    sleep 2
+    if ni_locate_capsule; then
+      if ni_type_submit "manmanxiang"; then
+        # 思考条应在慢响应窗口（10 秒）内出现：轮询 dump 直到命中或窗口过半
+        PC_STRIP=0
+        for i in $(seq 1 4); do
+          sleep 1
+          adb shell uiautomator dump /sdcard/pc_poll.xml > /dev/null 2>&1 || true
+          adb pull /sdcard/pc_poll.xml "$OUT/pc_poll.xml" > /dev/null 2>&1 || true
+          if grep -q "七仔想想中" "$OUT/pc_poll.xml" 2> /dev/null && grep -q 'text="取消"' "$OUT/pc_poll.xml" 2> /dev/null; then PC_STRIP=1; break; fi
+        done
+        if [ "$PC_STRIP" = "1" ]; then
+          ok "planning-strip"
+          shot "intent-planning"
+          # 点「取消」：优先 testTag planning_cancel，未命中退回 text=取消 的节点中心
+          if ! tap_rid "$OUT/pc_poll.xml" "planning_cancel"; then
+            CNODE=$(grep -o '<node[^>]*text="取消"[^>]*>' "$OUT/pc_poll.xml" | head -1)
+            CNUMS=$(echo "$CNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+            CX1=$(echo "$CNUMS" | sed -n 1p); CY1=$(echo "$CNUMS" | sed -n 2p)
+            CX2=$(echo "$CNUMS" | sed -n 3p); CY2=$(echo "$CNUMS" | sed -n 4p)
+            if [ -n "$CX1" ] && [ -n "$CY2" ]; then
+              adb shell input swipe $(( (CX1 + CX2) / 2 )) $(( (CY1 + CY2) / 2 )) $(( (CX1 + CX2) / 2 )) $(( (CY1 + CY2) / 2 )) 150 > /dev/null 2>&1 || true
+            fi
+          fi
+          sleep 2
+          adb shell uiautomator dump /sdcard/pc_after.xml > /dev/null 2>&1 || true
+          adb pull /sdcard/pc_after.xml "$OUT/pc_after.xml" > /dev/null 2>&1 || true
+          if [ -f "$OUT/pc_after.xml" ] && ! grep -q "七仔想想中" "$OUT/pc_after.xml" 2> /dev/null; then
+            ok "planning-cancel-dismisses"
+          else
+            ng "planning-cancel-dismisses"
+          fi
+          # 等迟到回包的落地窗口整个过去（累计已过约 8 秒，再等 10 秒 > 10 秒延迟）
+          sleep 10
+          adb shell uiautomator dump /sdcard/pc_late.xml > /dev/null 2>&1 || true
+          adb pull /sdcard/pc_late.xml "$OUT/pc_late.xml" > /dev/null 2>&1 || true
+          shot "intent-planning-cancelled"
+          if [ -f "$OUT/pc_late.xml" ] && ! grep -q "去哪儿" "$OUT/pc_late.xml" 2> /dev/null && ! grep -q "七仔想想中" "$OUT/pc_late.xml" 2> /dev/null; then
+            ok "planning-cancel-drops-late"
+          else
+            ng "planning-cancel-drops-late"
+          fi
+        else
+          ng "planning-strip"
+          ng "planning-cancel-dismisses"
+          ng "planning-cancel-drops-late"
+        fi
+      else
+        log "planning-cancel: submit tap failed - segment counted as fail"
+        ng "planning-strip"
+        ng "planning-cancel-dismisses"
+        ng "planning-cancel-drops-late"
+      fi
+    else
+      log "planning-cancel: capsule not located - segment skipped (not counted)"
+    fi
+    # 清理：删 llm prefs + force-stop 掉 SP 缓存，恢复无 Key 基线（同第 17 段）
+    adb shell "run-as $PKG rm -f shared_prefs/llm.xml" || true
+    adb reverse --remove "tcp:$PC_PORT" > /dev/null 2>&1 || true
+    adb shell am force-stop "$PKG" || true
+  else
+    log "planning-cancel: llm prefs seed failed - segment skipped (not counted)"
+  fi
+else
+  log "mock llm unavailable - planning-cancel segment skipped (not counted)"
+fi
+if [ -n "$PC_PID" ]; then kill "$PC_PID" 2> /dev/null || true; fi
+
+# --- 23. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

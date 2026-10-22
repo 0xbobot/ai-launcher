@@ -95,6 +95,8 @@ fun HomeScreen(
     onIntentSubmit: (String) -> Unit,
     onIntentConfirm: (com.bobot.ailauncher.core.action.ActionRequest) -> Unit,
     onIntentDismiss: () -> Unit,
+    // v0.68.98（F-06）：Planning 态取消（宿主真取消在途 Job），透传给 IntentEntry
+    onIntentCancelPlanning: () -> Unit,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -333,6 +335,7 @@ fun HomeScreen(
                             onSubmit = onIntentSubmit,
                             onConfirm = onIntentConfirm,
                             onDismiss = onIntentDismiss,
+                            onCancelPlanning = onIntentCancelPlanning,
                             onOpenSettings = onOpenSettings,
                             onOpenPermissionSettings = { perm -> openPermissionSettings(context, perm) },
                             onFocusChanged = { intentFocused = it }
