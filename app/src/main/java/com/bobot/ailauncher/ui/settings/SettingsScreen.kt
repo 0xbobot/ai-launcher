@@ -65,7 +65,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
+import com.bobot.ailauncher.data.CrashLog
 import com.bobot.ailauncher.data.LlmConfig
+import com.bobot.ailauncher.data.LlmKeyStore
 import com.bobot.ailauncher.data.LlmConnectionTester
 import com.bobot.ailauncher.data.OtaCheckResult
 import com.bobot.ailauncher.data.OtaDownloader
@@ -78,6 +80,13 @@ import com.bobot.ailauncher.ui.theme.tickHaptic
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.semantics.invisibleToUser
@@ -99,6 +108,8 @@ fun SettingsScreen(
     var apiKey by remember { mutableStateOf(LlmConfig.getApiKey(context)) }
     var baseUrl by remember { mutableStateOf(LlmConfig.getBaseUrl(context)) }
     var model by remember { mutableStateOf(LlmConfig.getModel(context)) }
+    // v0.68.100（卫生批）：Key 存放形态（加密 / 明文降级）——保存后刷新，卡内明示
+    var keyStatus by remember { mutableStateOf(LlmConfig.keyStorageStatus(context)) }
     var testing by remember { mutableStateOf(false) }
     var llmExpanded by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -130,7 +141,10 @@ fun SettingsScreen(
         }
     }
 
-    fun persist() = LlmConfig.save(context, apiKey, baseUrl, model)
+    fun persist() {
+        LlmConfig.save(context, apiKey, baseUrl, model)
+        keyStatus = LlmConfig.keyStorageStatus(context)
+    }
 
     // v0.57.0：从屏幕底部上滑 → 回桌面主页（Bob：任何时候从底部上滑都要能回主页）
     // 只响应起始点在屏幕底部 1/4 区域内的上滑，避免与列表滚动冲突
@@ -327,6 +341,35 @@ fun SettingsScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
                         ) {
                             Text(if (testing) "测试中…" else "测试连接")
+                        }
+                        // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
+                        // 明文降级时醒目提示 + 给得出下一步，不再静默回退
+                        when (keyStatus.mode) {
+                            LlmKeyStore.StorageMode.ENCRYPTED -> Text(
+                                text = "✓ API Key 已加密存储在本机",
+                                fontSize = 12.sp,
+                                color = AILauncherColors.current.Hint,
+                                modifier = Modifier.padding(top = 10.dp)
+                            )
+                            LlmKeyStore.StorageMode.PLAIN_FALLBACK -> Column(
+                                modifier = Modifier.padding(top = 10.dp)
+                            ) {
+                                Text(
+                                    text = "本机密钥库异常，API Key 现在是明文存储",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = "重启手机后回到这里，Key 会自动尝试恢复加密；" +
+                                        "仍不行的话，删掉 Key 重新粘贴保存一次。",
+                                    fontSize = 12.sp,
+                                    color = AILauncherColors.current.Hint,
+                                    lineHeight = 17.sp,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                            LlmKeyStore.StorageMode.EMPTY -> Unit
                         }
                     }
                 }
@@ -552,6 +595,164 @@ fun SettingsScreen(
                             OtaUpdater.setBetaOptIn(context, it)
                         }
                     )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // v0.68.100（卫生批）：崩溃记录——侧载没有 Play Console，崩溃在这里
+        // 可见：本地留痕（环形 10 份）、可看全文、可经系统分享发给开发者、可删。
+        // 未读时标题带红点，进列表即标记已读（与冷启动提示一次的水位联动）。
+        item {
+            var crashExpanded by remember { mutableStateOf(false) }
+            var crashRecords by remember { mutableStateOf(CrashLog.list(context)) }
+            var crashUnread by remember { mutableStateOf(CrashLog.unreadCount(context)) }
+            var openedCrash by remember { mutableStateOf<Long?>(null) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.padding(horizontal = 20.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                view.tickHaptic()
+                                crashExpanded = !crashExpanded
+                                if (crashExpanded) {
+                                    crashRecords = CrashLog.list(context)
+                                    CrashLog.markAllRead(context)
+                                    crashUnread = 0
+                                }
+                            },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "崩溃记录",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = AILauncherColors.current.Title
+                                )
+                                if (crashUnread > 0) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.error)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = when {
+                                    crashRecords.isEmpty() -> "暂无记录，七仔运行得很稳"
+                                    crashUnread > 0 -> "有 $crashUnread 条新记录，点开查看"
+                                    else -> "共 ${crashRecords.size} 条，点开查看或分享"
+                                },
+                                fontSize = 13.sp,
+                                color = AILauncherColors.current.Hint,
+                                lineHeight = 18.sp
+                            )
+                        }
+                        Icon(
+                            if (crashExpanded) Icons.Filled.KeyboardArrowUp
+                            else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (crashExpanded) "收起" else "展开",
+                            tint = AILauncherColors.current.Hint
+                        )
+                    }
+                    if (crashExpanded && crashRecords.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        crashRecords.forEach { record ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        openedCrash =
+                                            if (openedCrash == record.epochMillis) null
+                                            else record.epochMillis
+                                    }
+                                    .padding(vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = java.text.SimpleDateFormat(
+                                        "yyyy-MM-dd HH:mm",
+                                        java.util.Locale.getDefault()
+                                    ).format(java.util.Date(record.epochMillis)),
+                                    fontSize = 13.sp,
+                                    color = AILauncherColors.current.Title
+                                )
+                                Text(
+                                    text = record.title,
+                                    fontSize = 12.sp,
+                                    color = AILauncherColors.current.Hint,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                            if (openedCrash == record.epochMillis) {
+                                Text(
+                                    text = record.content,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = AILauncherColors.current.Body,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 240.dp)
+                                        .verticalScroll(rememberScrollState())
+                                )
+                                TextButton(
+                                    onClick = {
+                                        view.tickHaptic()
+                                        val send = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_SUBJECT, "AI桌面崩溃记录")
+                                            putExtra(Intent.EXTRA_TEXT, record.content)
+                                        }
+                                        runCatching {
+                                            context.startActivity(
+                                                Intent.createChooser(send, "分享崩溃记录")
+                                            )
+                                        }.onFailure {
+                                            IslandToasts.show("没有可用的分享方式")
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Text(
+                                        text = "分享这条",
+                                        fontSize = 13.sp,
+                                        color = AILauncherColors.current.Accent
+                                    )
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    view.tickHaptic()
+                                    CrashLog.deleteAll(context)
+                                    crashRecords = emptyList()
+                                    openedCrash = null
+                                }
+                            ) {
+                                Text(
+                                    text = "全部删除",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))

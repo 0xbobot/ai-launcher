@@ -76,11 +76,53 @@ object LlmConfig {
             }
         }
 
-    fun getApiKey(context: Context): String =
-        LlmKeyStore.readApiKey(
+    fun getApiKey(context: Context): String {
+        val key = LlmKeyStore.readApiKey(
             prefs(context).asStore(),
             securePrefs(context)?.asStore()
         )
+        // v0.68.100（卫生批）：顺手做一次存放形态记账——降级/恢复的时点
+        // 不能只靠用户打开设置页才发现，诊断日志要在事件发生时就留行
+        runCatching { keyStorageStatus(context) }
+        return key
+    }
+
+    private const val KEY_FALLBACK_SINCE = "key_fallback_since"
+
+    /** 设置页明示用：Key 当前存放形态 + 降级起始时间（未降级时为 0） */
+    data class KeyStorageStatus(
+        val mode: LlmKeyStore.StorageMode,
+        val fallbackSince: Long
+    )
+
+    /**
+     * 探测 Key 存放形态，并记账状态迁移：
+     * 首次发现明文降级 → 记起始时间 + 诊断日志一行（只有事件名，绝不带 Key）；
+     * 恢复加密（或 Key 已清空）→ 清掉起始时间。幂等，重复调用不重复记账。
+     */
+    fun keyStorageStatus(context: Context): KeyStorageStatus {
+        val mode = LlmKeyStore.probeMode(
+            prefs(context).asStore(),
+            securePrefs(context)?.asStore()
+        )
+        val p = prefs(context)
+        var since = p.getLong(KEY_FALLBACK_SINCE, 0L)
+        when {
+            mode == LlmKeyStore.StorageMode.PLAIN_FALLBACK && since == 0L -> {
+                since = System.currentTimeMillis()
+                p.edit().putLong(KEY_FALLBACK_SINCE, since).apply()
+                CrashLog.diag(context, "keystore_fallback: api key stored in plaintext")
+            }
+            mode != LlmKeyStore.StorageMode.PLAIN_FALLBACK && since != 0L -> {
+                if (mode == LlmKeyStore.StorageMode.ENCRYPTED) {
+                    CrashLog.diag(context, "keystore_recovered: api key encrypted again")
+                }
+                p.edit().remove(KEY_FALLBACK_SINCE).apply()
+                since = 0L
+            }
+        }
+        return KeyStorageStatus(mode, since)
+    }
 
     fun getBaseUrl(context: Context): String =
         prefs(context).getString("base_url", DEFAULT_BASE_URL).orEmpty()

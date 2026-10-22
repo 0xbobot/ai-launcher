@@ -30,7 +30,7 @@
 
     <application
         android:name=".LauncherApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="AI桌面"
         android:supportsRtl="true"
