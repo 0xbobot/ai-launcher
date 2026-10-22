@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.ui.home
 
+import android.view.View
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -60,8 +61,8 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -313,7 +314,7 @@ sealed interface BlindUiState {
  */
 class BlindCaptureController(
     private val context: Context,
-    private val haptics: HapticFeedback,
+    private val hapticView: View,
     private val setUi: (BlindUiState) -> Unit,
     private val triggerPx: Float,
 ) {
@@ -432,7 +433,7 @@ class BlindCaptureController(
         triggered = false
         modeIndex = -1
         editPinned = true
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        hapticView.confirmHaptic()
         guideEditOnce()
         setUi(BlindUiState.Editing(centerX, centerY, fanDir, buildEditSegments(), openAddSheet))
         Log.d(TAG, "diag: editMode(openAddSheet=$openAddSheet)")
@@ -528,7 +529,7 @@ class BlindCaptureController(
                 modeIndex = -1
                 setUi(BlindUiState.Selecting(centerX, centerY, -1, fanDir, segments))
                 dwellStartMs = change.uptimeMillis
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                hapticView.confirmHaptic()
                 if (isZeroQuick) guideZeroQuickOnce()
                 else PetRepository.say("拍点什么？")
                 Log.d(TAG, "diag: fan展开")
@@ -553,7 +554,7 @@ class BlindCaptureController(
             dwellStartMs = change.uptimeMillis
             setUi(BlindUiState.Selecting(centerX, centerY, idx, fanDir, segments))
             if (idx >= 0) {
-                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                hapticView.tickHaptic()
                 PetRepository.say(segmentLabel(idx))
                 Log.d(TAG, "diag: sector=${segmentLabel(idx)}")
             }
@@ -626,7 +627,7 @@ class BlindCaptureController(
         triggered = false
         modeIndex = -1
         setUi(BlindUiState.PhotoFlash)
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        hapticView.confirmHaptic()
         val t = ++flashToken
         Handler(Looper.getMainLooper()).postDelayed({
             if (t != flashToken) return@postDelayed

@@ -43,9 +43,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -118,7 +119,7 @@ internal fun WaveRail(
     onLongPressStart: () -> Unit = {}
 ) {
     val density = LocalDensity.current
-    val haptics = LocalHapticFeedback.current
+    val hapticView = LocalView.current
     val scope = rememberCoroutineScope()
     // 右侧 rail：波浪/气泡往左（向内）；左侧 rail：往右（向内）
     val dirSign = if (side == RailSide.RIGHT) -1f else 1f
@@ -137,7 +138,7 @@ internal fun WaveRail(
     val pulseScale = remember { androidx.compose.animation.core.Animatable(1f) }
     LaunchedEffect(pulseTick) {
         if (pulseItem != null && pulseTick > 0) {
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            hapticView.tickHaptic()
             pulseScale.animateTo(1.7f, tween(180))
             pulseScale.animateTo(1f, tween(220))
         }
@@ -149,7 +150,7 @@ internal fun WaveRail(
         // v0.68.13：分隔线不可触摸，滑过时无反应
         if (items[i] is RailItem.Separator) return
         activeIndex = i
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        hapticView.tickHaptic()
         onActiveItem(items[i])
     }
 
@@ -238,7 +239,7 @@ internal fun WaveRail(
                     if (requireLongPress) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { offset ->
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                hapticView.confirmHaptic()
                                 onLongPressStart()
                                 cancelPendingTapRelease()
                                 emitItem(indexAt(offset.y))

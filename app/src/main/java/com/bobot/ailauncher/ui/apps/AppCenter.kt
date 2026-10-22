@@ -80,6 +80,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -91,7 +92,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -107,13 +111,14 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -128,6 +133,7 @@ import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
+import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.UiPrefs
@@ -135,7 +141,6 @@ import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.Collator
@@ -170,7 +175,7 @@ fun AppCenterContent(
     val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val haptics = LocalHapticFeedback.current
+    val hapticView = LocalView.current
     val onPullDownState = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
@@ -455,6 +460,16 @@ fun AppCenterContent(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    // v0.68.93（布局与交互 Loop 一批①）：与首页同病同修——胶囊聚焦态与范围
+    // 供根 Box 的点外部观察者用（clearIntentFocusOnOutsideTap）。
+    var intentFocused by remember { mutableStateOf(false) }
+    var intentBoundsInRoot by remember {
+        mutableStateOf<androidx.compose.ui.geometry.Rect?>(null)
+    }
+    var rootPosInRoot by remember {
+        mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+    }
+
     // v0.25.2：松手滚动——等列表恢复全量重组完成后再滚，避免打在旧内容上
     fun launchApp(app: AppInfo) {
         focusManager.clearFocus()
@@ -528,6 +543,23 @@ fun AppCenterContent(
             .fillMaxSize()
             // v0.68.45（走查）：实底纸面——之前透明，主屏大时间透过来盖住列表
             .background(AILauncherColors.current.Background)
+            // v0.68.93：点胶囊外释放焦点（观察不消费，列表滚动/点按照旧）
+            .onGloballyPositioned { rootPosInRoot = it.positionInRoot() }
+            .clearIntentFocusOnOutsideTap(
+                focused = { intentFocused },
+                targetBoundsInHost = {
+                    intentBoundsInRoot?.let { b ->
+                        androidx.compose.ui.geometry.Rect(
+                            b.left - rootPosInRoot.x,
+                            b.top - rootPosInRoot.y,
+                            b.right - rootPosInRoot.x,
+                            b.bottom - rootPosInRoot.y
+                        )
+                    }
+                },
+                focusManager = focusManager,
+                keyboardController = keyboardController
+            )
     ) {
     // v0.68.70（Bob）：横屏判断改用量实际尺寸（LocalConfiguration 也不可靠）
     var isLandscapeAc by remember { mutableStateOf(false) }
@@ -632,7 +664,10 @@ fun AppCenterContent(
                     // 应用中心变体专属（10-21 Bob 批准）：✕ 一键清空，清空后网格恢复全量；
                     // 首页胶囊不开启，保持原设计。
                     showClearButton = true,
+                    // v0.68.93：焦点外报 + 范围捕获（根 Box 点外部观察者用）
+                    onFocusChanged = { intentFocused = it },
                     modifier = Modifier.weight(1f)
+                        .onGloballyPositioned { intentBoundsInRoot = it.boundsInRoot() }
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 // v0.41.9（Bob 选 B）：设置齿轮缩小弱化，仍在右上
@@ -781,7 +816,7 @@ fun AppCenterContent(
                                     app = app,
                                     onLaunch = { launchApp(app) },
                                     onLongClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        hapticView.confirmHaptic()
                                         popupApp = app
                                     },
                                     onHide = ::hideApp,
@@ -879,7 +914,7 @@ fun AppCenterContent(
                                 app = app,
                                 onLaunch = { launchApp(app) },
                                 onLongClick = {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    hapticView.confirmHaptic()
                                     popupApp = app
                                 },
                                 onHide = ::hideApp,
@@ -930,7 +965,7 @@ fun AppCenterContent(
                                             onDragStart = {
                                                 draggingDockPkg = app.packageName
                                                 dockDragOffsetY = 0f
-                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                hapticView.tickHaptic()
                                             },
                                             onDragEnd = {
                                                 UiPrefs.setDockPinned(
@@ -1012,7 +1047,7 @@ fun AppCenterContent(
                                 app = app,
                                 onLaunch = { launchApp(app) },
                                 onLongClick = {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    hapticView.confirmHaptic()
                                     popupApp = app
                                 },
                                 onHide = ::hideApp,
@@ -1130,7 +1165,7 @@ fun AppCenterContent(
                                     app = app,
                                     onLaunch = { launchApp(app) },
                                     onLongClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        hapticView.confirmHaptic()
                                         popupApp = app
                                     },
                                     onHide = {}, // 隐藏分组内：右滑=取消隐藏
@@ -1258,21 +1293,31 @@ fun AppCenterContent(
             // 触发后是右侧 rail 亮起波浪跟随；应用列表左侧缩进给手指留空间。
             // v0.67.11（Bob）：主屏 picker 会话中隐藏自己的 rail，避免与 picker 重叠
             if (!searching && letters.isNotEmpty() && homeTarget == null) {
-                var glideJob by remember { mutableStateOf<Job?>(null) }
                 // 左侧隐形区触发时，右侧可见 rail 跟随显示波浪
                 var mirrorIndex by remember { mutableStateOf<Int?>(null) }
                 // Niagara 做法：直接滚完整列表，不做内容过滤；松手时列表本来就在位置上，零位移
-                val glideToLetter: (Char) -> Unit = { letter ->
-                    val anchor = letterAnchors[letter] ?: 0
-                    glideJob?.cancel()
-                    glideJob = scope.launch {
-                        val cur = listState.firstVisibleItemIndex
-                        if (kotlin.math.abs(anchor - cur) > 20) {
-                            listState.scrollToItem(anchor)
-                        } else {
-                            listState.animateScrollToItem(anchor)
-                        }
+                // v0.68.93（布局与交互 Loop 一批②）：落位改「最新目标合并」——旧实现每过一个
+                // 字母就 cancel 旧协程再新起一个：近字母 animateScrollToItem（动画扫过中间
+                // 内容）、远字母 scrollToItem（瞬跳），拖动中两者交替取消/重启，列表一帧
+                // 一变，肉眼就是刷新感/乱（Bob 真机点名）。主流桌面（iOS 通讯录/小米索引）
+                // 的拖动态只认最新字母：这里只记目标，单个 effect 等一帧把同帧内的多次
+                // 改向合并成一次瞬时落位，列表位置与手指字母严格对应，不再有动画扫掠
+                // 与重启风暴；点按字母同走此路（瞬时落位，与通讯录一致）。
+                var glideTarget by remember { mutableStateOf<Char?>(null) }
+                var latestGlideLetter by remember { mutableStateOf<Char?>(null) }
+                LaunchedEffect(glideTarget) {
+                    val letter = glideTarget ?: return@LaunchedEffect
+                    withFrameNanos { }
+                    val anchor = letterAnchors[letter] ?: return@LaunchedEffect
+                    if (listState.firstVisibleItemIndex != anchor ||
+                        listState.firstVisibleItemScrollOffset != 0
+                    ) {
+                        listState.scrollToItem(anchor)
                     }
+                }
+                val glideToLetter: (Char) -> Unit = { letter ->
+                    latestGlideLetter = letter
+                    glideTarget = letter
                 }
                 // v0.68.6（Bob）：房子停留确认——滑到房子后停留450ms才回首页，
                 // v0.68.20（Bob）：手势驱动——拉拽进度替代停留时长
@@ -1286,8 +1331,15 @@ fun AppCenterContent(
                 var lastHousePull by remember { mutableStateOf(0f) }
                 var lastEyePull by remember { mutableStateOf(0f) }
                 val stopGlide: () -> Unit = {
-                    glideJob?.cancel()
-                    glideJob = null
+                    // v0.68.93：松手收尾——最后一次改向的目标可能还差一帧没落位
+                    // （effect 等帧期间松手），按最后记录的字母补一次瞬时落位，
+                    // 已在位则无操作；下面的 pull 复位沿旧口径。
+                    latestGlideLetter?.let { letter ->
+                        val anchor = letterAnchors[letter]
+                        if (anchor != null && listState.firstVisibleItemIndex != anchor) {
+                            scope.launch { listState.scrollToItem(anchor) }
+                        }
+                    }
                     if (!housePullCommitted) {
                         housePull = 0f
                         lastHousePull = 0f
@@ -1298,7 +1350,6 @@ fun AppCenterContent(
                     }
                     housePullArmed = true
                     eyePullArmed = true
-                    // 列表已在拖动中滚到位，松手无需任何操作
                 }
                 // v0.41.31（Bob）：Rail 顶部 ★ → Dock 分区，底部眼 → 隐藏分区
                 // v0.67.12（Bob）：改用共享 AppRail，单一样式单布局
@@ -1345,12 +1396,12 @@ fun AppCenterContent(
                         val cp = p.coerceIn(0f, 1f)
                         housePull = cp
                         if (cp >= 0.5f && lastHousePull < 0.5f) {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            hapticView.tickHaptic()
                         }
                         if (cp >= 1f) {
                             housePullCommitted = true
                             housePullArmed = false
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            hapticView.confirmHaptic()
                             housePull = 0f
                             lastHousePull = 0f
                             housePullCommitted = false
@@ -1365,12 +1416,12 @@ fun AppCenterContent(
                         val cp = p.coerceIn(0f, 1f)
                         eyePull = cp
                         if (cp >= 0.5f && lastEyePull < 0.5f) {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            hapticView.tickHaptic()
                         }
                         if (cp >= 1f) {
                             eyePullCommitted = true
                             eyePullArmed = false
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            hapticView.confirmHaptic()
                             unlockHiddenApps()
                             eyePull = 0f
                             lastEyePull = 0f

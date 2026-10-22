@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.CallLog
-import android.view.HapticFeedbackConstants
+import com.bobot.ailauncher.ui.theme.confirmHaptic
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -439,7 +439,7 @@ internal fun TodaySection(
                     // v0.64.5：纳入指引系统（只展示一次）；文案更新含退出方式
                     onLongClick = {
                         if (!editMode) {
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            view.confirmHaptic()
                             onEditModeChange(true)
                             if (GuideManager.tryShow(context, GuideManager.Id.EDIT_MODE)) {
                                 PetRepository.say("拖拽可以排序，点眼睛可以隐藏，点空白处退出哦")

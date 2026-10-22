@@ -19,6 +19,10 @@
 # 第 17 段为意图改进二批：本机 mock LLM（scripts/mock_llm.py）+ 预写 llm prefs 把
 # 协调器逼进缺参追问态实拍（intent-needsinput.png / intent-needsinput-answered.png），
 # 并断言发往模型的请求体含带参数说明的 hints 与上下文包。
+# v0.68.93（布局与交互 Loop 一批）追加：第 14 段内加会议双处呈现去重断言
+# （nextup-dedupe：种子事件在场时聚焦出建议面，标题全屏只出现一次）；
+# 第 18 段为意图焦点点外部取消（focus-cancel-outside：聚焦输字后点七仔，
+# dump 无 focused 节点且文本保留）；crash 检查顺延为第 19 段。
 # 体检批D ⑥（testTag 分段改造）：关键 composable 已加 testTag（intent_input /
 # intent_submit / intent_clear / result_item / pet_qizai / today_nextup /
 # appcenter_settings / dock_item），MainActivity 根容器开 testTagsAsResourceId，
@@ -945,6 +949,71 @@ PYEOF
   sleep 2
 }
 
+
+nextup_dedupe_flow() {
+  # $1=事件标题。v0.68.93（布局与交互 Loop 一批④）：同一会议双处呈现去重断言。
+  # NextUp 条是会议的常驻主场：种子事件在场、聚焦出建议面时，该标题在全屏
+  # dump 里只能出现一次（NextUp 标题），建议面内不得再有会议行。
+  # 环境门同 nextup_tap_flow：种子事件进不了 Instances 视图时 NextUp 无从
+  # 呈现，明示 SKIP 不计数（不冒充已验，报告如实标注）。
+  local TITLE="$1"
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  local WIN_B WIN_E DIAG_IN
+  WIN_B=$(( (EMU_S - 86400) * 1000 )); WIN_E=$(( (EMU_S + 86400) * 1000 ))
+  DIAG_IN=$(adb shell content query --uri "content://com.android.calendar/instances/when/$WIN_B/$WIN_E" --projection title 2>&1 | head -4 | tr '\n' ' ')
+  if ! echo "$DIAG_IN" | grep -q "$TITLE"; then
+    log "nextup-dedupe: SKIP (seeded event not visible in Instances on this image; dedupe unverified here)"
+    return
+  fi
+  adb shell uiautomator dump /sdcard/dedupe_dump0.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/dedupe_dump0.xml "$OUT/dedupe_dump0.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/dedupe_dump0.xml" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump0.xml"; then
+    ok "nextup-dedupe-home"
+  else
+    ng "nextup-dedupe-home"
+    return
+  fi
+  # 聚焦胶囊：testTag 定位（兜底坐标同第 15 段）
+  local DX DY CTR
+  DX=$(SX 540); DY=$(SY 1247)
+  CTR=$(center_rid "$OUT/dedupe_dump0.xml" "intent_input")
+  if [ -n "$CTR" ]; then DX=$(echo "$CTR" | cut -d' ' -f1); DY=$(echo "$CTR" | cut -d' ' -f2); log "dedupe capsule by tag at ($DX,$DY)"; fi
+  adb shell input swipe "$DX" "$DY" "$DX" "$DY" 150 || true
+  sleep 2
+  # BACK 只收键盘、焦点与建议面保留（同第 15 段法）：之后 dump 是全布局，
+  # NextUp 与建议面同屏——正是去重要验的同屏状态。
+  adb shell input keyevent KEYCODE_BACK || true
+  sleep 1
+  shot "intent-dedupe-suggest"
+  adb shell uiautomator dump /sdcard/dedupe_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/dedupe_dump.xml "$OUT/dedupe_dump.xml" > /dev/null 2>&1 || true
+  if [ ! -f "$OUT/dedupe_dump.xml" ]; then
+    ng "nextup-dedupe"
+    return
+  fi
+  # 前提：建议面真的在场（否则"无会议行"是空断言，直接判失败而非通过）
+  if ! grep -q '七仔猜你现在想用' "$OUT/dedupe_dump.xml"; then
+    log "nextup-dedupe: suggestion panel not present - assertion precondition missing"
+    ng "nextup-dedupe"
+    return
+  fi
+  # 标题出现次数：NextUp 标题一处（"<标题> · 点一下加入"）；建议面若复刻
+  # 会议行会有第二处同名文本节点。
+  local CNT
+  CNT=$(grep -o "text=\"[^\"]*${TITLE}[^\"]*\"" "$OUT/dedupe_dump.xml" | wc -l | tr -d ' ')
+  log "nextup-dedupe: title occurrences=$CNT (expect 1, NextUp only)"
+  if [ "$CNT" = "1" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump.xml"; then
+    ok "nextup-dedupe"
+  else
+    ng "nextup-dedupe"
+  fi
+}
+
 if [ -n "$CAL_ID" ]; then
   EMU_S=$(adb shell date +%s 2>/dev/null | tr -d '\r ')
   if [ -z "$EMU_S" ]; then EMU_S=$(date +%s); fi
@@ -1025,6 +1094,7 @@ if [ -n "$CAL_ID" ]; then
   HAS_SQLITE=$(adb shell "command -v sqlite3" 2>/dev/null | head -1 | tr -d '\r ')
   # 事件 A：无链接 → 点卡应打开日历（CATEGORY_APP_CALENDAR / 事件详情）
   if nextup_seed_event "SmokeNoLink" ""; then
+    nextup_dedupe_flow "SmokeNoLink"
     nextup_tap_flow "SmokeNoLink" "nolink" "calendar"
   elif [ -z "$SMOKE_LABEL" ]; then
     ng "nextup-seed"
@@ -1473,7 +1543,55 @@ else
 fi
 if [ -n "$MOCK_PID" ]; then kill "$MOCK_PID" 2> /dev/null || true; fi
 
-# --- 18. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 18. 意图焦点点外部取消（v0.68.93 布局与交互 Loop 一批①：Bob 真机点名 bug）---
+# 根因：Compose 无点外部自动清焦，releaseInputFocus 只从 IntentEntry 内部调，
+# 点页面其他地方焦点不释放、键盘不收，用户被困编辑态。修复后：聚焦输字 ->
+# press 点七仔（意图区外）-> dump 无 focused="true" 节点且已输文本仍在（不吞字）。
+# IME 可见性用 dumpsys input_method 的 mInputShown 做辅助日志（CI 读法不稳，
+# 不作断言本体；断言 = 焦点状态，键盘收起由截图人工确认，报告如实标注）。
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+adb shell uiautomator dump /sdcard/focus_dump0.xml > /dev/null 2>&1 || true
+adb pull /sdcard/focus_dump0.xml "$OUT/focus_dump0.xml" > /dev/null 2>&1 || true
+FCX=$(SX 540); FCY=$(SY 1247)
+CTR=$(center_rid "$OUT/focus_dump0.xml" "intent_input")
+if [ -n "$CTR" ]; then FCX=$(echo "$CTR" | cut -d' ' -f1); FCY=$(echo "$CTR" | cut -d' ' -f2); log "focus-cancel capsule by tag at ($FCX,$FCY)"; fi
+adb shell input swipe "$FCX" "$FCY" "$FCX" "$FCY" 150 || true
+sleep 2
+adb shell input text "daohang" || true
+sleep 1
+# 补空格让 LatinIME composing 上屏（同第 15 段法，与真实输入流程对齐）
+adb shell input text "%s" || true
+sleep 1
+adb shell uiautomator dump /sdcard/focus_pre.xml > /dev/null 2>&1 || true
+adb pull /sdcard/focus_pre.xml "$OUT/focus_pre.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/focus_pre.xml" ] && grep -q 'focused="true"' "$OUT/focus_pre.xml" && grep -q 'daohang' "$OUT/focus_pre.xml"; then
+  # 前提成立（确实聚焦且文本在框内）才验取消；点七仔（pet_qizai，意图区外）
+  PTX=$(SX 540); PTY=$(SY 950)
+  CTR=$(center_rid "$OUT/focus_dump0.xml" "pet_qizai")
+  if [ -n "$CTR" ]; then PTX=$(echo "$CTR" | cut -d' ' -f1); PTY=$(echo "$CTR" | cut -d' ' -f2); log "focus-cancel pet by tag at ($PTX,$PTY)"; fi
+  adb shell input swipe "$PTX" "$PTY" "$PTX" "$PTY" 150 || true
+  sleep 2
+  shot "intent-focus-outside"
+  IMESHOWN=$(adb shell dumpsys input_method 2>/dev/null | grep -m1 "mInputShown" | tr -d ' ' || true)
+  log "focus-cancel ime after outside tap: ${IMESHOWN:-unavailable} (auxiliary only)"
+  adb shell uiautomator dump /sdcard/focus_post.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/focus_post.xml "$OUT/focus_post.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/focus_post.xml" ] && ! grep -q 'focused="true"' "$OUT/focus_post.xml" && grep -q 'daohang' "$OUT/focus_post.xml"; then
+    ok "focus-cancel-outside"
+  else
+    ng "focus-cancel-outside"
+  fi
+else
+  log "focus-cancel precondition missing (capsule not focused or text absent) - counted as fail"
+  ng "focus-cancel-outside"
+fi
+
+# --- 19. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true
