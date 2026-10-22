@@ -81,9 +81,14 @@ fun PetZone(
     hasUpgrade: Boolean = false,
     onUpgradeTap: () -> Unit = {},
     // v0.68.99（主页重构 R-1）：点简报旁的讲述者七仔 = 进入输入态（底部原地
-    // 切换出胶囊，Dock 让位）——胶囊槽位 coverIntentSlot 随静态撤胶囊下线，
-    // 本区不再承载输入 UI，只负责简报构图与「点七仔」信号。
-    onPetTap: () -> Unit = {}
+    // 切换出胶囊，Dock 让位）。
+    onPetTap: () -> Unit = {},
+    // v0.68.99（R-1 修订）：输入态胶囊槽——恢复 .97 的 coverIntentSlot 位置
+    // （hero 与会行之间，横屏收进 coverLeftFrac 左区）：静态时槽内容零高度、
+    // 构图与无槽一致；输入态由 HomeScreen 填充 IntentEntry。早先的底部浮层
+    // 方案在横屏会跨进 hero 区（矩阵 landphone 腿实测 overlap），流式槽位靠
+    // 布局分区天然不重叠，且与 .97 几何基线同构。
+    intentSlot: @Composable () -> Unit = {}
 ) {
     val mood by PetRepository.mood.collectAsState()
     // R3-C：意图反应姿态覆盖（对话感）——非空时优先于整理员 mood 渲染，通知流程不受影响
@@ -347,9 +352,19 @@ fun PetZone(
                 }
             }
         )
-        // v0.68.99（主页重构 R-1）：静态胶囊行已撤（输入态由 HomeScreen 底部
-        // 浮现承载）；简报会行——有会议才显示，无会时 hero 已有"难得清闲"，
-        // 不重复。横屏走 coverLeftFrac 左区分区（.97 成果延续）。
+        // v0.68.99（R-1 修订）：输入态胶囊槽（.97 位置：hero 与会行之间；
+        // 横屏只占左侧区，右端不滑入面板下——.97 原注）
+        if (isLandscapeCover) {
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier.fillMaxWidth(coverLeftFrac)
+            ) {
+                intentSlot()
+            }
+        } else {
+            intentSlot()
+        }
+        // v0.68.99（主页重构 R-1）：简报会行——有会议才显示，无会时 hero 已有
+        // "难得清闲"，不重复。横屏走 coverLeftFrac 左区分区（.97 成果延续）。
         if (coverNextEvent != null) {
             Spacer(modifier = Modifier.height(14.dp))
             BriefMeetingRow(

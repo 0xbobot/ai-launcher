@@ -171,14 +171,18 @@ fun PullUpDock(
         }
     }
 
-    // v0.68.99：输入态下卡片让位（意图胶囊在底部原地接管，Dock 内容不与之叠画）
-    val cardVisible = (state == DockState.D1 || state == DockState.D2) && !intentInputMode
     // v0.39.0：Dock 长按 → 真弹窗快捷菜单（锚定在图标上）
     var popupApp by remember { mutableStateOf<AppInfo?>(null) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         // v0.68.73（Bob）：横屏时 Dock 收拢，不横贯全屏
         val isLandscapeDock = maxWidth > maxHeight
+        // v0.68.99：输入态下卡片让位（意图胶囊在底部原地接管，Dock 内容不与
+        // 之叠画）——让位只针对竖屏底栏形态：横屏 Dock 是右下面板，与左区
+        // 胶囊不争空间，保持在场（与 .97 基线一致；矩阵 landphone 腿实测
+        // 横屏让位会抽走底部带可点节点且与基线几何脱钩）。
+        val cardVisible = (state == DockState.D1 || state == DockState.D2) &&
+            (!intentInputMode || isLandscapeDock)
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
         // D2→D1 改由下滑/右滑手势触发
 

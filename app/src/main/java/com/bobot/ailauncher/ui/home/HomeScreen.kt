@@ -365,75 +365,70 @@ fun HomeScreen(
             // v0.68.96（F-01 退役）：PetZone 的非封面分支已删除，todayCardAlpha
             // 参数随之移除——该淡出原本只作用于已退役的 TODAY 卡，封面形态从未吃到。
             PetZone(
-                // v0.68.99：点简报讲述者七仔 = 进入输入态（胶囊改由下方浮层承载）。
+                // v0.68.99：点简报讲述者七仔 = 进入输入态（胶囊在简报下方的
+                // 槽位原地展开，Dock 让位）。
                 // 输入态下点它属「点外部」：只保留果冻反馈，不再报入口——否则
                 // 同一手势里 DOWN 的根观察者清焦退出与 UP 的点按重进互相竞态
                 // （冒烟第六轮实测一轮退出被重进吞掉、Dock 不回位）。
-                onPetTap = if (intentInputMode) ({}) else onEnterIntentInput
+                onPetTap = if (intentInputMode) ({}) else onEnterIntentInput,
+                // v0.68.99（R-1 修订）：输入态填充 PetZone 的 intentSlot（.97
+                // 槽位：hero 与会行之间、横屏左区）——静态时 AnimatedVisibility
+                // 零高度、封面只剩简报+Dock；包裹 Box 捕获意图区范围供 .93
+                // 点外部收焦观察者用。早先的底部浮层在横屏跨进 hero 区
+                // （矩阵 landphone 实测 overlap），流式槽位靠分区天然不重叠。
+                intentSlot = {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = intentInputMode,
+                        enter = androidx.compose.animation.expandVertically(
+                            animationSpec = androidx.compose.animation.core.tween(
+                                com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                                easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                            )
+                        ) + androidx.compose.animation.fadeIn(
+                            animationSpec = androidx.compose.animation.core.tween(
+                                com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                                easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                            )
+                        ),
+                        exit = androidx.compose.animation.shrinkVertically(
+                            animationSpec = androidx.compose.animation.core.tween(
+                                com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                                easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                            )
+                        ) + androidx.compose.animation.fadeOut(
+                            animationSpec = androidx.compose.animation.core.tween(
+                                com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                                easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                            )
+                        )
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp)
+                                .onGloballyPositioned {
+                                    intentBoundsInRoot = it.boundsInRoot()
+                                }
+                        ) {
+                            IntentEntry(
+                                state = intentState,
+                                onSubmit = onIntentSubmit,
+                                onConfirm = onIntentConfirm,
+                                onDismiss = onIntentDismiss,
+                                onCancelPlanning = onIntentCancelPlanning,
+                                onOpenSettings = onOpenSettings,
+                                onOpenPermissionSettings = { perm ->
+                                    openPermissionSettings(context, perm)
+                                },
+                                onFocusChanged = { intentFocused = it },
+                                fieldValue = intentFieldValue,
+                                onFieldValueChange = { intentFieldValue = it },
+                                requestFocusOnMount = intentRequestFocus
+                            )
+                        }
+                    }
+                }
             )
-        }
-        // v0.68.99（主页重构 R-1）：输入态——底部原地切换出胶囊（Dock 同时让位，
-        // 由 HomeHost 控制）。静态主页不再常驻胶囊，IntentEntry 只在输入态挂载；
-        // 包裹 Box 继续捕获意图区范围供 .93 点外部收焦观察者用。
-        androidx.compose.animation.AnimatedVisibility(
-            visible = intentInputMode,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = androidx.compose.animation.slideInVertically(
-                animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
-                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                )
-            ) { it / 2 } + androidx.compose.animation.fadeIn(
-                animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
-                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                )
-            ),
-            exit = androidx.compose.animation.slideOutVertically(
-                animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
-                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                )
-            ) { it / 2 } + androidx.compose.animation.fadeOut(
-                animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
-                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                )
-            )
-        ) {
-            // 底部内边距取 IME 与导航栏的较大者 + 16dp：贴底锚定时，输入块
-            // 最低处的可点元素（结果行、思考条「取消」钮）必须整块待在导航栏
-            // 触控区之上——否则点按被系统导航吞掉（R-1 首轮冒烟实测：取消钮
-            // 中心落进导航区、点按变系统 BACK，§10 结果行同病）。IME 弹起时
-            // 其 inset 更大，自动改为让位键盘。
-            val overlayImePx = androidx.compose.foundation.layout.WindowInsets.ime
-                .getBottom(density)
-            val overlayNavPx = androidx.compose.foundation.layout.WindowInsets.navigationBars
-                .getBottom(density)
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        bottom = with(density) {
-                            maxOf(overlayImePx, overlayNavPx).toDp()
-                        } + 16.dp
-                    )
-                    .onGloballyPositioned { intentBoundsInRoot = it.boundsInRoot() }
-            ) {
-                IntentEntry(
-                    state = intentState,
-                    onSubmit = onIntentSubmit,
-                    onConfirm = onIntentConfirm,
-                    onDismiss = onIntentDismiss,
-                    onCancelPlanning = onIntentCancelPlanning,
-                    onOpenSettings = onOpenSettings,
-                    onOpenPermissionSettings = { perm -> openPermissionSettings(context, perm) },
-                    onFocusChanged = { intentFocused = it },
-                    fieldValue = intentFieldValue,
-                    onFieldValueChange = { intentFieldValue = it },
-                    requestFocusOnMount = intentRequestFocus
-                )
-            }
         }
         // v0.68.99：返回退出输入态——IME 在场时不启用（那一按归输入法收键盘，
         // 与既有「BACK 先收键盘」口径一致，冒烟 §9/§10 依赖此序）；有在场状态

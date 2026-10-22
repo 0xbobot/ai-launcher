@@ -67,6 +67,17 @@ FAIL=0
 log()  { echo "[smoke] $*"; }
 ok()   { PASS=$((PASS+1)); log "PASS: $1"; }
 ng()   { FAIL=$((FAIL+1)); log "FAIL: $1"; }
+# v0.68.99（R-1 多轮实测）：uiautomator 偶发 0 字节空 dump（ni_btn/ac_dump3/
+# suggest_after/focus_pre 先后中招）——关键单发 dump 拉回后为空时重拉一次。
+redump_if_empty() {
+  # $1 = 文件名（不带 .xml，远端 /sdcard/<name>.xml 与本地 $OUT/<name>.xml 同名）
+  if [ ! -s "$OUT/$1.xml" ]; then
+    log "redump_if_empty: $1"
+    sleep 1
+    adb shell uiautomator dump "/sdcard/$1.xml" > /dev/null 2>&1 || true
+    adb pull "/sdcard/$1.xml" "$OUT/$1.xml" > /dev/null 2>&1 || true
+  fi
+}
 shot() {
   if adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null; then
     log "shot: $1.png"
@@ -1391,6 +1402,7 @@ adb shell input text "%s" || true
 sleep 1
 adb shell uiautomator dump /sdcard/suggest_kb.xml > /dev/null 2>&1 || true
 adb pull /sdcard/suggest_kb.xml "$OUT/suggest_kb.xml" > /dev/null 2>&1 || true
+redump_if_empty suggest_kb
 SUBX=""; SUBY=""
 if [ -f "$OUT/suggest_kb.xml" ]; then
   BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/suggest_kb.xml" | head -1)
@@ -1734,6 +1746,7 @@ adb shell input text "%s" || true
 sleep 1
 adb shell uiautomator dump /sdcard/focus_pre.xml > /dev/null 2>&1 || true
 adb pull /sdcard/focus_pre.xml "$OUT/focus_pre.xml" > /dev/null 2>&1 || true
+redump_if_empty focus_pre
 if [ -f "$OUT/focus_pre.xml" ] && grep -q 'focused="true"' "$OUT/focus_pre.xml" && grep -q 'daohang' "$OUT/focus_pre.xml"; then
   # 前提成立（确实聚焦且文本在框内）才验取消；点七仔（pet_qizai，意图区外）
   PTX=$(SX 540); PTY=$(SY 950)
@@ -1746,6 +1759,7 @@ if [ -f "$OUT/focus_pre.xml" ] && grep -q 'focused="true"' "$OUT/focus_pre.xml" 
   log "focus-cancel ime after outside tap: ${IMESHOWN:-unavailable} (auxiliary only)"
   adb shell uiautomator dump /sdcard/focus_post.xml > /dev/null 2>&1 || true
   adb pull /sdcard/focus_post.xml "$OUT/focus_post.xml" > /dev/null 2>&1 || true
+  redump_if_empty focus_post
   # v0.68.99：退出证据 = 无聚焦节点 + Dock 面板回位（胶囊已卸载，文本不在
   # 本 dump 里——保留性由紧随的重进检查证明）
   if [ -f "$OUT/focus_post.xml" ] && ! grep -q 'focused="true"' "$OUT/focus_post.xml" && grep -q 'resource-id="dock_panel"' "$OUT/focus_post.xml"; then
