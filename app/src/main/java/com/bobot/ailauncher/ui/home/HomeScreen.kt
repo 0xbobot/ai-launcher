@@ -365,8 +365,11 @@ fun HomeScreen(
             // v0.68.96（F-01 退役）：PetZone 的非封面分支已删除，todayCardAlpha
             // 参数随之移除——该淡出原本只作用于已退役的 TODAY 卡，封面形态从未吃到。
             PetZone(
-                // v0.68.99：点简报讲述者七仔 = 进入输入态（胶囊改由下方浮层承载）
-                onPetTap = onEnterIntentInput
+                // v0.68.99：点简报讲述者七仔 = 进入输入态（胶囊改由下方浮层承载）。
+                // 输入态下点它属「点外部」：只保留果冻反馈，不再报入口——否则
+                // 同一手势里 DOWN 的根观察者清焦退出与 UP 的点按重进互相竞态
+                // （冒烟第六轮实测一轮退出被重进吞掉、Dock 不回位）。
+                onPetTap = if (intentInputMode) ({}) else onEnterIntentInput
             )
         }
         // v0.68.99（主页重构 R-1）：输入态——底部原地切换出胶囊（Dock 同时让位，
