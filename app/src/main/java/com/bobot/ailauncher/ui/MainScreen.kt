@@ -225,6 +225,14 @@ private fun HomeHost(
         intentJob?.cancel()
         intentJob = intentScope.launch { intentCoordinator.submit(text) }
     }
+    // v0.68.98（F-06）：Planning 态「取消」——先让协调器作废在途规划的落地权
+    // 并收回 Idle（结果条随之收起），再 cancel Job 本体；顺序反过来，Job 的
+    // CancellationException 分支会抢先 dismiss 回 Editing，与取消语义不符。
+    fun cancelIntentPlanning() {
+        intentCoordinator.cancelPlanning()
+        intentJob?.cancel()
+        intentJob = null
+    }
     // 应用中心「问七仔」：先回首页（离 D3），再把整句交给协调器理解
     val onAskQizai: (String) -> Unit = { text ->
         onD3SwipeUpToHome()
@@ -344,6 +352,7 @@ private fun HomeHost(
             onIntentSubmit = { t -> submitIntent(t) },
             onIntentConfirm = { req -> intentCoordinator.confirm(req) },
             onIntentDismiss = { intentCoordinator.dismiss() },
+            onIntentCancelPlanning = { cancelIntentPlanning() },
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位）

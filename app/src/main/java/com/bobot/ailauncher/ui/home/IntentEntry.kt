@@ -326,6 +326,9 @@ fun IntentEntry(
     onSubmit: (String) -> Unit,
     onConfirm: (ActionRequest) -> Unit,
     onDismiss: () -> Unit,
+    // v0.68.98（F-06）：Planning 态取消——宿主 cancel 在途 Job + 协调器作废结果，
+    // 与 onDismiss（关反馈条）语义不同，故单列
+    onCancelPlanning: () -> Unit = {},
     onOpenSettings: () -> Unit,
     onOpenPermissionSettings: (String) -> Unit,
     // v0.68.93：焦点变化外报（宿主据此挂「点外部释放焦点」观察者，见 clearIntentFocusOnOutsideTap）
@@ -519,6 +522,12 @@ fun IntentEntry(
                     question = s.question,
                     onClose = onDismiss
                 )
+            }
+            // 思考条（v0.68.98·F-06）：Planning 态此前在槽位里什么都不渲染，
+            // 用户只能干等（最长 15 秒超时）且无出口；现在出「想想中 + 取消」——
+            // 取消走 onCancelPlanning 真作废在途规划（非模态，与其他条同一槽位）
+            is IntentUiState.Planning -> {
+                PlanningStrip(onCancel = onCancelPlanning)
             }
             else -> {
                 if (localResults.isNotEmpty() && state !is IntentUiState.NeedsConfirmation) {
@@ -920,6 +929,51 @@ private fun StatusStrip(
                     modifier = Modifier.size(16.dp)
                 )
             }
+        }
+    }
+}
+
+/**
+ * 七仔结果条·思考条（v0.68.98·F-06）：Planning 态的槽位呈现——「七仔想想中…」
+ * + 「取消」文字钮。此前 Planning 在结果槽位落入 else 空渲染，用户面对最长
+ * 15 秒的无反馈干等、还没有出口；取消走宿主真取消（Job cancel + 协调器代际
+ * 作废，迟到结果不上屏）。与回复/错误小条同一槽位、同一 Card 语言，非模态。
+ * 无障碍：liveRegion 礼貌播报「思考中」，取消钮是真 TextButton（触控 ≥48dp 由
+ * Material 保证），另加 testTag 供冒烟定位。
+ */
+@Composable
+private fun PlanningStrip(
+    onCancel: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
+            .clip(RoundedCornerShape(16.dp))
+            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
+            .semantics { liveRegion = LiveRegionMode.Polite }
+            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "七仔想想中…",
+            fontSize = 13.sp,
+            color = AILauncherColors.current.Body,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(
+            onClick = onCancel,
+            modifier = Modifier.testTag("planning_cancel")
+        ) {
+            Text(
+                text = "取消",
+                color = AILauncherColors.current.Accent,
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.sp
+            )
         }
     }
 }
