@@ -183,6 +183,20 @@ enter_input_mode() {
     log "enter_input_mode: capsule present after pet-cell tap"
     return 0
   fi
+  # uiautomator 偶发残缺 dump 会让第一份 dump 缺七仔格、点按落空（R-1 二轮
+  # 实测 giant 模板中招，同第 10 段登记过的残缺层级现象）：第二份 dump 里
+  # 七仔格在场则再点一次重试，不把偶发当产品失败。
+  if [ -f "$F" ] && grep -q 'resource-id="dock_pet_cell"' "$F"; then
+    log "enter_input_mode: retrying pet-cell tap (first dump may have been partial)"
+    tap_rid "$F" "dock_pet_cell" || true
+    sleep 2
+    adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
+    if [ -f "$F" ] && grep -q 'resource-id="intent_input"' "$F"; then
+      log "enter_input_mode: capsule present after retry"
+      return 0
+    fi
+  fi
   log "enter_input_mode: capsule NOT present"
   return 1
 }
