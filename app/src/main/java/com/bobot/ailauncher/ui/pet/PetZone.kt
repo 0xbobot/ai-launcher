@@ -56,6 +56,7 @@ import java.util.Calendar
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * 宠物区（封面模式）：杂志 hero + 意图胶囊槽位 + NextUp 紧凑条 + TODAY 数据管线。
