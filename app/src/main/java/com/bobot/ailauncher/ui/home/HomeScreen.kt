@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -398,11 +398,23 @@ fun HomeScreen(
                 )
             )
         ) {
+            // 底部内边距取 IME 与导航栏的较大者 + 16dp：贴底锚定时，输入块
+            // 最低处的可点元素（结果行、思考条「取消」钮）必须整块待在导航栏
+            // 触控区之上——否则点按被系统导航吞掉（R-1 首轮冒烟实测：取消钮
+            // 中心落进导航区、点按变系统 BACK，§10 结果行同病）。IME 弹起时
+            // 其 inset 更大，自动改为让位键盘。
+            val overlayImePx = androidx.compose.foundation.layout.WindowInsets.ime
+                .getBottom(density)
+            val overlayNavPx = androidx.compose.foundation.layout.WindowInsets.navigationBars
+                .getBottom(density)
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .imePadding()
-                    .padding(bottom = 16.dp)
+                    .padding(
+                        bottom = with(density) {
+                            maxOf(overlayImePx, overlayNavPx).toDp()
+                        } + 16.dp
+                    )
                     .onGloballyPositioned { intentBoundsInRoot = it.boundsInRoot() }
             ) {
                 IntentEntry(

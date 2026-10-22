@@ -727,12 +727,26 @@ for OFF in 0 1 2; do
       # 意图改进一批：聚焦+空文本先截建议面（三模板各一张供人工亲验）并断言标题在场；
       # 之后照旧输 "clo" 验本地结果（文本非空后建议面必须让位给本地结果）
       shot "intent-tpl-$TPL-suggest"
+      # v0.68.99（R-1）：几何断言用的聚焦态 dump 改在收键盘后拉——胶囊底部
+      # 锚定，IME 弹起时窗口被压缩，胶囊在压缩帧里压住 hero 下沿（真实视觉
+      # 即输入浮层盖住简报下部，与聊天类 App 一致）；收键盘后焦点与建议面
+      # 保留、窗口恢复全高，此时验 hero/pet 与胶囊两两不相交（同第 15 段
+      # suggest_dump 的既有口径）。截图仍是键盘弹起态，不受影响。
+      adb shell input keyevent KEYCODE_BACK || true
+      sleep 1
       adb shell uiautomator dump /sdcard/tpl_dump_s.xml > /dev/null 2>&1 || true
       adb pull /sdcard/tpl_dump_s.xml "$OUT/tpl_${TPL}_suggest.xml" > /dev/null 2>&1 || true
       if [ -f "$OUT/tpl_${TPL}_suggest.xml" ] && grep -q '七仔猜你现在想用' "$OUT/tpl_${TPL}_suggest.xml"; then
         ok "tpl-$TPL-suggest"
       else
         ng "tpl-$TPL-suggest"
+      fi
+      # 收键盘后重新点胶囊唤回键盘再输字（同第 15 段后半段法：BACK 只收
+      # 键盘、焦点保留，但输字前重点一次最稳）；其后的 BACK 仍是收键盘
+      CTR=$(center_rid "$OUT/tpl_${TPL}_suggest.xml" "intent_input")
+      if [ -n "$CTR" ]; then
+        adb shell input swipe $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) 150 || true
+        sleep 2
       fi
       adb shell input text "clo" || true
       sleep 1
@@ -1486,7 +1500,15 @@ ni_tap_submit() {
 
 # 聚焦胶囊 -> 输词（补空格让 LatinIME 组合上屏，同第 15 段注）-> 点提交
 ni_type_submit() {
-  adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 > /dev/null 2>&1 || true
+  # v0.68.99（R-1）：胶囊位置随 IME 升降而变（底部锚定：弹起时随窗口压缩
+  # 上移、收起时落回底部）——每次输字前按 testTag 重新定位再点，不复用
+  # ni_locate_capsule 的缓存坐标（旧版胶囊在流内、位置恒定才可复用；
+  # R-1 首轮实测：补参时点空、文字没进框，fill 两项连坐）。
+  adb shell uiautomator dump /sdcard/ni_tap.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/ni_tap.xml "$OUT/ni_tap.xml" > /dev/null 2>&1 || true
+  if ! tap_rid "$OUT/ni_tap.xml" "intent_input"; then
+    adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 > /dev/null 2>&1 || true
+  fi
   sleep 2
   adb shell input text "$1" > /dev/null 2>&1 || true
   sleep 1
