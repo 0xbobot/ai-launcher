@@ -128,6 +128,12 @@ if [ "$SCR_W" -gt "$SCR_H" ]; then
   log "landscape leg: app-center assertions follow AppCenterLandscape expectations"
 fi
 
+# v0.68.99（主页重构 R-1）：静态主页撤胶囊——简报 + Dock 两层，Dock 左端
+# 七仔格（dock_pet_cell）是意图入口。原「胶囊常驻」类段全部改走
+# enter_input_mode helper（点七仔格进输入态）再沿原路径验证；第 11 段静态
+# 断言改为简报（cover_hero）+ 七仔格在场；第 18 段升级为「退出 + 重进文本
+# 保留」三段断言；today_nextup 已迁移到简报会行（第 14/19/21 段语义不变）。
+
 # --- 体检批D ⑥：testTag 语义定位 helper ---
 # center_rid <dumpfile> <resource-id>：在已拉取的 dump 里按 resource-id（=testTag）
 # 找第一个节点，命中打印其 bounds 中心 "X Y"，未命中无输出、返回 1。
@@ -151,6 +157,34 @@ tap_rid() {
   adb shell input swipe $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) \
     $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) 150 || true
   return 0
+}
+
+# --- v0.68.99（主页重构 R-1）：进输入态 helper ---
+# 静态主页已无常驻胶囊：需要胶囊的段先调本 helper——dump 到目标文件，若
+# intent_input 已在场直接成功；否则点 Dock 七仔格（兜底点简报讲述者七仔）
+# 进输入态（胶囊底部浮现 + 自动聚焦 + 键盘弹起）后重新 dump 同一文件确认。
+# 返回 0 = 胶囊在场。注意返回时键盘是弹起态，需要「键盘收起坐标系」的段
+# 自行先 BACK 再重 dump（第 9 段法）。
+enter_input_mode() {
+  local F="$1"
+  adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
+  if [ -f "$F" ] && grep -q 'resource-id="intent_input"' "$F"; then
+    log "enter_input_mode: capsule already present"
+    return 0
+  fi
+  if ! tap_rid "$F" "dock_pet_cell"; then
+    tap_rid "$F" "pet_qizai" || true
+  fi
+  sleep 2
+  adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
+  if [ -f "$F" ] && grep -q 'resource-id="intent_input"' "$F"; then
+    log "enter_input_mode: capsule present after pet-cell tap"
+    return 0
+  fi
+  log "enter_input_mode: capsule NOT present"
+  return 1
 }
 
 # --- 1. 安装 ---
@@ -260,6 +294,14 @@ if ! tap_rid "$OUT/pet_dump.xml" "pet_qizai"; then
 fi
 sleep 0.7
 shot "pet"
+# v0.68.99（主页重构 R-1）：点七仔现在 = 进入输入态（胶囊浮现 + 键盘弹起），
+# pet.png 即输入态开启瞬间（果冻反馈仍在七仔身上）。随后退回静态基线：
+# 第 1 次 BACK 收键盘（焦点保留）、第 2 次 BACK 走输入态 BackHandler 收起
+# 胶囊、Dock 回位——否则下一段上滑会被输入态/键盘干扰。
+adb shell input keyevent KEYCODE_BACK || true
+sleep 1
+adb shell input keyevent KEYCODE_BACK || true
+sleep 1
 
 # --- 7. 上滑开 D3 应用中心 ---
 adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
@@ -327,6 +369,12 @@ adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 shot "intent-home"
 CX=$(SX 540); CY=$(SY 1247); BX=$(SX 928); BY=$(SY 1246)
+# v0.68.99（主页重构 R-1）：静态无胶囊——先点 Dock 七仔格进输入态；进态后
+# 先 BACK 收键盘（焦点与输入态保留），再拉 dump 量坐标——与旧流程「dump
+# 时键盘未弹起」的坐标系一致，后续点提交的坐标才准。
+enter_input_mode "$OUT/intent_dump.xml" || true
+adb shell input keyevent KEYCODE_BACK || true
+sleep 1
 adb shell uiautomator dump /sdcard/intent_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/intent_dump.xml "$OUT/intent_dump.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/intent_dump.xml" ]; then
@@ -402,10 +450,9 @@ adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
 sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
-# 定位胶囊（dump 找占位，兜底坐标同第 9 段）
+# 定位胶囊（v0.68.99：先点七仔格进输入态再 dump 找占位，兜底坐标同第 9 段）
 LCX=$(SX 540); LCY=$(SY 1247)
-adb shell uiautomator dump /sdcard/local_dump0.xml > /dev/null 2>&1 || true
-adb pull /sdcard/local_dump0.xml "$OUT/local_dump0.xml" > /dev/null 2>&1 || true
+enter_input_mode "$OUT/local_dump0.xml" || true
 if [ -f "$OUT/local_dump0.xml" ]; then
   NODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/local_dump0.xml" | head -1)
   if [ -n "$NODE" ]; then
@@ -617,9 +664,12 @@ fi
 # 模板选择是纯日期逻辑：CoverHero 里 coverTemplateFor() = DAY_OF_YEAR % 3 ->
 # values()[0]=GIANT_TIME（时间巨像）/ [1]=HEADLINE（头条简报）/ [2]=MINIMAL（留白时刻），不走 prefs。
 # 故靠改模拟器日期（今天起 +0/+1/+2 天必覆盖三余数）逐个切换；每次 force-stop 重启回首页，
-# 截 intent-tpl-<name>.png 并 dump 断言胶囊在场，再输 "clo" 截 -local 图并断言结果条 Clock。
+# 截 intent-tpl-<name>.png 并 dump 断言静态在场，再点七仔格进输入态输 "clo" 截 -local 图并断言结果条 Clock。
+# v0.68.99（主页重构 R-1）：静态断言改为简报（cover_hero）+ Dock 七仔格在场
+# （断言名 tpl-<tpl>-brief；静态已无胶囊）；聚焦态 dump 文件名不变
+# （tpl_<tpl>_suggest.xml 仍供第 21 段 FOCUS_PAIRS 几何断言消费）。
 # 日期改不动（如镜像无权限）时只 log 记录、不判失败——此时以代码级证据为准：
-# PetZone 封面 Column 里 CoverHero 之后隔 16dp 无条件调用 coverIntentSlot()，三模板共用同一渲染路径。
+# 三模板共用同一 CoverHero 渲染路径与同一 Dock，静态构图同源。
 adb shell settings put global auto_time 0 > /dev/null 2>&1 || true
 TPL_ALL=1
 for OFF in 0 1 2; do
@@ -657,16 +707,20 @@ for OFF in 0 1 2; do
   shot "intent-tpl-$TPL"
   adb shell uiautomator dump /sdcard/tpl_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/tpl_dump.xml "$OUT/tpl_${TPL}.xml" > /dev/null 2>&1 || true
-  if [ -f "$OUT/tpl_${TPL}.xml" ] && grep -q 'text="想做什么？"' "$OUT/tpl_${TPL}.xml"; then
-    ok "tpl-$TPL-capsule"
-    TNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/tpl_${TPL}.xml" | head -1)
+  # v0.68.99：tpl_<tpl>.xml 仍是静态 dump（第 21 段消费：静态下 intent_input /
+  # intent_submit 缺席走 INFO 跳过，cover_hero / dock_panel / pet_qizai 照常断言）
+  if [ -f "$OUT/tpl_${TPL}.xml" ] && grep -q 'resource-id="cover_hero"' "$OUT/tpl_${TPL}.xml" && grep -q 'resource-id="dock_pet_cell"' "$OUT/tpl_${TPL}.xml"; then
+    ok "tpl-$TPL-brief"
+    # 点七仔格进输入态后，在输入态 dump 里定位胶囊
+    enter_input_mode "$OUT/tpl_${TPL}_in.xml" || true
+    TNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/tpl_${TPL}_in.xml" | head -1)
     TNUMS=$(echo "$TNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
     TX1=$(echo "$TNUMS" | sed -n 1p); TY1=$(echo "$TNUMS" | sed -n 2p)
     TX2=$(echo "$TNUMS" | sed -n 3p); TY2=$(echo "$TNUMS" | sed -n 4p)
     if [ -n "$TX1" ] && [ -n "$TY2" ]; then
       TCX=$(( (TX1 + TX2) / 2 )); TCY=$(( (TY1 + TY2) / 2 ))
       # 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
-      CTR=$(center_rid "$OUT/tpl_${TPL}.xml" "intent_input")
+      CTR=$(center_rid "$OUT/tpl_${TPL}_in.xml" "intent_input")
       if [ -n "$CTR" ]; then TCX=$(echo "$CTR" | cut -d' ' -f1); TCY=$(echo "$CTR" | cut -d' ' -f2); log "tpl capsule by tag at ($TCX,$TCY)"; fi
       adb shell input swipe "$TCX" "$TCY" "$TCX" "$TCY" 150 || true
       sleep 2
@@ -701,7 +755,7 @@ for OFF in 0 1 2; do
       ng "tpl-$TPL-local"
     fi
   else
-    ng "tpl-$TPL-capsule"
+    ng "tpl-$TPL-brief"
   fi
 done
 adb shell settings put global auto_time 1 > /dev/null 2>&1 || true
@@ -750,8 +804,8 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 FCX=$(SX 540); FCY=$(SY 1247)
-adb shell uiautomator dump /sdcard/focus_dump.xml > /dev/null 2>&1 || true
-adb pull /sdcard/focus_dump.xml "$OUT/focus_dump.xml" > /dev/null 2>&1 || true
+# v0.68.99：先点七仔格进输入态（胶囊聚焦即倾听姿态），再定位
+enter_input_mode "$OUT/focus_dump.xml" || true
 if [ -f "$OUT/focus_dump.xml" ]; then
   FNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/focus_dump.xml" | head -1)
   if [ -n "$FNODE" ]; then
@@ -1006,9 +1060,10 @@ PYEOF
 
 nextup_dedupe_flow() {
   # $1=事件标题。v0.68.93（布局与交互 Loop 一批④）：同一会议双处呈现去重断言。
-  # NextUp 条是会议的常驻主场：种子事件在场、聚焦出建议面时，该标题在全屏
-  # dump 里只能出现一次（NextUp 标题），建议面内不得再有会议行。
-  # 环境门同 nextup_tap_flow：种子事件进不了 Instances 视图时 NextUp 无从
+  # v0.68.99（主页重构 R-1）：会议常驻主场由 NextUp 条迁移为简报会行
+  # （today_nextup 在简报内）：种子事件在场、进输入态出建议面时，该标题在
+  # 全屏 dump 里只能出现一次（简报会行标题），建议面内不得再有会议行。
+  # 环境门同 nextup_tap_flow：种子事件进不了 Instances 视图时简报会行无从
   # 呈现，明示 SKIP 不计数（不冒充已验，报告如实标注）。
   local TITLE="$1"
   adb shell am force-stop "$PKG" || true
@@ -1032,15 +1087,10 @@ nextup_dedupe_flow() {
     ng "nextup-dedupe-home"
     return
   fi
-  # 聚焦胶囊：testTag 定位（兜底坐标同第 15 段）
-  local DX DY CTR
-  DX=$(SX 540); DY=$(SY 1247)
-  CTR=$(center_rid "$OUT/dedupe_dump0.xml" "intent_input")
-  if [ -n "$CTR" ]; then DX=$(echo "$CTR" | cut -d' ' -f1); DY=$(echo "$CTR" | cut -d' ' -f2); log "dedupe capsule by tag at ($DX,$DY)"; fi
-  adb shell input swipe "$DX" "$DY" "$DX" "$DY" 150 || true
-  sleep 2
-  # BACK 只收键盘、焦点与建议面保留（同第 15 段法）：之后 dump 是全布局，
-  # NextUp 与建议面同屏——正是去重要验的同屏状态。
+  # v0.68.99：点 Dock 七仔格进输入态出建议面（静态无胶囊可聚焦）
+  enter_input_mode "$OUT/dedupe_in.xml" || true
+  # BACK 只收键盘、焦点与建议面保留、输入态不退（同第 15 段法）：之后 dump
+  # 里简报会行与建议面同屏——正是去重要验的同屏状态。
   adb shell input keyevent KEYCODE_BACK || true
   sleep 1
   shot "intent-dedupe-suggest"
@@ -1056,11 +1106,11 @@ nextup_dedupe_flow() {
     ng "nextup-dedupe"
     return
   fi
-  # 标题出现次数：NextUp 标题一处（"<标题> · 点一下加入"）；建议面若复刻
-  # 会议行会有第二处同名文本节点。
+  # 标题出现次数：简报会行标题一处（纯标题文本节点；行自身的
+  # content-desc 是另一属性不计入）；建议面若复刻会议行会有第二处同名文本。
   local CNT
   CNT=$(grep -o "text=\"[^\"]*${TITLE}[^\"]*\"" "$OUT/dedupe_dump.xml" | wc -l | tr -d ' ')
-  log "nextup-dedupe: title occurrences=$CNT (expect 1, NextUp only)"
+  log "nextup-dedupe: title occurrences=$CNT (expect 1, brief meeting row only)"
   if [ "$CNT" = "1" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump.xml"; then
     ok "nextup-dedupe"
   else
@@ -1188,8 +1238,8 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 SGX=$(SX 540); SGY=$(SY 1247)
-adb shell uiautomator dump /sdcard/suggest_dump0.xml > /dev/null 2>&1 || true
-adb pull /sdcard/suggest_dump0.xml "$OUT/suggest_dump0.xml" > /dev/null 2>&1 || true
+# v0.68.99：先点七仔格进输入态（聚焦即出建议面），再在输入态 dump 里定位
+enter_input_mode "$OUT/suggest_dump0.xml" || true
 if [ -f "$OUT/suggest_dump0.xml" ]; then
   SNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/suggest_dump0.xml" | head -1)
   if [ -n "$SNODE" ]; then
@@ -1208,8 +1258,10 @@ if [ -n "$CTR" ]; then SGX=$(echo "$CTR" | cut -d' ' -f1); SGY=$(echo "$CTR" | c
 adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
 sleep 2
 shot "intent-suggest"
-# 量测用 dump 在收键盘后拉：键盘弹起时窗口 resize、Dock 被遮挡，坐标与层级都不可靠；
-# BACK 只收键盘，焦点与建议面保留（同第 10 段法），再截一张全布局图供验 Dock 在位
+# 量测用 dump 在收键盘后拉：键盘弹起时窗口 resize，坐标与层级都不可靠；
+# BACK 只收键盘，焦点与建议面保留（同第 10 段法），再截一张图。
+# v0.68.99 注：输入态下 Dock 按设计让位（D1/D2 卡隐藏），本图不再验 Dock
+# 在位（Dock 在静态基线由 home.png / 第 21 段几何断言覆盖）。
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 shot "intent-suggest-full"
@@ -1279,8 +1331,8 @@ fi
 # 候选栏），新 composing 守卫会正确挡下提交（截图中提交钮呈禁用暗色，即守卫实证）；
 # 真实中文输入法流程同样是先点候选上屏再提交——这里补输一个空格让组合上屏，
 # 与真实流程对齐后再验提交+收键盘。
-adb shell uiautomator dump /sdcard/suggest_dump1.xml > /dev/null 2>&1 || true
-adb pull /sdcard/suggest_dump1.xml "$OUT/suggest_dump1.xml" > /dev/null 2>&1 || true
+# v0.68.99：点 Top1 打开应用后输入态已自动退出（焦点释放触发）——重新进输入态再定位
+enter_input_mode "$OUT/suggest_dump1.xml" || true
 if [ -f "$OUT/suggest_dump1.xml" ]; then
   SNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/suggest_dump1.xml" | head -1)
   if [ -n "$SNODE" ]; then
@@ -1392,8 +1444,9 @@ fi
 # 定位胶囊 -> CGX/CGY（体检批D ⑥：优先 testTag intent_input；未命中退回 dump 占位文案，与第 15 段同法）
 ni_locate_capsule() {
   CGX=""; CGY=""
-  adb shell uiautomator dump /sdcard/ni_dump0.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/ni_dump0.xml "$OUT/ni_dump0.xml" > /dev/null 2>&1 || true
+  # v0.68.99（主页重构 R-1）：静态无胶囊——先确保已进输入态（点七仔格），
+  # helper 的 dump 即 ni_dump0，后续定位逻辑不变。第 22 段共用本函数。
+  enter_input_mode "$OUT/ni_dump0.xml" || true
   local CTR=$(center_rid "$OUT/ni_dump0.xml" "intent_input")
   if [ -n "$CTR" ]; then
     CGX=$(echo "$CTR" | cut -d' ' -f1); CGY=$(echo "$CTR" | cut -d' ' -f2)
@@ -1601,6 +1654,9 @@ if [ -n "$MOCK_PID" ]; then kill "$MOCK_PID" 2> /dev/null || true; fi
 # 根因：Compose 无点外部自动清焦，releaseInputFocus 只从 IntentEntry 内部调，
 # 点页面其他地方焦点不释放、键盘不收，用户被困编辑态。修复后：聚焦输字 ->
 # press 点七仔（意图区外）-> dump 无 focused="true" 节点且已输文本仍在（不吞字）。
+# v0.68.99（主页重构 R-1）：进输入态改走 Dock 七仔格；点外部（讲述者七仔）
+# 现在连输入态一并退出（胶囊卸载、Dock 回位），文本改由宿主持有——断言
+# 升级：post dump 无聚焦节点 + dock_panel 回位，再重进输入态验文本仍在。
 # IME 可见性用 dumpsys input_method 的 mInputShown 做辅助日志（CI 读法不稳，
 # 不作断言本体；断言 = 焦点状态，键盘收起由截图人工确认，报告如实标注）。
 adb shell am force-stop "$PKG" || true
@@ -1609,13 +1665,9 @@ adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
 sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
-adb shell uiautomator dump /sdcard/focus_dump0.xml > /dev/null 2>&1 || true
-adb pull /sdcard/focus_dump0.xml "$OUT/focus_dump0.xml" > /dev/null 2>&1 || true
-FCX=$(SX 540); FCY=$(SY 1247)
-CTR=$(center_rid "$OUT/focus_dump0.xml" "intent_input")
-if [ -n "$CTR" ]; then FCX=$(echo "$CTR" | cut -d' ' -f1); FCY=$(echo "$CTR" | cut -d' ' -f2); log "focus-cancel capsule by tag at ($FCX,$FCY)"; fi
-adb shell input swipe "$FCX" "$FCY" "$FCX" "$FCY" 150 || true
-sleep 2
+# v0.68.99：点七仔格进输入态（进态即聚焦），直接输字
+enter_input_mode "$OUT/focus_dump0.xml" || true
+sleep 1
 adb shell input text "daohang" || true
 sleep 1
 # 补空格让 LatinIME composing 上屏（同第 15 段法，与真实输入流程对齐）
@@ -1635,8 +1687,16 @@ if [ -f "$OUT/focus_pre.xml" ] && grep -q 'focused="true"' "$OUT/focus_pre.xml" 
   log "focus-cancel ime after outside tap: ${IMESHOWN:-unavailable} (auxiliary only)"
   adb shell uiautomator dump /sdcard/focus_post.xml > /dev/null 2>&1 || true
   adb pull /sdcard/focus_post.xml "$OUT/focus_post.xml" > /dev/null 2>&1 || true
-  if [ -f "$OUT/focus_post.xml" ] && ! grep -q 'focused="true"' "$OUT/focus_post.xml" && grep -q 'daohang' "$OUT/focus_post.xml"; then
-    ok "focus-cancel-outside"
+  # v0.68.99：退出证据 = 无聚焦节点 + Dock 面板回位（胶囊已卸载，文本不在
+  # 本 dump 里——保留性由紧随的重进检查证明）
+  if [ -f "$OUT/focus_post.xml" ] && ! grep -q 'focused="true"' "$OUT/focus_post.xml" && grep -q 'resource-id="dock_panel"' "$OUT/focus_post.xml"; then
+    enter_input_mode "$OUT/focus_re.xml" || true
+    if [ -f "$OUT/focus_re.xml" ] && grep -q 'daohang' "$OUT/focus_re.xml"; then
+      ok "focus-cancel-outside"
+    else
+      log "focus-cancel: text NOT preserved across exit/re-entry"
+      ng "focus-cancel-outside"
+    fi
   else
     ng "focus-cancel-outside"
   fi
@@ -1737,26 +1797,23 @@ glass_root_swap_wallpaper() {
   adb shell dumpsys wallpaper 2>/dev/null | head -25
 } > "$OUT/glass-wp-debug.txt" 2>&1 || true
 glass_nextup_shot() {
-  # $1=截图名。NextUp 紧凑条取证（v0.68.96 F-02：该条本批换中玻璃）：
-  # 第 14 段种子事件窗口（+20~+80 分钟）仍覆盖本段时，聚焦胶囊→BACK 收键盘，
-  # 建议面与 NextUp 同屏入图（同 §14 dedupe 流）；事件不在场只记日志不判负
-  # （玻璃证据以本图为准，无事件时 NextUp 不渲染、由 glass-<mode> 全景图兜底）。
+  # $1=截图名。简报会行取证（v0.68.99 起 NextUp 紧凑条退役、会行长进简报，
+  # testTag today_nextup 迁移至简报会行；其玻璃语境即简报本体、无独立玻璃面）：
+  # 第 14 段种子事件窗口（+20~+80 分钟）仍覆盖本段时，点七仔格进输入态→
+  # BACK 收键盘，建议面与简报同屏入图（同 §14 dedupe 流）；事件不在场只记
+  # 日志不判负（玻璃证据以全景图为准，无事件时简报会行不渲染）。
   local name="$1"
-  adb shell uiautomator dump /sdcard/glass_nu_dump.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/glass_nu_dump.xml "$OUT/glass_nu_dump.xml" > /dev/null 2>&1 || true
+  enter_input_mode "$OUT/glass_nu_dump.xml" || true
   if [ -f "$OUT/glass_nu_dump.xml" ] && grep -q 'resource-id="today_nextup"' "$OUT/glass_nu_dump.xml"; then
-    local DX DY CTR
-    DX=$(SX 540); DY=$(SY 1247)
-    CTR=$(center_rid "$OUT/glass_nu_dump.xml" "intent_input")
-    if [ -n "$CTR" ]; then DX=$(echo "$CTR" | cut -d' ' -f1); DY=$(echo "$CTR" | cut -d' ' -f2); fi
-    adb shell input swipe "$DX" "$DY" "$DX" "$DY" 150 > /dev/null 2>&1 || true
-    sleep 2
     adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1 || true
     sleep 1
     shot "$name"
-    log "glass: nextup shot taken ($name)"
+    log "glass: brief-meeting shot taken ($name)"
+    # 恢复静态基线（下一拍长按七仔截气泡在静态下进行）：再 BACK 退出输入态
+    adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1 || true
+    sleep 1
   else
-    log "glass: nextup absent for $name (seeded event window passed or not seeded)"
+    log "glass: brief meeting row absent for $name (seeded event window passed or not seeded)"
     shot "$name"
   fi
 }

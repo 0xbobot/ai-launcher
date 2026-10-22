@@ -19,12 +19,17 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.tickHaptic
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -105,6 +110,10 @@ fun PullUpDock(
     onOpenSettings: () -> Unit,
     // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页并提交协调器（HomeHost 提供）
     onAskQizai: (String) -> Unit = {},
+    // v0.68.99（主页重构 R-1）：Dock 左端七仔格点按 = 进入输入态；
+    // 输入态在场时 D1/D2 卡让位（cardVisible 关），胶囊底部原地接管
+    onPetCellTap: () -> Unit = {},
+    intentInputMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -157,7 +166,8 @@ fun PullUpDock(
         }
     }
 
-    val cardVisible = state == DockState.D1 || state == DockState.D2
+    // v0.68.99：输入态下卡片让位（意图胶囊在底部原地接管，Dock 内容不与之叠画）
+    val cardVisible = (state == DockState.D1 || state == DockState.D2) && !intentInputMode
     // v0.39.0：Dock 长按 → 真弹窗快捷菜单（锚定在图标上）
     var popupApp by remember { mutableStateOf<AppInfo?>(null) }
 
@@ -358,7 +368,9 @@ fun PullUpDock(
                                 menuApp = popupApp,
                                 onLongPress = { popupApp = it },
                                 onDismissMenu = { popupApp = null },
-                                isLandscape = isLandscapeDock
+                                isLandscape = isLandscapeDock,
+                                // v0.68.99：七仔格只进 D1 行（D2 网格不加）
+                                onPetCellTap = onPetCellTap
                             )
                         }
                         }
@@ -439,7 +451,10 @@ private fun FullAppsOverlay(
     }
 }
 
-/** 第一档：4 个常用大图标（56dp），只留图标，卡内严格垂直居中 */
+/** 第一档：4 个常用大图标（56dp），只留图标，卡内严格垂直居中。
+ *  v0.68.99（主页重构 R-1）：行首加七仔格（意图入口）——格不占应用位，
+ *  4 个应用位一个不少；总宽变大后按可用宽分档收图标/间距（布局防线：
+ *  降级新内容本身，不挤其他槽位）。 */
 @Composable
 private fun DockRow4(
     apps: List<AppInfo>,
@@ -447,26 +462,127 @@ private fun DockRow4(
     menuApp: AppInfo?,
     onLongPress: (AppInfo) -> Unit,
     onDismissMenu: () -> Unit,
-    isLandscape: Boolean = false
+    isLandscape: Boolean = false,
+    onPetCellTap: (() -> Unit)? = null
 ) {
     // v0.68.82（第 3 项）：横屏改回横向（同竖屏），不再竖排
-    Row(
+    BoxWithConstraints(
         modifier = Modifier
             .let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() }
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        // v0.27.2：居中（之前 spacedBy 默认左对齐）
-        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
-        apps.forEach { app ->
-            DockIconButton(
-                app = app,
-                iconSize = 56.dp,
-                corner = 16.dp,
-                menuApp = menuApp,
-                onLaunch = onLaunch,
-                onLongPress = onLongPress,
-                onDismissMenu = onDismissMenu
+        val hasPet = onPetCellTap != null
+        // 分档（内容宽 = 本 Box 实测宽）：≥336 全尺寸；≥308 中档；其余小档
+        val iconSize: Dp
+        val gap: Dp
+        val cellSize: Dp
+        when {
+            !hasPet -> { iconSize = 56.dp; gap = 16.dp; cellSize = 56.dp }
+            maxWidth >= 336.dp -> { iconSize = 56.dp; gap = 14.dp; cellSize = 56.dp }
+            maxWidth >= 308.dp -> { iconSize = 52.dp; gap = 12.dp; cellSize = 52.dp }
+            else -> { iconSize = 48.dp; gap = 10.dp; cellSize = 48.dp }
+        }
+        Row(
+            modifier = Modifier
+                .let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() },
+            // v0.27.2：居中（之前 spacedBy 默认左对齐）
+            horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (onPetCellTap != null) {
+                DockPetCell(size = cellSize, onTap = onPetCellTap)
+            }
+            apps.forEach { app ->
+                DockIconButton(
+                    app = app,
+                    iconSize = iconSize,
+                    corner = if (iconSize >= 56.dp) 16.dp else 14.dp,
+                    menuApp = menuApp,
+                    onLaunch = onLaunch,
+                    onLongPress = onLongPress,
+                    onDismissMenu = onDismissMenu
+                )
+            }
+        }
+    }
+}
+
+/**
+ * v0.68.99（主页重构 R-1，Bob 定）：Dock 七仔格——意图入口的门，形态为
+ * 「对话等待态」：倾听姿态（meteor_wave，与意图 FETCH 姿态同图）头部为主
+ * 裁切 + 头边小对话泡（内「…」）暗示「点我说话」；慢呼吸微动仅在主页
+ * RESUMED 且非减动效 / 非低电量时开（省电口径同 PetView）。热区即整格
+ * （随 DockRow4 分档，≥48dp），点按进输入态。不占应用位（行宽分档处理）。
+ */
+@Composable
+private fun DockPetCell(size: Dp, onTap: () -> Unit) {
+    val view = LocalView.current
+    val reduceMotion = com.bobot.ailauncher.ui.theme.rememberReduceMotion()
+    val lowPower by com.bobot.ailauncher.data.BatteryState.isLowPower.collectAsState()
+    var resumed by remember { mutableStateOf(false) }
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> resumed = true
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> resumed = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val breathing = resumed && !reduceMotion && !lowPower
+    val breatheScale: Float = if (breathing) {
+        androidx.compose.animation.core.rememberInfiniteTransition(label = "dockPetBreathe")
+            .animateFloat(
+                initialValue = 1f,
+                targetValue = 1.045f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    animation = tween(
+                        2300,
+                        easing = androidx.compose.animation.core.FastOutSlowInEasing
+                    ),
+                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                ),
+                label = "dockPetBreatheVal"
+            ).value
+    } else {
+        1f
+    }
+    Box(
+        modifier = Modifier
+            .size(size)
+            .testTag("dock_pet_cell")
+            .semantics { contentDescription = "问七仔" }
+            .clickable {
+                view.tickHaptic()
+                onTap()
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(com.bobot.ailauncher.R.drawable.meteor_wave),
+            contentDescription = null,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            alignment = Alignment.TopCenter,
+            modifier = Modifier
+                .size(size - 8.dp)
+                .graphicsLayer { scaleX = breatheScale; scaleY = breatheScale }
+        )
+        // 对话泡：头边右上，内「…」——「它在等你说话」
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .clip(RoundedCornerShape(9.dp))
+                .background(AILauncherColors.current.Card.copy(alpha = 0.92f))
+                .padding(horizontal = 5.dp, vertical = 1.dp)
+        ) {
+            Text(
+                text = "…",
+                fontSize = 10.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                color = AILauncherColors.current.Accent
             )
         }
     }

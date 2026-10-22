@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -97,6 +98,13 @@ fun HomeScreen(
     onIntentDismiss: () -> Unit,
     // v0.68.98（F-06）：Planning 态取消（宿主真取消在途 Job），透传给 IntentEntry
     onIntentCancelPlanning: () -> Unit,
+    // v0.68.99（主页重构 R-1）：输入态开关（HomeHost 持有）——静态主页无胶囊；
+    // 点 Dock 七仔格 / 简报讲述者七仔进入，协调器在场状态由 HomeHost 自动带起
+    intentInputMode: Boolean = false,
+    // 进入输入态时是否挂载即聚焦（点入口进入 = true 要打字；自动带起呈现 = false 不弹键盘）
+    intentRequestFocus: Boolean = false,
+    onEnterIntentInput: () -> Unit = {},
+    onExitIntentInput: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -113,6 +121,37 @@ fun HomeScreen(
     }
     var rootPosInRoot by remember {
         mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+    }
+
+    // v0.68.99（主页重构 R-1）：意图输入文本由本宿主持有——IntentEntry 随
+    // 输入态挂载/卸载，文本放宿主则收起再进入不吞字（沿 .93 口径）。
+    var intentFieldValue by remember {
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
+    }
+    // 输入态退出判定：聚焦过又失焦、且协调器无在场状态 → 收起（Dock 回位）。
+    // 判定抽纯函数 intentInputShouldExit，状态矩阵有单测锁死。
+    var intentHasFocused by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(intentFocused) {
+        if (intentFocused) intentHasFocused = true
+    }
+    androidx.compose.runtime.LaunchedEffect(intentInputMode) {
+        if (intentInputMode) intentHasFocused = false
+    }
+    androidx.compose.runtime.LaunchedEffect(intentFocused, intentState, intentInputMode) {
+        if (intentInputShouldExit(intentInputMode, intentHasFocused, intentFocused, intentState)) {
+            onExitIntentInput()
+        }
+    }
+    // 兜底：进入输入态 1.5 秒后仍未聚焦且无事发生（极端时序/聚焦请求被吞）
+    // → 自动收起，避免胶囊永久滞留；Back 也可退（见下方 BackHandler）。
+    val intentStateLatest by rememberUpdatedState(intentState)
+    androidx.compose.runtime.LaunchedEffect(intentInputMode) {
+        if (intentInputMode) {
+            delay(1500)
+            if (!intentHasFocused && !intentStateHoldsInput(intentStateLatest)) {
+                onExitIntentInput()
+            }
+        }
     }
 
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
@@ -325,25 +364,70 @@ fun HomeScreen(
             // v0.68.96（F-01 退役）：PetZone 的非封面分支已删除，todayCardAlpha
             // 参数随之移除——该淡出原本只作用于已退役的 TODAY 卡，封面形态从未吃到。
             PetZone(
-                coverIntentSlot = {
-                    // v0.68.93：包裹层只为捕获意图区在根坐标中的范围（焦点观察者用）
-                    Box(
-                        Modifier.onGloballyPositioned { intentBoundsInRoot = it.boundsInRoot() }
-                    ) {
-                        IntentEntry(
-                            state = intentState,
-                            onSubmit = onIntentSubmit,
-                            onConfirm = onIntentConfirm,
-                            onDismiss = onIntentDismiss,
-                            onCancelPlanning = onIntentCancelPlanning,
-                            onOpenSettings = onOpenSettings,
-                            onOpenPermissionSettings = { perm -> openPermissionSettings(context, perm) },
-                            onFocusChanged = { intentFocused = it }
-                        )
-                    }
-                }
+                // v0.68.99：点简报讲述者七仔 = 进入输入态（胶囊改由下方浮层承载）
+                onPetTap = onEnterIntentInput
             )
         }
+        // v0.68.99（主页重构 R-1）：输入态——底部原地切换出胶囊（Dock 同时让位，
+        // 由 HomeHost 控制）。静态主页不再常驻胶囊，IntentEntry 只在输入态挂载；
+        // 包裹 Box 继续捕获意图区范围供 .93 点外部收焦观察者用。
+        androidx.compose.animation.AnimatedVisibility(
+            visible = intentInputMode,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = androidx.compose.animation.slideInVertically(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
+            ) { it / 2 } + androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
+            ),
+            exit = androidx.compose.animation.slideOutVertically(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
+            ) { it / 2 } + androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
+            )
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .imePadding()
+                    .padding(bottom = 16.dp)
+                    .onGloballyPositioned { intentBoundsInRoot = it.boundsInRoot() }
+            ) {
+                IntentEntry(
+                    state = intentState,
+                    onSubmit = onIntentSubmit,
+                    onConfirm = onIntentConfirm,
+                    onDismiss = onIntentDismiss,
+                    onCancelPlanning = onIntentCancelPlanning,
+                    onOpenSettings = onOpenSettings,
+                    onOpenPermissionSettings = { perm -> openPermissionSettings(context, perm) },
+                    onFocusChanged = { intentFocused = it },
+                    fieldValue = intentFieldValue,
+                    onFieldValueChange = { intentFieldValue = it },
+                    requestFocusOnMount = intentRequestFocus
+                )
+            }
+        }
+        // v0.68.99：返回退出输入态——IME 在场时不启用（那一按归输入法收键盘，
+        // 与既有「BACK 先收键盘」口径一致，冒烟 §9/§10 依赖此序）；有在场状态
+        // 时也不启用（思考/回复不被 Back 打断，走各自收起路径）。
+        val imeBottomPx = androidx.compose.foundation.layout.WindowInsets.ime
+            .getBottom(density)
+        androidx.activity.compose.BackHandler(
+            enabled = intentInputMode && imeBottomPx == 0 &&
+                !intentStateHoldsInput(intentState)
+        ) { onExitIntentInput() }
         // v0.36.0：无障碍权限引导卡
         panelGuideMode?.let { mode ->
             PanelPermissionGuide(
@@ -430,3 +514,32 @@ private fun PanelPermissionGuide(
         }
     }
 }
+
+/**
+ * v0.68.99（主页重构 R-1）：意图「在场状态」——这些状态下输入胶囊必须留在
+ * 屏上（思考中 / 待确认 / 缺权限 / 在追问 / 回复或错误待用户处理），
+ * 输入态不退出。Idle / Editing（无事发生）不算在场。
+ */
+internal fun intentStateHoldsInput(
+    state: com.bobot.ailauncher.core.intent.IntentUiState
+): Boolean = when (state) {
+    is com.bobot.ailauncher.core.intent.IntentUiState.Planning,
+    is com.bobot.ailauncher.core.intent.IntentUiState.NeedsConfirmation,
+    is com.bobot.ailauncher.core.intent.IntentUiState.NeedsPermission,
+    is com.bobot.ailauncher.core.intent.IntentUiState.NeedsInput,
+    is com.bobot.ailauncher.core.intent.IntentUiState.Reply,
+    is com.bobot.ailauncher.core.intent.IntentUiState.Error -> true
+    is com.bobot.ailauncher.core.intent.IntentUiState.Idle,
+    is com.bobot.ailauncher.core.intent.IntentUiState.Editing -> false
+}
+
+/**
+ * v0.68.99：输入态退出判定（纯函数，单测锁死状态矩阵）：输入态中、曾聚焦、
+ * 现已失焦、且无在场状态 → 收起输入态，Dock 回位。
+ */
+internal fun intentInputShouldExit(
+    inputMode: Boolean,
+    hasFocused: Boolean,
+    focused: Boolean,
+    state: com.bobot.ailauncher.core.intent.IntentUiState
+): Boolean = inputMode && hasFocused && !focused && !intentStateHoldsInput(state)

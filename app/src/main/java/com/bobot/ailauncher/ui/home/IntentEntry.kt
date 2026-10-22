@@ -131,9 +131,16 @@ fun IntentCapsuleField(
     planning: Boolean = false,
     showClearButton: Boolean = false,
     // R3-C：焦点变化回调（首页用来驱动七仔倾听姿态；应用中心不传，保持纯过滤）
-    onFocusChanged: (Boolean) -> Unit = {}
+    onFocusChanged: (Boolean) -> Unit = {},
+    // v0.68.99（主页重构 R-1）：挂载即聚焦——首页输入态由「点七仔格/讲述者」
+    // 进入，用户点一次就应能打字（键盘随聚焦弹起）；应用中心不传，保持点按
+    // 聚焦的原行为；「问七仔」自动带起的思考/回复呈现也不传（不弹键盘）。
+    requestFocusOnMount: Boolean = false
 ) {
     val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (requestFocusOnMount) focusRequester.requestFocus()
+    }
     // composing 中（拼音未上屏）禁止提交：组合区间的拉丁字母不是用户最终输入
     val composing = value.composition != null
     val canSubmit = value.text.isNotBlank() && !planning && !composing
@@ -333,12 +340,18 @@ fun IntentEntry(
     onOpenPermissionSettings: (String) -> Unit,
     // v0.68.93：焦点变化外报（宿主据此挂「点外部释放焦点」观察者，见 clearIntentFocusOnOutsideTap）
     onFocusChanged: (Boolean) -> Unit = {},
+    // v0.68.99（主页重构 R-1）：输入文本状态上提到宿主（HomeScreen）持有——
+    // 静态主页不再常驻胶囊，IntentEntry 随输入态挂载/卸载；文本放宿主，
+    // 收起再进入不吞字（沿 .93「已输入文本一个字不动」口径）。composing
+    // 区间（TextFieldValue）语义不变，下游沿用。
+    fieldValue: TextFieldValue,
+    onFieldValueChange: (TextFieldValue) -> Unit,
+    // 进入输入态时是否挂载即聚焦（点七仔格/讲述者 = 要打字，true；
+    // 协调器在场状态自动带起的呈现 = false，不弹键盘）
+    requestFocusOnMount: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    // 输入状态（意图改进一批）：String → TextFieldValue，感知中文输入法 composing
-    // 区间；text 是其已上屏文本的派生读法，下游沿用。
-    var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
     val text = fieldValue.text
     val composing = fieldValue.composition != null
     // 已提交的文本：与当前文本相同期间不再出本地结果（提交后清掉本地层）
@@ -474,7 +487,7 @@ fun IntentEntry(
         // 追问态（意图改进二批）：清空输入框等用户补参数——原话由协调器保存，
         // 关掉追问条 dismiss 时带回；文本清空后本地层也不会拿原话再出结果。
         if (state is IntentUiState.NeedsInput) {
-            fieldValue = TextFieldValue("")
+            onFieldValueChange(TextFieldValue(""))
             submittedText = null
         }
         // 提交即收键盘（意图改进一批）：回复/错误一呈现就释放焦点、收 IME——
@@ -492,9 +505,10 @@ fun IntentEntry(
         // ---- 胶囊本体（与应用中心同一组件） ----
         IntentCapsuleField(
             value = fieldValue,
-            onValueChange = { fieldValue = it },
+            onValueChange = onFieldValueChange,
             onSubmit = { submitIfReady() },
             planning = planning,
+            requestFocusOnMount = requestFocusOnMount,
             onFocusChanged = {
                 capsuleFocused = it
                 onFocusChanged(it)
@@ -582,7 +596,7 @@ fun IntentEntry(
                                 onOpenEvent = { e -> joinCalendarEvent(context, e) },
                                 onExample = {
                                     // 示例句：点 = 填入并提交（走与手输提交同一路径）
-                                    fieldValue = TextFieldValue(SUGGESTION_EXAMPLE)
+                                    onFieldValueChange(TextFieldValue(SUGGESTION_EXAMPLE))
                                     if (!planning) {
                                         submittedText = SUGGESTION_EXAMPLE
                                         onSubmit(SUGGESTION_EXAMPLE)
@@ -775,7 +789,7 @@ private fun SuggestionsBar(
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         if (event != null) {
-            // 会议行：与封面 NextUpStrip 同一文案语言（接下来 · 时间 / 标题 · 点一下加入）
+            // 会议行：与简报会行同一文案语言（接下来 · 时间 / 标题 · 点一下加入）
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

@@ -42,9 +42,9 @@ import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.core.pet.PetState
 import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.ui.home.BriefMeetingRow
 import com.bobot.ailauncher.ui.home.CoverHero
 import com.bobot.ailauncher.ui.rememberNowMillis
-import com.bobot.ailauncher.ui.home.NextUpStrip
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.coverPaletteFor
 import kotlinx.coroutines.delay
@@ -59,8 +59,12 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * 宠物区（封面模式）：杂志 hero + 意图胶囊槽位 + NextUp 紧凑条 + TODAY 数据管线。
+ * 宠物区（封面模式）：杂志 hero（简报区）+ 简报会行 + TODAY 数据管线。
  * 放在首页顶栏下方。
+ *
+ * v0.68.99（主页重构 R-1）：静态主页只剩简报 + Dock 两层——意图胶囊槽位
+ * 撤除（改由 HomeScreen 在输入态下底部浮现），NextUp 紧凑条退役、会行以
+ * BriefMeetingRow 形式长进简报；七仔点按 = 进入输入态（onPetTap）。
  *
  * v0.68.96（F-01 退役）：非封面分支（宠物舞台 + 全量 TODAY 列表卡 + 编辑模式）
  * 整段删除——自 v0.68.44 杂志封面改版起唯一调用点写死封面模式，该分支无入口
@@ -76,9 +80,10 @@ fun PetZone(
     // v0.29.0：升级提醒宠物化
     hasUpgrade: Boolean = false,
     onUpgradeTap: () -> Unit = {},
-    // R2 UI（文档二 P0）：意图入口胶囊槽位——渲染在 hero 与紧凑条之间；
-    // 状态由 HomeScreen 持有（IntentCoordinator），PetZone 只负责摆位
-    coverIntentSlot: @Composable () -> Unit = {}
+    // v0.68.99（主页重构 R-1）：点简报旁的讲述者七仔 = 进入输入态（底部原地
+    // 切换出胶囊，Dock 让位）——胶囊槽位 coverIntentSlot 随静态撤胶囊下线，
+    // 本区不再承载输入 UI，只负责简报构图与「点七仔」信号。
+    onPetTap: () -> Unit = {}
 ) {
     val mood by PetRepository.mood.collectAsState()
     // R3-C：意图反应姿态覆盖（对话感）——非空时优先于整理员 mood 渲染，通知流程不受影响
@@ -236,9 +241,10 @@ fun PetZone(
     // （会议数据原本只活在本 Composable 的状态里，IntentEntry 够不着）；
     // PetZone 离场时清空，避免建议面读到陈旧会议。TODAY 数据流本身不改。
     LaunchedEffect(coverNextEvent) { TodayEventsHolder.update(coverNextEvent) }
-    // v0.68.93（布局与交互 Loop 一批④）：NextUp 呈现状态与数据同源上报——封面条
-    // 的渲染条件就是 coverNextEvent != null（见下方 NextUpStrip 调用点），呈现的
-    // 事件 id 与 coverNextEvent.eventId 同拍写入/清空，供建议面按 id 去重。
+    // v0.68.93（布局与交互 Loop 一批④）：会议呈现状态与数据同源上报——呈现点
+    // 的渲染条件就是 coverNextEvent != null（.99 起为简报会行 BriefMeetingRow，
+    // 原 NextUpStrip），呈现的事件 id 与 coverNextEvent.eventId 同拍写入/清空，
+    // 供建议面按 id 去重（去重契约随呈现点迁移不变）。
     LaunchedEffect(coverNextEvent) {
         TodayEventsHolder.updatePresentedNextEventId(coverNextEvent?.eventId)
     }
@@ -270,12 +276,14 @@ fun PetZone(
     ) {
         val isLandscapeCover = maxWidth > maxHeight
         // v0.68.97（布局普查批，Bob 2026-10-22 横屏截图）：横屏封面分区——右侧
-        // 360dp 恒为 Dock 面板区（D1 面板实测宽 312dp＝4×56 图标+间距+内距，
-        // D2 网格 270dp 更窄；加右侧间隙约 28dp 与安全余量），胶囊与 NextUp
-        // 只占左侧区、右缘对齐，永不与面板相交（矩阵横屏腿几何断言常驻回归）。
-        // 竖屏 frac=1，构图不变。
+        // 恒为 Dock 面板区（D1 面板实测宽 312dp＝4×56 图标+间距+内距，D2 网格
+        // 270dp 更窄；加右侧间隙约 28dp 与安全余量），左区内容右缘对齐、
+        // 永不与面板相交（矩阵横屏腿几何断言常驻回归）。竖屏 frac=1，构图不变。
+        // v0.68.99（R-1）：D1 面板因七仔格变宽（+格 56 +间距 14 ≈ 382dp），
+        // 预留随之 360→432（382 + 约 50dp 间隙，与 .97 的实际间隙同量级）；
+        // 分区内只剩简报会行（胶囊已撤静态、NextUp 已退役）。
         val coverLeftFrac = if (isLandscapeCover) {
-            ((maxWidth - 360.dp) / maxWidth).coerceIn(0.5f, 0.72f)
+            ((maxWidth - 432.dp) / maxWidth).coerceIn(0.5f, 0.72f)
         } else {
             1f
         }
@@ -299,11 +307,13 @@ fun PetZone(
                                 indication = null,
                                 interactionSource = remember { MutableInteractionSource() },
                                 onClick = {
-                                    // v0.68.79（Bob）：装备环已移除，全部以扇形为主——点七仔只做果冻+开心表情
+                                    // v0.68.99（主页重构 R-1）：点讲述者七仔 = 进入
+                                    // 输入态（果冻反馈保留）；升级提醒仍优先。
+                                    // 原 .79「只做果冻+开心表情」被本批入口职责取代。
                                     if (hasUpgrade) onUpgradeTap()
                                     else {
                                         jellyTick++
-                                        PetRepository.setMoodHappyBrief()
+                                        onPetTap()
                                     }
                                 }
                             )
@@ -337,36 +347,17 @@ fun PetZone(
                 }
             }
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        // R2 UI：意图入口胶囊（封面与 TODAY 紧凑条之间）
-        // v0.68.97：横屏时胶囊只占左侧区（见 coverLeftFrac），右端不再滑入面板下
-        if (isLandscapeCover) {
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier.fillMaxWidth(coverLeftFrac)
-            ) {
-                coverIntentSlot()
-            }
-        } else {
-            coverIntentSlot()
-        }
-        // 有会议才显示——无会时 hero 已有"难得清闲"，不重复
+        // v0.68.99（主页重构 R-1）：静态胶囊行已撤（输入态由 HomeScreen 底部
+        // 浮现承载）；简报会行——有会议才显示，无会时 hero 已有"难得清闲"，
+        // 不重复。横屏走 coverLeftFrac 左区分区（.97 成果延续）。
         if (coverNextEvent != null) {
-            Spacer(modifier = Modifier.height(12.dp))
-            // v0.68.74（Bob）：横屏时紧凑条收窄到左侧 60%，避免和 Dock 重叠
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = androidx.compose.ui.Alignment.CenterStart
-            ) {
-                NextUpStrip(
-                    summary = coverSummary,
-                    nextEvent = coverNextEvent,
-                    palette = coverPalette,
-                    onMeetingTap = { e -> joinMeeting(e) },
-                    // v0.68.97：与胶囊同宽分区（原硬编码 0.62 与面板实际左缘只差
-                    // 一线，玻璃面板视觉外扩即压角）——统一走 coverLeftFrac
-                    modifier = Modifier.fillMaxWidth(coverLeftFrac)
-                )
-            }
+            Spacer(modifier = Modifier.height(14.dp))
+            BriefMeetingRow(
+                event = coverNextEvent!!,
+                palette = coverPalette,
+                onJoin = { e -> joinMeeting(e) },
+                modifier = Modifier.fillMaxWidth(coverLeftFrac)
+            )
         }
         }  // Column 结束
     }  // v0.68.74：BoxWithConstraints 结束
