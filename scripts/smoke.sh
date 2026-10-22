@@ -664,6 +664,14 @@ if [ -n "$KX" ]; then
   shot "appcenter-cleared"
   adb shell uiautomator dump /sdcard/ac_dump3.xml > /dev/null 2>&1 || true
   adb pull /sdcard/ac_dump3.xml "$OUT/ac_dump3.xml" > /dev/null 2>&1 || true
+  # v0.68.99（R-1 四轮实测）：uiautomator 偶发 0 字节空 dump（本段中招，
+  # 文件零节点）——空文件时重拉一次再判（与本批 ni_tap_submit / 第 10 段
+  # 结果重拉同一口径；前三轮本断言皆过，属环境偶发非产品回归）。
+  if [ ! -s "$OUT/ac_dump3.xml" ]; then
+    sleep 1
+    adb shell uiautomator dump /sdcard/ac_dump3.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/ac_dump3.xml "$OUT/ac_dump3.xml" > /dev/null 2>&1 || true
+  fi
   if [ -f "$OUT/ac_dump3.xml" ] && grep -q 'text="想做什么？"' "$OUT/ac_dump3.xml" && ! grep -q '问七仔' "$OUT/ac_dump3.xml"; then
     ok "appcenter-cleared"
   else
