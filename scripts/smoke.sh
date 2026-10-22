@@ -23,6 +23,13 @@
 # （nextup-dedupe：种子事件在场时聚焦出建议面，标题全屏只出现一次）；
 # 第 18 段为意图焦点点外部取消（focus-cancel-outside：聚焦输字后点七仔，
 # dump 无 focused 节点且文本保留）；crash 检查顺延为第 19 段。
+# 玻璃试点批合入后：玻璃取证续为第 19 段，crash 再顺延为第 20 段。
+# 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
+# 生成）/ 纯纸面三态各截首页（Dock+TODAY 卡），照片与纸面下再长按七仔截气泡
+# （glass-default / glass-photo / glass-bubble-photo / glass-paper /
+# glass-bubble-paper.png，气泡图各双拍一张 -b 保险，另有 glass-wp-debug.txt
+# 壁纸诊断）。玻璃质感是视觉判断、不设像素断言，硬断言只有换壁纸+重启后应用
+# 存活且首页可达（glass-alive-after-wallpaper-switches）。
 # 体检批D ⑥（testTag 分段改造）：关键 composable 已加 testTag（intent_input /
 # intent_submit / intent_clear / result_item / pet_qizai / today_nextup /
 # appcenter_settings / dock_item），MainActivity 根容器开 testTagsAsResourceId，
@@ -1591,7 +1598,126 @@ else
   ng "focus-cancel-outside"
 fi
 
-# --- 19. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 19. 玻璃试点批：双背景取证（照片壁纸全开强玻璃 / 纯纸面轻霜）---
+# 应用在第 17 段末尾被 force-stop，这里重新拉起走正常冷启路径。
+# v2 教训（实测）：本镜像 cmd wallpaper 没有 set 动词（help 只有 dim 相关，见
+# glass-wp-debug.txt），命令式换壁纸无解；v3 改走 root 直换壁纸文件 + 重启
+# （userdebug 镜像 adb root 可用时），失败自动回退默认壁纸取证并如实记录。
+# 气泡可见约 2.9 秒且 adb input 启动有 1-2 秒延迟：按住 4 秒、提前抓拍两张。
+# 第 8 段把 uimode 留在 auto、本镜像按时段判成夜间——本段先强制浅色保取证口径
+# （深色腿 SMOKE_NIGHT=yes 时不干预）。TODAY 卡在 CI 首页不进首屏（与基线一致，
+# 见各腿 home.png），本段以 Dock/气泡为玻璃取证主体，卡面材质由单测与真机补验。
+log "glass: segment start"
+if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night no > /dev/null 2>&1 || true; fi
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+shot "glass-default"
+glass_home_alive() {
+  adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1 || true
+  sleep 1
+  adb shell input keyevent KEYCODE_HOME > /dev/null 2>&1 || true
+  sleep 2
+  adb shell uiautomator dump /sdcard/glass_alive.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/glass_alive.xml "$OUT/glass_alive.xml" > /dev/null 2>&1 || true
+  [ -f "$OUT/glass_alive.xml" ] && { grep -q "intent_input" "$OUT/glass_alive.xml" || grep -q "pet_qizai" "$OUT/glass_alive.xml"; }
+}
+glass_bubble_shot() {
+  # 长按七仔：首按指引说话（「长按我是抚摸哦」）触发气泡；调用前已删 guide_prefs 复位。
+  # 按住 4 秒，约 1.2 秒与 2.4 秒各抓一张（气泡全显窗口约说后 0.3-2.9 秒）。
+  adb shell uiautomator dump /sdcard/glass_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/glass_dump.xml "$OUT/glass_dump.xml" > /dev/null 2>&1 || true
+  local ctr gx gy
+  ctr=$(center_rid "$OUT/glass_dump.xml" "pet_qizai")
+  if [ -n "$ctr" ]; then
+    gx=$(echo "$ctr" | cut -d' ' -f1); gy=$(echo "$ctr" | cut -d' ' -f2)
+  else
+    gx=$(SX 880); gy=$(SY 683)
+  fi
+  log "glass: bubble long-press at ($gx,$gy)"
+  adb shell input swipe "$gx" "$gy" "$gx" "$gy" 5000 > /dev/null 2>&1 &
+  local SWPID=$!
+  sleep 1.6
+  shot "$1"
+  adb shell uiautomator dump /sdcard/glass_bubble_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/glass_bubble_dump.xml "$OUT/${1}-dump.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/${1}-dump.xml" ]; then
+    grep -o 'text="[^"]*"' "$OUT/${1}-dump.xml" | grep -E "抚摸|°|好啦" | head -3 | while IFS= read -r line; do log "glass: bubble semantics during hold: $line"; done
+    grep -q "抚摸" "$OUT/${1}-dump.xml" || log "glass: bubble semantics during hold: NO speech text node"
+  fi
+  shot "$1-b"
+  wait $SWPID || true
+  sleep 1
+}
+glass_relaunch_home() {
+  adb shell am force-stop "$PKG" || true
+  adb shell "run-as $PKG rm -f shared_prefs/guide_prefs.xml" > /dev/null 2>&1 || true
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+}
+glass_root_swap_wallpaper() {
+  # $1=宿主本地图片。root 直换系统壁纸文件并重启让 WallpaperManagerService 重读；
+  # 任一步失败返回 1（调用方回退默认壁纸取证）。诊断追加进 glass-wp-debug.txt。
+  local img="$1"
+  adb root >> "$OUT/glass-wp-debug.txt" 2>&1 || return 1
+  adb wait-for-device || return 1
+  adb shell id 2>/dev/null | grep -q "uid=0" || { log "glass: adb root unavailable"; return 1; }
+  adb push "$img" /data/local/tmp/wp.png >> "$OUT/glass-wp-debug.txt" 2>&1 || return 1
+  adb shell "cp /data/local/tmp/wp.png /data/system/users/0/wallpaper && chown system:system /data/system/users/0/wallpaper && chmod 600 /data/system/users/0/wallpaper" >> "$OUT/glass-wp-debug.txt" 2>&1 || return 1
+  adb shell "chcon u:object_r:system_data_file:s0 /data/system/users/0/wallpaper" >> "$OUT/glass-wp-debug.txt" 2>&1 || true
+  log "glass: wallpaper file swapped ($img), rebooting"
+  adb reboot > /dev/null 2>&1 || return 1
+  adb wait-for-device || return 1
+  local i booted=""
+  for i in $(seq 1 30); do
+    if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then booted=1; break; fi
+    sleep 5
+  done
+  [ -n "$booted" ] || { log "glass: reboot timeout after wallpaper swap"; return 1; }
+  sleep 3
+  adb shell dumpsys wallpaper 2>/dev/null | head -12 >> "$OUT/glass-wp-debug.txt" 2>&1 || true
+  return 0
+}
+{
+  echo "== cmd wallpaper help (note: no set verb on this image) =="
+  adb shell cmd wallpaper help 2>&1 | head -20
+  echo "== dumpsys wallpaper (initial) =="
+  adb shell dumpsys wallpaper 2>/dev/null | head -25
+} > "$OUT/glass-wp-debug.txt" 2>&1 || true
+if python3 scripts/gen_wallpaper.py photo /tmp/glass-photo.png > /dev/null 2>&1 &&    python3 scripts/gen_wallpaper.py paper /tmp/glass-paper.png > /dev/null 2>&1; then
+  if glass_root_swap_wallpaper /tmp/glass-photo.png; then
+    glass_relaunch_home
+    shot "glass-photo"
+    glass_bubble_shot "glass-bubble-photo"
+  else
+    log "glass: root swap failed (photo) - photo shots fall back to current wallpaper"
+    glass_relaunch_home
+    shot "glass-photo"
+    glass_bubble_shot "glass-bubble-photo"
+  fi
+  if glass_root_swap_wallpaper /tmp/glass-paper.png; then
+    glass_relaunch_home
+    shot "glass-paper"
+    glass_bubble_shot "glass-bubble-paper"
+  else
+    log "glass: root swap failed (paper) - paper shots fall back to current wallpaper"
+    glass_relaunch_home
+    shot "glass-paper"
+    glass_bubble_shot "glass-bubble-paper"
+  fi
+else
+  log "glass: wallpaper generation failed - set-based shots skipped"
+fi
+if glass_home_alive && adb shell pidof "$PKG" > /dev/null 2>&1; then
+  ok "glass-alive-after-wallpaper-switches"
+else
+  ng "glass-alive-after-wallpaper-switches"
+fi
+
+# --- 20. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

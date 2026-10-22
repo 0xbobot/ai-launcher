@@ -21,7 +21,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +57,11 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.apps.DockState
 import com.bobot.ailauncher.ui.apps.AppRail
 import com.bobot.ailauncher.ui.apps.PullUpDock
+import com.bobot.ailauncher.ui.glass.GlassBackdropState
+import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
+import com.bobot.ailauncher.ui.glass.SystemWallpaperLayer
+import com.bobot.ailauncher.ui.glass.glassBackdropSource
+import com.bobot.ailauncher.ui.glass.refreshGlassSignals
 import com.bobot.ailauncher.ui.apps.RailItem
 import com.bobot.ailauncher.ui.apps.WaveRail
 import com.bobot.ailauncher.ui.components.UpdateDialog
@@ -255,22 +266,56 @@ private fun HomeHost(
         label = "dockAlpha",
     )
 
+    // 玻璃试点批（docs/GLASS_DESIGN.md §9）：背景源 + 玻璃状态宿主。
+    // 背景层（内绘系统壁纸 + 罩纱）整体录入图层，供 Dock / 七仔气泡 / TODAY 卡取材；
+    // 只在桌面可见（RESUMED 且非 D3 全屏层）时启用真材质，否则各面回半透明模拟（省电原则）；
+    // 省电/低电/低内存等降级信号在每次 onResume 时刷新（判定逻辑在 GlassPolicy，可单测）。
+    val glassState = remember { GlassBackdropState() }
+    glassState.layer = rememberGraphicsLayer()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var homeResumed by remember { mutableStateOf(false) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    homeResumed = true
+                    refreshGlassSignals(context, glassState)
+                }
+                Lifecycle.Event.ON_PAUSE -> homeResumed = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    glassState.active = homeResumed && dockState != DockState.D3
+
+    CompositionLocalProvider(LocalGlassBackdrop provides glassState) {
     Box(modifier = Modifier.fillMaxSize()) {
         // v0.68.50（Bob）：罩纱——暖纸渐变罩在系统壁纸上，调和壁纸与 UI 色调
         // 顶部 75% 不透明（hero 文字可读），底部 45%（透出壁纸氛围）
         // v0.32.0 的"全透明"作废：杂志风需要纸面统一
+        // 玻璃试点批：这一层（内绘系统壁纸 + 罩纱）整体录为玻璃背景源；绘制内容
+        // 与顺序不变，壁纸读不到时内绘层不画、系统壁纸照常透出。
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(
-                        colors = listOf(
-                            com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.75f),
-                            com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.45f)
+                .glassBackdropSource(glassState)
+        ) {
+            SystemWallpaperLayer(glassState)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(
+                                com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.75f),
+                                com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.45f)
+                            )
                         )
                     )
-                )
-        )
+            )
+        }
         // 单页桌面：只有首页；v0.16 首页上滑直达 D3，不再经 D1
         // v0.31.0：首屏只留 Dock（Bob）
         // v0.68.6：cleanHome 传入 HomeScreen——D3 应用中心打开时取消右边缘
@@ -579,5 +624,6 @@ private fun HomeHost(
             )
             BlindUiState.Hidden -> { }
         }
+    }
     }
 }
