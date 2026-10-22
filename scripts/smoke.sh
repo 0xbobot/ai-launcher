@@ -23,6 +23,13 @@
 # （nextup-dedupe：种子事件在场时聚焦出建议面，标题全屏只出现一次）；
 # 第 18 段为意图焦点点外部取消（focus-cancel-outside：聚焦输字后点七仔，
 # dump 无 focused 节点且文本保留）；crash 检查顺延为第 19 段。
+# 玻璃试点批合入后：玻璃取证续为第 19 段，crash 再顺延为第 20 段。
+# 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
+# 生成）/ 纯纸面三态各截首页（Dock+TODAY 卡），照片与纸面下再长按七仔截气泡
+# （glass-default / glass-photo / glass-bubble-photo / glass-paper /
+# glass-bubble-paper.png，另加 *-scrolled 滚动探针图与 glass-wp-debug.txt 壁纸
+# 设置诊断）。玻璃质感是视觉判断、不设像素断言，硬断言只有换壁纸+重启后应用
+# 存活且首页可达（glass-alive-after-wallpaper-switches）。
 # 体检批D ⑥（testTag 分段改造）：关键 composable 已加 testTag（intent_input /
 # intent_submit / intent_clear / result_item / pet_qizai / today_nextup /
 # appcenter_settings / dock_item），MainActivity 根容器开 testTagsAsResourceId，
@@ -1591,7 +1598,118 @@ else
   ng "focus-cancel-outside"
 fi
 
-# --- 19. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 19. 玻璃试点批：双背景取证（照片壁纸全开强玻璃 / 纯纸面轻霜）---
+# 应用在第 17 段末尾被 force-stop，这里重新拉起走正常冷启路径。
+# v2 教训（首跑实测）：① cmd wallpaper set 的朴素形式在本镜像非零退出——改多策略
+# 尝试 + dumpsys 前后对比验证，诊断全量落盘 glass-wp-debug.txt；② 气泡可见时长
+# 只有约 2.9 秒（字数*40ms+2.6s），松手再拍会错过——改按住期间抓拍（同第 5 段）；
+# ③ 第 8 段把 uimode 留在 auto、本镜像按时段判成夜间——本段先强制浅色保取证口径
+# （深色腿 SMOKE_NIGHT=yes 时不干预）；④ TODAY 卡在 CI 首屏视口外，加滚动探针图。
+log "glass: segment start"
+if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night no > /dev/null 2>&1 || true; fi
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+shot "glass-default"
+glass_home_alive() {
+  adb shell uiautomator dump /sdcard/glass_alive.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/glass_alive.xml "$OUT/glass_alive.xml" > /dev/null 2>&1 || true
+  [ -f "$OUT/glass_alive.xml" ] && grep -q "intent_input" "$OUT/glass_alive.xml"
+}
+glass_scroll_shot() {
+  # TODAY 卡若在首屏视口之下，短距上滑探针后抓拍（起点避开 Dock 与扇形手势区）
+  adb shell input swipe "$(SX 540)" "$(SY 1500)" "$(SX 540)" "$(SY 950)" 300 > /dev/null 2>&1 || true
+  sleep 1
+  shot "$1"
+  adb shell input swipe "$(SX 540)" "$(SY 950)" "$(SX 540)" "$(SY 1500)" 300 > /dev/null 2>&1 || true
+  sleep 1
+}
+glass_bubble_shot() {
+  # 长按七仔：首按指引说话（「长按我是抚摸哦」）触发气泡；调用前已删 guide_prefs 复位。
+  # 气泡只活约 2.9 秒：swipe 放后台按住 2.6 秒，1.5 秒时（话已说、打字机已完）抓拍。
+  adb shell uiautomator dump /sdcard/glass_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/glass_dump.xml "$OUT/glass_dump.xml" > /dev/null 2>&1 || true
+  local ctr gx gy
+  ctr=$(center_rid "$OUT/glass_dump.xml" "pet_qizai")
+  if [ -n "$ctr" ]; then
+    gx=$(echo "$ctr" | cut -d' ' -f1); gy=$(echo "$ctr" | cut -d' ' -f2)
+  else
+    gx=$(SX 880); gy=$(SY 683)
+  fi
+  log "glass: bubble long-press at ($gx,$gy)"
+  adb shell input swipe "$gx" "$gy" "$gx" "$gy" 2600 > /dev/null 2>&1 &
+  local SWPID=$!
+  sleep 1.5
+  shot "$1"
+  wait $SWPID || true
+  sleep 1
+}
+glass_wp_id() {
+  adb shell dumpsys wallpaper 2>/dev/null | grep -a -m1 "mId" | grep -o "[0-9]*" | head -1
+}
+glass_try_set_wallpaper() {
+  # $1=设备内路径 $2=宿主本地路径 $3=日志名；多策略尝试，dumpsys mId 变化才算成功
+  local before after
+  before=$(glass_wp_id)
+  {
+    echo "== try set ($3) before mId=$before"
+    adb shell cmd wallpaper set "$1" 2>&1 | head -3
+    echo "-- strategy plain rc=$?"
+  } >> "$OUT/glass-wp-debug.txt" 2>&1
+  sleep 1
+  after=$(glass_wp_id)
+  if [ -n "$after" ] && [ "$after" != "$before" ]; then log "glass: wallpaper set ok ($3, plain)"; return 0; fi
+  adb shell cmd wallpaper set --display 0 "$1" >> "$OUT/glass-wp-debug.txt" 2>&1 || true
+  sleep 1
+  after=$(glass_wp_id)
+  if [ -n "$after" ] && [ "$after" != "$before" ]; then log "glass: wallpaper set ok ($3, --display 0)"; return 0; fi
+  adb shell cmd wallpaper set < "$2" >> "$OUT/glass-wp-debug.txt" 2>&1 || true
+  sleep 1
+  after=$(glass_wp_id)
+  if [ -n "$after" ] && [ "$after" != "$before" ]; then log "glass: wallpaper set ok ($3, stdin)"; return 0; fi
+  log "glass: wallpaper set ALL strategies failed ($3)"
+  return 1
+}
+glass_set_wallpaper_and_restart() {
+  # $1=设备内路径 $2=宿主本地路径 $3=日志名；顺带复位长按指引，让气泡在每种背景下都能触发
+  glass_try_set_wallpaper "$1" "$2" "$3" || true
+  adb shell am force-stop "$PKG" || true
+  adb shell "run-as $PKG rm -f shared_prefs/guide_prefs.xml" > /dev/null 2>&1 || true
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+}
+{
+  echo "== cmd wallpaper help =="
+  adb shell cmd wallpaper help 2>&1 | head -20
+  echo "== dumpsys wallpaper (initial) =="
+  adb shell dumpsys wallpaper 2>/dev/null | head -40
+} > "$OUT/glass-wp-debug.txt" 2>&1 || true
+if python3 scripts/gen_wallpaper.py photo /tmp/glass-photo.png > /dev/null 2>&1 && \
+   python3 scripts/gen_wallpaper.py paper /tmp/glass-paper.png > /dev/null 2>&1; then
+  adb push /tmp/glass-photo.png /sdcard/glass-photo.png >> "$OUT/glass-wp-debug.txt" 2>&1 || true
+  adb push /tmp/glass-paper.png /sdcard/glass-paper.png >> "$OUT/glass-wp-debug.txt" 2>&1 || true
+  adb shell ls -la /sdcard/glass-photo.png /sdcard/glass-paper.png >> "$OUT/glass-wp-debug.txt" 2>&1 || true
+  glass_set_wallpaper_and_restart /sdcard/glass-photo.png /tmp/glass-photo.png photo
+  shot "glass-photo"
+  glass_scroll_shot "glass-photo-scrolled"
+  glass_bubble_shot "glass-bubble-photo"
+  glass_set_wallpaper_and_restart /sdcard/glass-paper.png /tmp/glass-paper.png paper
+  shot "glass-paper"
+  glass_scroll_shot "glass-paper-scrolled"
+  glass_bubble_shot "glass-bubble-paper"
+else
+  log "glass: wallpaper generation failed - set-based shots skipped"
+fi
+if glass_home_alive && adb shell pidof "$PKG" > /dev/null 2>&1; then
+  ok "glass-alive-after-wallpaper-switches"
+else
+  ng "glass-alive-after-wallpaper-switches"
+fi
+
+# --- 20. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

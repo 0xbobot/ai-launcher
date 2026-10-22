@@ -64,6 +64,7 @@ import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
+import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.systemGestureBottomPx
 import kotlin.math.abs
@@ -233,7 +234,16 @@ fun PullUpDock(
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .clip(RoundedCornerShape(28.dp))
-                        .background(AILauncherColors.current.GlassCard.copy(alpha = 0.55f * dockBgAlpha))
+                        // 玻璃试点批：Dock 强玻璃（AGSL 折射+模糊增色，只换材质不改尺寸/位置）。
+                        // 模拟档（老设备/省电/桌面不可见）逐像素回原行为：默认全透明、
+                        // 按压时 GlassCard 55%——fallback 与 boost 沿用 dockBgAlpha。
+                        .glassSurface(
+                            kind = com.bobot.ailauncher.ui.glass.GlassSurfaceKind.STRONG,
+                            cornerRadius = 28.dp,
+                            tintColor = AILauncherColors.current.Card,
+                            fallbackColor = AILauncherColors.current.GlassCard.copy(alpha = 0.55f * dockBgAlpha),
+                            tintBoost = dockBgAlpha
+                        )
                         .combinedClickable(
                             interactionSource = dockPressSource,
                             indication = null,  // 用背景显隐做反馈，不要水波纹

@@ -78,6 +78,7 @@ import com.bobot.ailauncher.core.pet.PetState
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.home.CoverHero
 import com.bobot.ailauncher.ui.home.NextUpStrip
+import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.coverPaletteFor
 import kotlinx.coroutines.launch
@@ -723,6 +724,8 @@ fun PetZone(
         // v0.60.0：毛玻璃——白 65% + 1dp 白描边，系统壁纸透过来
         // v0.63.1：不用 Material3 Card（tonal elevation 在半透明背景上形成灰边），
         // 改用 Box + 手动柔和阴影，边缘与背景自然融合
+        // 玻璃试点批：换真中玻璃（模糊+增色+叠白+顶部亮边，见 ui/glass）；
+        // 维持单层、无嵌套、28dp 圆角与既有阴影；模拟档回白 65% 现状。
         // v0.64.3：editMode 上提；编辑模式卡片高度自适应内容（去 minHeight、不滚动）
         // v0.64.5：todayEditMode 已移到 PetZone 顶部，此处不再重复声明
         Box(
@@ -748,7 +751,12 @@ fun PetZone(
                     spotColor = Color.Black.copy(alpha = 0.08f)
                 )
                 .clip(RoundedCornerShape(28.dp))
-                .background(AILauncherColors.current.Card.copy(alpha = 0.65f))
+                .glassSurface(
+                    kind = com.bobot.ailauncher.ui.glass.GlassSurfaceKind.MEDIUM,
+                    cornerRadius = 28.dp,
+                    tintColor = AILauncherColors.current.Card,
+                    fallbackColor = AILauncherColors.current.Card.copy(alpha = 0.65f)
+                )
         ) {
             // v0.64.0：十万火急红色光带扫过顶部（1 次）
             val sweepX = remember { Animatable(-0.3f) }
