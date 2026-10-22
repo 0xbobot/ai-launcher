@@ -1499,6 +1499,14 @@ ni_locate_capsule() {
 ni_tap_submit() {
   adb shell uiautomator dump /sdcard/ni_btn.xml > /dev/null 2>&1 || true
   adb pull /sdcard/ni_btn.xml "$OUT/ni_btn.xml" > /dev/null 2>&1 || true
+  # v0.68.99（R-1 三轮实测）：uiautomator 偶发空 dump（ni_btn.xml 零节点）
+  # 让提交钮无从定位、第 17 段阶段 B 整段连坐——dump 里连 intent_submit
+  # 都没有时重拉一次（同第 10 段未命中重 dump 的既有口径）。
+  if ! grep -q 'intent_submit' "$OUT/ni_btn.xml" 2> /dev/null; then
+    sleep 1
+    adb shell uiautomator dump /sdcard/ni_btn.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/ni_btn.xml "$OUT/ni_btn.xml" > /dev/null 2>&1 || true
+  fi
   if tap_rid "$OUT/ni_btn.xml" "intent_submit"; then
     return 0
   fi
@@ -2079,7 +2087,9 @@ if [ "$LAYOUT_FAILS" -gt 0 ]; then ng "layout-geometry($LAYOUT_FAILS)"; else ok 
 
 # --- 22. Planning 取消（v0.68.98 布局与交互 Loop 二批-C：F-06 状态出口）---
 # 手段同第 17 段（mock LLM + 预写 llm prefs），差别在 mock 对含标记词
-# manmanxiang 的请求延迟 10 秒回包——把协调器稳定停在 Planning 态：
+# manmanxiang 的请求延迟 13 秒回包（v0.68.99 由 10 秒加长：R-1 入口路径
+# 变长后 10 秒余量被进入+轮询吃光，出现回包与点取消同秒竞态；仍 < 协调器
+# 15 秒超时）——把协调器稳定停在 Planning 态：
 # ①思考条「七仔想想中…」+「取消」钮在场（planning-strip）；
 # ②点「取消」后思考条消失、回 Idle（planning-cancel-dismisses）；
 # ③等过迟到回包的落地窗口，dump 里不得出现追问句「去哪儿」——mock 恒回
@@ -2164,7 +2174,7 @@ if [ "$PC_UP" = "1" ]; then
           else
             ng "planning-cancel-dismisses"
           fi
-          # 等迟到回包的落地窗口整个过去（累计已过约 8 秒，再等 10 秒 > 10 秒延迟）
+          # 等迟到回包的落地窗口整个过去（点取消后累计已过约 15 秒 > 13 秒延迟，再等 10 秒确认不上屏）
           sleep 10
           adb shell uiautomator dump /sdcard/pc_late.xml > /dev/null 2>&1 || true
           adb pull /sdcard/pc_late.xml "$OUT/pc_late.xml" > /dev/null 2>&1 || true

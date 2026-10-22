@@ -62,14 +62,17 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             pass
         # v0.68.98 第 22 段（Planning 取消）专用：请求体含标记词 manmanxiang 时
-        # 延迟 10 秒再回（仍在协调器 15 秒超时内）——把协调器稳定停在 Planning
+        # 延迟再回（仍在协调器 15 秒超时内）——把协调器稳定停在 Planning
         # 态，等冒烟点完「取消」后，这份迟到结果（daohang 空参 -> 本应进
         # NeedsInput 追问）若仍上屏即断言失败。第 17 段的输入不含标记词，
         # 行为不变。sleep 在请求线程内，ThreadingHTTPServer 不阻塞其他请求。
+        # v0.68.99（R-1）：延迟 10 -> 13 秒——R-1 后进输入态要多走点七仔格 +
+        # 轮询 dump，10 秒余量被吃光，三轮实测回包与点取消同秒竞态（迟到
+        # 结果抢先落成追问态）；13 秒仍在 15 秒超时内，留出稳定取消窗口。
         if b"manmanxiang" in raw:
             import time
 
-            time.sleep(10)
+            time.sleep(13)
         if self.path.rstrip("/").endswith("chat/completions"):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
