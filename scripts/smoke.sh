@@ -1636,11 +1636,16 @@ glass_bubble_shot() {
     gx=$(SX 880); gy=$(SY 683)
   fi
   log "glass: bubble long-press at ($gx,$gy)"
-  adb shell input swipe "$gx" "$gy" "$gx" "$gy" 4000 > /dev/null 2>&1 &
+  adb shell input swipe "$gx" "$gy" "$gx" "$gy" 5000 > /dev/null 2>&1 &
   local SWPID=$!
-  sleep 1.2
+  sleep 1.6
   shot "$1"
-  sleep 1.2
+  adb shell uiautomator dump /sdcard/glass_bubble_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/glass_bubble_dump.xml "$OUT/${1}-dump.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/${1}-dump.xml" ]; then
+    grep -o 'text="[^"]*"' "$OUT/${1}-dump.xml" | grep -E "抚摸|°|好啦" | head -3 | while IFS= read -r line; do log "glass: bubble semantics during hold: $line"; done
+    grep -q "抚摸" "$OUT/${1}-dump.xml" || log "glass: bubble semantics during hold: NO speech text node"
+  fi
   shot "$1-b"
   wait $SWPID || true
   sleep 1
