@@ -233,6 +233,23 @@ private fun HomeHost(
         intentJob?.cancel()
         intentJob = null
     }
+    // v0.68.99（主页重构 R-1）：输入态开关——静态主页无胶囊；点 Dock 七仔格 /
+    // 简报讲述者七仔进入（要打字，聚焦）；协调器进入在场状态（思考 / 回复 /
+    // 待确认 / 缺权限 / 追问）时自动带起呈现（不聚焦、不弹键盘，如应用中心
+    // 「问七仔」提交后回首页看结果）。开 D3 抽屉即退出（见 HomeScreen 调用点）。
+    var intentInputMode by remember { mutableStateOf(false) }
+    var intentFocusWanted by remember { mutableStateOf(false) }
+    LaunchedEffect(intentState) {
+        if (com.bobot.ailauncher.ui.home.intentStateHoldsInput(intentState)) {
+            intentInputMode = true
+        }
+    }
+    fun enterIntentInput(focus: Boolean) {
+        // 已在输入态时忽略（讲述者七仔在输入态下也可点，避免聚焦意图被重入改写）
+        if (intentInputMode) return
+        intentFocusWanted = focus
+        intentInputMode = true
+    }
     // 应用中心「问七仔」：先回首页（离 D3），再把整句交给协调器理解
     val onAskQizai: (String) -> Unit = { text ->
         onD3SwipeUpToHome()
@@ -330,7 +347,11 @@ private fun HomeHost(
         // 系统手势豁免，让系统返回手势正常工作（之前漏传，恒为 true，
         // 豁免在应用中心也生效，吃掉了系统返回）
         HomeScreen(
-            onOpenAppDrawer = onOpenAppDrawer,
+            // v0.68.99：上滑开 D3 即退出输入态（D3 是覆盖层，胶囊不跟随）
+            onOpenAppDrawer = {
+                intentInputMode = false
+                onOpenAppDrawer()
+            },
             cleanHome = dockState != DockState.D3,
             onBlindActiveChange = { blindActive = it },
             // v0.68.32：扇形状态上报（顶层绘制）+ Dock 区高度（圆心钳制）
@@ -353,6 +374,11 @@ private fun HomeHost(
             onIntentConfirm = { req -> intentCoordinator.confirm(req) },
             onIntentDismiss = { intentCoordinator.dismiss() },
             onIntentCancelPlanning = { cancelIntentPlanning() },
+            // v0.68.99（R-1）：输入态（点讲述者七仔进入；退出由 HomeScreen 判定）
+            intentInputMode = intentInputMode,
+            intentRequestFocus = intentFocusWanted,
+            onEnterIntentInput = { enterIntentInput(focus = true) },
+            onExitIntentInput = { intentInputMode = false },
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位）
@@ -365,7 +391,10 @@ private fun HomeHost(
             onHideDockRequest = onHideDockRequest,
             onOpenSettings = onOpenSettings,
             // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页 + 提交协调器
-            onAskQizai = onAskQizai
+            onAskQizai = onAskQizai,
+            // v0.68.99（R-1）：Dock 七仔格点按进输入态；输入态时 Dock 卡让位
+            intentInputMode = intentInputMode,
+            onPetCellTap = { enterIntentInput(focus = true) }
         )
         // v0.67.13（Bob）：主屏 rail 长按 → 快找；房子/收藏/字母/隐藏一条导航滑动到达。
         // 长按震动后选择器浮现；手指一动就由应用中心接管（D3 淡入）；picker 会话在 D3 打开后
