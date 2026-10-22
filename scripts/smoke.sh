@@ -1879,6 +1879,24 @@ sleep 1
 # dock_panel 缺失退化为 dock_item 并集）。聚焦态不查 Dock（IME 升起时
 # dump 中的 Dock bounds 是被键盘覆盖的不可见几何）。
 log "layout: segment start"
+# NextUp 几何要有「即将开始」的事件在场才查得到：第 14 段种的事件到本段
+# （约 25 分钟后）多已开始/被删，home-current 首轮实测 nextup 恒缺席、这条
+# 核心对（NextUp x Dock/胶囊）永远查不到。重启前复用第 14 段的 seed 函数
+# 现种一条 +10 分钟开始的探针事件；函数不在场/种失败只记日志跳过。
+if type nextup_seed_event > /dev/null 2>&1; then
+  LAYOUT_NOW_S=$(adb shell date +%s 2>/dev/null | tr -d '\r')
+  if [ -n "$LAYOUT_NOW_S" ]; then
+    EV_BEGIN=$(( (LAYOUT_NOW_S + 600) * 1000 ))
+    EV_END=$(( (LAYOUT_NOW_S + 4200) * 1000 ))
+    if nextup_seed_event "LayoutProbe" ""; then
+      log "layout: probe event seeded (starts in 10min)"
+    else
+      log "layout: probe event seed failed, nextup pair checks may skip"
+    fi
+  fi
+else
+  log "layout: nextup_seed_event unavailable on this leg, nextup pair checks may skip"
+fi
 # 上一段结束时停在 D3 应用中心（Dock 状态在 MainActivity 内，am start/HOME 回不到
 # 首页视图，同第 9 段实测结论）→ force-stop 重启回首页基线再取 dump；
 # 日历事件在 provider 侧，重启不丢，NextUp 检查不受影响。
