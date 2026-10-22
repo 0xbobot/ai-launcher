@@ -40,7 +40,6 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
@@ -102,7 +101,6 @@ fun HomeScreen(
     val context = LocalContext.current
     val density = LocalDensity.current
     val view = LocalView.current
-    val haptics = LocalHapticFeedback.current
 
     // v0.68.93（布局与交互 Loop 一批①）：点胶囊外释放焦点的宿主侧状态——
     // 胶囊聚焦与否由 IntentEntry 经 onFocusChanged 外报，胶囊范围用包裹 Box 的
@@ -151,7 +149,7 @@ fun HomeScreen(
     val blindCtl = remember {
         BlindCaptureController(
             context = context,
-            haptics = haptics,
+            hapticView = view,
             setUi = { blindUi = it },
             triggerPx = with(density) { 24.dp.toPx() },
         )

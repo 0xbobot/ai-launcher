@@ -33,11 +33,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import com.bobot.ailauncher.ui.theme.confirm
-import com.bobot.ailauncher.ui.theme.tick
+import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.compose.NavHost
@@ -316,7 +316,7 @@ private fun HomeHost(
         // v0.67.13（Bob）：主屏 rail 长按 → 快找；房子/收藏/字母/隐藏一条导航滑动到达。
         // 长按震动后选择器浮现；手指一动就由应用中心接管（D3 淡入）；picker 会话在 D3 打开后
         // 继续存活（手势不断），手指不松开可继续滑动；松手后 picker 撤下，D3 自己的 rail 接管
-        val haptics = LocalHapticFeedback.current
+        val hapticView = LocalView.current
         val scope = rememberCoroutineScope()
         var pickerActive by remember { mutableStateOf(false) }
         var pickerIndex by remember { mutableIntStateOf(-1) }
@@ -412,11 +412,11 @@ private fun HomeHost(
                         val cp = p.coerceIn(0f, 1f)
                         pickerHousePull = cp
                         if (cp >= 0.5f && lastPickerHousePull < 0.5f) {
-                            haptics.tick()
+                            hapticView.tickHaptic()
                         }
                         if (cp >= 1f) {
                             pickerHouseArmed = false
-                            haptics.confirm()
+                            hapticView.confirmHaptic()
                             // v0.68.30（Bob）：picker 房子上拉——D3 开着时要先关 D3 回主页，
                             // 不能只关 picker（不然还停在 D3 里）
                             if (d3Opened) {
@@ -502,7 +502,7 @@ private fun HomeHost(
             )
             is BlindUiState.Editing -> {
                 val ctx = LocalContext.current
-                val haptics = LocalHapticFeedback.current
+                val hapticView = LocalView.current
                 var editSegs by remember(s) { mutableStateOf(s.segments) }
                 var showAddSheet by remember(s) { mutableStateOf(false) }
                 fun refreshEditSegs() {
@@ -544,7 +544,7 @@ private fun HomeHost(
                             full.add(to, item)
                             QuickActionsPrefs.save(ctx, full)
                             refreshEditSegs()
-                            haptics.tick()
+                            hapticView.tickHaptic()
                         }
                     },
                     onEditTapOutside = {

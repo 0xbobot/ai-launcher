@@ -55,10 +55,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import com.bobot.ailauncher.ui.theme.tick
+import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -93,7 +93,7 @@ internal fun AppRow(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    val haptics = LocalHapticFeedback.current
+    val hapticView = LocalView.current
 
     // v0.41.11：openAppDetails/uninstallApp 已移到长按菜单（AppPopupMenu），此处删除
 
@@ -205,7 +205,7 @@ internal fun AppRow(
     fun onIconTap(which: String, action: () -> Unit) {
         if (tappedIcon != null) return
         tappedIcon = which
-        haptics.tick()
+        hapticView.tickHaptic()
         scope.launch {
             tapScale.snapTo(1f)
             tapScale.animateTo(0.75f, tween(80))

@@ -111,14 +111,14 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import com.bobot.ailauncher.ui.theme.confirm
-import com.bobot.ailauncher.ui.theme.tick
+import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -175,7 +175,7 @@ fun AppCenterContent(
     val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val haptics = LocalHapticFeedback.current
+    val hapticView = LocalView.current
     val onPullDownState = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
@@ -816,7 +816,7 @@ fun AppCenterContent(
                                     app = app,
                                     onLaunch = { launchApp(app) },
                                     onLongClick = {
-                                        haptics.confirm()
+                                        hapticView.confirmHaptic()
                                         popupApp = app
                                     },
                                     onHide = ::hideApp,
@@ -914,7 +914,7 @@ fun AppCenterContent(
                                 app = app,
                                 onLaunch = { launchApp(app) },
                                 onLongClick = {
-                                    haptics.confirm()
+                                    hapticView.confirmHaptic()
                                     popupApp = app
                                 },
                                 onHide = ::hideApp,
@@ -965,7 +965,7 @@ fun AppCenterContent(
                                             onDragStart = {
                                                 draggingDockPkg = app.packageName
                                                 dockDragOffsetY = 0f
-                                                haptics.tick()
+                                                hapticView.tickHaptic()
                                             },
                                             onDragEnd = {
                                                 UiPrefs.setDockPinned(
@@ -1047,7 +1047,7 @@ fun AppCenterContent(
                                 app = app,
                                 onLaunch = { launchApp(app) },
                                 onLongClick = {
-                                    haptics.confirm()
+                                    hapticView.confirmHaptic()
                                     popupApp = app
                                 },
                                 onHide = ::hideApp,
@@ -1165,7 +1165,7 @@ fun AppCenterContent(
                                     app = app,
                                     onLaunch = { launchApp(app) },
                                     onLongClick = {
-                                        haptics.confirm()
+                                        hapticView.confirmHaptic()
                                         popupApp = app
                                     },
                                     onHide = {}, // 隐藏分组内：右滑=取消隐藏
@@ -1396,12 +1396,12 @@ fun AppCenterContent(
                         val cp = p.coerceIn(0f, 1f)
                         housePull = cp
                         if (cp >= 0.5f && lastHousePull < 0.5f) {
-                            haptics.tick()
+                            hapticView.tickHaptic()
                         }
                         if (cp >= 1f) {
                             housePullCommitted = true
                             housePullArmed = false
-                            haptics.confirm()
+                            hapticView.confirmHaptic()
                             housePull = 0f
                             lastHousePull = 0f
                             housePullCommitted = false
@@ -1416,12 +1416,12 @@ fun AppCenterContent(
                         val cp = p.coerceIn(0f, 1f)
                         eyePull = cp
                         if (cp >= 0.5f && lastEyePull < 0.5f) {
-                            haptics.tick()
+                            hapticView.tickHaptic()
                         }
                         if (cp >= 1f) {
                             eyePullCommitted = true
                             eyePullArmed = false
-                            haptics.confirm()
+                            hapticView.confirmHaptic()
                             unlockHiddenApps()
                             eyePull = 0f
                             lastEyePull = 0f

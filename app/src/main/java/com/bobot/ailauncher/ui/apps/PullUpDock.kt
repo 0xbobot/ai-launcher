@@ -23,8 +23,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import com.bobot.ailauncher.ui.theme.confirm
-import androidx.compose.ui.platform.LocalHapticFeedback
+import com.bobot.ailauncher.ui.theme.confirmHaptic
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -512,7 +512,7 @@ private fun DockIconButton(
     onDismissMenu: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val haptics = LocalHapticFeedback.current
+    val hapticView = LocalView.current
     Box(modifier = modifier) {
         AppIconImage(
             drawable = app.icon,
@@ -525,7 +525,7 @@ private fun DockIconButton(
                 .combinedClickable(
                     onClick = { onLaunch(app) },
                     onLongClick = {
-                        haptics.confirm()
+                        hapticView.confirmHaptic()
                         onLongPress(app)
                     }
                 )
