@@ -2276,13 +2276,16 @@ adb shell am force-stop "$PKG" || true
 adb shell "run-as $PKG rm -rf files/crashes" || true
 adb shell am start -n "$PKG/.MainActivity" --ez smoke_crash true > /dev/null 2>&1 || true
 sleep 3
-CRASH_COUNT=$(adb shell "run-as $PKG ls files/crashes" 2>/dev/null | grep -c "^crash-.*\.log$" || true)
+# 注意：run-as 输出带 \r，先剥掉再匹配；首跑实测 $ 锚点会被 \r 顶掉误报无文件
+CRASH_LIST=$(adb shell "run-as $PKG ls files/crashes" 2>/dev/null | tr -d '\r')
+log "crash-log: dir listing after trigger: ${CRASH_LIST:-<empty>}"
+CRASH_COUNT=$(printf '%s\n' "$CRASH_LIST" | grep -c "^crash-.*\.log$" || true)
 if [ "${CRASH_COUNT:-0}" -ge 1 ] 2>/dev/null; then
   ok "crash-log-written"
 else
   ng "crash-log-written"
 fi
-FIRST_CRASH=$(adb shell "run-as $PKG ls files/crashes" 2>/dev/null | grep "^crash-.*\.log$" | head -1 | tr -d '\r')
+FIRST_CRASH=$(printf '%s\n' "$CRASH_LIST" | grep "^crash-.*\.log$" | head -1)
 if [ -n "$FIRST_CRASH" ] && adb shell "run-as $PKG cat files/crashes/$FIRST_CRASH" 2>/dev/null | grep -q "smoke-test crash"; then
   ok "crash-log-content"
 else
