@@ -2027,16 +2027,30 @@ if [ "$PC_UP" = "1" ]; then
     adb shell input keyevent KEYCODE_HOME || true
     sleep 2
     if ni_locate_capsule; then
-      if ni_type_submit "manmanxiang"; then
-        # 思考条应在慢响应窗口（10 秒）内出现：轮询 dump 直到命中或窗口过半
-        PC_STRIP=0
-        for i in $(seq 1 4); do
-          sleep 1
-          adb shell uiautomator dump /sdcard/pc_poll.xml > /dev/null 2>&1 || true
-          adb pull /sdcard/pc_poll.xml "$OUT/pc_poll.xml" > /dev/null 2>&1 || true
-          if grep -q "七仔想想中" "$OUT/pc_poll.xml" 2> /dev/null && grep -q 'text="取消"' "$OUT/pc_poll.xml" 2> /dev/null; then PC_STRIP=1; break; fi
-        done
-        if [ "$PC_STRIP" = "1" ]; then
+      # 聚焦胶囊 -> 输标记词（补空格让 LatinIME 组合上屏，同第 15/17 段法）
+      adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 > /dev/null 2>&1 || true
+      sleep 2
+      adb shell input text "manmanxiang" > /dev/null 2>&1 || true
+      sleep 1
+      adb shell input text "%s" > /dev/null 2>&1 || true
+      sleep 1
+      # 提交 + 等思考条合并成一轮轮询：每轮 dump 先找思考条；没找到且提交钮
+      # 在场就点一次（只点一次）。不用 ni_type_submit 的单次 dump 定音——
+      # dark 腿首跑实测：单次 dump 落空导致 ni_tap_submit 找不到提交钮、三条
+      # 断言连坐；轮询重试可自愈这类偶发空/旧帧。思考条在提交后立即出现、
+      # 停留到慢响应回包（10 秒）为止，8 轮足够覆盖慢腿。
+      PC_STRIP=0
+      PC_TAPPED=0
+      for i in $(seq 1 8); do
+        adb shell uiautomator dump /sdcard/pc_poll.xml > /dev/null 2>&1 || true
+        adb pull /sdcard/pc_poll.xml "$OUT/pc_poll.xml" > /dev/null 2>&1 || true
+        if grep -q "七仔想想中" "$OUT/pc_poll.xml" 2> /dev/null && grep -q 'text="取消"' "$OUT/pc_poll.xml" 2> /dev/null; then PC_STRIP=1; break; fi
+        if [ "$PC_TAPPED" = "0" ] && tap_rid "$OUT/pc_poll.xml" "intent_submit"; then
+          PC_TAPPED=1
+        fi
+        sleep 1
+      done
+      if [ "$PC_STRIP" = "1" ]; then
           ok "planning-strip"
           shot "intent-planning"
           # 点「取消」：优先 testTag planning_cancel，未命中退回 text=取消 的节点中心
@@ -2067,13 +2081,8 @@ if [ "$PC_UP" = "1" ]; then
           else
             ng "planning-cancel-drops-late"
           fi
-        else
-          ng "planning-strip"
-          ng "planning-cancel-dismisses"
-          ng "planning-cancel-drops-late"
-        fi
       else
-        log "planning-cancel: submit tap failed - segment counted as fail"
+        log "planning-cancel: planning strip never appeared after submit retries - segment counted as fail"
         ng "planning-strip"
         ng "planning-cancel-dismisses"
         ng "planning-cancel-drops-late"
