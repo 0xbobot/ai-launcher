@@ -162,6 +162,9 @@ center_rid() {
   X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
   X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
   [ -n "$X1" ] && [ -n "$Y2" ] || return 1
+  # 退化 bounds（[0,0][0,0]：残缺 dump 里节点在场但无几何）不算定位成功——
+  # 否则点位落到屏幕角上误触他处（v0.68.101 矩阵 landphone 腿 focus-cancel 实测）
+  [ "$X2" -gt "$X1" ] && [ "$Y2" -gt "$Y1" ] || return 1
   echo "$(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 ))"
 }
 tap_rid() {
@@ -1145,6 +1148,7 @@ nextup_dedupe_flow() {
   fi
   adb shell uiautomator dump /sdcard/dedupe_dump0.xml > /dev/null 2>&1 || true
   adb pull /sdcard/dedupe_dump0.xml "$OUT/dedupe_dump0.xml" > /dev/null 2>&1 || true
+  redump_if_empty dedupe_dump0
   if [ -f "$OUT/dedupe_dump0.xml" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump0.xml"; then
     ok "nextup-dedupe-home"
   else
@@ -1160,7 +1164,10 @@ nextup_dedupe_flow() {
   shot "intent-dedupe-suggest"
   adb shell uiautomator dump /sdcard/dedupe_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/dedupe_dump.xml "$OUT/dedupe_dump.xml" > /dev/null 2>&1 || true
-  if [ ! -f "$OUT/dedupe_dump.xml" ]; then
+  # 0 字节空 dump 是「未知」不是「不在场」（v0.68.101 矩阵 tablet 腿实测：
+  # 空文件让前提检查误判建议面缺席）——同 focus 段的 redump 守卫
+  redump_if_empty dedupe_dump
+  if [ ! -s "$OUT/dedupe_dump.xml" ]; then
     ng "nextup-dedupe"
     return
   fi
@@ -1776,8 +1783,10 @@ adb pull /sdcard/focus_pre.xml "$OUT/focus_pre.xml" > /dev/null 2>&1 || true
 redump_if_empty focus_pre
 if [ -f "$OUT/focus_pre.xml" ] && grep -q 'focused="true"' "$OUT/focus_pre.xml" && grep -q 'daohang' "$OUT/focus_pre.xml"; then
   # 前提成立（确实聚焦且文本在框内）才验取消；点七仔（pet_qizai，意图区外）
+  # 坐标取刚 dump 的 focus_pre（比进态时的 focus_dump0 新鲜；退化 bounds
+  # 由 center_rid 守卫挡下、落回默认坐标）
   PTX=$(SX 540); PTY=$(SY 950)
-  CTR=$(center_rid "$OUT/focus_dump0.xml" "pet_qizai")
+  CTR=$(center_rid "$OUT/focus_pre.xml" "pet_qizai")
   if [ -n "$CTR" ]; then PTX=$(echo "$CTR" | cut -d' ' -f1); PTY=$(echo "$CTR" | cut -d' ' -f2); log "focus-cancel pet by tag at ($PTX,$PTY)"; fi
   adb shell input swipe "$PTX" "$PTY" "$PTX" "$PTY" 150 || true
   sleep 2
@@ -2278,7 +2287,8 @@ if [ -n "$PC_PID" ]; then kill "$PC_PID" 2> /dev/null || true; fi
 #   .87 NeedsInput 追问条「去哪儿」（slot-send-executes：槽位是事前防
 #   缺参、追问是解析后兜底，两段在此同框即不打架的证据）。
 # mock 起不来或 prefs 预写失败时整段跳过不计 FAIL（同第 17 段口径）；
-# 段末清 llm prefs + force-stop，不污染第 23/24 段。
+# 放大字体腿（SMOKE_FONT_SCALE）示例行按降级规则收起、本段前提不成立，
+# 同样整段跳过不计；段末清 llm prefs + force-stop，不污染第 23/24 段。
 sd_tap_text() {
   local F="$1" T="$2" NODE NUMS X1 Y1 X2 Y2
   NODE=$(grep -o "<node[^>]*text=\"$T\"[^>]*>" "$F" | head -1)
@@ -2326,13 +2336,22 @@ if [ "$SD_UP" = "1" ]; then
     sleep 2
     if enter_input_mode "$OUT/sd_open.xml"; then
       sd_dump "$OUT/sd_deck.xml"
+      # 示例行在放大字体腿（SMOKE_FONT_SCALE，如 1.3）按降级规则收起——
+      # 本段的前提（示例 chips 在场）在该腿按设计不成立，整段跳过不计
+      # （同第 17 段环境门控口径）；非降级腿缺示例才是真失败。
+      SD_SKIP25=0
       if [ -f "$OUT/sd_deck.xml" ] && grep -q 'resource-id="deck_example_nav"' "$OUT/sd_deck.xml"; then
         ok "slot-deck-examples"
+      elif [ -n "$SMOKE_FONT_SCALE" ]; then
+        SD_SKIP25=1
+        log "slot-deck: example chips degraded away on font-scale leg - segment skipped (not counted)"
       else
         ng "slot-deck-examples"
       fi
       shot "slot-deck"
-      if tap_rid "$OUT/sd_deck.xml" "deck_example_nav"; then
+      if [ "$SD_SKIP25" = "1" ]; then
+        log "slot-deck: segment skipped on this leg (see above)"
+      elif tap_rid "$OUT/sd_deck.xml" "deck_example_nav"; then
         sleep 2
         sd_dump "$OUT/sd_tpl.xml"
         cp "$OUT/sd_tpl.xml" "$OUT/slot_focus.xml" 2> /dev/null || true

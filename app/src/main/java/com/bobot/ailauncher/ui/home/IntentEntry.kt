@@ -502,15 +502,17 @@ fun IntentEntry(
     }
     // 布局防线（Bob 2026-10-21，R-2 沿用并扩展到甲板）：内容先降级自身，
     // 绝不挤压胶囊/TODAY/Dock 等其他槽位——示例行是第一牺牲位（字体放大
-    // >1.15 沿旧口径，或短高形态 <640dp 高：横屏手机等，先收示例行）；
-    // 应用行在最紧配置（字体 1.3 + 矮屏）减到 2 个；槽位面板是功能件，
-    // 不在降级之列（其选项行横向滚动自适应）。
+    // >1.15 时收起，沿旧建议面口径）；应用行在最紧配置（字体 1.3 + 矮屏）
+    // 减到 2 个；槽位面板是功能件，不在降级之列（选项行横向滚动自适应）。
+    // 短高形态（横屏）不另收示例：示例是模板模式的唯一入口，收掉等于横屏
+    // 无槽位填充、与 L-7「横屏同语义」相悖；高度靠流式列自然裁剪末位
+    // （会行在列尾先让位），甲板/胶囊居列首不被裁，几何网在 landphone
+    // 腿对输入态实测兜底（v0.68.101 矩阵首跑定案）。
     val densityNow = LocalDensity.current
     val configurationNow = LocalConfiguration.current
     val tightLayout = densityNow.fontScale >= 1.3f &&
         configurationNow.screenHeightDp <= 800
-    val showDeckExamples = densityNow.fontScale <= 1.15f &&
-        configurationNow.screenHeightDp >= 640
+    val showDeckExamples = densityNow.fontScale <= 1.15f
     val visibleSuggestionApps = if (tightLayout) suggestionApps.take(2) else suggestionApps
 
     // R3-C 七仔反应（对话感）：姿态只跟状态走，不说话、不弹气泡，克制优先——
