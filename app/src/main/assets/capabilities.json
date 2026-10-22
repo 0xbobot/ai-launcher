@@ -223,6 +223,14 @@
             "com.sdu.didi.psnger",
             "com.didapassenger",
             "com.ubercab"
+          ],
+          "params": [
+            {
+              "name": "to",
+              "label": "目的地",
+              "required": true,
+              "ask": "打车去哪儿？"
+            }
           ]
         },
         {
