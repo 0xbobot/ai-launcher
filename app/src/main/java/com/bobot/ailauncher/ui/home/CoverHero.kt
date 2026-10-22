@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.CoverPalette
 import kotlinx.coroutines.delay
@@ -46,12 +47,15 @@ fun CoverHero(
     petSlot: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // v0.68.95（F-05）：模板选择也从分钟 ticker 派生——跨午夜模板与日期
+    // 同拍翻篇，不再「新模板 + 旧日期」。
+    val nowMillis by rememberNowMillis()
     // v0.68.60（Bob）：横屏优先——统一紧凑横排，不跟 Dock 抢竖向空间
     androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
         if (maxWidth > maxHeight) {
             CoverHeroLandscape(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
         } else {
-            when (coverTemplateFor()) {
+            when (coverTemplateFor(nowMillis)) {
                 CoverTemplate.HEADLINE -> CoverHeroHeadline(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
                 CoverTemplate.MINIMAL -> CoverHeroMinimal(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
                 CoverTemplate.GIANT_TIME -> CoverHeroGiantTime(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
@@ -80,17 +84,13 @@ fun CoverHeroGiantTime(
         val petTopPad = (190 * scale).dp
         val isLandscape = maxWidth > maxHeight
         // v0.68.59：横屏双栏——时间左，标题/七仔右
-    // v0.68.34： live 时间，每分钟整点刷新（轻量协程，无轮询浪费）
-    var timeText by remember { mutableStateOf(currentTimeText()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            val now = System.currentTimeMillis()
-            delay(60_000L - (now % 60_000L) + 200L)
-            timeText = currentTimeText()
-        }
-    }
-    val dateText = remember { currentDateText() }
-    val daypartLine = remember { daypartLine() }
+    // v0.68.95（F-05）：时间/日期/时段统一从分钟 ticker 派生——此前时钟每
+    // 分钟刷新，日期与时段文案却被无 key remember{} 冻结，跨午夜/跨时段
+    // 不翻篇（且与每分钟自算的模板选择自相矛盾）。
+    val nowMillis by rememberNowMillis()
+    val timeText = remember(nowMillis) { currentTimeText(nowMillis) }
+    val dateText = remember(nowMillis) { currentDateText(nowMillis) }
+    val daypartLine = remember(nowMillis) { daypartLine(nowMillis) }
 
     // v0.68.50：入场动画——kicker 先现，时间上滑，标题 stagger 80ms
     var entered by remember { mutableStateOf(false) }
@@ -249,23 +249,28 @@ fun TrackedText(
     }
 }
 
-private fun currentTimeText(): String =
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Calendar.getInstance().time)
+private fun currentTimeText(nowMs: Long): String =
+    SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date(nowMs))
 
-private fun currentDateText(): String {
-    val cal = Calendar.getInstance()
+/** 日期文案（纯函数：入参毫秒 → 文案，供单测）：「M月d日 星期X」 */
+internal fun currentDateText(nowMs: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = nowMs }
     val weekdays = arrayOf("星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六")
     return "${cal.get(Calendar.MONTH) + 1}月${cal.get(Calendar.DAY_OF_MONTH)}日 ${weekdays[cal.get(Calendar.DAY_OF_WEEK) - 1]}"
 }
 
-private fun daypartLine(): String {
-    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    return when (hour) {
-        in 6..11 -> "七仔帮你盯着呢"
-        in 12..17 -> "适合出门走走"
-        in 18..22 -> "晚上好好放松"
-        else -> "好好休息"
-    }
+private fun daypartLine(nowMs: Long): String {
+    val hour = Calendar.getInstance().apply { timeInMillis = nowMs }
+        .get(Calendar.HOUR_OF_DAY)
+    return daypartForHour(hour)
+}
+
+/** 时段文案（纯函数，供单测）：小时 → 时段句，边界与原实现一致 */
+internal fun daypartForHour(hour: Int): String = when (hour) {
+    in 6..11 -> "七仔帮你盯着呢"
+    in 12..17 -> "适合出门走走"
+    in 18..22 -> "晚上好好放松"
+    else -> "好好休息"
 }
 
 /**
@@ -274,8 +279,9 @@ private fun daypartLine(): String {
  */
 enum class CoverTemplate { GIANT_TIME, HEADLINE, MINIMAL }
 
-fun coverTemplateFor(): CoverTemplate {
-    val day = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+fun coverTemplateFor(nowMs: Long): CoverTemplate {
+    val day = Calendar.getInstance().apply { timeInMillis = nowMs }
+        .get(Calendar.DAY_OF_YEAR)
     return CoverTemplate.values()[day % 3]
 }
 
@@ -291,15 +297,10 @@ fun CoverHeroHeadline(
     petSlot: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var timeText by remember { mutableStateOf(currentTimeText()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            val now = System.currentTimeMillis()
-            delay(60_000L - (now % 60_000L) + 200L)
-            timeText = currentTimeText()
-        }
-    }
-    val dateText = remember { currentDateText() }
+    // v0.68.95（F-05）：时间/日期从分钟 ticker 派生（原各自时钟循环 + 冻结日期）
+    val nowMillis by rememberNowMillis()
+    val timeText = remember(nowMillis) { currentTimeText(nowMillis) }
+    val dateText = remember(nowMillis) { currentDateText(nowMillis) }
 
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = modifier.fillMaxWidth().padding(top = 56.dp, start = 28.dp, end = 16.dp)
@@ -362,14 +363,9 @@ fun CoverHeroMinimal(
     petSlot: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var timeText by remember { mutableStateOf(currentTimeText()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            val now = System.currentTimeMillis()
-            delay(60_000L - (now % 60_000L) + 200L)
-            timeText = currentTimeText()
-        }
-    }
+    // v0.68.95（F-05）：时间从分钟 ticker 派生（原各自时钟循环）
+    val nowMillis by rememberNowMillis()
+    val timeText = remember(nowMillis) { currentTimeText(nowMillis) }
 
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = modifier.fillMaxWidth().padding(top = 80.dp, start = 28.dp, end = 28.dp)
@@ -420,15 +416,10 @@ fun CoverHeroLandscape(
     petSlot: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var timeText by remember { mutableStateOf(currentTimeText()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            val now = System.currentTimeMillis()
-            delay(60_000L - (now % 60_000L) + 200L)
-            timeText = currentTimeText()
-        }
-    }
-    val dateText = remember { currentDateText() }
+    // v0.68.95（F-05）：时间/日期从分钟 ticker 派生（原各自时钟循环 + 冻结日期）
+    val nowMillis by rememberNowMillis()
+    val timeText = remember(nowMillis) { currentTimeText(nowMillis) }
+    val dateText = remember(nowMillis) { currentDateText(nowMillis) }
 
     Row(
         modifier = modifier

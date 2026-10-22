@@ -24,6 +24,9 @@
 # 第 18 段为意图焦点点外部取消（focus-cancel-outside：聚焦输字后点七仔，
 # dump 无 focused 节点且文本保留）；crash 检查顺延为第 19 段。
 # 玻璃试点批合入后：玻璃取证续为第 19 段，crash 再顺延为第 20 段。
+# v0.68.95（布局与交互 Loop 二批-A）追加：第 20 段为数据新鲜度（装/卸桩应用
+# 在应用中心开着时实时刷新 A-Z 列表，catalog-install/uninstall-refresh），
+# crash 检查再顺延为第 21 段。
 # 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
 # 生成）/ 纯纸面三态各截首页（Dock+TODAY 卡），照片与纸面下再长按七仔截气泡
 # （glass-default / glass-photo / glass-bubble-photo / glass-paper /
@@ -1717,7 +1720,96 @@ else
   ng "glass-alive-after-wallpaper-switches"
 fi
 
-# --- 20. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 20. 数据新鲜度：装/卸应用实时刷新（v0.68.95 布局与交互 Loop 二批-A：F-03/F-04）---
+# 此前 Dock 清单是无 key remember{}（进程内只算一次），应用中心靠自带广播在
+# 组合期主线程整表重建。本批改 AppCatalog 仓库：InstalledApps.epoch 失效 ->
+# IO 构建 -> StateFlow 快照递交。本段在应用中心（Dock D3）开着、不重启进程、
+# 不离开表面的前提下装上腾讯地图桩：A-Z 列表应自己长出「腾讯地图桩」；再卸
+# 掉，列表应自己消掉。与第 17 段阶段 B（装桩后重启进程验能力绑定）互补：
+# 那里验「重启后对」，这里验「活着就刷新」。桩的构建复用 ni_build_stub。
+log "freshness: segment start"
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+sleep 3
+fresh_dump() {
+  adb shell uiautomator dump /sdcard/fresh_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/fresh_dump.xml "$OUT/fresh_dump.xml" > /dev/null 2>&1 || true
+}
+# 当前屏 dump 命中标签返回 0；未命中滑一屏再找。滑动轴按方向选：竖屏列表
+# 纵向滚；横屏应用中心是竖排流多列、整表横向滚（AppCenterLandscape），
+# 必须横滑——首轮矩阵 tablet 腿实证：竖滑 12 次翻不到 T 列（断言手法问题，
+# 非 App 刷新问题，横屏数据同样来自 AppCenterContent 的 azGroups）。
+fresh_swipe_fwd() {
+  if [ "$LANDSCAPE" = "1" ]; then
+    adb shell input swipe "$(SX 800)" "$(SY 1200)" "$(SX 280)" "$(SY 1200)" 300 || true
+  else
+    adb shell input swipe "$(SX 540)" "$(SY 1600)" "$(SX 540)" "$(SY 650)" 300 || true
+  fi
+}
+fresh_swipe_back() {
+  if [ "$LANDSCAPE" = "1" ]; then
+    adb shell input swipe "$(SX 280)" "$(SY 1200)" "$(SX 800)" "$(SY 1200)" 300 || true
+  else
+    adb shell input swipe "$(SX 540)" "$(SY 650)" "$(SX 540)" "$(SY 1600)" 300 || true
+  fi
+}
+fresh_find_label() {
+  local label="$1" tries="$2" i
+  for i in $(seq 1 "$tries"); do
+    fresh_dump
+    if [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"; then
+      return 0
+    fi
+    fresh_swipe_fwd
+    sleep 1
+  done
+  fresh_dump
+  [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"
+}
+fresh_scroll_top() {
+  local i
+  for i in $(seq 1 10); do
+    fresh_swipe_back
+    sleep 0.5
+  done
+}
+STUB_LABEL="腾讯地图桩"
+if ! fresh_find_label "$STUB_LABEL" 1; then
+  ok "catalog-preinstall-absent"
+else
+  log "freshness: stub label unexpectedly present before install"
+  ng "catalog-preinstall-absent"
+fi
+if ni_build_stub && adb install -r "$STUB_APK" > /dev/null 2>&1; then
+  log "freshness: stub installed while AppCenter open"
+  # 广播 -> epoch -> IO 重建 -> 快照换表，给慢腿留足轮询窗口
+  sleep 3
+  if fresh_find_label "$STUB_LABEL" 12; then
+    ok "catalog-install-refresh"
+  else
+    ng "catalog-install-refresh"
+  fi
+  shot "appcenter-fresh-installed"
+  adb shell pm uninstall com.tencent.map > /dev/null 2>&1 || true
+  log "freshness: stub uninstalled while AppCenter open"
+  sleep 3
+  fresh_scroll_top
+  if ! fresh_find_label "$STUB_LABEL" 12; then
+    ok "catalog-uninstall-refresh"
+  else
+    ng "catalog-uninstall-refresh"
+  fi
+  shot "appcenter-fresh-uninstalled"
+else
+  log "freshness: stub build/install failed - segment counted as fail (same as phase B)"
+  ng "catalog-install-refresh"
+  ng "catalog-uninstall-refresh"
+fi
+adb shell input keyevent KEYCODE_HOME || true
+sleep 1
+
+# --- 21. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true
