@@ -34,7 +34,11 @@
 # v0.68.98（布局与交互 Loop 二批-C·F-06）追加：第 22 段为 Planning 取消
 # （planning-strip / planning-cancel-dismisses / planning-cancel-drops-late：
 # mock 慢响应把协调器停在 Planning 态 -> 思考条带「取消」-> 点取消后条消失 ->
-# 等迟到结果落地窗口过后断言追问不上屏），crash 检查再顺延为第 23 段。形态 env 追加 SMOKE_WM_SIZE /
+# 等迟到结果落地窗口过后断言追问不上屏），crash 检查再顺延为第 23 段。
+# v0.68.100（卫生批）追加：第 24 段为崩溃本地日志（crash-log-written /
+# crash-log-content / crash-relaunch-alive：debug 专用 intent extra 触发一次
+# 真崩溃 -> files/crashes 落盘且含异常首行 -> 正常重启存活不进崩溃循环）。
+# 本段故意产生 FATAL，必须排在第 23 段 no-fatal-crash 之后。形态 env 追加 SMOKE_WM_SIZE /
 # SMOKE_USER_ROTATION：第 0 段几何读取前覆写显示尺寸与旋转锁定（矩阵的
 # 横屏手机短高、平板竖屏腿用），不带 env 时行为不变。
 # 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
@@ -2264,6 +2268,40 @@ if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
 else
   ok "no-fatal-crash"
 fi
+
+# --- 24. 崩溃本地日志（v0.68.100 卫生批）：故意崩溃一次，验证端到端留痕 ---
+# MainActivity 是 singleTask 且可能在运行，先 force-stop 保证 extra 走 onCreate。
+# 清掉历史记录隔离本段（run-as 相对路径与第 22 段删 llm prefs 同款）。
+adb shell am force-stop "$PKG" || true
+adb shell "run-as $PKG rm -rf files/crashes" || true
+adb shell am start -n "$PKG/.MainActivity" --ez smoke_crash true > /dev/null 2>&1 || true
+sleep 3
+# 注意：run-as 输出带 \r，先剥掉再匹配；首跑实测 $ 锚点会被 \r 顶掉误报无文件
+CRASH_LIST=$(adb shell "run-as $PKG ls files/crashes" 2>/dev/null | tr -d '\r')
+log "crash-log: dir listing after trigger: ${CRASH_LIST:-<empty>}"
+CRASH_COUNT=$(printf '%s\n' "$CRASH_LIST" | grep -c "^crash-.*\.log$" || true)
+if [ "${CRASH_COUNT:-0}" -ge 1 ] 2>/dev/null; then
+  ok "crash-log-written"
+else
+  ng "crash-log-written"
+fi
+FIRST_CRASH=$(printf '%s\n' "$CRASH_LIST" | grep "^crash-.*\.log$" | head -1)
+if [ -n "$FIRST_CRASH" ] && adb shell "run-as $PKG cat files/crashes/$FIRST_CRASH" 2>/dev/null | grep -q "smoke-test crash"; then
+  ok "crash-log-content"
+else
+  ng "crash-log-content"
+fi
+# 崩溃后正常重启：进程能起来、首页 dump 得到本包节点（不进崩溃循环）
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 3
+adb shell uiautomator dump /sdcard/crash_after.xml > /dev/null 2>&1 || true
+adb pull /sdcard/crash_after.xml "$OUT/crash_after.xml" > /dev/null 2>&1 || true
+if [ -f "$OUT/crash_after.xml" ] && grep -q "$PKG" "$OUT/crash_after.xml"; then
+  ok "crash-relaunch-alive"
+else
+  ng "crash-relaunch-alive"
+fi
+shot "crash-after-relaunch"
 
 log "RESULT pass=$PASS fail=$FAIL"
 exit "$FAIL"

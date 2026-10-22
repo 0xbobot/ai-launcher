@@ -2,6 +2,7 @@ package com.bobot.ailauncher
 
 import android.app.Application
 import com.bobot.ailauncher.data.BatteryGuard
+import com.bobot.ailauncher.data.CrashLog
 
 /**
  * v0.40.0：Application 入口。
@@ -11,6 +12,9 @@ import com.bobot.ailauncher.data.BatteryGuard
 class LauncherApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // v0.68.100（卫生批）：先装崩溃本地日志处理器——越早装越能兜住
+        // 后续初始化路径上的崩溃（写 files/crashes/，链回系统原处理器）
+        CrashLog.install(this)
         BatteryGuard.ensureStarted(this)
     }
 }

@@ -41,6 +41,34 @@ object LlmKeyStore {
         return legacy
     }
 
+    /** API Key 当前的实际存放形态（v0.68.100 卫生批：降级不再静默，设置页要明示） */
+    enum class StorageMode {
+        /** Key 在加密存储里 */
+        ENCRYPTED,
+
+        /** 加密不可用或读写失败，Key 正以明文存放（降级） */
+        PLAIN_FALLBACK,
+
+        /** 还没存过 Key */
+        EMPTY
+    }
+
+    /**
+     * 探测当前存放形态，以 Key 实际躺在哪儿为准：
+     * 加密里有值即 ENCRYPTED；加密层读抛异常（解密失败等）视为不可用，
+     * 与加密不可用同等对待——此时 Key 若在明文里就是 PLAIN_FALLBACK。
+     */
+    fun probeMode(plain: Store, secure: Store?): StorageMode {
+        if (secure != null) {
+            val secureHas = runCatching { secure.read(KEY_API) }
+                .getOrNull()?.isNotBlank() == true
+            if (secureHas) return StorageMode.ENCRYPTED
+        }
+        val plainHas = runCatching { plain.read(KEY_API) }
+            .getOrNull()?.isNotBlank() == true
+        return if (plainHas) StorageMode.PLAIN_FALLBACK else StorageMode.EMPTY
+    }
+
     /** 保存 API Key：优先加密存储（成功后清明文），失败回退明文（保可用性、不丢 Key） */
     fun writeApiKey(plain: Store, secure: Store?, value: String) {
         if (secure != null) {

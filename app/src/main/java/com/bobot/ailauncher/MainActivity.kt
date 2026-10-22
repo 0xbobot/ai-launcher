@@ -43,6 +43,10 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // v0.68.100（卫生批）：仅 debug 包的冒烟入口——带 extra 启动即抛一次
+        // 真异常，验证崩溃日志端到端落盘；release 包 BuildConfig.DEBUG 恒
+        // false 不存在此入口，用户界面没有任何「测试崩溃」按钮
+        throwIfSmokeCrash(intent)
         // v0.32.3：冷启动时也处理快捷方式
         if (intent?.action == "com.bobot.ailauncher.CHECK_UPDATE") {
             // 延迟到 UI 就绪后检查
@@ -67,6 +71,10 @@ class MainActivity : FragmentActivity() {
         PetRepository.init(this)
         // v0.68.56（Bob）：B 方案——灵动岛系统通知通道初始化
         com.bobot.ailauncher.ui.island.IslandToasts.init(this)
+        // v0.68.100（卫生批）：有没看过的崩溃记录时，冷启动非模态提示一次
+        // （每个新崩溃至多提示一次，在设置页看过后不再提）
+        com.bobot.ailauncher.data.CrashLog.promptTextIfNeeded(this)
+            ?.let { IslandToasts.show(it) }
         // v0.40.0：低电量守护不再用前台服务（常驻通知打扰），BatteryGuard 跟随进程生命周期；
         // LauncherApp.onCreate 已注册，这里幂等再保一次
         com.bobot.ailauncher.data.BatteryGuard.ensureStarted(this)
@@ -209,11 +217,21 @@ class MainActivity : FragmentActivity() {
     // v0.26.5：singleTask 模式下按 Home 键回来走这里，确保不重建页面
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // v0.68.100（卫生批）：冒烟崩溃 extra 也认 onNewIntent——桌面进程
+        // 常驻/被系统自动拉起时 am start 走的是这里，不是 onCreate
+        throwIfSmokeCrash(intent)
         // v0.32.3：长按快捷方式"检查更新"
         if (intent.action == "com.bobot.ailauncher.CHECK_UPDATE") {
             checkUpdateNow()
         }
         // 其他情况不做任何事：MainScreen 的 Compose 状态保持，避免"空页面"
+    }
+
+    /** v0.68.100（卫生批）：debug 冒烟专用崩溃触发（release 包恒不触发） */
+    private fun throwIfSmokeCrash(intent: Intent?) {
+        if (BuildConfig.DEBUG && intent?.getBooleanExtra("smoke_crash", false) == true) {
+            throw RuntimeException("smoke-test crash (debug only)")
+        }
     }
 
     /** v0.32.3：快捷方式触发立即检查更新 */

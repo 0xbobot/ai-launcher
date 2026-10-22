@@ -97,4 +97,63 @@ class LlmKeyStoreTest {
         LlmKeyStore.writeApiKey(plain, null, "sk-fresh")
         assertTrue(plain.map[LlmKeyStore.KEY_API] == "sk-fresh")
     }
+
+    // ---- probeMode（v0.68.100：存放形态探测，供设置页明示/降级记账）----
+
+    @Test
+    fun `probe reports encrypted when key lives in secure store`() {
+        val plain = FakeStore()
+        val secure = FakeStore(mapOf(LlmKeyStore.KEY_API to "sk-x"))
+        assertEquals(
+            LlmKeyStore.StorageMode.ENCRYPTED,
+            LlmKeyStore.probeMode(plain, secure)
+        )
+    }
+
+    @Test
+    fun `probe reports plaintext fallback when secure store unavailable`() {
+        val plain = FakeStore(mapOf(LlmKeyStore.KEY_API to "sk-x"))
+        assertEquals(
+            LlmKeyStore.StorageMode.PLAIN_FALLBACK,
+            LlmKeyStore.probeMode(plain, null)
+        )
+    }
+
+    @Test
+    fun `probe reports plaintext fallback when key stranded in plain despite secure store`() {
+        // 加密可用但 Key 还躺在明文里（写入回退过）——同样是降级，必须明示
+        val plain = FakeStore(mapOf(LlmKeyStore.KEY_API to "sk-x"))
+        val secure = FakeStore()
+        assertEquals(
+            LlmKeyStore.StorageMode.PLAIN_FALLBACK,
+            LlmKeyStore.probeMode(plain, secure)
+        )
+    }
+
+    @Test
+    fun `probe reports plaintext fallback when secure store read throws`() {
+        val plain = FakeStore(mapOf(LlmKeyStore.KEY_API to "sk-x"))
+        val brokenSecure = FakeStore(failRead = true)
+        assertEquals(
+            LlmKeyStore.StorageMode.PLAIN_FALLBACK,
+            LlmKeyStore.probeMode(plain, brokenSecure)
+        )
+    }
+
+    @Test
+    fun `probe reports empty when no key anywhere`() {
+        assertEquals(
+            LlmKeyStore.StorageMode.EMPTY,
+            LlmKeyStore.probeMode(FakeStore(), FakeStore())
+        )
+        assertEquals(
+            LlmKeyStore.StorageMode.EMPTY,
+            LlmKeyStore.probeMode(FakeStore(), null)
+        )
+        // 加密层坏了且明文也没有 Key：无 Key 可丢，报 EMPTY 而非降级
+        assertEquals(
+            LlmKeyStore.StorageMode.EMPTY,
+            LlmKeyStore.probeMode(FakeStore(), FakeStore(failRead = true))
+        )
+    }
 }
