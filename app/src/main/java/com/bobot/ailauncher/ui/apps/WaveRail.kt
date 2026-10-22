@@ -48,6 +48,7 @@ import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -358,6 +359,8 @@ internal fun WaveRail(
                             color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                             fontWeight = FontWeight.Normal,
                             maxLines = 1,
+                            // v0.68.96（F-07）：单字母标签形式对齐——超宽字形省略而非硬裁
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.graphicsLayer {
                                 // 高斯波浪：越靠近手指越大；波浪整体再往拇指反方向避让
                                 translationX = dirSign * bulgePx * g + waveShiftX * g
