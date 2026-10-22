@@ -167,6 +167,17 @@ def main():
                     h = (b[3] - b[1]) * 160.0 / density
                     if w > 300 and h > 300:  # 排除全屏根容器
                         continue
+                    if landscape:
+                        # 横屏 Dock 是右下面板：其格位中心在约 79% 屏高处，
+                        # 「中心入带」是竖屏口径——横屏改验底边入带 + 完整在
+                        # 屏内（锚底且不溢出，属性等价）。
+                        in_band = b[3] > rb[3] * 0.85
+                        contained = (b[0] >= rb[0] and b[1] >= rb[1] and
+                                     b[2] <= rb[2] and b[3] <= rb[3])
+                        if in_band and contained:
+                            dock = b
+                            break
+                        continue
                     cy = (b[1] + b[3]) / 2.0
                     if cy > rb[3] * 0.85 and b[2] <= rb[2] and b[3] <= rb[3]:
                         dock = b

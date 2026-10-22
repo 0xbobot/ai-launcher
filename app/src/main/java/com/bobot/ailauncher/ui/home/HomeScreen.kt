@@ -143,12 +143,14 @@ fun HomeScreen(
             onExitIntentInput()
         }
     }
-    // 兜底：进入输入态 1.5 秒后仍未聚焦且无事发生（极端时序/聚焦请求被吞）
+    // 兜底：进入输入态 4 秒后仍未聚焦且无事发生（极端时序/聚焦请求被吞）
     // → 自动收起，避免胶囊永久滞留；Back 也可退（见下方 BackHandler）。
+    // 窗口取 4 秒：1.5 秒时慢帧下自动聚焦可能尚未落地，兜底会抢先退出把
+    // 刚进的输入态吞掉（矩阵 dark 腿实测一轮进不去输入态、§9 级联失败）。
     val intentStateLatest by rememberUpdatedState(intentState)
     androidx.compose.runtime.LaunchedEffect(intentInputMode) {
         if (intentInputMode) {
-            delay(1500)
+            delay(4000)
             if (!intentHasFocused && !intentStateHoldsInput(intentStateLatest)) {
                 onExitIntentInput()
             }
