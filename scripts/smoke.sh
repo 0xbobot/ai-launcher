@@ -27,6 +27,12 @@
 # v0.68.95（布局与交互 Loop 二批-A）追加：第 20 段为数据新鲜度（装/卸桩应用
 # 在应用中心开着时实时刷新 A-Z 列表，catalog-install/uninstall-refresh），
 # crash 检查再顺延为第 21 段。
+# v0.68.97（布局普查批）追加：第 21 段为布局几何断言（scripts/layout_check.py
+# 量 tpl_*.xml / fan_dump.xml 与本段新拉的 layout_home/ac/settings dump：
+# cover_hero / 胶囊 / 发送键 / NextUp / 七仔 / Dock 面板两两不相交 + 关键元素
+# 完整在屏内），crash 检查再顺延为第 22 段。形态 env 追加 SMOKE_WM_SIZE /
+# SMOKE_USER_ROTATION：第 0 段几何读取前覆写显示尺寸与旋转锁定（矩阵的
+# 横屏手机短高、平板竖屏腿用），不带 env 时行为不变。
 # 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
 # 生成）/ 纯纸面三态各截首页（Dock+TODAY 卡），照片与纸面下再长按七仔截气泡
 # （glass-default / glass-photo / glass-bubble-photo / glass-paper /
@@ -68,6 +74,19 @@ shot() {
 adb wait-for-device
 adb shell input keyevent KEYCODE_WAKEUP || true
 sleep 2
+
+# --- 0a. 形态覆写（v0.68.97 布局普查批）：在几何读取前把基线设备改造成
+# 横屏手机短高 / 平板竖屏等形态；不带 env 时整段跳过、行为不变 ---
+if [ -n "$SMOKE_WM_SIZE" ]; then
+  adb shell wm size "$SMOKE_WM_SIZE" || true
+  log "wm size override -> $SMOKE_WM_SIZE"
+fi
+if [ -n "$SMOKE_USER_ROTATION" ]; then
+  adb shell settings put system accelerometer_rotation 0 || true
+  adb shell settings put system user_rotation "$SMOKE_USER_ROTATION" || true
+  log "user rotation lock -> $SMOKE_USER_ROTATION"
+fi
+if [ -n "$SMOKE_WM_SIZE" ] || [ -n "$SMOKE_USER_ROTATION" ]; then sleep 3; fi
 
 # --- 0. 屏幕几何（R4）：基准 1080x2400 的写死坐标经 SX/SY 换算到实际分辨率；密度供 a11y 的 px->dp ---
 SIZE_LINE=$(adb shell wm size 2>/dev/null | grep -o '[0-9]\+x[0-9]\+' | head -1)
@@ -1832,7 +1851,41 @@ fi
 adb shell input keyevent KEYCODE_HOME || true
 sleep 1
 
-# --- 21. crash 检查（只看本包 FATAL，避免系统噪音）---
+# --- 21. 布局几何断言（v0.68.97 布局普查批）：关键元素两两不相交 + 完整在屏内 ---
+# 量各段已产出的 tpl_*.xml / fan_dump.xml 与本段新拉的 layout_home / layout_ac /
+# layout_settings（scripts/layout_check.py，testTag 定位：cover_hero /
+# intent_input / intent_submit / today_nextup / pet_qizai / dock_panel，
+# dock_panel 缺失退化为 dock_item 并集）。聚焦态不查 Dock（IME 升起时
+# dump 中的 Dock bounds 是被键盘覆盖的不可见几何）。
+log "layout: segment start"
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+shot "layout-home"
+adb shell uiautomator dump /sdcard/layout_home.xml > /dev/null 2>&1 || true
+adb pull /sdcard/layout_home.xml "$OUT/layout_home.xml" > /dev/null 2>&1 || true
+adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+sleep 3
+shot "layout-appcenter"
+adb shell uiautomator dump /sdcard/layout_ac.xml > /dev/null 2>&1 || true
+adb pull /sdcard/layout_ac.xml "$OUT/layout_ac.xml" > /dev/null 2>&1 || true
+if tap_rid "$OUT/layout_ac.xml" "appcenter_settings"; then
+  sleep 3
+  shot "layout-settings"
+  adb shell uiautomator dump /sdcard/layout_set.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/layout_set.xml "$OUT/layout_settings.xml" > /dev/null 2>&1 || true
+  adb shell input keyevent KEYCODE_BACK || true
+  sleep 1
+else
+  log "layout: settings gear not tappable on this leg, settings state skipped"
+fi
+adb shell input keyevent KEYCODE_HOME || true
+sleep 1
+LAYOUT_OUT=$(python3 scripts/layout_check.py "$OUT" "$SCR_W" "$SCR_H" 2>&1)
+echo "$LAYOUT_OUT" | while IFS= read -r line; do log "$line"; done
+LAYOUT_FAILS=$(echo "$LAYOUT_OUT" | grep -c "LAYOUT FAIL" || true)
+if [ "$LAYOUT_FAILS" -gt 0 ]; then ng "layout-geometry($LAYOUT_FAILS)"; else ok "layout-geometry"; fi
+
+# --- 22. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
   ng "no-fatal-crash"
   adb logcat -d 2>/dev/null | grep -i -A15 "FATAL EXCEPTION" | head -30 || true

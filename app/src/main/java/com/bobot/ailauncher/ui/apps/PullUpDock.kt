@@ -239,6 +239,8 @@ fun PullUpDock(
                 )
                 Column(
                     modifier = Modifier
+                        // v0.68.97（布局普查批）：冒烟几何断言锚点（Dock 面板整体）
+                        .testTag("dock_panel")
                         // v0.68.82（第 3 项）：横屏包内容（右下角），不再 148dp 右侧窄条
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
