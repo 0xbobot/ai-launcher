@@ -4,6 +4,11 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -534,16 +539,13 @@ private fun DockPetCell(size: Dp, onTap: () -> Unit) {
     }
     val breathing = resumed && !reduceMotion && !lowPower
     val breatheScale: Float = if (breathing) {
-        androidx.compose.animation.core.rememberInfiniteTransition(label = "dockPetBreathe")
+        rememberInfiniteTransition(label = "dockPetBreathe")
             .animateFloat(
                 initialValue = 1f,
                 targetValue = 1.045f,
-                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                    animation = tween(
-                        2300,
-                        easing = androidx.compose.animation.core.FastOutSlowInEasing
-                    ),
-                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                animationSpec = infiniteRepeatable(
+                    animation = tween(2300, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
                 ),
                 label = "dockPetBreatheVal"
             ).value
