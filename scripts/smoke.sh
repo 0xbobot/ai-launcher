@@ -1736,7 +1736,24 @@ fresh_dump() {
   adb shell uiautomator dump /sdcard/fresh_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/fresh_dump.xml "$OUT/fresh_dump.xml" > /dev/null 2>&1 || true
 }
-# 当前屏 dump 命中标签返回 0；未命中上滑一屏再找（列表中部起手，避开底部手势区）。
+# 当前屏 dump 命中标签返回 0；未命中滑一屏再找。滑动轴按方向选：竖屏列表
+# 纵向滚；横屏应用中心是竖排流多列、整表横向滚（AppCenterLandscape），
+# 必须横滑——首轮矩阵 tablet 腿实证：竖滑 12 次翻不到 T 列（断言手法问题，
+# 非 App 刷新问题，横屏数据同样来自 AppCenterContent 的 azGroups）。
+fresh_swipe_fwd() {
+  if [ "$LANDSCAPE" = "1" ]; then
+    adb shell input swipe "$(SX 800)" "$(SY 1200)" "$(SX 280)" "$(SY 1200)" 300 || true
+  else
+    adb shell input swipe "$(SX 540)" "$(SY 1600)" "$(SX 540)" "$(SY 650)" 300 || true
+  fi
+}
+fresh_swipe_back() {
+  if [ "$LANDSCAPE" = "1" ]; then
+    adb shell input swipe "$(SX 280)" "$(SY 1200)" "$(SX 800)" "$(SY 1200)" 300 || true
+  else
+    adb shell input swipe "$(SX 540)" "$(SY 650)" "$(SX 540)" "$(SY 1600)" 300 || true
+  fi
+}
 fresh_find_label() {
   local label="$1" tries="$2" i
   for i in $(seq 1 "$tries"); do
@@ -1744,7 +1761,7 @@ fresh_find_label() {
     if [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"; then
       return 0
     fi
-    adb shell input swipe "$(SX 540)" "$(SY 1600)" "$(SX 540)" "$(SY 650)" 300 || true
+    fresh_swipe_fwd
     sleep 1
   done
   fresh_dump
@@ -1753,7 +1770,7 @@ fresh_find_label() {
 fresh_scroll_top() {
   local i
   for i in $(seq 1 10); do
-    adb shell input swipe "$(SX 540)" "$(SY 650)" "$(SX 540)" "$(SY 1600)" 300 || true
+    fresh_swipe_back
     sleep 0.5
   done
 }
