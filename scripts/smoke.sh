@@ -1413,6 +1413,13 @@ if [ -n "$SUBX" ]; then
   shot "intent-submit-nokeyboard"
   adb shell uiautomator dump /sdcard/suggest_after.xml > /dev/null 2>&1 || true
   adb pull /sdcard/suggest_after.xml "$OUT/suggest_after.xml" > /dev/null 2>&1 || true
+  # v0.68.99（R-1 五轮实测）：uiautomator 偶发 0 字节空 dump（本文件在
+  # 五轮中招；同批 ac_dump3 / ni_btn 亦然）——空文件时重拉一次再判。
+  if [ ! -s "$OUT/suggest_after.xml" ]; then
+    sleep 1
+    adb shell uiautomator dump /sdcard/suggest_after.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/suggest_after.xml "$OUT/suggest_after.xml" > /dev/null 2>&1 || true
+  fi
   if grep -q "先在设置里配置大模型" "$OUT/suggest_after.xml" 2>/dev/null && ! grep -q 'focused="true"' "$OUT/suggest_after.xml"; then
     ok "submit-releases-focus"
   else
