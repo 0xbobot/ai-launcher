@@ -177,6 +177,9 @@ fun PullUpDock(
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         // v0.68.73（Bob）：横屏时 Dock 收拢，不横贯全屏
         val isLandscapeDock = maxWidth > maxHeight
+        // v0.68.101：面板可用高（坐姿七仔紧配置判定用；内层 AnimatedVisibility
+        // 作用域里隐式 receiver 不可达，故在此提升为局部值）
+        val dockAvailableHeight = maxHeight
         // v0.68.99：输入态下卡片让位（意图胶囊在底部原地接管，Dock 内容不与
         // 之叠画）——让位只针对竖屏底栏形态：横屏 Dock 是右下面板，与左区
         // 胶囊不争空间，保持在场（与 .97 基线一致；矩阵 landphone 腿实测
@@ -341,7 +344,7 @@ fun PullUpDock(
                     // 横屏面板虽留在场、坐姿也让位，保证任何时刻恰一只。
                     if (!intentInputMode) {
                         val seatCompact = LocalDensity.current.fontScale >= 1.3f ||
-                            maxHeight < 400.dp
+                            dockAvailableHeight < 400.dp
                         DockPetSeat(
                             compact = seatCompact,
                             onTap = onPetCellTap,

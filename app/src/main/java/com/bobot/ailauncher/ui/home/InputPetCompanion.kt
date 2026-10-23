@@ -13,8 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.bobot.ailauncher.core.pet.PetState
 import com.bobot.ailauncher.data.PetRepository
-import com.bobot.ailauncher.data.PetState
 import com.bobot.ailauncher.ui.pet.PetView
 import com.bobot.ailauncher.ui.pet.ThinkDots
 
