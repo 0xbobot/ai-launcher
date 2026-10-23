@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# 310 冻结探针（probe-freeze-* 分支专用）：§9「force-stop 重启后进输入态楔死」三路对照。
-# 路径 A：同进程连续两次进/退输入态；路径 B：uimode 切换（Activity 重建、进程不变）后进态；
-# 路径 C：force-stop 冷启后首入（= §9 复现）；C2：再冷启一次（区分「每个冷启都楔」vs「特定会话序列」）。
-# 每路检查点：进程存活（pidof）/ 层级可读且胶囊在场（uiautomator dump 带超时）/
-# screencap 不阻塞（带超时计时；楔死签名为阻塞 ~28s）。楔死时落 logcat + 进程表取证。
-# 与 scripts/smoke.sh 同口径：容错计数、PASS/FAIL 汇总、退出码 = FAIL 数。
+# 310 冻结探针 v2（probe-freeze-* 分支专用）：§9 进输入态楔死定因。
+# v1 教训（run 40031168600）：A1 点后 adb 命令先挂 ~30s、随后整个模拟器消失
+# （device not found / TCP 5554 refused），「应用进程死亡」与「模拟器死亡」
+# 在 v1 的检查点口径下不可分。v2 改法：
+#  ① 全程 adb logcat 后台直落宿主文件——设备死了，最后日志也留得住；
+#  ② 每个检查点先记 adb get-state，应用死亡与设备死亡分开判；
+#  ③ 先跑控制相：开机静置 + 应用静置 60s（周期探活），再进路径 A/C；
+#  ④ 进态前先静置（开机风暴过后再点，复刻全量冒烟 §6 的自然时序）；
+#  ⑤ 楔死后试 adb reconnect，区分 adbd 死亡与 qemu 死亡。
+# 路径：A 同进程两次进/退；C force-stop 冷启首入（§9 复现）；C2 再冷启一次。
 PKG="com.bobot.ailauncher"
 APK="apk/app-debug.apk"
 OUT="probe-out"
@@ -19,7 +23,16 @@ ng()   { FAIL=$((FAIL+1)); log "FAIL: $1"; }
 adb wait-for-device
 adb shell input keyevent KEYCODE_WAKEUP || true
 sleep 2
-log "night mode state: $(adb shell cmd uimode night 2>/dev/null | tr -d '\r')"
+
+# ① 连续 logcat（宿主文件，设备死亡不丢）
+adb logcat -c > /dev/null 2>&1 || true
+adb logcat -v time > "$OUT/logcat-live.txt" 2>/dev/null &
+LOGCAT_PID=$!
+
+state() { adb get-state 2>/dev/null | tr -d '\r'; }
+curpid() { adb shell pidof "$PKG" 2>/dev/null | tr -d '\r'; }
+alive() { [ "$(state)" = "device" ] && [ -n "$(curpid)" ]; }
+devok() { [ "$(state)" = "device" ]; }
 
 # --- 安装 + 预写 prefs（与 smoke.sh 第 1/2 段同法同键） ---
 if [ -f "$APK" ]; then
@@ -41,7 +54,7 @@ else
 fi
 adb shell cmd package set-home-activity "$PKG/.MainActivity" > /dev/null 2>&1 || true
 
-# --- 基础 helper（center_rid / tap_rid 与 smoke.sh 同实现） ---
+# --- helper（center_rid / tap_rid 与 smoke.sh 同实现） ---
 center_rid() {
   local F="$1" RID="$2" NODE NUMS X1 Y1 X2 Y2
   [ -f "$F" ] || return 1
@@ -63,17 +76,11 @@ tap_rid() {
     $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) 150 || true
   return 0
 }
-
-curpid() { adb shell pidof "$PKG" 2>/dev/null | tr -d '\r'; }
-alive() { [ -n "$(curpid)" ]; }
-
-# 带超时的层级 dump：楔死时 uiautomator 会挂起，40s 掐断判负
 tdump() {
   timeout 40 adb shell uiautomator dump /sdcard/probe_dump.xml > /dev/null 2>&1
   adb pull /sdcard/probe_dump.xml "$1" > /dev/null 2>&1
   [ -s "$1" ]
 }
-# 带超时的截图：楔死签名 = screencap 阻塞约 28s；>20s 即记阻塞
 tshot() {
   local t0 t1 ms
   t0=$(date +%s%N)
@@ -86,25 +93,33 @@ tshot() {
   log "shot $1 TIMEOUT"
   return 1
 }
-forensics() {
-  log "forensics: $1"
-  timeout 30 adb logcat -d -t 800 > "$OUT/$1-logcat.txt" 2>/dev/null || true
-  timeout 30 adb shell dumpsys activity processes > "$OUT/$1-procs.txt" 2>/dev/null || true
-  timeout 30 adb shell ls /data/tombstones > "$OUT/$1-tombstones.txt" 2>/dev/null || true
-}
-
 start_app() {
   adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
   sleep 5
   adb shell input keyevent KEYCODE_HOME || true
   sleep 2
-  log "started, pid=$(curpid)"
+  log "started, state=$(state) pid=$(curpid)"
+}
+# 楔死取证：先看设备还在不在，再试 reconnect
+forensics() {
+  log "forensics $1: state=$(state)"
+  if ! devok; then
+    log "forensics $1: device LOST, trying reconnect"
+    timeout 20 adb reconnect > /dev/null 2>&1 || true
+    sleep 5
+    log "forensics $1: after reconnect state=$(state)"
+  fi
+  if devok; then
+    timeout 30 adb shell dumpsys activity processes > "$OUT/$1-procs.txt" 2>/dev/null || true
+    timeout 30 adb shell ls /data/tombstones > "$OUT/$1-tombstones.txt" 2>/dev/null || true
+    timeout 30 adb shell dumpsys activity lastanr > "$OUT/$1-lastanr.txt" 2>/dev/null || true
+  fi
 }
 
-# 进输入态并做三项检查点；$1=路径标签。返回 0 = 全过。
 enter_and_check() {
   local L="$1"
-  log "=== enter_and_check $L (pid before=$(curpid)) ==="
+  log "=== enter_and_check $L (state=$(state) pid=$(curpid)) ==="
+  if ! devok; then ng "$L-DEVICE-LOST-before"; forensics "$L"; return 1; fi
   if ! tdump "$OUT/$L-home.xml"; then
     ng "$L-home-dump-blocked"
     forensics "$L"
@@ -115,8 +130,13 @@ enter_and_check() {
     return 1
   fi
   sleep 3
+  if ! devok; then
+    ng "$L-DEVICE-LOST-after-tap"
+    forensics "$L"
+    return 1
+  fi
   if ! alive; then
-    ng "$L-PROCESS-DIED"
+    ng "$L-APP-DIED(device-alive)"
     forensics "$L"
     return 1
   fi
@@ -133,10 +153,9 @@ enter_and_check() {
     2) ng "$L-screencap-slow(>20s)" ;;
     *) ng "$L-screencap-blocked" ;;
   esac
-  log "pid after $L = $(curpid)"
+  log "after $L: state=$(state) pid=$(curpid)"
   return 0
 }
-
 exit_input() {
   adb shell input keyevent KEYCODE_BACK || true
   sleep 1
@@ -144,47 +163,52 @@ exit_input() {
   sleep 1
 }
 
-# ================= 路径 A：同进程两次进/退 =================
+# ================= 控制相：静置探活 =================
+log "control phase: settle 30s, then start app and idle-probe 6x10s"
+sleep 30
 start_app
-PID_P1="$(curpid)"
+CTRL_OK=1
+for i in 1 2 3 4 5 6; do
+  sleep 10
+  if alive; then
+    log "control idle $i: alive pid=$(curpid)"
+  else
+    log "control idle $i: NOT alive (state=$(state) pid=$(curpid))"
+    CTRL_OK=0
+    forensics "ctrl$i"
+    break
+  fi
+done
+[ "$CTRL_OK" = "1" ] && ok "control-idle-60s" || ng "control-idle-60s"
+tshot "control-home" && ok "control-screencap" || ng "control-screencap"
+
+# ================= 路径 A：同进程两次进/退 =================
 enter_and_check "A1" && exit_input
 sleep 1
-if alive; then enter_and_check "A2" && exit_input; else ng "A2-process-gone-before"; fi
-log "path A done, pid=$(curpid) (P1=$PID_P1)"
+if alive; then enter_and_check "A2" && exit_input; else ng "A2-app-gone-before"; fi
 
-# ================= 路径 B：Activity 重建（uimode 两次切换）后进态 =================
-adb shell cmd uimode night yes || true
-sleep 3
-log "after night-yes pid=$(curpid) (recreate expected, process same)"
-adb shell cmd uimode night auto || true
-sleep 3
-log "after night-auto pid=$(curpid)"
-if alive; then
-  enter_and_check "B1" && exit_input
+# ================= 路径 C：force-stop 冷启首入（§9 复现，进态前静置 15s） =================
+if devok; then
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  start_app
+  sleep 15
+  enter_and_check "C1" && exit_input
 else
-  ng "B1-process-gone-before"
+  ng "C1-skipped-device-lost"
 fi
-
-# ================= 加料：开一次应用中心再回（同 §7 的进程内履历） =================
-if alive; then
-  adb shell input swipe 540 2000 540 800 300 || true
-  sleep 3
-  adb shell input keyevent KEYCODE_BACK || true
-  sleep 2
-  log "appcenter seasoning done, pid=$(curpid)"
-fi
-
-# ================= 路径 C：force-stop 冷启首入（§9 复现） =================
-adb shell am force-stop "$PKG" || true
-sleep 1
-start_app
-enter_and_check "C1" && exit_input
 
 # ================= 路径 C2：再冷启一次 =================
-adb shell am force-stop "$PKG" || true
-sleep 1
-start_app
-enter_and_check "C2" && exit_input
+if devok; then
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  start_app
+  sleep 15
+  enter_and_check "C2" && exit_input
+else
+  ng "C2-skipped-device-lost"
+fi
 
-log "RESULT probe-freeze PASS=$PASS FAIL=$FAIL"
+kill "$LOGCAT_PID" > /dev/null 2>&1 || true
+log "RESULT probe-freeze-v2 PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
