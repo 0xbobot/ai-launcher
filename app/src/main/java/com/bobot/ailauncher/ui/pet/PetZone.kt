@@ -308,7 +308,7 @@ fun PetZone(
                 summary = coverSummary,
                 weatherDesc = weatherDesc ?: "",
                 palette = coverPalette,
-                inputCompact = inputActive
+                inputCompact = false // PROBE-H1: hero 永不紧凑（二分点火源）
             )
         }
         // v0.68.99（R-1 修订）：输入态胶囊槽（.97 位置：hero 与会行之间；

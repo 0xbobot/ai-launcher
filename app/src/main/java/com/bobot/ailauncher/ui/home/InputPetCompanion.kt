@@ -39,7 +39,7 @@ fun InputPetCompanion(modifier: Modifier = Modifier) {
     // 七仔」计数口径不变），七仔在胶囊落定后随即就位，呈现语义不变。
     var settled by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(300)
+        kotlinx.coroutines.delay(600000) // PROBE-H1: 本体永不挂载（二分点火源）
         settled = true
     }
     if (!settled) {
