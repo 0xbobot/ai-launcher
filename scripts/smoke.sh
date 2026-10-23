@@ -2453,6 +2453,20 @@ else
       else
         ng "keystore-migration-value-match"
       fi
+      # 定因探针（并行线 B §25 两条 FAIL 复跑取证）：只记诊断事件名、
+      # shared_prefs 文件名/大小、新格式文件的布尔特征——绝不输出 prefs
+      # 内容、Key 明文或密文片段。探针只写 log，不参与任何 ok/ng 判定。
+      ks_evidence() {
+        local ETAG="$1" EDIAG ELS EXML EV1 EPLAIN EBYTES
+        EDIAG=$(adb shell "run-as $PKG cat files/crashes/diagnostics.log" 2> /dev/null | tr -d '\r' | grep "keystore" | tail -4 | tr '\n' '|')
+        ELS=$(adb shell "run-as $PKG ls -l shared_prefs" 2> /dev/null | tr -d '\r' | awk '{print $5":"$NF}' | tr '\n' ' ')
+        EXML=$(adb shell "run-as $PKG cat shared_prefs/llm_keystore.xml" 2> /dev/null | tr -d '\r')
+        EV1=0; echo "$EXML" | grep -q "v1:" && EV1=1
+        EPLAIN=0; echo "$EXML" | grep -q "$KS_KEY" && EPLAIN=1
+        EBYTES=$(echo -n "$EXML" | wc -c)
+        log "ks-evidence[$ETAG] diag=[$EDIAG] prefs=[$ELS] newfmt_bytes=$EBYTES has_v1=$EV1 has_plain=$EPLAIN"
+      }
+      ks_evidence t0-after-value-match
       shot "keystore-migrated"
       # 新格式落盘：llm_keystore.xml 含 v1: 密文且通篇不含 Key 明文
       KS_NEWXML=$(adb shell "run-as $PKG cat shared_prefs/llm_keystore.xml" 2> /dev/null | tr -d '\r')
@@ -2461,11 +2475,14 @@ else
       else
         ng "keystore-migration-new-format"
       fi
+      sleep 10
+      ks_evidence t10-after-new-format
       # 删掉旧格式文件后重启：设置页状态行仍报「已加密」——读路径已不依赖旧格式
       adb shell am force-stop "$PKG" || true
       adb shell "run-as $PKG rm -f shared_prefs/llm_secure.xml" || true
       adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
       sleep 5
+      ks_evidence tR-after-restart
       if ks_open_settings_expand && grep -q "已加密存储在本机" "$OUT/ks_set.xml" 2> /dev/null; then
         ok "keystore-migration-legacy-removed"
       else
