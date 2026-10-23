@@ -404,25 +404,21 @@ fun HomeScreen(
                 // 点外部收焦观察者用。早先的底部浮层在横屏跨进 hero 区
                 // （矩阵 landphone 实测 overlap），流式槽位靠分区天然不重叠。
                 intentSlot = {
+                    // v0.68.102（310 冻结修复·入场削峰）：槽位进出只走 fade，
+                    // 不再 expandVertically/shrinkVertically——高度动画会让
+                    // 简报列在进态首帧逐帧重测（与 IME resize、hero 紧凑、
+                    // 伴随七仔首次挂载叠加成布局风暴，CI 实证进态后进程
+                    // 死亡/楔死、screencap 与层级读取全失效）。fade 不改变
+                    // 尺寸，槽位一帧到位，语义与呈现内容不变。
                     androidx.compose.animation.AnimatedVisibility(
                         visible = intentInputMode,
-                        enter = androidx.compose.animation.expandVertically(
-                            animationSpec = androidx.compose.animation.core.tween(
-                                com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
-                                easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                            )
-                        ) + androidx.compose.animation.fadeIn(
+                        enter = androidx.compose.animation.fadeIn(
                             animationSpec = androidx.compose.animation.core.tween(
                                 com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
                                 easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
                             )
                         ),
-                        exit = androidx.compose.animation.shrinkVertically(
-                            animationSpec = androidx.compose.animation.core.tween(
-                                com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
-                                easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                            )
-                        ) + androidx.compose.animation.fadeOut(
+                        exit = androidx.compose.animation.fadeOut(
                             animationSpec = androidx.compose.animation.core.tween(
                                 com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
                                 easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing

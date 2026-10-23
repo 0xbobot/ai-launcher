@@ -31,6 +31,24 @@ import com.bobot.ailauncher.ui.pet.ThinkDots
  */
 @Composable
 fun InputPetCompanion(modifier: Modifier = Modifier) {
+    // v0.68.102（310 冻结修复·入场削峰）：本体延迟 300ms 再挂载——进态
+    // 首帧已有 IME resize + 槽位展开 + hero 紧凑在抢主线程，PetView 的
+    // 大图首次解码与多路无限动画同帧启动是压垮点之一（CI 实证进态后
+    // 进程死亡/楔死）。延迟窗内以同尺寸同 testTag 占位（布局与「恰一只
+    // 七仔」计数口径不变），七仔在胶囊落定后随即就位，呈现语义不变。
+    var settled by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(300)
+        settled = true
+    }
+    if (!settled) {
+        Box(
+            modifier = modifier
+                .size(76.dp)
+                .testTag("pet_qizai")
+        )
+        return
+    }
     val mood by PetRepository.mood.collectAsState()
     val intentPose by PetRepository.intentPose.collectAsState()
     val intentThinking by PetRepository.intentThinking.collectAsState()
