@@ -1255,7 +1255,8 @@ fun AppCenterContent(
             // pass 旁观位移、累计上滑过阈值照样触发回桌面，但不消费任何事件：
             // 带内行点击、列表滚动、Rail 交互全部先于本条成立。
             val bottomStripPx = with(density) { 56.dp.toPx() }
-            Box(
+            // D-6 取证变体 X（临时）：整条手势条摘除，验证带内行是否恢复可点
+            if (false) Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
