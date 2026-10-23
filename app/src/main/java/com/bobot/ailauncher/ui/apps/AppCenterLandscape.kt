@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -293,6 +294,11 @@ fun AppCenterLandscape(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(start = 24.dp, end = 24.dp, top = 10.dp)
+                            // 触控下限 48dp：与竖屏同结构在横屏宽容器下布局
+                            // 取整差 3px（实测行高 123px≈46.9dp，竖屏 126px=
+                            // 48.0dp），§16 a11y 量到 46.9<48——下限保不变量，
+                            // 内容更高时自然长高，外观与竖屏一致
+                            .heightIn(min = 48.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
                             .clickable { onAskQizai(searchFieldValue.text.trim()) }

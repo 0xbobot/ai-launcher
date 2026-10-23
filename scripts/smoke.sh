@@ -2071,6 +2071,12 @@ fi
 # fresh_find_label 逐轮留进度日志——再失败时可从日志直接区分「始终没出现」
 # （产品侧）与「滑到时窗已尽」（窗口侧）。卸载方向同批已过（scroll_top +
 # 12 轮判空），维持原窗口不动。
+# 续（线 C 首轮矩阵 39880105848）：上述加固后 landphone 仍红，24 轮日志全程
+# 「未出现」，但工件截图实证真因是断言过程被带偏——慢腿上横滑误展开应用
+# 长按面板、后续手势命中「应用信息」跳进系统设置页，剩余轮次全在设置页里
+# 空找（详见 fresh_find_label 绕行恢复注）；而 .100 矩阵复跑（attempt 2）
+# 同腿同断言全过，产品刷新链本身无缺陷证据。本轮对策：横屏滑动 300→150ms
+# 降误触概率 + 绕行检出自愈；窗口/起点加固保留（无害且定起点）。
 log "freshness: segment start"
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
@@ -2086,14 +2092,17 @@ fresh_dump() {
 # 非 App 刷新问题，横屏数据同样来自 AppCenterContent 的 azGroups）。
 fresh_swipe_fwd() {
   if [ "$LANDSCAPE" = "1" ]; then
-    adb shell input swipe "$(SX 800)" "$(SY 1200)" "$(SX 280)" "$(SY 1200)" 300 || true
+    # 横屏 150ms（竖屏 300ms 不动）：慢腿上输入派发延迟会把 300ms 横滑的
+    # 按下相位拖过长按阈值、误展开应用长按面板（本轮 landphone 实测教训，
+    # 详见 fresh_find_label 的绕行恢复注）
+    adb shell input swipe "$(SX 800)" "$(SY 1200)" "$(SX 280)" "$(SY 1200)" 150 || true
   else
     adb shell input swipe "$(SX 540)" "$(SY 1600)" "$(SX 540)" "$(SY 650)" 300 || true
   fi
 }
 fresh_swipe_back() {
   if [ "$LANDSCAPE" = "1" ]; then
-    adb shell input swipe "$(SX 280)" "$(SY 1200)" "$(SX 800)" "$(SY 1200)" 300 || true
+    adb shell input swipe "$(SX 280)" "$(SY 1200)" "$(SX 800)" "$(SY 1200)" 150 || true
   else
     adb shell input swipe "$(SX 540)" "$(SY 650)" "$(SX 540)" "$(SY 1600)" 300 || true
   fi
@@ -2102,6 +2111,18 @@ fresh_find_label() {
   local label="$1" tries="$2" i
   for i in $(seq 1 "$tries"); do
     fresh_dump
+    # 绕行恢复（F2 线 C 本轮 landphone 实测）：慢腿上横滑误触应用长按面板后，
+    # 后续滑动命中其「应用信息」图标、跳进系统设置应用信息页——此后所有
+    # dump 都是设置页，标签永远找不到（卸载判空也因此假过；工件截图
+    # appcenter-fresh-installed.png 实证停在 App info / Camera 页）。
+    # 检出该页（有 App info 标题且无 AC 的 INDEX 标志）即 BACK 退回重拉，
+    # 本轮继续找——是断言过程自愈，不改判据本身。
+    if [ -f "$OUT/fresh_dump.xml" ] && grep -q 'text="App info"' "$OUT/fresh_dump.xml" && ! grep -q 'INDEX' "$OUT/fresh_dump.xml"; then
+      log "fresh-find: app-info detour detected, backing out and re-dumping"
+      adb shell input keyevent KEYCODE_BACK || true
+      sleep 1
+      fresh_dump
+    fi
     if [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"; then
       log "fresh-find: '$label' visible on try $i/$tries"
       return 0
