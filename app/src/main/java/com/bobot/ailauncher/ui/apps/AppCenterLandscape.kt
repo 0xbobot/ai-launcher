@@ -22,14 +22,10 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,20 +40,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.ui.components.AppIconImage
+import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import kotlinx.coroutines.launch
 
@@ -82,15 +81,23 @@ fun AppCenterLandscape(
     onPullDownToD2: () -> Unit,
     onHeaderSwipeRight: () -> Unit,
     onBottomSwipeUp: () -> Unit,
-    // v0.68.82（横屏专项第 2 项）：真搜索框（状态层复用竖屏）
-    query: String,
-    onQueryChange: (String) -> Unit,
+    // F2 销账（线 C）：搜索契约与竖屏统一——同一 IntentCapsuleField 组件
+    // （showClearButton 变体）、同一 TextFieldValue 状态层（composing 守卫 /
+    // 120ms 防抖 / AppSearchIndex 过滤语义对横屏同样生效），本文件只保留
+    // 横屏布局（列流 + 字母轨），不再自绘搜索框、不再走裸 String 契约
+    searchFieldValue: TextFieldValue,
+    onSearchFieldChange: (TextFieldValue) -> Unit,
     searchResults: List<AppInfo>?,
+    onSearchSubmit: () -> Unit,
+    onAskQizai: (String) -> Unit,
+    // 与竖屏同一套焦点礼仪（v0.68.93）：焦点外报 + 范围捕获，
+    // 供 AppCenter 根 Box 的点外部清焦观察者使用
+    onSearchFocusChanged: (Boolean) -> Unit = {},
+    onSearchPositioned: (Rect) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
-    val keyboardController = LocalSoftwareKeyboardController.current
     val onPullDownToD2State = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
@@ -247,79 +254,77 @@ fun AppCenterLandscape(
                         )
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    // v0.68.82（横屏专项第 2 项）：真搜索框——pill 外形不变，内部换 BasicTextField
-                    Row(
+                    // F2：与竖屏同一 IntentCapsuleField（占位/提交/✕ 清空/焦点
+                    // 礼仪全部同组件同口径）；宽度沿用原 pill 的 440dp 顶栏预算
+                    IntentCapsuleField(
+                        value = searchFieldValue,
+                        onValueChange = onSearchFieldChange,
+                        onSubmit = onSearchSubmit,
+                        // 应用中心变体（同竖屏）：✕ 一键清空、清空后列流恢复全量
+                        showClearButton = true,
+                        onFocusChanged = onSearchFocusChanged,
                         modifier = Modifier
                             .width(440.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(AILauncherColors.current.Card.copy(alpha = 0.7f))
-                            .padding(horizontal = 18.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        BasicTextField(
-                            value = query,
-                            onValueChange = onQueryChange,
-                            singleLine = true,
-                            textStyle = TextStyle(
-                                fontSize = 14.sp,
-                                color = AILauncherColors.current.Title
-                            ),
-                            cursorBrush = SolidColor(AILauncherColors.current.Accent),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = {
-                                keyboardController?.hide()
-                            }),
-                            decorationBox = { innerTextField ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        Icons.Filled.Search,
-                                        contentDescription = null,
-                                        tint = AILauncherColors.current.Hint,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        if (query.isEmpty()) {
-                                            Text(
-                                                text = "搜索应用，支持拼音/首字母",
-                                                fontSize = 14.sp,
-                                                color = AILauncherColors.current.Hint,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        innerTextField()
-                                    }
-                                    if (query.isNotEmpty()) {
-                                        IconButton(
-                                            onClick = { onQueryChange("") },
-                                            modifier = Modifier.size(24.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Filled.Close,
-                                                contentDescription = "清空",
-                                                tint = AILauncherColors.current.Hint,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                            .onGloballyPositioned { onSearchPositioned(it.boundsInRoot()) }
+                    )
                     Spacer(modifier = Modifier.weight(1f))
                     // 设置齿轮（Bob：横屏时竖屏的齿轮拿掉，放这里）
-                    Icon(
-                        imageVector = Icons.Filled.Settings,
-                        contentDescription = "设置",
-                        tint = AILauncherColors.current.Hint,
+                    // F2：与竖屏同一 IconButton + testTag 锚点——此前是裸 Icon
+                    // 无锚点，冒烟 §21 到达校验与布局几何断言在横屏测不到本节点、
+                    // 触控面也只有约 28dp（竖屏为 48dp IconButton）
+                    IconButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier.testTag("appcenter_settings")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "设置",
+                            tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                // F2：「问七仔」行与竖屏同契约同结构（跟随原始文本即时出现、
+                // 不等防抖落定，整句交七仔；横屏此前无此行）
+                if (searchFieldValue.text.isNotBlank()) {
+                    Row(
                         modifier = Modifier
-                            .size(24.dp)
-                            .clip(CircleShape)
-                            .clickable { onOpenSettings() }
-                            .padding(2.dp)
-                    )
+                            .fillMaxWidth()
+                            .padding(start = 24.dp, end = 24.dp, top = 10.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
+                            .clickable { onAskQizai(searchFieldValue.text.trim()) }
+                            .padding(horizontal = 16.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.AutoAwesome,
+                            // 装饰图标（行文案已表达含义）标装饰语义（同竖屏）
+                            contentDescription = null,
+                            tint = AILauncherColors.current.Accent,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .semantics { invisibleToUser() }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "问七仔：「${searchFieldValue.text.trim()}」",
+                            fontSize = 13.sp,
+                            color = AILauncherColors.current.Accent,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = AILauncherColors.current.Accent,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .semantics { invisibleToUser() }
+                        )
+                    }
                 }
                 val results = searchResults
                 if (results != null) {
@@ -335,7 +340,7 @@ fun AppCenterLandscape(
                         if (results.isEmpty()) {
                             item(key = "search-empty") {
                                 Text(
-                                    text = "没有找到「${query.trim()}」相关的应用",
+                                    text = "没有找到「${searchFieldValue.text.trim()}」相关的应用",
                                     fontSize = 14.sp,
                                     color = AILauncherColors.current.Hint,
                                     modifier = Modifier.padding(

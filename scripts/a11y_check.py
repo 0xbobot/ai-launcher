@@ -9,8 +9,9 @@
 - 清空按钮：ac_dump2.xml 中 content-desc="清空"
 - 问七仔行：ac_dump2.xml 中 text 含「问七仔」
 - 本地结果项：local_dump.xml 中 text="Clock" 的可点祖先（探针选 Clock：API 29 镜像无相机）
-横屏（landscape=1）时 ac_dump2 来自横屏旧搜索框流程，无清空/问七仔控件，
-这两项缺失记 INFO 跳过（横屏未并入统一胶囊，R4 发现 F2），在场则照常测量。
+横屏（landscape=1）时 ac_dump2 来自横屏 AC 流程：F2 销账（线 C）后横屏已
+并入统一胶囊契约，清空/问七仔控件在场并照常测量；缺失记 INFO 的兜底保留
+（smoke 第 10 段已对两控件在场单独断言，缺失不会从本检查漏检）。
 
 意图改进一批追加（suggest_dump.xml，smoke.sh 第 15 段在收键盘后拉取，建议面在场）：
 布局不变量——建议项触控 >=48dp（标题后第一个应用项的可点祖先）；胶囊占位节点
