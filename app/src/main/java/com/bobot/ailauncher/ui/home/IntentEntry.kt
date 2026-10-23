@@ -324,7 +324,11 @@ fun Modifier.clearIntentFocusOnOutsideTap(
     focused: () -> Boolean,
     targetBoundsInHost: () -> Rect?,
     focusManager: FocusManager,
-    keyboardController: SoftwareKeyboardController?
+    keyboardController: SoftwareKeyboardController?,
+    // v0.68.101（D-2）：真实外点事件回调——宿主据此退出输入态。退出判定
+    // 从此走「用户动作事件」而非「焦点变 false 的边沿推断」：IME 切面板/
+    // 删字造成的瞬时焦点抖动不再能把输入态误退（Bob 真机两幕实证）。
+    onOutsideTap: () -> Unit = {}
 ): Modifier = this.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
@@ -336,6 +340,7 @@ fun Modifier.clearIntentFocusOnOutsideTap(
             if (!bounds.contains(pos)) {
                 focusManager.clearFocus()
                 keyboardController?.hide()
+                onOutsideTap()
             }
         }
     }
@@ -360,9 +365,13 @@ fun IntentEntry(
     // 区间（TextFieldValue）语义不变，下游沿用。
     fieldValue: TextFieldValue,
     onFieldValueChange: (TextFieldValue) -> Unit,
-    // 进入输入态时是否挂载即聚焦（点七仔格/讲述者 = 要打字，true；
+    // 进入输入态时是否挂载即聚焦（点坐姿七仔 = 要打字，true；
     // 协调器在场状态自动带起的呈现 = false，不弹键盘）
     requestFocusOnMount: Boolean = false,
+    // v0.68.101（D-2）：显式退出输入态请求——点本地结果/建议应用打开 App
+    // 是「事办完了」的明确动作，由宿主收起输入态（文本保留）。原先靠
+    // 「失焦→退出」的边沿推断，IME 抖动会误伤，现已拆除（见 HomeScreen）。
+    onRequestExitInput: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -675,6 +684,9 @@ fun IntentEntry(
                             apps = visibleSuggestionApps,
                             onOpenApp = { app ->
                                 releaseInputFocus()
+                                // v0.68.101（D-2）：甲板应用即原建议应用，同样显式
+                                // 退出输入态（明确动作，不依赖失焦边沿推断）
+                                onRequestExitInput()
                                 launchLocalApp(context, app)
                             }
                         )
@@ -765,7 +777,10 @@ fun IntentEntry(
                         apps = localResults,
                         onOpen = { app ->
                             // 点开即收键盘（意图改进一批）：应用要打开了，先释放输入
+                            // v0.68.101（D-2）：同时显式退出输入态（明确动作，不再
+                            // 依赖失焦边沿推断）
                             releaseInputFocus()
+                            onRequestExitInput()
                             launchLocalApp(context, app)
                         }
                     )

@@ -64,8 +64,17 @@ def inter(a, b):
     return (w, h) if w > 0 and h > 0 else (0, 0)
 
 
-def check_state(root, state, elements, pairs, W, H):
+def check_state(root, state, elements, pairs, W, H, one_pet=False):
     """elements: {name: bounds or None}; pairs: [(a,b)] 需不相交"""
+    if one_pet:
+        # v0.68.101（单宠物原则，Bob 08:08 拍板）：任何时刻屏幕上恰一只
+        # 七仔——静态 = Dock 坐姿（dock_pet_cell）、输入态 = 胶囊旁伴随体
+        # （pet_qizai），两者永不同时在场、也永不双缺（主页形态下）。
+        n = len(by_rid(root, "dock_pet_cell")) + len(by_rid(root, "pet_qizai"))
+        if n == 1:
+            print(f"LAYOUT OK {state}: one-pet count={n}")
+        else:
+            print(f"LAYOUT FAIL {state}: one-pet count={n} (expected exactly 1)")
     for name, b in elements.items():
         if b is None:
             print(f"LAYOUT INFO {state}/{name}: absent, skipped")
@@ -97,6 +106,7 @@ def home_elements(root):
     sub = by_rid(root, "intent_submit")
     nxt = by_rid(root, "today_nextup")
     pet = by_rid(root, "pet_qizai")
+    seat = by_rid(root, "dock_pet_cell")
     hero = by_rid(root, "cover_hero")
     deck = by_rid(root, "deck_root")
     return {
@@ -105,6 +115,7 @@ def home_elements(root):
         "submit": sub[0] if sub else None,
         "nextup": nxt[0] if nxt else None,
         "pet": pet[0] if pet else None,
+        "dockpet": seat[0] if seat else None,
         "dock": dock,
         # v0.68.101（R-2）：输入甲板（胶囊上方槽位）——静态态不存在，
         # absent 时 INFO 跳过，不影响既有状态的断言口径
@@ -117,7 +128,10 @@ HOME_PAIRS = [
     ("capsule", "nextup"), ("capsule", "dock"), ("submit", "dock"),
     ("nextup", "dock"), ("pet", "capsule"), ("pet", "nextup"),
     ("pet", "dock"),
-    # pet 在 hero 内（petSlot），submit 在 capsule 内，均属包含关系，不查
+    # v0.68.101：坐姿七仔（dockpet）是 dock 面板的子节点（包含关系不查
+    # dockpet×dock）；它探出面板上沿，必须与会行/hero 不相交
+    ("dockpet", "nextup"), ("dockpet", "hero"), ("dockpet", "capsule"),
+    # pet 在输入态与胶囊同行（伴随体），submit 在 capsule 内属包含，不查
 ]
 FOCUS_PAIRS = [
     ("hero", "capsule"), ("capsule", "nextup"), ("hero", "nextup"),
@@ -137,22 +151,26 @@ def main():
         if os.path.exists(p):
             r = parse(p)
             if r is not None:
-                check_state(r, f"home-{tpl}", home_elements(r), HOME_PAIRS, W, H)
+                check_state(r, f"home-{tpl}", home_elements(r), HOME_PAIRS, W, H,
+                            one_pet=True)
         p = os.path.join(d, f"tpl_{tpl}_suggest.xml")
         if os.path.exists(p):
             r = parse(p)
             if r is not None:
-                check_state(r, f"focus-{tpl}", home_elements(r), FOCUS_PAIRS, W, H)
+                check_state(r, f"focus-{tpl}", home_elements(r), FOCUS_PAIRS, W, H,
+                            one_pet=True)
     p = os.path.join(d, "slot_focus.xml")
     if os.path.exists(p):
         r = parse(p)
         if r is not None:
-            check_state(r, "slot-focus", home_elements(r), FOCUS_PAIRS, W, H)
+            check_state(r, "slot-focus", home_elements(r), FOCUS_PAIRS, W, H,
+                        one_pet=True)
     p = os.path.join(d, "layout_home.xml")
     if os.path.exists(p):
         r = parse(p)
         if r is not None:
-            check_state(r, "home-current", home_elements(r), HOME_PAIRS, W, H)
+            check_state(r, "home-current", home_elements(r), HOME_PAIRS, W, H,
+                        one_pet=True)
     p = os.path.join(d, "layout_ac.xml")
     if os.path.exists(p):
         r = parse(p)

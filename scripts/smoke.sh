@@ -36,6 +36,9 @@
 # mock 慢响应把协调器停在 Planning 态 -> 思考条带「取消」-> 点取消后条消失 ->
 # 等迟到结果落地窗口过后断言追问不上屏），crash 检查再顺延为第 23 段。
 # v0.68.100（卫生批）追加：第 24 段为崩溃本地日志（crash-log-written /
+# v0.68.102（310 合并批）段号统一：R-2 槽位甲板 = 第 25 段；热修 D-2 输入态
+# 不误退 = 第 26 段；热修 D-5 点加入只发一次 = 第 27 段（三段同插在第 22 段
+# 之后、第 23/24 段之前——第 24 段故意崩溃必须保持最后两段的既有约束）。
 # crash-log-content / crash-relaunch-alive：debug 专用 intent extra 触发一次
 # 真崩溃 -> files/crashes 落盘且含异常首行 -> 正常重启存活不进崩溃循环）。
 # 本段故意产生 FATAL，必须排在第 23 段 no-fatal-crash 之后。形态 env 追加 SMOKE_WM_SIZE /
@@ -328,21 +331,20 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 
-# --- 6. 点七仔（宠物区中央；果冻反馈+开心表情 1.2 秒，0.7 秒后截图抓反应中途）---
-# 体检批D ⑥：优先 dump 按 testTag pet_qizai 定位七仔本体中心；未命中才走旧坐标
-# （按当前首页布局实测约 (540,950)；旧坐标 840,630 点空导致 pet 与 home 同帧，R1 实测）。
+# --- 6. 点七仔进输入态（v0.68.101 单宠物：静态唯一七仔 = Dock 上沿坐姿，
+# testTag 沿用 dock_pet_cell；旧讲述者 pet_qizai 静态已撤）---
 # press 150ms 模拟真手指（瞬时 tap 会被首页手势层取消，见第 9 段注）
 adb shell uiautomator dump /sdcard/pet_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/pet_dump.xml "$OUT/pet_dump.xml" > /dev/null 2>&1 || true
-if ! tap_rid "$OUT/pet_dump.xml" "pet_qizai"; then
-  adb shell input swipe "$(SX 540)" "$(SY 950)" "$(SX 540)" "$(SY 950)" 150 || true
+if ! tap_rid "$OUT/pet_dump.xml" "dock_pet_cell"; then
+  log "seg6: dock_pet_cell not found in dump - seat tap skipped (shot still taken)"
 fi
 sleep 0.7
 shot "pet"
-# v0.68.99（主页重构 R-1）：点七仔现在 = 进入输入态（胶囊浮现 + 键盘弹起），
-# pet.png 即输入态开启瞬间（果冻反馈仍在七仔身上）。随后退回静态基线：
-# 第 1 次 BACK 收键盘（焦点保留）、第 2 次 BACK 走输入态 BackHandler 收起
-# 胶囊、Dock 回位——否则下一段上滑会被输入态/键盘干扰。
+# 点坐姿七仔 = 进入输入态（胶囊浮现 + 键盘弹起 + 伴随七仔立在胶囊旁），
+# pet.png 即输入态开启瞬间。随后退回静态基线：第 1 次 BACK 收键盘
+# （焦点保留）、第 2 次 BACK 走输入态 BackHandler 收起胶囊、Dock 回位
+# ——否则下一段上滑会被输入态/键盘干扰。
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 adb shell input keyevent KEYCODE_BACK || true
@@ -1782,12 +1784,12 @@ adb shell uiautomator dump /sdcard/focus_pre.xml > /dev/null 2>&1 || true
 adb pull /sdcard/focus_pre.xml "$OUT/focus_pre.xml" > /dev/null 2>&1 || true
 redump_if_empty focus_pre
 if [ -f "$OUT/focus_pre.xml" ] && grep -q 'focused="true"' "$OUT/focus_pre.xml" && grep -q 'daohang' "$OUT/focus_pre.xml"; then
-  # 前提成立（确实聚焦且文本在框内）才验取消；点七仔（pet_qizai，意图区外）
-  # 坐标取刚 dump 的 focus_pre（比进态时的 focus_dump0 新鲜；退化 bounds
-  # 由 center_rid 守卫挡下、落回默认坐标）
-  PTX=$(SX 540); PTY=$(SY 950)
-  CTR=$(center_rid "$OUT/focus_pre.xml" "pet_qizai")
-  if [ -n "$CTR" ]; then PTX=$(echo "$CTR" | cut -d' ' -f1); PTY=$(echo "$CTR" | cut -d' ' -f2); log "focus-cancel pet by tag at ($PTX,$PTY)"; fi
+  # 前提成立（确实聚焦且文本在框内）才验取消；点简报区（cover_hero，
+  # 意图区外）——v0.68.101 单宠物后输入态 pet_qizai 是胶囊旁伴随体
+  # （意图区内，点它不退出），静态讲述者已撤，本段改点 hero 本体中心
+  PTX=$(SX 540); PTY=$(SY 300)
+  CTR=$(center_rid "$OUT/focus_pre.xml" "cover_hero")
+  if [ -n "$CTR" ]; then PTX=$(echo "$CTR" | cut -d' ' -f1); PTY=$(echo "$CTR" | cut -d' ' -f2); log "focus-cancel hero by tag at ($PTX,$PTY)"; fi
   adb shell input swipe "$PTX" "$PTY" "$PTX" "$PTY" 150 || true
   sleep 2
   shot "intent-focus-outside"
@@ -1937,6 +1939,27 @@ glass_wallpaper_round() {
   glass_nextup_shot "glass-$mode-nextup"
   glass_bubble_shot "glass-bubble-$mode"
 }
+# v0.68.101（D-4 验收取证，主会话点名交付物）：「有会议 + 繁忙照片壁纸」
+# 静态主页图——三轮换壁纸前现种一条 +30 分钟开始的会议（配方同第 21 段
+# LayoutProbe：复用第 14 段 seed 函数 + 新鲜时间窗；日历在 provider 侧，
+# 换壁纸重启不丢），photo 轮的全景图 glass-photo 即 D-4 验收图（会议行
+# 在繁忙照片底上的可读性）；三轮后删种，不污染后续段。
+D4_SEEDED=""
+if type nextup_seed_event > /dev/null 2>&1; then
+  D4_NOW_S=$(adb shell date +%s 2>/dev/null | tr -d '\r')
+  if [ -n "$D4_NOW_S" ]; then
+    EV_BEGIN=$(( (D4_NOW_S + 1800) * 1000 ))
+    EV_END=$(( (D4_NOW_S + 5400) * 1000 ))
+    if nextup_seed_event "SmokeD4Review" "https://zoom.us/j/1234567890"; then
+      D4_SEEDED=1
+      log "d4: meeting seeded for photo-wallpaper readability shot (starts in 30min)"
+    else
+      log "d4: seed failed - glass-photo shot may lack the meeting row"
+    fi
+  fi
+else
+  log "d4: nextup_seed_event unavailable on this leg - D-4 shot unverified here"
+fi
 if python3 scripts/gen_wallpaper.py sky /tmp/glass-sky.png > /dev/null 2>&1 && \
    python3 scripts/gen_wallpaper.py photo /tmp/glass-photo.png > /dev/null 2>&1 && \
    python3 scripts/gen_wallpaper.py paper /tmp/glass-paper.png > /dev/null 2>&1; then
@@ -1946,6 +1969,10 @@ if python3 scripts/gen_wallpaper.py sky /tmp/glass-sky.png > /dev/null 2>&1 && \
   glass_wallpaper_round paper /tmp/glass-paper.png
 else
   log "glass: wallpaper generation failed - set-based shots skipped"
+fi
+if [ -n "$D4_SEEDED" ] && type nextup_delete_event > /dev/null 2>&1; then
+  nextup_delete_event "SmokeD4Review"
+  log "d4: seed removed after wallpaper rounds"
 fi
 if glass_home_alive && adb shell pidof "$PKG" > /dev/null 2>&1; then
   ok "glass-alive-after-wallpaper-switches"
@@ -2529,6 +2556,103 @@ else
   log "mock llm unavailable - slot-deck segment skipped (not counted)"
 fi
 if [ -n "$SD_PID" ]; then kill "$SD_PID" 2> /dev/null || true; fi
+
+# --- 26. 输入态不误退（v0.68.101·D-2 验收）：进输入 → 打字 → 空转超旧
+# 4 秒兜底窗口并间歇补字 → 删到空 → 再打字，全程不退出、不收键盘 ---
+# 真机两幕（切 IME 符号面板后、删字删到空后退出）的 CI 覆盖口径：符号
+# 面板切换在模拟器 LatinIME 上无法以 uiautomator 驱动，本段以「跨越旧
+# 兜底时窗的持续会话 + 删空 + 再输入」锁住同一失效类别（计时/失焦推断
+# 误退）；面板切换本身归真机验收。断言：末态仍聚焦、文本在框、键盘在场
+# （mInputShown 仅辅助日志，个别镜像读不到不判负）。
+log "input-stay: segment start"
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+enter_input_mode "$OUT/stay_dump0.xml" || true
+sleep 1
+adb shell input text "daohang" || true
+sleep 1
+adb shell input text "%s" || true
+sleep 1
+# 跨过旧 4 秒兜底窗口：静置 3 秒 + 补一个字 + 再静置 3 秒（会话持续约 8 秒）
+sleep 3
+adb shell input text "2" || true
+sleep 3
+# 删到空（文本 "daohang 2" 共 9 字，DEL 12 次保底，多按无副作用）
+for _i in 1 2 3 4 5 6 7 8 9 10 11 12; do adb shell input keyevent KEYCODE_DEL || true; done
+sleep 1
+adb shell input text "dache" || true
+sleep 2
+adb shell uiautomator dump /sdcard/stay_post.xml > /dev/null 2>&1 || true
+adb pull /sdcard/stay_post.xml "$OUT/stay_post.xml" > /dev/null 2>&1 || true
+redump_if_empty stay_post
+shot "input-stay"
+IMESHOWN_STAY=$(adb shell dumpsys input_method 2>/dev/null | grep -m1 "mInputShown" | tr -d ' ' || true)
+log "input-stay ime: ${IMESHOWN_STAY:-unavailable} (auxiliary only)"
+if [ -f "$OUT/stay_post.xml" ] && grep -q 'focused="true"' "$OUT/stay_post.xml" && grep -q 'dache' "$OUT/stay_post.xml"; then
+  ok "input-no-auto-exit"
+else
+  log "input-stay: session did not survive typing/idle/delete cycle (see stay_post.xml)"
+  ng "input-no-auto-exit"
+fi
+adb shell input keyevent KEYCODE_HOME || true
+sleep 1
+
+# --- 27. 点「加入」只发一次意图 + 不回弹（v0.68.101·D-5）：种子会议（带
+# Zoom 链接）→ 点加入一次 → 数 logcat 中该链接的 START 派发次数（恰 1）
+# + 本应用 MainActivity 的 START 次数（0——回弹/重启信号）；无 URL
+# handler 的镜像走日历兜底派发，同样数恰 1。环境门同第 14 段：种子进
+# 不了 Instances 视图则 SKIP 不计数。---
+log "join-once: segment start"
+if nextup_seed_event "SmokeJoinOnce" "https://zoom.us/j/9876543210"; then
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  WIN_B=$(( (EMU_S - 86400) * 1000 )); WIN_E=$(( (EMU_S + 86400) * 1000 ))
+  DIAG_IN=$(adb shell content query --uri "content://com.android.calendar/instances/when/$WIN_B/$WIN_E" --projection title 2>&1 | head -4 | tr '\n' ' ')
+  if ! echo "$DIAG_IN" | grep -q "SmokeJoinOnce"; then
+    log "join-once: SKIP (seeded event not visible in Instances on this image)"
+  else
+    adb shell uiautomator dump /sdcard/join_dump.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/join_dump.xml "$OUT/join_dump.xml" > /dev/null 2>&1 || true
+    redump_if_empty join_dump
+    JCTR=$(center_rid "$OUT/join_dump.xml" "today_nextup")
+    if [ -z "$JCTR" ]; then
+      log "join-once: meeting row (today_nextup) not found in dump"
+      ng "join-fires-once"
+    else
+      JTX=$(echo "$JCTR" | cut -d' ' -f1); JTY=$(echo "$JCTR" | cut -d' ' -f2)
+      adb logcat -c > /dev/null 2>&1 || true
+      adb shell input swipe "$JTX" "$JTY" "$JTX" "$JTY" 150 || true
+      sleep 3
+      shot "join-once"
+      LINK_STARTS=$(adb logcat -d 2>/dev/null | grep "START u0" | grep -ci "zoom" || true)
+      CAL_STARTS=$(adb logcat -d 2>/dev/null | grep "START u0" | grep -ci "calendar" || true)
+      SELF_STARTS=$(adb logcat -d 2>/dev/null | grep "START u0" | grep -c "$PKG" || true)
+      FGJ=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
+      log "join-once dispatches: link=$LINK_STARTS calendar=$CAL_STARTS self=$SELF_STARTS fg=$FGJ"
+      DISPATCHES=$LINK_STARTS
+      if [ "$LINK_STARTS" = "0" ]; then DISPATCHES=$CAL_STARTS; fi
+      if [ "$DISPATCHES" = "1" ] && [ "$SELF_STARTS" = "0" ]; then
+        ok "join-fires-once"
+      else
+        log "join-once: expected exactly 1 external dispatch and 0 self relaunches"
+        ng "join-fires-once"
+      fi
+    fi
+  fi
+  nextup_delete_event "SmokeJoinOnce"
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 1
+else
+  log "join-once: seed failed - segment skipped (not counted)"
+fi
 
 # --- 23. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
