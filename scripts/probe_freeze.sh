@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# 310 冻结探针 v3（probe-freeze-* 分支专用）：在 v2 结论上做判别实验。
-# v2 实证（run 40031960155）：静置 60s 全健康；点七仔格后 <1s 整个模拟器
-# 消失（logcat 无宾客侧 FATAL/ANR、宿主 TCP 5554 refused = qemu 进程级死亡）；
-# adb 调用在死套接字上挂 ~28s——即历史所记「screencap 阻塞约 28 秒」签名。
-# v3 判别序（单模拟器会话、按信息量排序，设备死了后续自动跳过）：
-#  X3 先在应用中心点搜索胶囊聚焦（IME 首秀 + 窗口 resize，但无主页进态
-#     合成内容）——若此处即死，触发源是 IME/窗口机制而非主页进态内容；
-#  A1 IME 已热后点七仔格进主页输入态；
-#  C1 force-stop 冷启后进态（IME 进程仍热、应用进程冷）；
-#  C9 深色 + 冷启后进态（§9 的确切加料：§8 留下的夜间态）。
-# 全程 logcat 直落宿主文件；每次点按后逐秒探活，记录死亡延迟。
+# 310 冻结探针 v4（probe-freeze-* 分支专用）：验证 fix3「进态错峰」修复。
+# 前情（probe v1–v3 实证）：进态合成爆发与 IME 首秀同窗 → 模拟器进程级
+# 死亡（logcat 无宾客侧 FATAL）；冷 IME、深色首帧各为一个加重因子；
+# 应用中心单独聚焦存活；IME 已热 + 浅色 + 冷进程进态存活（v3 C1）。
+# v4 按加重程度从高到低打（设备死了后续自动跳过）：
+#  D0 深色（开机前设定）+ 冷进程 + 冷 IME —— 最大加重，修复的首要考场；
+#  D1 深色 + force-stop 冷启再进（v3 C9 的点火配置复打）；
+#  L1 浅色 + 冷启进态（v3 C1 的存活配置，防修法回退）；
+#  A2 同进程第二次进/退。
 PKG="com.bobot.ailauncher"
 APK="apk/app-debug.apk"
 OUT="probe-out"
@@ -97,7 +95,6 @@ start_app() {
   sleep 2
   log "started, state=$(state) pid=$(curpid)"
 }
-# 点按后逐秒探活（最多 10 秒），打印死亡延迟；存活满 10 秒返回 0
 death_watch() {
   local L="$1" i
   for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -119,6 +116,8 @@ enter_and_check() {
     1) ng "$L-DEVICE-LOST-after-tap"; return 1 ;;
     2) ng "$L-APP-DIED(device-alive)"; return 1 ;;
   esac
+  # fix3 错峰：聚焦在 +450ms、IME 弹起更晚，胶囊 dump 前多等一拍
+  sleep 3
   if tdump "$OUT/$L-in.xml" && grep -q 'resource-id="intent_input"' "$OUT/$L-in.xml"; then
     ok "$L-capsule-present"
   else
@@ -139,71 +138,46 @@ exit_input() {
   adb shell input keyevent KEYCODE_BACK || true
   sleep 1
 }
+cold_start() {
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  start_app
+  sleep 10
+}
 
-# ================= 控制相（短版） =================
-sleep 20
+# ================= D0：深色预置 + 冷启 + 冷 IME（最大加重） =================
+adb shell cmd uimode night yes || true
+sleep 2
 start_app
-for i in 1 2 3; do sleep 10; alive && log "control idle $i: alive" || { log "control idle $i: NOT alive"; ng "control-idle"; }; done
-ok "control-idle-done"
+sleep 10
+enter_and_check "D0" && exit_input
 
-# ================= X3：应用中心搜索框聚焦（IME 首秀，无主页进态内容） =================
+# ================= D1：深色 + 冷启再进（v3 C9 点火配置） =================
 if devok; then
-  adb shell input swipe 540 2000 540 800 300 || true
-  sleep 3
-  if tdump "$OUT/x3-ac.xml"; then
-    if tap_rid "$OUT/x3-ac.xml" "intent_input"; then
-      log "X3: tapped AppCenter search field, watching"
-      death_watch "X3"
-      case $? in
-        0) ok "X3-ime-show-survived" ;;
-        1) ng "X3-DEVICE-LOST" ;;
-        2) ng "X3-APP-DIED" ;;
-      esac
-    else
-      log "X3: intent_input not found in AppCenter dump"
-      ng "X3-field-not-found"
-    fi
-  else
-    ng "X3-ac-dump-blocked"
-  fi
-  if devok; then
-    adb shell input keyevent KEYCODE_BACK || true
-    sleep 1
-    adb shell input keyevent KEYCODE_HOME || true
-    sleep 2
-  fi
+  cold_start
+  enter_and_check "D1" && exit_input
 else
-  ng "X3-skipped-device-lost"
+  ng "D1-skipped-device-lost"
 fi
 
-# ================= A1：IME 已热后主页进态 =================
-if devok; then enter_and_check "A1" && exit_input; else ng "A1-skipped-device-lost"; fi
-
-# ================= C1：冷启进态（IME 进程仍热） =================
+# ================= L1：浅色 + 冷启进态 =================
 if devok; then
-  adb shell am force-stop "$PKG" || true
-  sleep 1
-  start_app
-  sleep 10
-  enter_and_check "C1" && exit_input
-else
-  ng "C1-skipped-device-lost"
-fi
-
-# ================= C9：深色 + 冷启进态（§9 加料） =================
-if devok; then
-  adb shell cmd uimode night yes || true
+  adb shell cmd uimode night no || true
   sleep 2
-  adb shell am force-stop "$PKG" || true
-  sleep 1
-  start_app
-  sleep 10
-  enter_and_check "C9" && exit_input
-  adb shell cmd uimode night auto || true
+  cold_start
+  enter_and_check "L1" && exit_input
 else
-  ng "C9-skipped-device-lost"
+  ng "L1-skipped-device-lost"
 fi
 
+# ================= A2：同进程第二次进/退 =================
+if alive; then
+  enter_and_check "A2" && exit_input
+else
+  ng "A2-app-gone-before"
+fi
+
+adb shell cmd uimode night auto || true
 kill "$LOGCAT_PID" > /dev/null 2>&1 || true
-log "RESULT probe-freeze-v3 PASS=$PASS FAIL=$FAIL"
+log "RESULT probe-freeze-v4 PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

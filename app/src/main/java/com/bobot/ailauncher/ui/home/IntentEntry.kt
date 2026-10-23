@@ -146,7 +146,10 @@ fun IntentCapsuleField(
     templateContent: (@Composable () -> Unit)? = null
 ) {
     val focusRequester = sharedFocusRequester ?: remember { FocusRequester() }
-    LaunchedEffect(Unit) {
+    // v0.68.102（310 冻结修复二轮）：key 改为 requestFocusOnMount 本身——
+    // 宿主（HomeScreen）的进态错峰门在进态合成落定后才把 true 送进来，
+    // 本 Effect 须在 prop 翻 true 时才发聚焦请求（原 Unit key 只读首值）。
+    LaunchedEffect(requestFocusOnMount) {
         if (requestFocusOnMount) focusRequester.requestFocus()
     }
     // composing 中（拼音未上屏）禁止提交：组合区间的拉丁字母不是用户最终输入
