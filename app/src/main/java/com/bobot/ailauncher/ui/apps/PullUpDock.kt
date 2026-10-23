@@ -331,6 +331,23 @@ fun PullUpDock(
                             )
                         }
                 ) {
+                    // v0.68.101（D-3 修订·单宠物原则，Bob 08:00/08:08 拍板）：
+                    // 七仔坐姿入口——贴面板上沿、水平居中，半坐在面板顶边。
+                    // D1 行 / D2 网格 / 横屏右下面板共用这一个形态（锚定面板
+                    // 本身：在面板 Column 的流式首位，居中对齐——面板在哪
+                    // 它坐哪）；R-1 的 D1 行内格随之移除。图标行绝对位置
+                    // 不因它下移以外的变化（面板底锚，本节点只向上长）。
+                    // 输入态不呈现：全屏唯一七仔此时在胶囊旁（伴随体），
+                    // 横屏面板虽留在场、坐姿也让位，保证任何时刻恰一只。
+                    if (!intentInputMode) {
+                        val seatCompact = LocalDensity.current.fontScale >= 1.3f ||
+                            maxHeight < 400.dp
+                        DockPetSeat(
+                            compact = seatCompact,
+                            onTap = onPetCellTap,
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        )
+                    }
                     // 一二档内容：crossfade + scale，卡片高度弹簧跟随
                     AnimatedContent(
                         targetState = state,
@@ -377,9 +394,7 @@ fun PullUpDock(
                                 menuApp = popupApp,
                                 onLongPress = { popupApp = it },
                                 onDismissMenu = { popupApp = null },
-                                isLandscape = isLandscapeDock,
-                                // v0.68.99：七仔格只进 D1 行（D2 网格不加）
-                                onPetCellTap = onPetCellTap
+                                isLandscape = isLandscapeDock
                             )
                         }
                         }
@@ -461,9 +476,8 @@ private fun FullAppsOverlay(
 }
 
 /** 第一档：4 个常用大图标（56dp），只留图标，卡内严格垂直居中。
- *  v0.68.99（主页重构 R-1）：行首加七仔格（意图入口）——格不占应用位，
- *  4 个应用位一个不少；总宽变大后按可用宽分档收图标/间距（布局防线：
- *  降级新内容本身，不挤其他槽位）。 */
+ *  v0.68.101：R-1 的行内七仔格已移除（七仔改坐面板上沿，见 DockPetSeat），
+ *  本行回到 4 应用位原始分档（56 图标 / 16 间距）。 */
 @Composable
 private fun DockRow4(
     apps: List<AppInfo>,
@@ -471,8 +485,7 @@ private fun DockRow4(
     menuApp: AppInfo?,
     onLongPress: (AppInfo) -> Unit,
     onDismissMenu: () -> Unit,
-    isLandscape: Boolean = false,
-    onPetCellTap: (() -> Unit)? = null
+    isLandscape: Boolean = false
 ) {
     // v0.68.82（第 3 项）：横屏改回横向（同竖屏），不再竖排
     BoxWithConstraints(
@@ -480,17 +493,8 @@ private fun DockRow4(
             .let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() }
             .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
-        val hasPet = onPetCellTap != null
-        // 分档（内容宽 = 本 Box 实测宽）：≥336 全尺寸；≥308 中档；其余小档
-        val iconSize: Dp
-        val gap: Dp
-        val cellSize: Dp
-        when {
-            !hasPet -> { iconSize = 56.dp; gap = 16.dp; cellSize = 56.dp }
-            maxWidth >= 336.dp -> { iconSize = 56.dp; gap = 14.dp; cellSize = 56.dp }
-            maxWidth >= 308.dp -> { iconSize = 52.dp; gap = 12.dp; cellSize = 52.dp }
-            else -> { iconSize = 48.dp; gap = 10.dp; cellSize = 48.dp }
-        }
+        val iconSize = 56.dp
+        val gap = 16.dp
         Row(
             modifier = Modifier
                 .let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() },
@@ -498,9 +502,6 @@ private fun DockRow4(
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (onPetCellTap != null) {
-                DockPetCell(size = cellSize, onTap = onPetCellTap)
-            }
             apps.forEach { app ->
                 DockIconButton(
                     app = app,
@@ -517,14 +518,19 @@ private fun DockRow4(
 }
 
 /**
- * v0.68.99（主页重构 R-1，Bob 定）：Dock 七仔格——意图入口的门，形态为
- * 「对话等待态」：倾听姿态（meteor_wave，与意图 FETCH 姿态同图）头部为主
- * 裁切 + 头边小对话泡（内「…」）暗示「点我说话」；慢呼吸微动仅在主页
- * RESUMED 且非减动效 / 非低电量时开（省电口径同 PetView）。热区即整格
- * （随 DockRow4 分档，≥48dp），点按进输入态。不占应用位（行宽分档处理）。
+ * v0.68.101（D-3 修订 + 单宠物原则，Bob 2026-10-23 08:00/08:08 拍板）：
+ * Dock 坐姿七仔——全屏唯一七仔的静态呈现，进输入态的唯一门。贴面板
+ * 上沿、水平居中：本体下缘与面板内容顶边齐平（半坐感），上半身探出
+ * 面板之上；形态沿 R-1「对话等待态」：倾听姿态（meteor_wave，与意图
+ * FETCH 同图）头部为主裁切 + 头边「…」小对话泡 + 慢呼吸（仅主页
+ * RESUMED 且非减动效/非低电量，省电口径同前）。
+ * 热区 68×44dp（≥48 宽；紧配置 56×36 + 本体收小——布局防线：高度
+ * 不够先缩它，不挤其他槽位）。testTag 沿用 dock_pet_cell（冒烟入口
+ * 定位契约不变），点按语义不变（进输入态）。原 R-1 行内格 DockPetCell
+ * 已随本形态删除。
  */
 @Composable
-private fun DockPetCell(size: Dp, onTap: () -> Unit) {
+private fun DockPetSeat(compact: Boolean, onTap: () -> Unit, modifier: Modifier = Modifier) {
     val view = LocalView.current
     val reduceMotion = com.bobot.ailauncher.ui.theme.rememberReduceMotion()
     val lowPower by com.bobot.ailauncher.data.BatteryState.isLowPower.collectAsState()
@@ -556,40 +562,48 @@ private fun DockPetCell(size: Dp, onTap: () -> Unit) {
     } else {
         1f
     }
+    val boxWidth = if (compact) 56.dp else 68.dp
+    val slotHeight = if (compact) 36.dp else 44.dp
+    val imgSize = if (compact) 44.dp else 54.dp
     Box(
-        modifier = Modifier
-            .size(size)
+        modifier = modifier
+            .size(width = boxWidth, height = slotHeight)
             .testTag("dock_pet_cell")
             .semantics { contentDescription = "问七仔" }
             .clickable {
                 view.tickHaptic()
                 onTap()
             },
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.BottomCenter
     ) {
-        androidx.compose.foundation.Image(
-            painter = androidx.compose.ui.res.painterResource(com.bobot.ailauncher.R.drawable.meteor_wave),
-            contentDescription = null,
-            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-            alignment = Alignment.TopCenter,
-            modifier = Modifier
-                .size(size - 8.dp)
-                .graphicsLayer { scaleX = breatheScale; scaleY = breatheScale }
-        )
-        // 对话泡：头边右上，内「…」——「它在等你说话」
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .clip(RoundedCornerShape(9.dp))
-                .background(AILauncherColors.current.Card.copy(alpha = 0.92f))
-                .padding(horizontal = 5.dp, vertical = 1.dp)
-        ) {
-            Text(
-                text = "…",
-                fontSize = 10.sp,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                color = AILauncherColors.current.Accent
+        // 本体簇：底边与槽位底边齐平（=面板内容顶边），上半身探出槽位
+        // 之上（父级不裁剪，半坐感由此而来）
+        Box(modifier = Modifier.size(imgSize)) {
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(com.bobot.ailauncher.R.drawable.meteor_wave),
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                alignment = Alignment.TopCenter,
+                modifier = Modifier
+                    .size(imgSize - 6.dp)
+                    .align(Alignment.BottomCenter)
+                    .graphicsLayer { scaleX = breatheScale; scaleY = breatheScale }
             )
+            // 对话泡：头边右上，内「…」——「它在等你说话」
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(AILauncherColors.current.Card.copy(alpha = 0.92f))
+                    .padding(horizontal = 5.dp, vertical = 1.dp)
+            ) {
+                Text(
+                    text = "…",
+                    fontSize = 10.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    color = AILauncherColors.current.Accent
+                )
+            }
         }
     }
 }

@@ -100,11 +100,11 @@ fun HomeScreen(
     // v0.68.98（F-06）：Planning 态取消（宿主真取消在途 Job），透传给 IntentEntry
     onIntentCancelPlanning: () -> Unit,
     // v0.68.99（主页重构 R-1）：输入态开关（HomeHost 持有）——静态主页无胶囊；
-    // 点 Dock 七仔格 / 简报讲述者七仔进入，协调器在场状态由 HomeHost 自动带起
+    // 点 Dock 坐姿七仔进入（v0.68.101 起为唯一入口——讲述者七仔已撤），
+    // 协调器在场状态由 HomeHost 自动带起
     intentInputMode: Boolean = false,
     // 进入输入态时是否挂载即聚焦（点入口进入 = true 要打字；自动带起呈现 = false 不弹键盘）
     intentRequestFocus: Boolean = false,
-    onEnterIntentInput: () -> Unit = {},
     onExitIntentInput: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -129,8 +129,17 @@ fun HomeScreen(
     var intentFieldValue by remember {
         mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
     }
-    // 输入态退出判定：聚焦过又失焦、且协调器无在场状态 → 收起（Dock 回位）。
-    // 判定抽纯函数 intentInputShouldExit，状态矩阵有单测锁死。
+    // 输入态退出判定（v0.68.101·D-2 重构，取代「失焦边沿推断 + 4 秒盲
+    // 兜底」）：旧实现把「聚焦过→失焦」当退出信号，真机实证（Bob 录屏
+    // 两幕，缺陷文档 D-2）输入会话在进态约 4~5 秒无故退出/收键盘——
+    // 切 IME 面板、删字期间的瞬时焦点事件在真机 IME 下时序不可靠，任何
+    // 「看焦点猜意图」的推断都会误伤会话。新口径下退出只由用户动作事件
+    // 与协调器状态落定驱动（打字/切面板/删到空都不碰这两条通道）：
+    //  ① 点外：根观察者真实 Press 事件直接回调退出（见根 Box 的
+    //     onOutsideTap，非在场状态时）；② Back（下方 BackHandler）；
+    //  ③ 提交后落定：在场状态退场且未聚焦 → 收起；④ 点本地结果/建议
+    //     应用开 App（IntentEntry 的 onRequestExitInput）；⑤ 开抽屉。
+    // 「曾经聚焦过」锁存只供 ⑥ 滞留兜底，不再直接触发退出。
     var intentHasFocused by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(intentFocused) {
         if (intentFocused) intentHasFocused = true
@@ -138,20 +147,29 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(intentInputMode) {
         if (intentInputMode) intentHasFocused = false
     }
-    androidx.compose.runtime.LaunchedEffect(intentFocused, intentState, intentInputMode) {
-        if (intentInputShouldExit(intentInputMode, intentHasFocused, intentFocused, intentState)) {
+    val intentStateLatest by rememberUpdatedState(intentState)
+    // ③ 状态落定退出（纯函数 intentSettleShouldExit，单测锁死矩阵）
+    var intentPrevHolds by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(intentState, intentFocused, intentInputMode) {
+        val holdsNow = intentStateHoldsInput(intentState)
+        if (intentSettleShouldExit(intentInputMode, intentPrevHolds, holdsNow, intentFocused)) {
             onExitIntentInput()
         }
+        intentPrevHolds = holdsNow
     }
-    // 兜底：进入输入态 4 秒后仍未聚焦且无事发生（极端时序/聚焦请求被吞）
-    // → 自动收起，避免胶囊永久滞留；Back 也可退（见下方 BackHandler）。
-    // 窗口取 4 秒：1.5 秒时慢帧下自动聚焦可能尚未落地，兜底会抢先退出把
-    // 刚进的输入态吞掉（矩阵 dark 腿实测一轮进不去输入态、§9 级联失败）。
-    val intentStateLatest by rememberUpdatedState(intentState)
+    // ⑥ 滞留兜底：进态 2.5 秒后仍「从未聚焦 + 文本为空 + 无在场状态」
+    // 才收起——防聚焦请求被吞后空胶囊永久滞留。真实会话必先聚焦（锁存
+    // 置位）或已有文本，永不误伤；它只收「根本没开始过」的会话，与旧
+    // 4 秒盲兜底的区别正在于三重门槛（旧版单看未聚焦即在会话中误伤）。
+    val intentFieldTextLatest by rememberUpdatedState(intentFieldValue.text)
     androidx.compose.runtime.LaunchedEffect(intentInputMode) {
         if (intentInputMode) {
-            delay(4000)
-            if (!intentHasFocused && !intentStateHoldsInput(intentStateLatest)) {
+            delay(2500)
+            if (intentInputStranded(
+                    intentHasFocused, intentFieldTextLatest.isEmpty(),
+                    intentStateHoldsInput(intentStateLatest)
+                )
+            ) {
                 onExitIntentInput()
             }
         }
@@ -288,6 +306,10 @@ fun HomeScreen(
             }
             // v0.68.93：点意图区外任意处 → 释放焦点 + 收键盘（不消费事件，
             // 拖拽/点按/扇形全部照旧；文本保留不动）
+            // v0.68.101（D-2）：点外同时直接退出输入态（真实用户动作事件，
+            // 取代旧「失焦后由 Effect 推断退出」）——协调器在场状态持有
+            // 输入框时不退（确认/追问/回复呈现中点外只收键盘，用户看完
+            // 还要能接着答；其落定退出走状态通道）。
             .clearIntentFocusOnOutsideTap(
                 focused = { intentFocused },
                 targetBoundsInHost = {
@@ -301,7 +323,12 @@ fun HomeScreen(
                     }
                 },
                 focusManager = focusManager,
-                keyboardController = keyboardController
+                keyboardController = keyboardController,
+                onOutsideTap = {
+                    if (!intentStateHoldsInput(intentStateLatest)) {
+                        onExitIntentInput()
+                    }
+                }
             )
             // v0.68.17：落点跟踪已删除（触发改为"任何左滑"，不再需要真实落点）
             .pointerInput(blindCtl) {
@@ -367,12 +394,10 @@ fun HomeScreen(
             // v0.68.96（F-01 退役）：PetZone 的非封面分支已删除，todayCardAlpha
             // 参数随之移除——该淡出原本只作用于已退役的 TODAY 卡，封面形态从未吃到。
             PetZone(
-                // v0.68.99：点简报讲述者七仔 = 进入输入态（胶囊在简报下方的
-                // 槽位原地展开，Dock 让位）。
-                // 输入态下点它属「点外部」：只保留果冻反馈，不再报入口——否则
-                // 同一手势里 DOWN 的根观察者清焦退出与 UP 的点按重进互相竞态
-                // （冒烟第六轮实测一轮退出被重进吞掉、Dock 不回位）。
-                onPetTap = if (intentInputMode) ({}) else onEnterIntentInput,
+                // v0.68.101（单宠物原则）：讲述者七仔撤出（PetZone 已纯文字
+                // 简报）——进输入的唯一门是 Dock 上沿坐姿七仔；inputActive
+                // 驱动简报紧凑（D-1）与横屏 hero 让位。
+                inputActive = intentInputMode,
                 // v0.68.99（R-1 修订）：输入态填充 PetZone 的 intentSlot（.97
                 // 槽位：hero 与会行之间、横屏左区）——静态时 AnimatedVisibility
                 // 零高度、封面只剩简报+Dock；包裹 Box 捕获意图区范围供 .93
@@ -412,21 +437,32 @@ fun HomeScreen(
                                     intentBoundsInRoot = it.boundsInRoot()
                                 }
                         ) {
-                            IntentEntry(
-                                state = intentState,
-                                onSubmit = onIntentSubmit,
-                                onConfirm = onIntentConfirm,
-                                onDismiss = onIntentDismiss,
-                                onCancelPlanning = onIntentCancelPlanning,
-                                onOpenSettings = onOpenSettings,
-                                onOpenPermissionSettings = { perm ->
-                                    openPermissionSettings(context, perm)
-                                },
-                                onFocusChanged = { intentFocused = it },
-                                fieldValue = intentFieldValue,
-                                onFieldValueChange = { intentFieldValue = it },
-                                requestFocusOnMount = intentRequestFocus
-                            )
+                            // v0.68.101（单宠物原则）：伴随七仔立在胶囊左侧
+                            // （方向二原型站位）——全屏唯一七仔的输入态
+                            // 呈现，反应姿态走 PetRepository 状态机；整行
+                            // 在意图区 bounds 内，点它不触发点外退出。
+                            androidx.compose.foundation.layout.Row(
+                                verticalAlignment = androidx.compose.ui.Alignment.Bottom
+                            ) {
+                                InputPetCompanion()
+                                IntentEntry(
+                                    state = intentState,
+                                    onSubmit = onIntentSubmit,
+                                    onConfirm = onIntentConfirm,
+                                    onDismiss = onIntentDismiss,
+                                    onCancelPlanning = onIntentCancelPlanning,
+                                    onOpenSettings = onOpenSettings,
+                                    onOpenPermissionSettings = { perm ->
+                                        openPermissionSettings(context, perm)
+                                    },
+                                    onFocusChanged = { intentFocused = it },
+                                    fieldValue = intentFieldValue,
+                                    onFieldValueChange = { intentFieldValue = it },
+                                    requestFocusOnMount = intentRequestFocus,
+                                    onRequestExitInput = onExitIntentInput,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
                 }
@@ -547,12 +583,26 @@ internal fun intentStateHoldsInput(
 }
 
 /**
- * v0.68.99：输入态退出判定（纯函数，单测锁死状态矩阵）：输入态中、曾聚焦、
- * 现已失焦、且无在场状态 → 收起输入态，Dock 回位。
+ * v0.68.101（D-2）：状态落定退出（纯函数，单测锁死）：在场状态从持有
+ * 变不持有、且当前未聚焦 → 输入态收起。它是提交后生命周期的收口——
+ * 用户提交后焦点已被释放，回复/确认呈现完自然落定关闭；打字不改变
+ * 协调器状态，IME 焦点抖动无从触发本通道。
  */
-internal fun intentInputShouldExit(
+internal fun intentSettleShouldExit(
     inputMode: Boolean,
+    prevHolds: Boolean,
+    holdsNow: Boolean,
+    focused: Boolean
+): Boolean = inputMode && prevHolds && !holdsNow && !focused
+
+/**
+ * v0.68.101（D-2）：滞留兜底（纯函数，单测锁死）：进态后从未聚焦、
+ * 文本为空、无在场状态——三条全中才判定「会话根本没开始过」，允许
+ * 延迟收起。从未聚焦是进入会话的必经之路（打字前必聚焦），故真实
+ * 会话永不命中；旧 intentInputShouldExit（失焦边沿推断）已删除。
+ */
+internal fun intentInputStranded(
     hasFocused: Boolean,
-    focused: Boolean,
-    state: com.bobot.ailauncher.core.intent.IntentUiState
-): Boolean = inputMode && hasFocused && !focused && !intentStateHoldsInput(state)
+    textEmpty: Boolean,
+    holdsNow: Boolean
+): Boolean = !hasFocused && textEmpty && !holdsNow

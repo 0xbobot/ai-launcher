@@ -374,10 +374,10 @@ private fun HomeHost(
             onIntentConfirm = { req -> intentCoordinator.confirm(req) },
             onIntentDismiss = { intentCoordinator.dismiss() },
             onIntentCancelPlanning = { cancelIntentPlanning() },
-            // v0.68.99（R-1）：输入态（点讲述者七仔进入；退出由 HomeScreen 判定）
+            // v0.68.99（R-1）：输入态（进入 = 点 Dock 坐姿七仔，v0.68.101 起
+            // 为唯一入口——讲述者已撤；退出由 HomeScreen 判定）
             intentInputMode = intentInputMode,
             intentRequestFocus = intentFocusWanted,
-            onEnterIntentInput = { enterIntentInput(focus = true) },
             onExitIntentInput = { intentInputMode = false },
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
