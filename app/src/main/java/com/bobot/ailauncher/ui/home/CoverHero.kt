@@ -61,12 +61,8 @@ fun CoverHero(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
-    modifier: Modifier = Modifier,
-    // v0.68.101（Stage 1 热修·单宠物原则）：输入态紧凑——简报让位给胶囊
-    // 堆栈（D-1：键盘上沿之上要装下胶囊+结果条），各模板收顶距/字号。
-    // v0.68.101 同批：讲述者七仔撤出简报（三模板+横屏全撤）——七仔只留
-    // Dock 上沿坐姿一只，简报回归纯文字排版，讲述口吻只活在文案里。
-    inputCompact: Boolean = false
+    petSlot: @Composable () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     // v0.68.95（F-05）：模板选择也从分钟 ticker 派生——跨午夜模板与日期
     // 同拍翻篇，不再「新模板 + 旧日期」。
@@ -75,12 +71,12 @@ fun CoverHero(
     // v0.68.97（布局普查批）：冒烟几何断言锚点（封面 hero 整体）
     androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier.testTag("cover_hero")) {
         if (maxWidth > maxHeight) {
-            CoverHeroLandscape(summary, weatherDesc, palette, Modifier.fillMaxWidth())
+            CoverHeroLandscape(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
         } else {
             when (coverTemplateFor(nowMillis)) {
-                CoverTemplate.HEADLINE -> CoverHeroHeadline(summary, weatherDesc, palette, Modifier.fillMaxWidth(), inputCompact)
-                CoverTemplate.MINIMAL -> CoverHeroMinimal(summary, weatherDesc, palette, Modifier.fillMaxWidth(), inputCompact)
-                CoverTemplate.GIANT_TIME -> CoverHeroGiantTime(summary, weatherDesc, palette, Modifier.fillMaxWidth(), inputCompact)
+                CoverTemplate.HEADLINE -> CoverHeroHeadline(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
+                CoverTemplate.MINIMAL -> CoverHeroMinimal(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
+                CoverTemplate.GIANT_TIME -> CoverHeroGiantTime(summary, weatherDesc, palette, petSlot, Modifier.fillMaxWidth())
             }
         }
     }
@@ -91,21 +87,21 @@ fun CoverHeroGiantTime(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
-    modifier: Modifier = Modifier,
-    inputCompact: Boolean = false
+    petSlot: @Composable () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     // v0.68.50：响应式——按屏宽缩放，基准 400.dp，小屏不溢出
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = if (inputCompact) 16.dp else 56.dp, start = 28.dp, end = 16.dp)
+            .padding(top = 56.dp, start = 28.dp, end = 16.dp)
     ) {
         val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
-        // v0.68.101：输入态时钟收一档（104→82 基准），给胶囊堆栈让高
-        val timeSize = ((if (inputCompact) 82 else 104) * scale).sp
+        val timeSize = (104 * scale).sp
         val titleSize = (32 * scale).sp  // v0.68.59：字阶收敛 44→32
+        val petTopPad = (190 * scale).dp
         val isLandscape = maxWidth > maxHeight
-        // v0.68.59：横屏双栏——时间左，标题右（v0.68.101 撤七仔后纯文字）
+        // v0.68.59：横屏双栏——时间左，标题/七仔右
     // v0.68.95（F-05）：时间/日期/时段统一从分钟 ticker 派生——此前时钟每
     // 分钟刷新，日期与时段文案却被无 key remember{} 冻结，跨午夜/跨时段
     // 不翻篇（且与每分钟自算的模板选择自相矛盾）。
@@ -240,6 +236,14 @@ fun CoverHeroGiantTime(
                 )
             }
         }
+        // 七仔在右侧（调用方传入 PetView）
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = petTopPad)
+        ) {
+            petSlot()
+        }
     }
     }
 }
@@ -310,8 +314,8 @@ fun CoverHeroHeadline(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
-    modifier: Modifier = Modifier,
-    inputCompact: Boolean = false
+    petSlot: @Composable () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     // v0.68.95（F-05）：时间/日期从分钟 ticker 派生（原各自时钟循环 + 冻结日期）
     val nowMillis by rememberNowMillis()
@@ -321,8 +325,7 @@ fun CoverHeroHeadline(
     val narration = remember(nowMillis) { daypartLine(nowMillis) }
 
     androidx.compose.foundation.layout.BoxWithConstraints(
-        modifier = modifier.fillMaxWidth()
-            .padding(top = if (inputCompact) 16.dp else 56.dp, start = 28.dp, end = 16.dp)
+        modifier = modifier.fillMaxWidth().padding(top = 56.dp, start = 28.dp, end = 16.dp)
     ) {
         val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
         val titleSize = (32 * scale).sp
@@ -345,6 +348,7 @@ fun CoverHeroHeadline(
                     Text(text = narration, fontSize = 15.sp,
                         color = palette.title.copy(alpha = 0.7f))
                 }
+                Box(modifier = Modifier.padding(start = 16.dp)) { petSlot() }
             }
         } else {
             Box(modifier = Modifier.fillMaxWidth()) {
@@ -369,6 +373,8 @@ fun CoverHeroHeadline(
                     Text(text = narration, fontSize = 15.sp,
                         color = palette.title.copy(alpha = 0.7f))
                 }
+                Box(modifier = Modifier.align(Alignment.TopEnd)
+                    .padding(top = (140 * scale).dp)) { petSlot() }
             }
         }
     }
@@ -384,8 +390,8 @@ fun CoverHeroMinimal(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
-    modifier: Modifier = Modifier,
-    inputCompact: Boolean = false
+    petSlot: @Composable () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     // v0.68.95（F-05）：时间从分钟 ticker 派生（原各自时钟循环）
     val nowMillis by rememberNowMillis()
@@ -393,8 +399,7 @@ fun CoverHeroMinimal(
     val dateText = remember(nowMillis) { currentDateText(nowMillis) }
 
     androidx.compose.foundation.layout.BoxWithConstraints(
-        modifier = modifier.fillMaxWidth()
-            .padding(top = if (inputCompact) 20.dp else 80.dp, start = 28.dp, end = 28.dp)
+        modifier = modifier.fillMaxWidth().padding(top = 80.dp, start = 28.dp, end = 28.dp)
     ) {
         val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
         // v0.68.99：时钟行 64sp（原 104sp 巨像收编——简报句才是 MINIMAL 的锚点）
@@ -429,20 +434,23 @@ fun CoverHeroMinimal(
             // 日期 · 天气副行
             Text(text = "$dateText · $weatherDesc", fontSize = 14.sp,
                 color = palette.title.copy(alpha = 0.6f))
-            // v0.68.101：讲述者七仔撤出——MINIMAL 以日期副行收尾（纯文字）
+            Spacer(modifier = Modifier.height(32.dp))
+            // 七仔居中
+            petSlot()
         }
     }
 }
 
 /**
  * v0.68.60（Bob）：横屏统一紧凑布局——横排，不跟 Dock 抢竖向空间。
- * 左：日期刊头 + 时间（64.sp）+ 标题 + 天气（v0.68.101 撤七仔后纯文字）。
+ * 左：日期刊头 + 时间（64.sp）+ 标题 + 天气；右：七仔。
  */
 @Composable
 fun CoverHeroLandscape(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
+    petSlot: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // v0.68.95（F-05）：时间/日期从分钟 ticker 派生（原各自时钟循环 + 冻结日期）
@@ -491,6 +499,9 @@ fun CoverHeroLandscape(
                 fontSize = 14.sp,
                 color = palette.title.copy(alpha = 0.6f)
             )
+        }
+        Box(modifier = Modifier.padding(start = 24.dp)) {
+            petSlot()
         }
     }
 }

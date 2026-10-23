@@ -394,10 +394,8 @@ fun HomeScreen(
             // v0.68.96（F-01 退役）：PetZone 的非封面分支已删除，todayCardAlpha
             // 参数随之移除——该淡出原本只作用于已退役的 TODAY 卡，封面形态从未吃到。
             PetZone(
-                // v0.68.101（单宠物原则）：讲述者七仔撤出（PetZone 已纯文字
-                // 简报）——进输入的唯一门是 Dock 上沿坐姿七仔；inputActive
-                // 驱动简报紧凑（D-1）与横屏 hero 让位。
-                inputActive = intentInputMode,
+                // PROBE-freeze-pz 垫片：PetZone 回退 .100 签名（无 inputActive），
+                // 其余保持候选树，单变量验证冻结源是否在 PetZone/CoverHero。
                 // v0.68.99（R-1 修订）：输入态填充 PetZone 的 intentSlot（.97
                 // 槽位：hero 与会行之间、横屏左区）——静态时 AnimatedVisibility
                 // 零高度、封面只剩简报+Dock；包裹 Box 捕获意图区范围供 .93

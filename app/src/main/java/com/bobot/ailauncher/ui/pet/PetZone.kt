@@ -77,13 +77,12 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PetZone(
-    // v0.68.101（Stage 1 热修·单宠物原则，Bob 08:08 拍板）：讲述者七仔
-    // 撤出简报——七仔只留 Dock 上沿坐姿一只（静态）与输入态胶囊旁的反应体
-    // （HomeScreen 的 InputPetCompanion），简报回归纯文字。原 hasUpgrade /
-    // onUpgradeTap / onPetTap 随讲述者退役（hasUpgrade 从未有调用方传入，
-    // 升级提醒走更新流的既有通道；进输入的唯一门是 Dock 坐姿七仔）。
-    // 输入态标记：驱动简报紧凑（D-1）与横屏 hero 让位。
-    inputActive: Boolean = false,
+    // v0.29.0：升级提醒宠物化
+    hasUpgrade: Boolean = false,
+    onUpgradeTap: () -> Unit = {},
+    // v0.68.99（主页重构 R-1）：点简报旁的讲述者七仔 = 进入输入态（底部原地
+    // 切换出胶囊，Dock 让位）。
+    onPetTap: () -> Unit = {},
     // v0.68.99（R-1 修订）：输入态胶囊槽——恢复 .97 的 coverIntentSlot 位置
     // （hero 与会行之间，横屏收进 coverLeftFrac 左区）：静态时槽内容零高度、
     // 构图与无槽一致；输入态由 HomeScreen 填充 IntentEntry。早先的底部浮层
@@ -91,15 +90,24 @@ fun PetZone(
     // 布局分区天然不重叠，且与 .97 几何基线同构。
     intentSlot: @Composable () -> Unit = {}
 ) {
+    val mood by PetRepository.mood.collectAsState()
+    // R3-C：意图反应姿态覆盖（对话感）——非空时优先于整理员 mood 渲染，通知流程不受影响
+    val intentPose by PetRepository.intentPose.collectAsState()
+    val intentThinking by PetRepository.intentThinking.collectAsState()
+    val displayMood = intentPose ?: mood
+    val mouth by PetRepository.mouth.collectAsState()
+    // v0.19：语义状态——SLEEPY 时眼睛保持闭合（夜晚睡觉）
+    val petState by PetRepository.petState.collectAsState()
     // v0.29.0：新通知送达
     val deliverTick by PetRepository.deliverTick.collectAsState()
     val deliverApp by PetRepository.deliverApp.collectAsState()
-    // v0.51.0：新通知 → 七仔开口（徽标已删，消息统一进 Today 数据管线）
+    // v0.43.0：七仔场景演示——新通知到达自动进 READING 等
+    var demoScene by remember { mutableStateOf(QizaiScene.NONE) }
+    // v0.51.0：新通知 → 七仔看手机 + 开口（徽标已删，消息统一进 Today 数据管线）
     // v0.56.0 M3：改用 sayApp（同一应用 30 秒合并 + 深夜/手势中降级）
-    // v0.68.101：原「看手机」场景演示随讲述者七仔退役，开口状态保留
-    // （PetRepository 语音状态机不动，其他呈现面可继续消费）。
     LaunchedEffect(deliverTick) {
         if (deliverTick > 0) {
+            demoScene = QizaiScene.READING // 新通知 → 七仔拿起手机看
             // 七仔开口——只报应用名，不念内容（守门人分寸）
             deliverApp?.let { app ->
                 PetRepository.sayApp(app)
@@ -150,14 +158,14 @@ fun PetZone(
         val wasBad = old != null && isBadWeather(old)
         val isBad = isBadWeather(desc)
         val isGood = isGoodWeather(desc)
-        // v0.68.101：天气场景演示（下雨/天晴姿态）随讲述者七仔退役，
-        // 开口提醒保留（语音状态机，其他呈现面可消费）。
         when {
             old != null && !wasBad && isBad -> {
+                demoScene = QizaiScene.WEATHER_RAIN // 转坏：下雨了
                 PetRepository.say("下雨啦，出门记得带伞！")
                 weatherTriggersToday++
             }
             old != null && wasBad && isGood -> {
+                demoScene = QizaiScene.WEATHER_SUN // 转好：雨停天晴
                 PetRepository.say("雨停啦，太阳出来了！")
                 weatherTriggersToday++
             }
@@ -181,22 +189,26 @@ fun PetZone(
     }
 
     // 早晨简报：6-10 点首次进入播一次今日天气
-    // v0.68.101：原挥手场景演示随讲述者七仔退役，只保留天气播报本身
+    // v0.56.0 M4：先挥手打招呼（WAVE），再播天气
     LaunchedEffect(Unit) {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val today = todayStr()
         if (hour in 6..10 && morningBriefedDate != today) {
             morningBriefedDate = today
+            demoScene = QizaiScene.WAVE // 伸懒腰+挥手打招呼
+            delay(2600) // 等挥手播完
             val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
             if (w != null) {
                 lastWeatherDesc = w.desc
                 lastWeatherFetchMs = System.currentTimeMillis() // v0.67.6：计入 TTL，避免重复请求
                 weatherInitDone = true
                 WeatherState.updateFull(w)
+                demoScene = weatherSceneFor(w.desc)
                 PetRepository.say("早上好！今天${w.desc}，${w.temp}°")
             }
         }
     }
+    var blinking by remember { mutableStateOf(false) }
     val context = LocalContext.current
     // v0.67.6：删除 15 分钟日程轮询（省电原则）
     // 改为一次性任务：TodaySection 数据管线的会议提醒调度（开会前 30/15 分钟
@@ -213,15 +225,19 @@ fun PetZone(
         val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
             .format(Date(e.begin))
         val title = e.title.ifBlank { "（无标题）" }
-        // 七仔开口（v0.68.101：看日程场景随讲述者七仔退役）
+        // 七仔开口 + 看日程场景
         PetRepository.say("$timeStr 有日程：$title")
+        demoScene = QizaiScene.READING
         // v0.51.2：日历只走 TODAY，不再走整理员（避免多重重复）
     }
     // 封面紧凑条点按（文案承诺"点一下加入"，必须真入会/打开日程，不能只提醒）：
     // 实现已抽为文件级 joinCalendarEvent（意图入口建议面的会议行共用同一条入会
     // 路径，三级路径说明见该函数）；不走 remindMeeting 的去重（点按每次都要有结果）。
     fun joinMeeting(e: CalEvent) = joinCalendarEvent(context, e)
-    // v0.68.101：点按果冻随讲述者七仔退役（jellyTick 删除）
+    // v0.25.6 P0：点按果冻（纯视觉反馈，Bob 拍板）
+    var jellyTick by remember { mutableIntStateOf(0) }
+
+    // v0.56.0 M1：眨眼已移入 PetView（8 秒 ± 3 秒随机），此处删除旧定时器
 
     // v0.68.44：封面模式状态（hero 标题/下个会议）
     var coverSummary by remember { mutableStateOf("难得清闲") }
@@ -268,46 +284,74 @@ fun PetZone(
         // 恒为 Dock 面板区（D1 面板实测宽 312dp＝4×56 图标+间距+内距，D2 网格
         // 270dp 更窄；加右侧间隙约 28dp 与安全余量），左区内容右缘对齐、
         // 永不与面板相交（矩阵横屏腿几何断言常驻回归）。竖屏 frac=1，构图不变。
-        // v0.68.99（R-1）：D1 面板因七仔格变宽，预留曾放到 432；
-        // v0.68.101：行内格移除（七仔改坐面板上沿，不占行宽），D1 面板
-        // 回到 4 应用位 ≈312dp，预留回 360（312 + 约 48 间隙，.97 同量级）。
+        // v0.68.99（R-1）：D1 面板因七仔格变宽（+格 56 +间距 14 ≈ 382dp），
+        // 预留随之 360→432（382 + 约 50dp 间隙，与 .97 的实际间隙同量级）；
+        // 分区内只剩简报会行（胶囊已撤静态、NextUp 已退役）。
         val coverLeftFrac = if (isLandscapeCover) {
-            ((maxWidth - 360.dp) / maxWidth).coerceIn(0.5f, 0.72f)
+            ((maxWidth - 432.dp) / maxWidth).coerceIn(0.5f, 0.72f)
         } else {
             1f
         }
-        // v0.68.101（D-4）：简报罩纱——原全屏渐变（MainScreen 0.75→0.45）
-        // 到会议行高度只剩弱洗底，金色眉题压在繁忙壁纸上对比不足。本层
-        // 渐变衬底跟随简报内容（hero+槽位+会行）延伸：上部轻洗不抢简报
-        // 的通透、中下部持平浓度托住会议行、到会行下缘之下再渐隐收尾。
-        // 纯渐变无边框无圆角——不做成卡片、不复活 NextUp 卡形态。
-        androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxWidth()) {
-            val scrimColor = AILauncherColors.current.Background
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        androidx.compose.ui.graphics.Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0.0f to scrimColor.copy(alpha = 0.22f),
-                                0.55f to scrimColor.copy(alpha = 0.46f),
-                                0.86f to scrimColor.copy(alpha = 0.46f),
-                                1.0f to scrimColor.copy(alpha = 0.0f)
+        Column(modifier = Modifier.fillMaxWidth()) {
+        CoverHero(
+            summary = coverSummary,
+            weatherDesc = weatherDesc ?: "",
+            palette = coverPalette,
+            petSlot = {
+                Box(
+                    modifier = Modifier.size(120.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // 七仔本体（可点）
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            // 体检批D ⑥：冒烟语义定位锚点（七仔本体，封面形态）
+                            .testTag("pet_qizai")
+                            .combinedClickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() },
+                                onClick = {
+                                    // v0.68.99（主页重构 R-1）：点讲述者七仔 = 进入
+                                    // 输入态（果冻反馈保留）；升级提醒仍优先。
+                                    // 原 .79「只做果冻+开心表情」被本批入口职责取代。
+                                    if (hasUpgrade) onUpgradeTap()
+                                    else {
+                                        jellyTick++
+                                        onPetTap()
+                                    }
+                                }
                             )
+                    ) {
+                        PetView(
+                            mood = displayMood,
+                            mouth = mouth,
+                            blinking = blinking,
+                            sleepy = petState == PetState.SLEEPY,
+                            jellyTick = jellyTick,
+                            scene = demoScene,
+                            onSceneDone = { demoScene = QizaiScene.NONE },
+                            modifier = Modifier.fillMaxSize()
                         )
-                    )
-            )
-            Column(modifier = Modifier.fillMaxWidth()) {
-        // v0.68.101（D-1）：横屏输入态 hero 整体让位——横屏 IME 抬升后
-        // 可用高度只剩约四成，左区只装胶囊堆栈；竖屏走各模板 inputCompact。
-        if (!(isLandscapeCover && inputActive)) {
-            CoverHero(
-                summary = coverSummary,
-                weatherDesc = weatherDesc ?: "",
-                palette = coverPalette,
-                inputCompact = inputActive
-            )
-        }
+                    }
+                    // R3-C：意图思考态——七仔头顶冒思考点点（深色小药丸保底，
+                    // 任何封面底色上都看得清；与非封面模式的 ThinkDots 同一语言）
+                    if (intentThinking) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .background(
+                                    Color(0xFF141428).copy(alpha = 0.72f),
+                                    RoundedCornerShape(99.dp)
+                                )
+                                .padding(horizontal = 10.dp, vertical = 7.dp)
+                        ) {
+                            ThinkDots()
+                        }
+                    }
+                }
+            }
+        )
         // v0.68.99（R-1 修订）：输入态胶囊槽（.97 位置：hero 与会行之间；
         // 横屏只占左侧区，右端不滑入面板下——.97 原注）
         if (isLandscapeCover) {
@@ -330,10 +374,7 @@ fun PetZone(
                 modifier = Modifier.fillMaxWidth(coverLeftFrac)
             )
         }
-        // 罩纱尾巴：会行（或简报末尾）之下留一段渐隐距离，衬底在此收尾
-        Spacer(modifier = Modifier.height(26.dp))
-            }  // Column 结束
-        }  // 罩纱 Box 结束
+        }  // Column 结束
     }  // v0.68.74：BoxWithConstraints 结束
     // 数据源：只跑 effect、上报，不渲染（TodaySection 数据管线）
     TodaySection(
@@ -343,7 +384,7 @@ fun PetZone(
     )
 }
 
-/** 思考中的三个跳动点（v0.68.101：放开给输入态伴随七仔共用同一语言） */
+/** 思考中的三个跳动点 */
 @Composable
 internal fun ThinkDots(modifier: Modifier = Modifier) {
     // R3-D：系统减动效时三点静止（只表"思考中"，不跳动）
@@ -424,37 +465,12 @@ private fun extractMeetingUrl(event: CalEvent): String? {
 }
 
 /**
- * v0.68.101（D-5）：入会防多发守卫（纯逻辑，单测锁死）——同一事件在
- * 窗口内重复触发（连点/重组竞态）只放行第一次。真机录屏里「加入」后
- * 浏览器与主页来回闪烁，代码侧先把「本应用多次发放意图」这一路堵死：
- * joinCalendarEvent 本身是命令式一次性链（无 Effect 重触发、无重试
- * 循环），守卫再兜住手速连点与任何未来的重复调用点。
- */
-internal class JoinGuard(private val windowMs: Long = 2_000L) {
-    private var lastKey: String? = null
-    private var lastMs: Long = Long.MIN_VALUE
-
-    @Synchronized
-    fun shouldFire(key: String, nowMs: Long): Boolean {
-        if (key == lastKey && nowMs - lastMs < windowMs) return false
-        lastKey = key
-        lastMs = nowMs
-        return true
-    }
-}
-
-private val joinGuard = JoinGuard()
-
-/**
  * 点按入会（封面紧凑条与意图入口建议面的会议行共用同一条路径，2026-10-21 抽出）：
  * 1) 事件里有可解析的在线会议链接 → 直开链接（会议 App/浏览器接管）；
  * 2) 无链接 → 打开日历 App / 事件详情（三级兜底，与非封面 TODAY 会议行同款）；
  * 3) 全失败 → 七仔说话兜底，绝不无反应。
  */
 fun joinCalendarEvent(context: android.content.Context, e: CalEvent) {
-    // D-5：窗口内重复触发直接吞掉（见 JoinGuard）
-    val joinKey = "${e.eventId}|${extractMeetingUrl(e) ?: ""}"
-    if (!joinGuard.shouldFire(joinKey, System.currentTimeMillis())) return
     val url = getValidMeetingUrl(context, e)
     if (url != null) {
         try {
