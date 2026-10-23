@@ -38,7 +38,15 @@
 # v0.68.100（卫生批）追加：第 24 段为崩溃本地日志（crash-log-written /
 # crash-log-content / crash-relaunch-alive：debug 专用 intent extra 触发一次
 # 真崩溃 -> files/crashes 落盘且含异常首行 -> 正常重启存活不进崩溃循环）。
-# 本段故意产生 FATAL，必须排在第 23 段 no-fatal-crash 之后。形态 env 追加 SMOKE_WM_SIZE /
+# 本段故意产生 FATAL，必须排在第 23 段 no-fatal-crash 之后。
+# 并行线 B（密钥存储迁移）追加：第 25 段为真 fixture 迁移验证
+# （keystore-fixture-old-encrypted / keystore-fixture-upgrade-install /
+# keystore-migration-value-match / keystore-migration-new-format /
+# keystore-migration-legacy-removed）：下载已发布 v0.68.100 包（同固定签名），
+# 在旧版里走真实设置 UI 把假 Key 存进 alpha06 加密层，再覆盖装新版，
+# 断言发往 mock 的 Authorization 与旧版写入逐字一致、新格式密文落盘、
+# 删旧格式文件后仍可读。旧包下载不到 = 环境问题整段跳过不计 FAIL；
+# 形态覆写腿（横屏/平板/大字体）设置 UI 布局不同，整段跳过。形态 env 追加 SMOKE_WM_SIZE /
 # SMOKE_USER_ROTATION：第 0 段几何读取前覆写显示尺寸与旋转锁定（矩阵的
 # 横屏手机短高、平板竖屏腿用），不带 env 时行为不变。
 # 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
@@ -2302,6 +2310,173 @@ else
   ng "crash-relaunch-alive"
 fi
 shot "crash-after-relaunch"
+
+# --- 25. 密钥存储迁移 fixture（并行线 B）：旧版 alpha06 写入的 Key，升级后原样读出 ---
+# 流程见文件头第 25 段说明。假 Key 只含字母数字与连字符（input text 不转义）。
+KS_KEY="sk-fixture-mig7"
+KS_OLD_APK="$OUT/old-v0.68.100.apk"
+KS_PORT=18743
+KS_LOG="$OUT/mock_keystore_requests.log"
+KS_SKIP=0
+if [ -n "$SMOKE_WM_SIZE" ] || [ -n "$SMOKE_USER_ROTATION" ] || \
+   { [ -n "$SMOKE_FONT_SCALE" ] && [ "$SMOKE_FONT_SCALE" != "1.0" ]; }; then
+  KS_SKIP=1
+fi
+ks_dump() {
+  adb shell uiautomator dump "/sdcard/$1.xml" > /dev/null 2>&1 || true
+  adb pull "/sdcard/$1.xml" "$OUT/$1.xml" > /dev/null 2>&1 || true
+  redump_if_empty "$1"
+}
+ks_tap_text() { # $1=已拉取的 dump 基名 $2=节点 text 原文；命中点按返回 0
+  local NODE NUMS X1 Y1 X2 Y2
+  NODE=$(grep -o "<node[^>]*text=\"$2\"[^>]*>" "$OUT/$1.xml" 2> /dev/null | head -1)
+  [ -n "$NODE" ] || return 1
+  NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+  X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+  [ -n "$X1" ] && [ -n "$Y2" ] || return 1
+  adb shell input swipe $(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) \
+    $(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) 150 || true
+  return 0
+}
+ks_open_settings_expand() { # 前置：本 App 主页在前台；成功后 ks_set.xml 为展开态 dump
+  adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+  sleep 3
+  ks_dump ks_ac
+  local CTR=$(center_rid "$OUT/ks_ac.xml" "appcenter_settings")
+  if [ -n "$CTR" ]; then
+    adb shell input swipe $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) \
+      $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) 150 || true
+  else
+    adb shell input swipe "$(SX 985)" "$(SY 505)" "$(SX 985)" "$(SY 505)" 150 || true
+  fi
+  sleep 3
+  ks_dump ks_set
+  grep -q "让七仔更聪明" "$OUT/ks_set.xml" 2> /dev/null || return 1
+  ks_tap_text ks_set "让七仔更聪明" || return 1
+  sleep 2
+  ks_dump ks_set
+  return 0
+}
+if [ "$KS_SKIP" = "1" ]; then
+  log "keystore-fixture: skipped on form-factor leg (not counted)"
+elif ! curl -sL --max-time 120 -o "$KS_OLD_APK" \
+    "https://github.com/0xbobot/ai-launcher/releases/download/v0.68.100/ai-launcher-v0.68.100.apk" \
+    || [ ! -s "$KS_OLD_APK" ]; then
+  log "keystore-fixture: old apk download failed - segment skipped (not counted)"
+else
+  KS_OK=1
+  if adb install -r -d -g "$KS_OLD_APK" > /dev/null 2>&1; then
+    log "keystore-fixture: old v0.68.100 installed"
+  else
+    ng "keystore-fixture-old-encrypted"
+    KS_OK=0
+  fi
+  if [ "$KS_OK" = "1" ]; then
+    adb shell pm clear "$PKG" > /dev/null 2>&1 || true
+    # 跳过引导：复用第 2 段已生成的 ai_launcher.xml（本地 $OUT 与 /data/local/tmp 各有一份）
+    adb shell "run-as $PKG mkdir -p shared_prefs" || true
+    adb shell "run-as $PKG cp /data/local/tmp/ai_launcher.xml shared_prefs/ai_launcher.xml" || true
+    adb shell "run-as $PKG chmod 660 shared_prefs/ai_launcher.xml" || true
+    adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+    sleep 5
+    if ks_open_settings_expand; then
+      # 展开后第一个 EditText = 大模型 Key 框（字段序：Key / 接口地址 / 模型）
+      ENODE=$(grep -o '<node[^>]*class="android.widget.EditText"[^>]*>' "$OUT/ks_set.xml" | head -1)
+      ENUMS=$(echo "$ENODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+      EX1=$(echo "$ENUMS" | sed -n 1p); EY1=$(echo "$ENUMS" | sed -n 2p)
+      EX2=$(echo "$ENUMS" | sed -n 3p); EY2=$(echo "$ENUMS" | sed -n 4p)
+      if [ -n "$EX1" ] && [ -n "$EY2" ]; then
+        adb shell input swipe $(( (EX1 + EX2) / 2 )) $(( (EY1 + EY2) / 2 )) \
+          $(( (EX1 + EX2) / 2 )) $(( (EY1 + EY2) / 2 )) 150 || true
+        sleep 1
+        adb shell input text "$KS_KEY" || true
+        sleep 2
+      fi
+      ks_dump ks_old_saved
+      # fixture 成立 = 旧版状态行报「已加密」且 llm_secure.xml 真在场
+      if grep -q "已加密存储在本机" "$OUT/ks_old_saved.xml" 2> /dev/null && \
+         adb shell "run-as $PKG ls shared_prefs" 2> /dev/null | tr -d '\r' | grep -q "llm_secure.xml"; then
+        ok "keystore-fixture-old-encrypted"
+      else
+        ng "keystore-fixture-old-encrypted"
+        KS_OK=0
+      fi
+    else
+      ng "keystore-fixture-old-encrypted"
+      KS_OK=0
+    fi
+    adb shell input keyevent KEYCODE_BACK || true
+    sleep 1
+  fi
+  if [ "$KS_OK" = "1" ]; then
+    KS_MOCK_UP=0
+    KS_PID=""
+    if command -v python3 > /dev/null 2>&1; then
+      rm -f "$KS_LOG"
+      python3 scripts/mock_llm.py "$KS_PORT" "$KS_LOG" &
+      KS_PID=$!
+      for i in $(seq 1 20); do
+        if curl -s "http://127.0.0.1:$KS_PORT/health" 2> /dev/null | grep -q ok; then
+          KS_MOCK_UP=1; break
+        fi
+        sleep 0.5
+      done
+    fi
+    if [ "$KS_MOCK_UP" != "1" ]; then
+      log "keystore-fixture: mock unavailable - remaining checks skipped (not counted)"
+    else
+      adb reverse "tcp:$KS_PORT" "tcp:$KS_PORT" > /dev/null 2>&1 || true
+      adb shell am force-stop "$PKG" || true
+      # 只预写 base_url/model——api_key 不许出现，Key 只能由迁移从旧加密层带出
+      printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
+        "    <string name=\"base_url\">http://127.0.0.1:$KS_PORT</string>" \
+        '    <string name="model">mock-model</string>' "</map>" > "$OUT/llm_ks.xml"
+      adb push "$OUT/llm_ks.xml" /data/local/tmp/llm_ks.xml > /dev/null 2>&1 || true
+      adb shell "run-as $PKG cp /data/local/tmp/llm_ks.xml shared_prefs/llm.xml" || true
+      adb shell "run-as $PKG chmod 660 shared_prefs/llm.xml" || true
+      if adb install -r -g "$APK" > /dev/null 2>&1; then
+        ok "keystore-fixture-upgrade-install"
+      else
+        ng "keystore-fixture-upgrade-install"
+      fi
+      adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+      sleep 5
+      # 值一致：提交一句意图，mock 收到的 Authorization 必须逐字等于 fixture Key
+      if enter_input_mode "$OUT/ks_in.xml" && ni_type_submit "daohang"; then
+        KS_FOUND=0
+        for i in $(seq 1 15); do
+          if grep -q "^AUTH: Bearer $KS_KEY\$" "$KS_LOG" 2> /dev/null; then KS_FOUND=1; break; fi
+          sleep 1
+        done
+        if [ "$KS_FOUND" = "1" ]; then ok "keystore-migration-value-match"; else ng "keystore-migration-value-match"; fi
+      else
+        ng "keystore-migration-value-match"
+      fi
+      shot "keystore-migrated"
+      # 新格式落盘：llm_keystore.xml 含 v1: 密文且通篇不含 Key 明文
+      KS_NEWXML=$(adb shell "run-as $PKG cat shared_prefs/llm_keystore.xml" 2> /dev/null | tr -d '\r')
+      if echo "$KS_NEWXML" | grep -q "v1:" && ! echo "$KS_NEWXML" | grep -q "$KS_KEY"; then
+        ok "keystore-migration-new-format"
+      else
+        ng "keystore-migration-new-format"
+      fi
+      # 删掉旧格式文件后重启：设置页状态行仍报「已加密」——读路径已不依赖旧格式
+      adb shell am force-stop "$PKG" || true
+      adb shell "run-as $PKG rm -f shared_prefs/llm_secure.xml" || true
+      adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+      sleep 5
+      if ks_open_settings_expand && grep -q "已加密存储在本机" "$OUT/ks_set.xml" 2> /dev/null; then
+        ok "keystore-migration-legacy-removed"
+      else
+        ng "keystore-migration-legacy-removed"
+      fi
+      adb shell input keyevent KEYCODE_BACK || true
+      adb reverse --remove "tcp:$KS_PORT" > /dev/null 2>&1 || true
+      [ -n "$KS_PID" ] && kill "$KS_PID" > /dev/null 2>&1 || true
+    fi
+  fi
+fi
 
 log "RESULT pass=$PASS fail=$FAIL"
 exit "$FAIL"

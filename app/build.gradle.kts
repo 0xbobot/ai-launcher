@@ -109,7 +109,10 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.squareup.okhttp)
-    // v0.68.89：API Key 加密存储（EncryptedSharedPreferences）
+    // v0.68.89：API Key 加密存储（EncryptedSharedPreferences）。
+    // 并行线 B 起 Key 改存 Android Keystore AES/GCM 直连实现（零三方依赖），
+    // 本依赖仅保留供一次性迁移读取 alpha06 旧格式数据；迁移随版本铺满后的
+    // 下一批连同 LlmConfig.securePrefs 一起移除（本批不许删，删了旧 Key 读不出）。
     implementation(libs.androidx.security.crypto)
     // R2：IntentCoordinator 纯逻辑单测（JVM，不走 Android 运行时）
     testImplementation(libs.junit)

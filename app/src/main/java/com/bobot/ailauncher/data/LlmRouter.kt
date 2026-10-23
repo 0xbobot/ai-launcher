@@ -30,12 +30,16 @@ sealed interface LlmCallResult {
 
 /**
  * 大模型配置：base_url / model 存 SharedPreferences "llm"；
- * api_key 自 v0.68.89 起存 EncryptedSharedPreferences "llm_secure"，
- * 旧明文 Key 首次读取时自动迁移（迁移逻辑见 [LlmKeyStore]，失败回退明文不丢 Key）。
+ * api_key 自 v0.68.89 起加密存储，旧明文 Key 首次读取时自动迁移
+ * （迁移逻辑见 [LlmKeyStore]，失败回退明文不丢 Key）。
+ * 加密层实现（并行线 B）：v0.68.89–.100 为 EncryptedSharedPreferences
+ * "llm_secure"（security-crypto alpha06）；现行 = [secureStore] 的
+ * Android Keystore AES/GCM 直连实现，旧格式仅供一次性迁移读取。
  */
 object LlmConfig {
     private const val PREFS = "llm"
     private const val SECURE_PREFS = "llm_secure"
+    private const val KEYSTORE_PREFS = "llm_keystore"
     const val DEFAULT_BASE_URL = "https://api.deepseek.com"
     const val DEFAULT_MODEL = "deepseek-flash"
 
@@ -45,7 +49,12 @@ object LlmConfig {
     @Volatile
     private var securePrefsCache: SharedPreferences? = null
 
-    /** 加密存储；初始化失败（Keystore 异常等）返回 null，调用方回退明文路径 */
+    /**
+     * 旧 alpha06 加密层（"llm_secure"）；初始化失败（Keystore 异常等）返回 null。
+     * 并行线 B 起**仅供** [MigratingSecureStore] 一次性迁移读取，新写入一律走
+     * [secureStore]；迁移随版本铺满后的下一批，连同本函数与 security-crypto
+     * 依赖一起删除（本批保留依赖就是为了读它）。
+     */
     private fun securePrefs(context: Context): SharedPreferences? {
         securePrefsCache?.let { return it }
         val created = runCatching {
@@ -76,10 +85,54 @@ object LlmConfig {
             }
         }
 
+    private const val KEY_MIG_FAIL_LOGGED = "keystore_mig_fail_logged"
+
+    @Volatile
+    private var secureStoreCache: LlmKeyStore.Store? = null
+
+    /**
+     * 现行加密层（并行线 B）：[KeystoreCipherStore]（Android Keystore
+     * AES/GCM 直连、零三方依赖）外包 [MigratingSecureStore]，把旧格式里的
+     * Key 一次性迁入新格式；[LlmKeyStore] 的读/写/probe 逻辑零改，仍以
+     * 本组合为「加密层」。Keystore 不可用时其读写抛异常 → LlmKeyStore 按
+     * 既有契约回退明文、设置页明示（v0.68.100 行为，不静默）。
+     * 迁移事件只记事件名进诊断日志（绝不带 Key 本身），失败只记一次。
+     */
+    private fun secureStore(context: Context): LlmKeyStore.Store {
+        secureStoreCache?.let { return it }
+        val appContext = context.applicationContext
+        val created = MigratingSecureStore(
+            newStore = KeystoreCipherStore(
+                appContext.getSharedPreferences(KEYSTORE_PREFS, Context.MODE_PRIVATE),
+                AesGcmBox { AndroidKeystoreKeys.loadOrCreate() }
+            ),
+            legacyStore = securePrefs(appContext)?.asStore(),
+            onMigrated = {
+                prefs(appContext).edit().remove(KEY_MIG_FAIL_LOGGED).apply()
+                CrashLog.diag(
+                    appContext,
+                    "keystore_migrated: api key moved to android-keystore aes-gcm store"
+                )
+            },
+            onMigrationFailed = {
+                val p = prefs(appContext)
+                if (!p.getBoolean(KEY_MIG_FAIL_LOGGED, false)) {
+                    p.edit().putBoolean(KEY_MIG_FAIL_LOGGED, true).apply()
+                    CrashLog.diag(
+                        appContext,
+                        "keystore_migration_failed: legacy key kept in place, will retry"
+                    )
+                }
+            }
+        )
+        secureStoreCache = created
+        return created
+    }
+
     fun getApiKey(context: Context): String {
         val key = LlmKeyStore.readApiKey(
             prefs(context).asStore(),
-            securePrefs(context)?.asStore()
+            secureStore(context)
         )
         // v0.68.100（卫生批）：顺手做一次存放形态记账——降级/恢复的时点
         // 不能只靠用户打开设置页才发现，诊断日志要在事件发生时就留行
@@ -103,7 +156,7 @@ object LlmConfig {
     fun keyStorageStatus(context: Context): KeyStorageStatus {
         val mode = LlmKeyStore.probeMode(
             prefs(context).asStore(),
-            securePrefs(context)?.asStore()
+            secureStore(context)
         )
         val p = prefs(context)
         var since = p.getLong(KEY_FALLBACK_SINCE, 0L)
@@ -138,7 +191,7 @@ object LlmConfig {
         val plain = prefs(context)
         LlmKeyStore.writeApiKey(
             plain.asStore(),
-            securePrefs(context)?.asStore(),
+            secureStore(context),
             apiKey.trim()
         )
         plain.edit()
