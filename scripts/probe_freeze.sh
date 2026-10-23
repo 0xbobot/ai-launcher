@@ -109,8 +109,8 @@ death_watch() {
 local L="$1" i
 for i in $(seq 1 15); do
 sleep 1
-if! devok; then log "$L: device lost at +${i}s"; return 1; fi
-if [ -z "$(curpid)"]; then log "$L: app pid gone at +${i}s (device alive)"; return 2; fi
+if ! devok; then log "$L: device lost at +${i}s"; return 1; fi
+if [ -z "$(curpid)" ]; then log "$L: app pid gone at +${i}s (device alive)"; return 2; fi
 done
 log "$L: alive through +15s"
 return 0
