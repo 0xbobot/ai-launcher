@@ -84,6 +84,23 @@ class MigratingSecureStoreTest {
     }
 
     @Test
+    fun `migration failure callback receives the thrown exception for diagnosis`() {
+        val brokenNew = FakeStore(failWrite = true)
+        val legacy = FakeStore(mapOf(LlmKeyStore.KEY_API to "sk-keepme"))
+        var seen: Throwable? = null
+        var called = false
+        val store = MigratingSecureStore(
+            brokenNew, legacy,
+            onMigrationFailed = { t -> called = true; seen = t }
+        )
+        assertEquals("sk-keepme", store.read(LlmKeyStore.KEY_API))
+        assertTrue(called)
+        // 诊断只许用类名：回调必须拿到真异常，而不是被吞成一个布尔
+        assertTrue(seen is RuntimeException)
+        assertEquals("keystore broken", seen!!.message)
+    }
+
+    @Test
     fun `new store value wins over stale legacy value`() {
         val newStore = FakeStore(mapOf(LlmKeyStore.KEY_API to "sk-new"))
         val legacy = FakeStore(mapOf(LlmKeyStore.KEY_API to "sk-old"))

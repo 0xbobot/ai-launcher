@@ -96,7 +96,8 @@ object LlmConfig {
      * Key 一次性迁入新格式；[LlmKeyStore] 的读/写/probe 逻辑零改，仍以
      * 本组合为「加密层」。Keystore 不可用时其读写抛异常 → LlmKeyStore 按
      * 既有契约回退明文、设置页明示（v0.68.100 行为，不静默）。
-     * 迁移事件只记事件名进诊断日志（绝不带 Key 本身），失败只记一次。
+     * 迁移事件记事件名进诊断日志（绝不带 Key 本身）；失败额外带异常类名
+     * （仅类名、无 message）供定因，失败只记一次。
      */
     private fun secureStore(context: Context): LlmKeyStore.Store {
         secureStoreCache?.let { return it }
@@ -114,13 +115,15 @@ object LlmConfig {
                     "keystore_migrated: api key moved to android-keystore aes-gcm store"
                 )
             },
-            onMigrationFailed = {
+            onMigrationFailed = { failure ->
                 val p = prefs(appContext)
                 if (!p.getBoolean(KEY_MIG_FAIL_LOGGED, false)) {
                     p.edit().putBoolean(KEY_MIG_FAIL_LOGGED, true).apply()
+                    // 只记异常类名（定因用）：不带 message、不带任何 Key 材料
+                    val cause = failure?.javaClass?.simpleName ?: "verify-mismatch"
                     CrashLog.diag(
                         appContext,
-                        "keystore_migration_failed: legacy key kept in place, will retry"
+                        "keystore_migration_failed: $cause; legacy key kept in place, will retry"
                     )
                 }
             }

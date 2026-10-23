@@ -8,8 +8,9 @@ package com.bobot.ailauncher.data
  * 读取顺序：新格式有值 → 用新值；新格式没有、旧格式有值 → 触发一次性迁移：
  * 写新格式 → 回读核对一致 → 才删旧条目 → 回调 [onMigrated]。迁移任何一步
  * 失败：旧数据原样保留、照样返回旧值（Key 绝不因迁移丢），回调
- * [onMigrationFailed]，下次读再试。迁移逻辑本身只依赖 [LlmKeyStore.Store]
- * 接口，JVM 可测（假存储 + 真 [AesGcmBox]）。
+ * [onMigrationFailed]（带失败异常；回读不一致这类无异常失败传 null），
+ * 下次读再试。迁移逻辑本身只依赖 [LlmKeyStore.Store] 接口，JVM 可测
+ * （假存储 + 真 [AesGcmBox]）。
  *
  * 写入只走新格式（失败原样上抛，[LlmKeyStore.writeApiKey] 按既有契约回退
  * 明文 + 设置页明示）；写成功后顺手清旧条目，防止旧值残留被误读为现行 Key。
@@ -22,7 +23,7 @@ class MigratingSecureStore(
     private val newStore: LlmKeyStore.Store,
     private val legacyStore: LlmKeyStore.Store?,
     private val onMigrated: () -> Unit = {},
-    private val onMigrationFailed: () -> Unit = {}
+    private val onMigrationFailed: (Throwable?) -> Unit = {}
 ) : LlmKeyStore.Store {
 
     override fun read(key: String): String? {
@@ -33,15 +34,19 @@ class MigratingSecureStore(
         val legacy = legacyStore ?: return null
         val fromLegacy = runCatching { legacy.read(key) }.getOrNull() ?: return null
         if (fromLegacy.isBlank()) return fromLegacy
-        val migrated = runCatching {
+        var failure: Throwable? = null
+        val migrated = try {
             newStore.write(key, fromLegacy)
             newStore.read(key) == fromLegacy
-        }.getOrDefault(false)
+        } catch (t: Throwable) {
+            failure = t
+            false
+        }
         if (migrated) {
             runCatching { legacy.delete(key) }
             runCatching { onMigrated() }
         } else {
-            runCatching { onMigrationFailed() }
+            runCatching { onMigrationFailed(failure) }
         }
         return fromLegacy
     }

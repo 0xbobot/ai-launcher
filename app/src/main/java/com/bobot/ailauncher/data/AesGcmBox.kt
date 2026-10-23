@@ -109,6 +109,14 @@ object AndroidKeystoreKeys {
  * [LlmKeyStore.Store] 适配：值经 [AesGcmBox] 加密后存普通 SharedPreferences
  * （文件名 llm_keystore）。读不到条目返回 null；条目在但解密失败抛异常
  * （与 EncryptedSharedPreferences 的失败语义对齐，[LlmKeyStore] 不用改）。
+ *
+ * 写/删一律 commit() 同步落盘：本存储是迁移的终态与 Key 的唯一现行副本，
+ * 「写成功」的语义必须包含「进程此刻被杀也不丢」。apply() 只保证内存
+ * 更新 + 异步刷盘，刷盘完成前进程被杀（force-stop/崩溃/低内存回收）
+ * 写入即蒸发——而上层 [LlmKeyStore] 的回读核对只看内存，会误报成功
+ * （§25 冒烟取证：迁移后 1 秒内 cat 不到文件、force-stop 后新格式为空）。
+ * commit() 返回 false（磁盘写失败）直接上抛，让迁移按失败处理、保留
+ * 旧格式副本，绝不出现「以为存好了其实没落盘」。
  */
 class KeystoreCipherStore(
     private val prefs: SharedPreferences,
@@ -120,10 +128,15 @@ class KeystoreCipherStore(
     }
 
     override fun write(key: String, value: String) {
-        prefs.edit().putString(key, box.encrypt(value, key)).apply()
+        val blob = box.encrypt(value, key)
+        if (!prefs.edit().putString(key, blob).commit()) {
+            throw IllegalStateException("keystore prefs commit failed")
+        }
     }
 
     override fun delete(key: String) {
-        prefs.edit().remove(key).apply()
+        if (!prefs.edit().remove(key).commit()) {
+            throw IllegalStateException("keystore prefs commit failed")
+        }
     }
 }
