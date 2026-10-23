@@ -118,8 +118,11 @@ private val RESULT_BAR_MAX_HEIGHT = 180.dp
  * 出 ✕ 一键清空（点后文本清空、网格恢复全量）；首页胶囊保持原设计不开，避免和提交钮抢位。
  *
  * 输入状态用 [TextFieldValue]（意图改进一批）：为了感知中文输入法的 composing
- * （拼音组合）区间——组合未上屏时金色钮与 IME Done 都不许提交半成品文本；
- * 宿主侧据此在组合期间暂停本地搜索更新并做防抖。首页与应用中心同享这套语义。
+ * （拼音组合）区间——组合未上屏时金色钮与 IME Done 都不许提交半成品文本。
+ * 本地搜索的有效查询不在组件内派生，由宿主各自决定：首页逐键经
+ * effectiveLocalQuery 派生（无已上屏汉字时用全文、含 composing 中的
+ * 拼音字母；有汉字上屏后只按已上屏内容查，见 LocalSearchGate），
+ * 应用中心过滤沿用其组合暂停口径；两侧状态互不共用、互不影响。
  */
 @Composable
 fun IntentCapsuleField(
@@ -398,14 +401,18 @@ fun IntentEntry(
         keyboardController?.hide()
     }
 
-    // 本地搜索词（意图改进一批·防抖+组合暂停）：fieldValue 每次变化重启计时，
-    // 组合中（拼音未上屏）直接返回不落定——组合区间的拉丁串不触发搜索重算，
-    // 组合结束/停键 120ms 后才把文本落定为搜索词（与索引懒构建共用同一落定值）。
+    // 本地搜索词（意图改进一批·防抖落定；并行线 D 改派生口径）：落定值逐键
+    // 经 effectiveLocalQuery 派生（见 LocalSearchGate）——无已上屏汉字时以
+    // 全文（含 composing 中未上屏的拼音字母）为查询；有汉字上屏后只按已
+    // 上屏内容查、还在敲的拼音不拼入。停键 120ms 防抖不变（与索引懒构建
+    // 共用同一落定值）。旧口径「组合中直接返回、暂停落定」废止——组合期
+    // 不再冻结旧查询。提交侧的 composing 守卫（submitIfReady / 胶囊组件
+    // canSubmit）与应用中心过滤的组合暂停（其自有状态层）不在此列、
+    // 保持原样。
     var committedQuery by remember { mutableStateOf("") }
     LaunchedEffect(fieldValue) {
-        if (fieldValue.composition != null) return@LaunchedEffect
         delay(120)
-        committedQuery = fieldValue.text
+        committedQuery = effectiveLocalQuery(fieldValue)
     }
 
     // 本地直达层数据源：与应用中心 azApps 完全一致（listLaunchableApps 去自己、去隐藏），
