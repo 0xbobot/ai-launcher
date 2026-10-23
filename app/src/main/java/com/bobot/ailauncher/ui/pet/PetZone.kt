@@ -281,23 +281,26 @@ fun PetZone(
         // 渐变衬底跟随简报内容（hero+槽位+会行）延伸：上部轻洗不抢简报
         // 的通透、中下部持平浓度托住会议行、到会行下缘之下再渐隐收尾。
         // 纯渐变无边框无圆角——不做成卡片、不复活 NextUp 卡形态。
-        androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxWidth()) {
-            val scrimColor = AILauncherColors.current.Background
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        androidx.compose.ui.graphics.Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0.0f to scrimColor.copy(alpha = 0.22f),
-                                0.55f to scrimColor.copy(alpha = 0.46f),
-                                0.86f to scrimColor.copy(alpha = 0.46f),
-                                1.0f to scrimColor.copy(alpha = 0.0f)
-                            )
+        // v0.68.102（310 冻结修复）：渐变改挂 Column 自身 background，不再
+        // 用独立 Box + matchParentSize 覆层——二分实证（probe-freeze-*）：
+        // 该覆层与 inputCompact 同在时，进输入态 UI 确定性冻结（摘其一即
+        // 活）；渐变作为内容容器自身背景，视觉口径不变（同色标、同范围：
+        // 容器高度本就由内容决定），动画路径上少一个跟随测量的节点。
+        val scrimColor = AILauncherColors.current.Background
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.0f to scrimColor.copy(alpha = 0.22f),
+                            0.55f to scrimColor.copy(alpha = 0.46f),
+                            0.86f to scrimColor.copy(alpha = 0.46f),
+                            1.0f to scrimColor.copy(alpha = 0.0f)
                         )
                     )
-            )
-            Column(modifier = Modifier.fillMaxWidth()) {
+                )
+        ) {
         // v0.68.101（D-1）：横屏输入态 hero 整体让位——横屏 IME 抬升后
         // 可用高度只剩约四成，左区只装胶囊堆栈；竖屏走各模板 inputCompact。
         if (!(isLandscapeCover && inputActive)) {
@@ -332,8 +335,7 @@ fun PetZone(
         }
         // 罩纱尾巴：会行（或简报末尾）之下留一段渐隐距离，衬底在此收尾
         Spacer(modifier = Modifier.height(26.dp))
-            }  // Column 结束
-        }  // 罩纱 Box 结束
+        }  // Column 结束
     }  // v0.68.74：BoxWithConstraints 结束
     // 数据源：只跑 effect、上报，不渲染（TodaySection 数据管线）
     TodaySection(
