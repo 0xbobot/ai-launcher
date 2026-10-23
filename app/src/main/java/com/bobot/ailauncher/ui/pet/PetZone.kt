@@ -527,3 +527,20 @@ internal fun getValidMeetingUrl(context: android.content.Context, event: CalEven
 }
 
 // 批B ②：hasCalendarPermission / loadTodayEvents 已下沉 data 层 CalendarRepository
+
+// PROBE-freeze-pz 垫片：JoinGuard 随回退丢失，单测引用它——原样补回
+// （.100 的 joinCalendarEvent 不调用守卫，探针范围内无语义影响）。
+internal class JoinGuard(private val windowMs: Long = 2_000L) {
+    private var lastKey: String? = null
+    private var lastMs: Long = Long.MIN_VALUE
+
+    @Synchronized
+    fun shouldFire(key: String, nowMs: Long): Boolean {
+        if (key == lastKey && nowMs - lastMs < windowMs) return false
+        lastKey = key
+        lastMs = nowMs
+        return true
+    }
+}
+
+private val joinGuard = JoinGuard()
