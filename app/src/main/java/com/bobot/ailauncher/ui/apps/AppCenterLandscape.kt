@@ -46,8 +46,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -472,29 +475,51 @@ fun AppCenterLandscape(
             }  // if (searchResults == null) 搜索态隐藏 Rail 结束
         }
         // v0.68.82（横屏专项第 1 项）：底部 88dp 透明手势条，上滑 → D2（记住档）
-        // 后于内容 Row 声明：手势条优先于列表（同竖屏）；右端让出 57dp 给 AppRail（Rail 优先，同竖屏）
-        // 搜索态 Rail 隐藏时手势条占满整宽
+        // 右端让出 57dp 给 AppRail（Rail 优先，同竖屏）；搜索态 Rail 隐藏时手势条占满整宽
+        // D-6（同竖屏）：手势条改「只观察、不消费」——旧实现 detectVerticalDragGestures
+        // 在回调里 consume，盖住的底部 88dp 内行点按永不成立。现于 Initial pass 旁观
+        // 位移、累计上滑过阈值照样触发，但不消费任何事件，带内行点击/列表滚动优先。
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .width(maxWidth - if (searchResults == null) 57.dp else 0.dp)
                 .height(88.dp)
+                .testTag("appcenter_bottom_strip")
                 .pointerInput(Unit) {
-                    var accumY = 0f
-                    var fired = false
                     val bottomStripPx = with(density) { 56.dp.toPx() }
-                    detectVerticalDragGestures(
-                        onDragStart = { accumY = 0f; fired = false },
-                        onVerticalDrag = { change, dragAmount ->
-                            change.consume()
-                            if (fired) return@detectVerticalDragGestures
-                            accumY += dragAmount
-                            if (accumY < -bottomStripPx) {
-                                fired = true
-                                onBottomSwipeUpState.value()
+                    val firePx = bottomStripPx + viewConfiguration.touchSlop
+                    awaitPointerEventScope {
+                        var activeId: PointerId? = null
+                        var lastY = 0f
+                        var accumY = 0f
+                        var fired = false
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = if (activeId == null) {
+                                event.changes.firstOrNull { it.pressed }
+                            } else {
+                                event.changes.firstOrNull { it.id == activeId }
+                            } ?: continue
+                            if (activeId == null) {
+                                activeId = change.id
+                                lastY = change.position.y
+                                accumY = 0f
+                                fired = false
+                            }
+                            if (change.pressed) {
+                                accumY += change.position.y - lastY
+                                lastY = change.position.y
+                                if (!fired && accumY < -firePx) {
+                                    fired = true
+                                    onBottomSwipeUpState.value()
+                                }
+                            } else {
+                                activeId = null
+                                accumY = 0f
+                                fired = false
                             }
                         }
-                    )
+                    }
                 }
         )
     }

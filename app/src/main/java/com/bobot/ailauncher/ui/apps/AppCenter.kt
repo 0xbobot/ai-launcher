@@ -108,6 +108,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import com.bobot.ailauncher.ui.theme.confirmHaptic
@@ -1246,27 +1248,53 @@ fun AppCenterContent(
             // 系统手势导航会吃掉最底部边缘的触摸，这里在系统手势区之上放一条
             // 透明手势条：从底部向上滑过阈值就关闭应用中心，回到记住的 Dock 档。
             // 放在 Rail 之前绘制，Rail 保持可交互。
+            // D-6（Bob .100 真机点名）：手势条改「只观察、不消费」——旧实现用
+            // detectVerticalDragGestures 且在拖动回调里 consume 指针变更，条带
+            // 盖住的底部 88dp 内行点按被判已消费、点击永不成立（真机与 CI 第
+            // 28 段对照实证：同一行中屏可点、落入带内无反应）。现于 Initial
+            // pass 旁观位移、累计上滑过阈值照样触发回桌面，但不消费任何事件：
+            // 带内行点击、列表滚动、Rail 交互全部先于本条成立。
             val bottomStripPx = with(density) { 56.dp.toPx() }
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .height(88.dp)
+                    .testTag("appcenter_bottom_strip")
                     .pointerInput(Unit) {
-                        var accumY = 0f
-                        var fired = false
-                        detectVerticalDragGestures(
-                            onDragStart = { accumY = 0f; fired = false },
-                            onVerticalDrag = { change, dragAmount ->
-                                change.consume()
-                                if (fired) return@detectVerticalDragGestures
-                                accumY += dragAmount
-                                if (accumY < -bottomStripPx) {
-                                    fired = true
-                                    onBottomSwipeUpState.value()
+                        val firePx = bottomStripPx + viewConfiguration.touchSlop
+                        awaitPointerEventScope {
+                            var activeId: PointerId? = null
+                            var lastY = 0f
+                            var accumY = 0f
+                            var fired = false
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = if (activeId == null) {
+                                    event.changes.firstOrNull { it.pressed }
+                                } else {
+                                    event.changes.firstOrNull { it.id == activeId }
+                                } ?: continue
+                                if (activeId == null) {
+                                    activeId = change.id
+                                    lastY = change.position.y
+                                    accumY = 0f
+                                    fired = false
+                                }
+                                if (change.pressed) {
+                                    accumY += change.position.y - lastY
+                                    lastY = change.position.y
+                                    if (!fired && accumY < -firePx) {
+                                        fired = true
+                                        onBottomSwipeUpState.value()
+                                    }
+                                } else {
+                                    activeId = null
+                                    accumY = 0f
+                                    fired = false
                                 }
                             }
-                        )
+                        }
                     }
             )
             // Rail：波浪字母导航（v0.24，学 Niagara/参考视频）——只做定位
