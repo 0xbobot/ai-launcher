@@ -5,6 +5,8 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Base64
+import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 
@@ -40,6 +42,37 @@ class AesGcmBoxTest {
         assertNotEquals(a, c)
         assertEquals("sk-same", b.decrypt(a, "api_key"))
         assertEquals("sk-same", b.decrypt(c, "api_key"))
+    }
+
+    @Test
+    fun `blob layout interoperates with a raw cipher that generated its own iv`() {
+        // 按「无参 init、IV 由 Cipher 生成、从 cipher.iv 读回」手工造 v1 blob，
+        // box 必须能解；反方向 box 的 blob 裸 Cipher 按 IV(12B) 前缀切分也必须
+        // 能解——锁住 v1 格式与「IV 来自 Cipher」构造的互操作。
+        // 覆盖边界：JVM 软件 provider 不执行 Keystore 的
+        // RandomizedEncryptionRequired 规则（加密侧带调用方 IV 也不会抛
+        // InvalidAlgorithmParameterException），本测只能锁格式与布局；
+        // Keystore 规则本身只能靠 §25 冒烟（模拟器真 Keystore）网住。
+        val raw = Cipher.getInstance("AES/GCM/NoPadding")
+        raw.init(Cipher.ENCRYPT_MODE, fixedKey)
+        raw.updateAAD("api_key".toByteArray(Charsets.UTF_8))
+        val ct = raw.doFinal("sk-iv-source".toByteArray(Charsets.UTF_8))
+        assertEquals(12, raw.iv.size)
+        val manualBlob = "v1:" + Base64.getEncoder().encodeToString(raw.iv + ct)
+        assertEquals("sk-iv-source", box().decrypt(manualBlob, "api_key"))
+
+        val blob = box().encrypt("sk-iv-source", "api_key")
+        val bytes = Base64.getDecoder().decode(blob.removePrefix("v1:"))
+        val back = Cipher.getInstance("AES/GCM/NoPadding")
+        back.init(
+            Cipher.DECRYPT_MODE, fixedKey,
+            javax.crypto.spec.GCMParameterSpec(128, bytes.copyOfRange(0, 12))
+        )
+        back.updateAAD("api_key".toByteArray(Charsets.UTF_8))
+        assertEquals(
+            "sk-iv-source",
+            String(back.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+        )
     }
 
     @Test

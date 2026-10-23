@@ -4,7 +4,6 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.security.KeyStore
-import java.security.SecureRandom
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -20,6 +19,13 @@ import javax.crypto.SecretKey
  * AAD 绑定条目名——密文被搬到别的条目下解不开；IV/密文/tag 任一处被篡改，
  * GCM 校验都会抛 AEADBadTagException，绝不静默返回错误明文。
  *
+ * IV 来源是硬约束：加密侧必须让 Cipher 自生成、再从 `cipher.iv` 读回存盘，
+ * 不许调用方经 GCMParameterSpec 自带——Android Keystore 密钥默认
+ * RandomizedEncryptionRequired=true，加密 init 带调用方 IV 会抛
+ * InvalidAlgorithmParameterException（迁移写新格式实测中招，§25 冒烟
+ * ks-evidence 定因；JVM 软件 provider 不执行此规则，单测照不出）。
+ * 解密侧自带 IV 不受此限，仍按存盘 IV 构造 GCMParameterSpec。
+ *
  * 密钥由 [keyProvider] 提供（生产 = [AndroidKeystoreKeys]；单测 = 固定
  * SecretKeySpec）。provider 返回 null 或 Cipher 使用时抛异常（密钥被系统
  * 作废等）都按「加密层不可用」原样上抛——与旧 EncryptedSharedPreferences
@@ -31,11 +37,13 @@ class AesGcmBox(private val keyProvider: () -> SecretKey?) {
     fun encrypt(plaintext: String, aad: String): String {
         val key = keyProvider()
             ?: throw IllegalStateException("keystore key unavailable")
-        val iv = ByteArray(IV_BYTES).also { SecureRandom().nextBytes(it) }
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(TAG_BITS, iv))
+        // 不带参数 init：IV 由 Cipher 生成（见类头注，Keystore 随机化硬约束）
+        cipher.init(Cipher.ENCRYPT_MODE, key)
         cipher.updateAAD(aad.toByteArray(Charsets.UTF_8))
         val ct = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        val iv = cipher.iv
+        require(iv.size == IV_BYTES) { "unexpected gcm iv size: ${iv.size}" }
         return PREFIX + Base64.getEncoder().encodeToString(iv + ct)
     }
 
@@ -97,6 +105,8 @@ object AndroidKeystoreKeys {
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                // 不关 RandomizedEncryptionRequired（默认 true，更严）：
+                // 加密侧 IV 由 Cipher 生成与之兼容，见 AesGcmBox 类头注。
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
                 .build()
