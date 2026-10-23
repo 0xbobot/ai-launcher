@@ -1,0 +1,58 @@
+name: Probe Freeze (Emulator)
+
+# 310 冻结探针专用（probe-freeze-* 分支）：装分支最近成功构建的 APK，
+# 跑 scripts/probe_freeze.sh 三路对照短检查点，不走全量 smoke.sh。
+# 与 publish 无关，结论不阻塞任何发布。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download debug APK artifact (dispatch)
+        uses: dawidd6/action-download-artifact@v27
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: build-apk.yml
+          branch: ${{ github.ref_name }}
+          workflow_conclusion: success
+          name: ai-launcher-debug-apk
+          path: apk
+
+      - name: Install emulator system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpulse0
+          sudo chmod 666 /dev/kvm || true
+          ls -la /dev/kvm
+
+      - name: Run freeze probe on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu swiftshader_indirect
+          script: bash scripts/probe_freeze.sh
+
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-freeze-out
+          path: probe-out/
+          retention-days: 14
