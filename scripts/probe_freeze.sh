@@ -31,10 +31,15 @@ LOGCAT_PID=$!
 
 state() { adb get-state 2>/dev/null | tr -d '\r';}
 curpid() { adb shell pidof "$PKG" 2>/dev/null | tr -d '\r';}
-devok() { [ "$(state)" = "device"];}
-alive() { devok && [ -n "$(curpid)"];}
+devok() { [ "$(state)" = "device" ];}
+alive() { devok && [ -n "$(curpid)" ];}
 
-if [ -f "$APK"]; then
+log "apk check: cwd=$(pwd)"; ls apk/ 2>/dev/null || log "no apk dir at cwd"
+if [ ! -f "$APK" ]; then
+FOUND=$(find . -name 'app-debug.apk' 2>/dev/null | head -1)
+if [ -n "$FOUND" ]; then APK="$FOUND"; log "apk found at $APK"; fi
+fi
+if [ -f "$APK" ]; then
 if adb install -r -g "$APK"; then ok "install"; else ng "install"; fi
 else
 ng "apk-missing($APK)"
@@ -55,26 +60,26 @@ adb shell cmd package set-home-activity "$PKG/.MainActivity" > /dev/null 2>&1 ||
 
 center_rid() {
 local F="$1" RID="$2" NODE NUMS X1 Y1 X2 Y2
-[ -f "$F"] || return 1
+[ -f "$F" ] || return 1
 NODE=$(grep -o "<node[^>]*resource-id=\"$RID\"[^>]*>" "$F" | head -1)
-[ -n "$NODE"] || return 1
+[ -n "$NODE" ] || return 1
 NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
 X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
 X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
-[ -n "$X1"] && [ -n "$Y2"] || return 1
-[ "$X2" -gt "$X1"] && [ "$Y2" -gt "$Y1"] || return 1
+[ -n "$X1" ] && [ -n "$Y2" ] || return 1
+[ "$X2" -gt "$X1" ] && [ "$Y2" -gt "$Y1" ] || return 1
 echo "$(( (X1 + X2) / 2)) $(( (Y1 + Y2) / 2))"
 }
 center_text() {
 local F="$1" TXT="$2" NODE NUMS X1 Y1 X2 Y2
-[ -f "$F"] || return 1
+[ -f "$F" ] || return 1
 NODE=$(grep -o "<node[^>]*text=\"[^\"]*$TXT[^\"]*\"[^>]*>" "$F" | head -1)
-[ -n "$NODE"] || return 1
+[ -n "$NODE" ] || return 1
 NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
 X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
 X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
-[ -n "$X1"] && [ -n "$Y2"] || return 1
-[ "$X2" -gt "$X1"] && [ "$Y2" -gt "$Y1"] || return 1
+[ -n "$X1" ] && [ -n "$Y2" ] || return 1
+[ "$X2" -gt "$X1" ] && [ "$Y2" -gt "$Y1" ] || return 1
 echo "$(( (X1 + X2) / 2)) $(( (Y1 + Y2) / 2))"
 }
 tap_xy() {
@@ -84,7 +89,7 @@ adb shell input swipe "$1" "$2" "$1" "$2" 150 || true
 tdump() {
 timeout 40 adb shell uiautomator dump /sdcard/probe_dump.xml > /dev/null 2>&1
 adb pull /sdcard/probe_dump.xml "$1" > /dev/null 2>&1
-[ -s "$1"]
+[ -s "$1" ]
 }
 tshot() {
 local t0 t1 ms
@@ -129,7 +134,7 @@ adb shell input swipe 540 2000 540 800 300 || true
 sleep 3
 if tdump "$OUT/x3d-ac.xml"; then
 CTR=$(center_rid "$OUT/x3d-ac.xml" "intent_input")
-if [ -n "$CTR"]; then
+if [ -n "$CTR" ]; then
 tap_xy $CTR
 death_watch "X3D"
 case $? in
@@ -153,7 +158,7 @@ adb shell input text "test" || true
 sleep 2
 if tdump "$OUT/qz-typed.xml"; then
 CTR=$(center_text "$OUT/qz-typed.xml" "问七仔")
-if [ -n "$CTR"]; then
+if [ -n "$CTR" ]; then
 tap_xy $CTR
 log "QZ: tapped ask-qizai row, watching auto entry (no focus)"
 death_watch "QZ"
@@ -187,7 +192,7 @@ adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 if tdump "$OUT/t1-home.xml"; then
 CTR=$(center_rid "$OUT/t1-home.xml" "dock_pet_cell")
-if [ -n "$CTR"]; then
+if [ -n "$CTR" ]; then
 tap_xy $CTR
 death_watch "T1"
 case $? in
