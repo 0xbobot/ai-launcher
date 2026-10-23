@@ -39,6 +39,9 @@
 # v0.68.102（310 合并批）段号统一：R-2 槽位甲板 = 第 25 段；热修 D-2 输入态
 # 不误退 = 第 26 段；热修 D-5 点加入只发一次 = 第 27 段（三段同插在第 22 段
 # 之后、第 23/24 段之前——第 24 段故意崩溃必须保持最后两段的既有约束）。
+# D-6（应用中心底部条带点不动，Bob .100 真机点名）= 第 28 段，插在第 27 段
+# 之后、第 23 段之前：D3 内做底部 88dp 带内行 vs 中屏行（带外）的点开对照，
+# 并把覆盖带内行的候选覆盖节点打进日志取证（ac_band.xml / ac_band_mid.xml）。
 # crash-log-content / crash-relaunch-alive：debug 专用 intent extra 触发一次
 # 真崩溃 -> files/crashes 落盘且含异常首行 -> 正常重启存活不进崩溃循环）。
 # 本段故意产生 FATAL，必须排在第 23 段 no-fatal-crash 之后。形态 env 追加 SMOKE_WM_SIZE /
@@ -2653,6 +2656,135 @@ if nextup_seed_event "SmokeJoinOnce" "https://zoom.us/j/9876543210"; then
 else
   log "join-once: seed failed - segment skipped (not counted)"
 fi
+
+# --- 28. 应用中心底部条带可点（D-6，Bob .100 真机点名）：底部 88dp 透明
+# 手势条（v0.40.0「底部上滑回桌面」）后于列表声明、全宽盖住列表底部 88dp，
+# 其 detectVerticalDragGestures 在拖动回调里 consume 触摸——带内行点按的
+# up 被判已消费，点击永不成立（真机对照：同一行滚到中屏可点、落入底部带
+# 无反应，与内容无关、与纵向位置有关）。本段同法对照：先点中屏行（带外
+# 对照组），再点底部 88dp 带内行（判别组），判定均为「press 后前台不再是
+# 本包」；带内 dump 另把「bounds 覆盖被点行中心的全部节点」按文档序打进
+# 日志（ac_band.xml 留档），供指认覆盖层。横屏腿同段执行（横屏同源手势条，
+# 几何按 SCR/DENSITY 实测换算）。
+log "band-tap: segment start"
+band_open_d3() {
+  adb shell am force-stop "$PKG" > /dev/null 2>&1 || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+  sleep 3
+}
+band_label_center() {
+  # $1=dump 文件 $2=下界 y $3=上界 y：候选应用标签里找中心落在 [$2,$3) 的
+  # 第一个，输出 "cx cy label"；找不到返回 1
+  local F="$1" LO="$2" HI="$3" LBL NODE NUMS X1 Y1 X2 Y2 CX CY
+  for LBL in Clock Calendar Camera Contacts Phone Settings Messaging Gallery Files Search; do
+    NODE=$(grep -o "<node[^>]*text=\"$LBL\"[^>]*>" "$F" | head -1)
+    [ -n "$NODE" ] || continue
+    NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+    X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+    [ -n "$X1" ] && [ -n "$Y2" ] || continue
+    CX=$(( (X1 + X2) / 2 )); CY=$(( (Y1 + Y2) / 2 ))
+    if [ "$CY" -ge "$LO" ] && [ "$CY" -lt "$HI" ]; then
+      echo "$CX $CY $LBL"
+      return 0
+    fi
+  done
+  return 1
+}
+band_fg_opened() {
+  # 点按后轮询 6 秒：前台 topResumedActivity 不再是本包 = 应用被打开
+  local I FG=""
+  for I in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    sleep 0.5
+    FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
+    if [ -n "$FG" ] && ! echo "$FG" | grep -q "$PKG"; then
+      log "band-tap: foreground after tap: $FG"
+      return 0
+    fi
+  done
+  log "band-tap: foreground still ours after tap: $FG"
+  return 1
+}
+BAND_PX=$(( 88 * DENSITY / 160 ))
+BAND_TOP=$(( SCR_H - BAND_PX ))
+MID_LO=$(( SCR_H * 38 / 100 ))
+MID_HI=$(( SCR_H * 62 / 100 ))
+log "band-tap: screen ${SCR_W}x${SCR_H} density=$DENSITY band=[${BAND_TOP},${SCR_H}] mid=[${MID_LO},${MID_HI}]"
+# 对照组：中屏行可点开（带外）
+band_open_d3
+MID_HIT=""
+for TRY in 1 2; do
+  adb shell uiautomator dump /sdcard/ac_band_mid.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/ac_band_mid.xml "$OUT/ac_band_mid.xml" > /dev/null 2>&1 || true
+  redump_if_empty ac_band_mid
+  if [ -f "$OUT/ac_band_mid.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band_mid.xml"; then
+    MID_HIT=$(band_label_center "$OUT/ac_band_mid.xml" "$MID_LO" "$MID_HI" || true)
+    [ -n "$MID_HIT" ] && break
+  fi
+  adb shell input swipe "$(SX 540)" "$(SY 1300)" "$(SX 540)" "$(SY 900)" 300 || true
+  sleep 1
+done
+if [ -n "$MID_HIT" ]; then
+  MX=$(echo "$MID_HIT" | cut -d' ' -f1); MY=$(echo "$MID_HIT" | cut -d' ' -f2); ML=$(echo "$MID_HIT" | cut -d' ' -f3)
+  log "band-tap: control row '$ML' at ($MX,$MY)"
+  adb shell input swipe "$MX" "$MY" "$MX" "$MY" 150 || true
+  if band_fg_opened; then ok "appcenter-band-control"; else ng "appcenter-band-control"; fi
+else
+  log "band-tap: no mid-screen app row found (control unavailable)"
+  ng "appcenter-band-control"
+fi
+# 判别组：底部 88dp 带内行可点开（回 D3 基线；带内无行时逐次上滑列表找行）
+band_open_d3
+BAND_HIT=""
+for TRY in 1 2 3 4 5; do
+  adb shell uiautomator dump /sdcard/ac_band.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/ac_band.xml "$OUT/ac_band.xml" > /dev/null 2>&1 || true
+  redump_if_empty ac_band
+  if [ -f "$OUT/ac_band.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band.xml"; then
+    BAND_HIT=$(band_label_center "$OUT/ac_band.xml" "$BAND_TOP" "$SCR_H" || true)
+    [ -n "$BAND_HIT" ] && break
+  fi
+  adb shell input swipe "$(SX 540)" "$(SY 1300)" "$(SX 540)" "$(SY 800)" 300 || true
+  sleep 1
+done
+if [ -n "$BAND_HIT" ]; then
+  BX=$(echo "$BAND_HIT" | cut -d' ' -f1); BY=$(echo "$BAND_HIT" | cut -d' ' -f2); BL=$(echo "$BAND_HIT" | cut -d' ' -f3)
+  log "band-tap: band row '$BL' at ($BX,$BY) (band top=$BAND_TOP)"
+  # 覆盖层取证：把 bounds 覆盖被点行中心的全部节点按文档序打进日志
+  python3 - "$OUT/ac_band.xml" "$BX" "$BY" <<'PYEOF' || true
+import re, sys
+data = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+tx, ty = int(sys.argv[2]), int(sys.argv[3])
+for i, n in enumerate(re.findall(r"<node[^>]*>", data)):
+    m = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if not m: continue
+    x1, y1, x2, y2 = (int(v) for v in m.groups())
+    if x1 <= tx <= x2 and y1 <= ty <= y2:
+        def attr(k):
+            mm = re.search(k + r'="([^"]*)"', n)
+            return mm.group(1) if mm else None
+        print("band-cover: idx=%d class=%s bounds=[%d,%d][%d,%d] text=%r rid=%r clickable=%s" % (
+            i, attr("class"), x1, y1, x2, y2, attr("text"), attr("resource-id"), attr("clickable")))
+PYEOF
+  shot "appcenter-band"
+  adb shell input swipe "$BX" "$BY" "$BX" "$BY" 150 || true
+  if band_fg_opened; then
+    ok "appcenter-band-row-tap"
+  else
+    ng "appcenter-band-row-tap"
+  fi
+  shot "appcenter-band-after"
+else
+  log "band-tap: no app row reached the bottom band after scrolls"
+  ng "appcenter-band-row-tap"
+fi
+adb shell input keyevent KEYCODE_HOME || true
+sleep 1
 
 # --- 23. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
