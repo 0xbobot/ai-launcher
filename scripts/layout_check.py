@@ -10,6 +10,7 @@
 输入约定（smoke.sh 第 22 段与既有段产出的 dump，缺失记 INFO 跳过）：
 - tpl_giant.xml / tpl_headline.xml / tpl_minimal.xml  首页三模板（未聚焦）
 - tpl_<tpl>_suggest.xml                               意图聚焦/建议面
+- slot_focus.xml                                      槽位面板展开态（第 25 段，R-2 甲板）
 - layout_home.xml                                     当前模板首页（兜底）
 - layout_ac.xml                                       应用中心
 - fan_dump.xml                                        扇形展开（Canvas 语义稀疏，只记 INFO）
@@ -97,6 +98,7 @@ def home_elements(root):
     nxt = by_rid(root, "today_nextup")
     pet = by_rid(root, "pet_qizai")
     hero = by_rid(root, "cover_hero")
+    deck = by_rid(root, "deck_root")
     return {
         "hero": hero[0] if hero else None,
         "capsule": cap[0] if cap else None,
@@ -104,6 +106,9 @@ def home_elements(root):
         "nextup": nxt[0] if nxt else None,
         "pet": pet[0] if pet else None,
         "dock": dock,
+        # v0.68.101（R-2）：输入甲板（胶囊上方槽位）——静态态不存在，
+        # absent 时 INFO 跳过，不影响既有状态的断言口径
+        "deck": deck[0] if deck else None,
     }
 
 
@@ -117,6 +122,9 @@ HOME_PAIRS = [
 FOCUS_PAIRS = [
     ("hero", "capsule"), ("capsule", "nextup"), ("hero", "nextup"),
     ("pet", "capsule"), ("pet", "nextup"),
+    # v0.68.101（R-2）：甲板在 hero 与胶囊之间、三者与 NextUp 互不相交
+    # （横屏同样适用——L-7：横屏输入态与竖屏同语义，断言不放水）
+    ("hero", "deck"), ("deck", "capsule"), ("deck", "nextup"),
     # 聚焦态键盘升起，Dock 被 IME 覆盖，dump 中的 Dock bounds 不代表可见几何，不查
 ]
 
@@ -135,6 +143,11 @@ def main():
             r = parse(p)
             if r is not None:
                 check_state(r, f"focus-{tpl}", home_elements(r), FOCUS_PAIRS, W, H)
+    p = os.path.join(d, "slot_focus.xml")
+    if os.path.exists(p):
+        r = parse(p)
+        if r is not None:
+            check_state(r, "slot-focus", home_elements(r), FOCUS_PAIRS, W, H)
     p = os.path.join(d, "layout_home.xml")
     if os.path.exists(p):
         r = parse(p)
