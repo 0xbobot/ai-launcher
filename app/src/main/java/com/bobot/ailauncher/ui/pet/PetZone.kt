@@ -305,7 +305,7 @@ fun PetZone(
                 summary = coverSummary,
                 weatherDesc = weatherDesc ?: "",
                 palette = coverPalette,
-                inputCompact = inputActive
+                inputCompact = false // PROBE-freeze-compact：强制关紧凑，单变量验 inputCompact
             )
         }
         // v0.68.99（R-1 修订）：输入态胶囊槽（.97 位置：hero 与会行之间；

@@ -350,6 +350,11 @@ sleep 1
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 
+# PROBE-freeze：首次进/退输入态后即早退（二分探针专用，勿合主干）
+log "PROBE-EARLY-EXIT after seg6"
+log "RESULT pass=$PASS fail=$FAIL"
+exit 0
+
 # --- 7. 上滑开 D3 应用中心 ---
 adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
 sleep 3
