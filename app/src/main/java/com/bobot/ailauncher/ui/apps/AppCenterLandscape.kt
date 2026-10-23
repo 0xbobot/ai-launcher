@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.bobot.ailauncher.ui.apps
 
 import androidx.compose.foundation.background
