@@ -701,7 +701,7 @@ PYEOF
         KX=$(( (KX1 + KX2) / 2 )); KY=$(( (KY1 + KY2) / 2 ))
       fi
     fi
-    KRID=$(center_rid intent_clear "$OUT/ac_dump2.xml")
+    KRID=$(center_rid "$OUT/ac_dump2.xml" intent_clear)
     if [ -n "$KRID" ]; then
       KX=$(echo "$KRID" | cut -d' ' -f1); KY=$(echo "$KRID" | cut -d' ' -f2)
       log "landscape clear button via testTag at ($KX,$KY)"
@@ -2071,12 +2071,15 @@ fi
 # fresh_find_label 逐轮留进度日志——再失败时可从日志直接区分「始终没出现」
 # （产品侧）与「滑到时窗已尽」（窗口侧）。卸载方向同批已过（scroll_top +
 # 12 轮判空），维持原窗口不动。
-# 续（线 C 首轮矩阵 39880105848）：上述加固后 landphone 仍红，24 轮日志全程
-# 「未出现」，但工件截图实证真因是断言过程被带偏——慢腿上横滑误展开应用
-# 长按面板、后续手势命中「应用信息」跳进系统设置页，剩余轮次全在设置页里
-# 空找（详见 fresh_find_label 绕行恢复注）；而 .100 矩阵复跑（attempt 2）
-# 同腿同断言全过，产品刷新链本身无缺陷证据。本轮对策：横屏滑动 300→150ms
-# 降误触概率 + 绕行检出自愈；窗口/起点加固保留（无害且定起点）。
+# 续（线 C 矩阵 39880105848 / 39885224811 两轮）：窗口加固后 landphone 仍
+# 红，工件截图实证真因是断言过程被带偏——慢腿上横滑误展开应用长按面板、
+# 后续手势命中「应用信息」跳进系统设置页，剩余轮次全在错误表面上空找；
+# 中间试过 BACK 绕行自愈（fresh_find_label 内保留，竖屏同样受益），但
+# BACK 落点不确定（终局 dump 停在主页），横屏不靠它收口。.100 矩阵复跑
+# （attempt 2）同腿同断言全过，产品刷新链本身始终无缺陷证据。
+# 定版对策：横屏三处检查（装前缺席/装后出现/卸后消亡）改走 fresh_search_label
+# 搜索探针（与列表同源快照、判据等价，见函数注）；竖屏扫列路径与窗口
+# 加固（scroll_top 定起点 + 24 轮 + 进度日志）保持不变。
 log "freshness: segment start"
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
@@ -2143,8 +2146,85 @@ fresh_scroll_top() {
     sleep 0.5
   done
 }
+# 横屏专用探针（F2 线 C 定版）：经 F2 统一后的胶囊搜索面验刷新——点胶囊、
+# 输入桩拼音 "tengxun"（AppSearchIndex 以 pinyinFull 子串命中「腾讯地图桩」），
+# 结果里出现/不出现该标签即快照已/未包含它。为什么横屏不用横滑扫列（竖屏
+# 继续扫列表）：AppCatalog 同一快照同时派生 visibleApps（列表）与 index
+# （搜索），本段验的性质（装/卸 -> epoch -> IO 重建 -> 快照换表）是数据层
+# 性质，两面同源、判据等价；而横滑扫列在 landphone 慢腿上已被多轮实测证伪
+# 为探针不可靠——输入派发延迟把滑动按下相位拖过长按阈值、误展开应用长按
+# 面板，后续手势命中其「应用信息」跳进系统设置页（39880105848 /
+# 39885224811 两轮工件截图实证），BACK 恢复落点还不确定（终局 dump 停在
+# 主页）。搜索探针全程只有点胶囊/打字/点清空三个小动作、不横滑过应用行，
+# 绕开该失效模式。A-Z 列表自身的渲染由第 7/10/21 段在每条腿上另行覆盖。
+# 用法：fresh_search_label <标签> <拼音查询> <轮询次数>
+# 返回：0=结果中见到标签；1=探针跑完未见到；2=胶囊定位失败、探针没跑成
+# （缺席类断言必须把 2 判为失败，不得当「不在场」假过）。
+fresh_search_label() {
+  local label="$1" query="$2" polls="$3" i capnode capnums cx1 cy1 cx2 cy2 cx cy
+  fresh_dump
+  capnode=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/fresh_dump.xml" 2>/dev/null | head -1)
+  if [ -z "$capnode" ]; then
+    capnode=$(grep -o '<node[^>]*resource-id="intent_input"[^>]*>' "$OUT/fresh_dump.xml" 2>/dev/null | head -1)
+  fi
+  if [ -z "$capnode" ]; then
+    log "fresh-search: capsule not found in dump - probe invalid"
+    return 2
+  fi
+  capnums=$(echo "$capnode" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  cx1=$(echo "$capnums" | sed -n 1p); cy1=$(echo "$capnums" | sed -n 2p)
+  cx2=$(echo "$capnums" | sed -n 3p); cy2=$(echo "$capnums" | sed -n 4p)
+  if [ -z "$cx1" ] || [ -z "$cy2" ]; then
+    log "fresh-search: capsule node has no bounds - probe invalid"
+    return 2
+  fi
+  cx=$(( (cx1 + cx2) / 2 )); cy=$(( (cy1 + cy2) / 2 ))
+  adb shell input swipe "$cx" "$cy" "$cx" "$cy" 150 || true
+  sleep 1
+  # 清残留文本防追加（上一探针若异常退出可能留有查询）：移到文末连删
+  adb shell input keyevent KEYCODE_MOVE_END \
+    KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL \
+    KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL \
+    KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL \
+    KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL || true
+  adb shell input text "$query" || true
+  sleep 1
+  adb shell input keyevent KEYCODE_BACK || true
+  sleep 1
+  for i in $(seq 1 "$polls"); do
+    fresh_dump
+    if [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"; then
+      log "fresh-search: '$label' visible in results on poll $i/$polls"
+      fresh_search_clear
+      return 0
+    fi
+    sleep 3
+  done
+  log "fresh-search: '$label' not in results after $polls polls"
+  fresh_search_clear
+  return 1
+}
+# 探针收尾：点胶囊 ✕ 清空查询，AC 回到列流全量态（供后续段落/卸载方向用）
+fresh_search_clear() {
+  local ctr
+  ctr=$(center_rid "$OUT/fresh_dump.xml" intent_clear)
+  if [ -n "$ctr" ]; then
+    adb shell input swipe $(echo "$ctr" | cut -d' ' -f1) $(echo "$ctr" | cut -d' ' -f2) \
+      $(echo "$ctr" | cut -d' ' -f1) $(echo "$ctr" | cut -d' ' -f2) 150 || true
+    sleep 1
+  fi
+}
 STUB_LABEL="腾讯地图桩"
-if ! fresh_find_label "$STUB_LABEL" 1; then
+if [ "$LANDSCAPE" = "1" ]; then
+  fresh_search_label "$STUB_LABEL" "tengxun" 2
+  FRESH_RC=$?
+  if [ "$FRESH_RC" = "1" ]; then
+    ok "catalog-preinstall-absent"
+  else
+    log "freshness: preinstall probe rc=$FRESH_RC (0=label present, 2=probe invalid)"
+    ng "catalog-preinstall-absent"
+  fi
+elif ! fresh_find_label "$STUB_LABEL" 1; then
   ok "catalog-preinstall-absent"
 else
   log "freshness: stub label unexpectedly present before install"
@@ -2154,23 +2234,46 @@ if ni_build_stub && adb install -r "$STUB_APK" > /dev/null 2>&1; then
   log "freshness: stub installed while AppCenter open"
   # 广播 -> epoch -> IO 重建 -> 快照换表，给慢腿留足轮询窗口
   sleep 3
-  # F2 线 C 加固（定性见本段头注）：装桩前列表停在哪一列不确定（前段导航
-  # 遗留），先滑回起点再找；窗口 12 -> 24 轮，逐轮进度日志留证
-  fresh_scroll_top
-  if fresh_find_label "$STUB_LABEL" 24; then
-    ok "catalog-install-refresh"
+  if [ "$LANDSCAPE" = "1" ]; then
+    # 横屏：搜索探针（理由见 fresh_search_label 注）；轮询 8 次 x 约 4 秒，
+    # 覆盖慢腿上的重建落地延迟
+    if fresh_search_label "$STUB_LABEL" "tengxun" 8; then
+      ok "catalog-install-refresh"
+    else
+      ng "catalog-install-refresh"
+    fi
   else
-    ng "catalog-install-refresh"
+    # 竖屏：扫列表。装桩前列表停在哪不确定（前段导航遗留），先滑回起点
+    # 再找；窗口 12 -> 24 轮，逐轮进度日志留证（F2 线 C 加固）
+    fresh_scroll_top
+    if fresh_find_label "$STUB_LABEL" 24; then
+      ok "catalog-install-refresh"
+    else
+      ng "catalog-install-refresh"
+    fi
   fi
   shot "appcenter-fresh-installed"
   adb shell pm uninstall com.tencent.map > /dev/null 2>&1 || true
   log "freshness: stub uninstalled while AppCenter open"
   sleep 3
-  fresh_scroll_top
-  if ! fresh_find_label "$STUB_LABEL" 12; then
-    ok "catalog-uninstall-refresh"
+  if [ "$LANDSCAPE" = "1" ]; then
+    # 横屏：搜索探针判消亡（rc=1 才算真不在场；rc=2 探针无效判失败，
+    # 不许像扫列时代那样在错误表面上判空假过）
+    fresh_search_label "$STUB_LABEL" "tengxun" 3
+    FRESH_RC=$?
+    if [ "$FRESH_RC" = "1" ]; then
+      ok "catalog-uninstall-refresh"
+    else
+      log "freshness: uninstall probe rc=$FRESH_RC (0=label still present, 2=probe invalid)"
+      ng "catalog-uninstall-refresh"
+    fi
   else
-    ng "catalog-uninstall-refresh"
+    fresh_scroll_top
+    if ! fresh_find_label "$STUB_LABEL" 12; then
+      ok "catalog-uninstall-refresh"
+    else
+      ng "catalog-uninstall-refresh"
+    fi
   fi
   shot "appcenter-fresh-uninstalled"
 else
