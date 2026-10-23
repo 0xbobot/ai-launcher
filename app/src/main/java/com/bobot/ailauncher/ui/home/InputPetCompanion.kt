@@ -37,9 +37,15 @@ fun InputPetCompanion(modifier: Modifier = Modifier) {
     // 大图首次解码与多路无限动画同帧启动是压垮点之一（CI 实证进态后
     // 进程死亡/楔死）。延迟窗内以同尺寸同 testTag 占位（布局与「恰一只
     // 七仔」计数口径不变），七仔在胶囊落定后随即就位，呈现语义不变。
+    // v0.68.102（310 冻结续修·probe-freeze H1/H2/H3 对照实证）：300ms 仍
+    // 落在入场爆发窗内——深色+无聚焦自动进态（问七仔路径）在本体挂载
+    // 瞬间确定性点火整机图形栈楔死（与 IME/焦点无关：H1/H2 本体不挂载
+    // 即活、H3 落定后 1500ms 挂载即活）。延迟提到入场动画全落定之后
+    // （1500ms，真机帧成本约为 CI 软渲染的十分之一、余量充足），占位
+    // 语义不变，本体姿态/反应语义不变。
     var settled by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(300)
+        kotlinx.coroutines.delay(1500)
         settled = true
     }
     if (!settled) {

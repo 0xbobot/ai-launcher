@@ -162,6 +162,24 @@ fun HomeScreen(
     // 置位）或已有文本，永不误伤；它只收「根本没开始过」的会话，与旧
     // 4 秒盲兜底的区别正在于三重门槛（旧版单看未聚焦即在会话中误伤）。
     val intentFieldTextLatest by rememberUpdatedState(intentFieldValue.text)
+    // v0.68.102（310 冻结修复二轮·进态错峰）：聚焦（= IME 首秀 + 窗口
+    // resize）延迟到进态合成落定后才放行。CI 探针实证（probe-freeze-*，
+    // 2026-10-24）：进态首帧的合成爆发（槽位淡入 + hero 紧凑 + 伴随七仔
+    // 挂载）与 IME 首秀在同一时间窗叠加时整机图形栈死亡（模拟器进程级
+    // 消失、logcat 无宾客侧 FATAL）——冷 IME（开机首秀）与深色首帧各为
+    // 一个加重因子，任一与进态同窗即点火；应用中心单独聚焦（无进态
+    // 合成）与错峰后的进态均存活。故把链条串行化：胶囊先挂载落定
+    // （含 +300ms 的伴随七仔），450ms 后才放行聚焦，IME 在静默窗外弹起。
+    // 呈现带起（intentRequestFocus=false）本就不聚焦，不受影响；滞留
+    // 兜底的 2.5s 阈值远大于 450ms，不误伤。
+    var intentFocusGateOpen by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(intentInputMode) {
+        intentFocusGateOpen = false
+        if (intentInputMode) {
+            delay(450)
+            intentFocusGateOpen = true
+        }
+    }
     androidx.compose.runtime.LaunchedEffect(intentInputMode) {
         if (intentInputMode) {
             delay(2500)
@@ -454,7 +472,7 @@ fun HomeScreen(
                                     onFocusChanged = { intentFocused = it },
                                     fieldValue = intentFieldValue,
                                     onFieldValueChange = { intentFieldValue = it },
-                                    requestFocusOnMount = intentRequestFocus,
+                                    requestFocusOnMount = intentRequestFocus && intentFocusGateOpen,
                                     onRequestExitInput = onExitIntentInput,
                                     modifier = Modifier.weight(1f)
                                 )
