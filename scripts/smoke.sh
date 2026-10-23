@@ -1929,6 +1929,27 @@ glass_wallpaper_round() {
   glass_nextup_shot "glass-$mode-nextup"
   glass_bubble_shot "glass-bubble-$mode"
 }
+# v0.68.101（D-4 验收取证，主会话点名交付物）：「有会议 + 繁忙照片壁纸」
+# 静态主页图——三轮换壁纸前现种一条 +30 分钟开始的会议（配方同第 21 段
+# LayoutProbe：复用第 14 段 seed 函数 + 新鲜时间窗；日历在 provider 侧，
+# 换壁纸重启不丢），photo 轮的全景图 glass-photo 即 D-4 验收图（会议行
+# 在繁忙照片底上的可读性）；三轮后删种，不污染后续段。
+D4_SEEDED=""
+if type nextup_seed_event > /dev/null 2>&1; then
+  D4_NOW_S=$(adb shell date +%s 2>/dev/null | tr -d '\r')
+  if [ -n "$D4_NOW_S" ]; then
+    EV_BEGIN=$(( (D4_NOW_S + 1800) * 1000 ))
+    EV_END=$(( (D4_NOW_S + 5400) * 1000 ))
+    if nextup_seed_event "SmokeD4Review" ""; then
+      D4_SEEDED=1
+      log "d4: meeting seeded for photo-wallpaper readability shot (starts in 30min)"
+    else
+      log "d4: seed failed - glass-photo shot may lack the meeting row"
+    fi
+  fi
+else
+  log "d4: nextup_seed_event unavailable on this leg - D-4 shot unverified here"
+fi
 if python3 scripts/gen_wallpaper.py sky /tmp/glass-sky.png > /dev/null 2>&1 && \
    python3 scripts/gen_wallpaper.py photo /tmp/glass-photo.png > /dev/null 2>&1 && \
    python3 scripts/gen_wallpaper.py paper /tmp/glass-paper.png > /dev/null 2>&1; then
@@ -1938,6 +1959,10 @@ if python3 scripts/gen_wallpaper.py sky /tmp/glass-sky.png > /dev/null 2>&1 && \
   glass_wallpaper_round paper /tmp/glass-paper.png
 else
   log "glass: wallpaper generation failed - set-based shots skipped"
+fi
+if [ -n "$D4_SEEDED" ] && type nextup_delete_event > /dev/null 2>&1; then
+  nextup_delete_event "SmokeD4Review"
+  log "d4: seed removed after wallpaper rounds"
 fi
 if glass_home_alive && adb shell pidof "$PKG" > /dev/null 2>&1; then
   ok "glass-alive-after-wallpaper-switches"

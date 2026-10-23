@@ -101,7 +101,7 @@ class IntentInputModeTest {
     }
 
     @Test
-    fun `滞留不收 - 聚焦过/有文本/有在场任一成立`() {
+    fun `滞留不收 - 聚焦过、有文本、有在场任一成立`() {
         // 聚焦过（真实会话开始过——D-2 两幕场景的锁存状态）
         assertFalse(
             intentInputStranded(hasFocused = true, textEmpty = true, holdsNow = false)
