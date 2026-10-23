@@ -281,23 +281,9 @@ fun PetZone(
         // 渐变衬底跟随简报内容（hero+槽位+会行）延伸：上部轻洗不抢简报
         // 的通透、中下部持平浓度托住会议行、到会行下缘之下再渐隐收尾。
         // 纯渐变无边框无圆角——不做成卡片、不复活 NextUp 卡形态。
-        androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxWidth()) {
-            val scrimColor = AILauncherColors.current.Background
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        androidx.compose.ui.graphics.Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0.0f to scrimColor.copy(alpha = 0.22f),
-                                0.55f to scrimColor.copy(alpha = 0.46f),
-                                0.86f to scrimColor.copy(alpha = 0.46f),
-                                1.0f to scrimColor.copy(alpha = 0.0f)
-                            )
-                        )
-                    )
-            )
-            Column(modifier = Modifier.fillMaxWidth()) {
+        // PROBE-freeze-scrim：罩纱 Box（matchParentSize 渐变层）摘除，
+        // Column 直挂 BoxWithConstraints，其余（含 inputCompact）保持候选。
+        Column(modifier = Modifier.fillMaxWidth()) {
         // v0.68.101（D-1）：横屏输入态 hero 整体让位——横屏 IME 抬升后
         // 可用高度只剩约四成，左区只装胶囊堆栈；竖屏走各模板 inputCompact。
         if (!(isLandscapeCover && inputActive)) {
@@ -332,8 +318,7 @@ fun PetZone(
         }
         // 罩纱尾巴：会行（或简报末尾）之下留一段渐隐距离，衬底在此收尾
         Spacer(modifier = Modifier.height(26.dp))
-            }  // Column 结束
-        }  // 罩纱 Box 结束
+        }  // Column 结束（PROBE：罩纱摘除）
     }  // v0.68.74：BoxWithConstraints 结束
     // 数据源：只跑 effect、上报，不渲染（TodaySection 数据管线）
     TodaySection(
