@@ -583,7 +583,15 @@ fun IntentEntry(
     }
     // v6 后调整（Bob 2026-10-24 20:31：胶囊下方「猜你想问」行删除）：
     // 主行用整池横滚，不再切分——发散覆盖面保留，不退回旧 5 项池子。
-    val deckExamples = deckExamplePool
+    // 推荐按本机已装能力过滤（Bob 2026-10-24 22:06；321 查日程个案）：
+    // 事实源与路由器 hints 同源（CapabilityRegistry.executableCapabilities，
+    // epoch 缓存：装/卸应用时 installedEpoch 变化触发重算，不轮询、
+    // 不每帧重查 PackageManager）。注意不用 validIds() 全集——全集不过滤。
+    // 滤空兜底：空池时推荐行整行隐藏（见下 showDeck 条件），不留空白占位。
+    val deckExamples = remember(deckExamplePool, installedEpoch) {
+        val executableIds = CapabilityRegistry.executableCapabilities(context).map { it.id }.toSet()
+        SlotTemplates.filterExecutable(deckExamplePool, executableIds)
+    }
 
     // F 批·点选填充：点示例 = 把模板整句（exampleFillText：有默认值代入
     // 默认值、无默认值的槽位以 label 原文呈现）写入输入框，光标落文末、
@@ -701,8 +709,9 @@ fun IntentEntry(
                     .align(Alignment.BottomStart)
                     .offset(x = petOffsetX, y = -(capsuleHeight - petOverlap))
             )
-            // 推荐问主行：底部对齐（行底距胶囊顶 8dp），从七仔右缘起横滚
-            if (showDeck && showDeckExamples) {
+            // 推荐问主行：底部对齐（行底距胶囊顶 8dp），从七仔右缘起横滚；
+            // 滤空时整行隐藏（按已装能力过滤后池子可能为空，不留空白占位）
+            if (showDeck && showDeckExamples && deckExamples.isNotEmpty()) {
                 DeckExamplesRow(
                     examples = deckExamples,
                     onPick = { pickExample(it) },

@@ -214,4 +214,54 @@ class SlotTemplatesTest {
         assertTrue(ex.map { it.id }.contains("rili"))
         assertTrue(ex.map { it.id }.contains("wechat"))
     }
+
+    // ---------- 推荐按本机可执行能力过滤（Bob 2026-10-24 22:06） ----------
+
+    @Test
+    fun filterExecutable_dropsRiliWhenCalendarNotInstalled() {
+        // 321 个案：已装集里没有任何日历包时（即可执行集无 rili），
+        // 「查我明天的日程」不得出现在推荐池里；其余 8 条不受影响。
+        val now = 1_700_000_000_000L
+        val pool = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
+        assertTrue(pool.map { it.id }.contains("rili"))
+        val executable = setOf(
+            "dache", "daohang", "hangban", "meituan",
+            "ditie", "wechat", "zhifubao", "jiudian"
+        )
+        val filtered = SlotTemplates.filterExecutable(pool, executable)
+        assertTrue(filtered.none { it.id == "rili" })
+        assertTrue(filtered.none { it.exampleFillText() == "查我明天的日程" })
+        assertEquals(8, filtered.size)
+    }
+
+    @Test
+    fun filterExecutable_keepsRiliWhenCalendarInstalled() {
+        // 含任一日历包时（即可执行集含 rili），日程推荐照常出现。
+        val now = 1_700_000_000_000L
+        val pool = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
+        val executable = setOf(
+            "dache", "daohang", "hangban", "rili", "meituan",
+            "ditie", "wechat", "zhifubao", "jiudian"
+        )
+        val filtered = SlotTemplates.filterExecutable(pool, executable)
+        assertEquals(pool.map { it.id }, filtered.map { it.id })
+    }
+
+    @Test
+    fun filterExecutable_keepsCapabilityLessContextualItems() {
+        // 能力 id 为空的是上下文派生（会议提醒：背后是真实日历事件
+        // 而非能力执行），不过滤——空可执行集里它仍保留。
+        val now = 1_700_000_000_000L
+        val pool = SlotTemplates.buildExpandedExamples(
+            daohang, dacheNoParams, event(now + 7_200_000L, "机场T3"), now
+        )
+        assertEquals(10, pool.size)
+        val filtered = SlotTemplates.filterExecutable(pool, emptySet())
+        assertEquals(listOf("meeting-reminder"), filtered.map { it.id })
+    }
+
+    @Test
+    fun filterExecutable_emptyPoolStaysEmpty() {
+        assertTrue(SlotTemplates.filterExecutable(emptyList(), setOf("rili")).isEmpty())
+    }
 }

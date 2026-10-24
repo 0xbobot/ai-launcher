@@ -202,6 +202,22 @@ object SlotTemplates {
         return out
     }
 
+    /**
+     * 按本机可执行能力过滤推荐池（Bob 2026-10-24 22:06：推荐按已装
+     * 能力过滤；321 查日程个案：静态池子许诺了本机没有的能力）。
+     * 事实源与路由器 hints 同源：调用方传入
+     * CapabilityRegistry.executableCapabilities 的 id 集——注意不是
+     * validIds() 全集目录，全集不过滤，bug 仍在。
+     * 去留规则：有能力 id 的只保留 id 在集里的；能力 id 为空的是
+     * 上下文派生（会议提醒：背后是真实日历事件而非能力执行），不过滤。
+     * 纯函数，单测锁死。
+     */
+    fun filterExecutable(
+        templates: List<SlotTemplate>,
+        executableIds: Set<String>
+    ): List<SlotTemplate> =
+        templates.filter { it.capabilityId == null || it.capabilityId in executableIds }
+
     /** HH:mm（与封面条/提醒文案同一格式口径）。 */
     fun fmtHHmm(ms: Long): String =
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
