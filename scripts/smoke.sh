@@ -410,7 +410,7 @@ sleep 2
 if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night auto || true; fi
 sleep 2
 
-# --- 探针（合并列车 B v3）：跳过第 9 段起的中后段，直达第 28 段密钥迁移（产品脚本已含坐标直点补丁） ---
+# --- 探针（合并列车 B v4）：头部段 + 第 28 段（落定新鲜 dump 坐标直点版） ---
 
 # --- 28. 密钥存储迁移 fixture（并行线 B）：旧版 alpha06 写入的 Key，升级后原样读出 ---
 # 流程见文件头第 28 段说明。假 Key 只含字母数字与连字符（input text 不转义）。
@@ -556,17 +556,28 @@ else
       adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
       sleep 5
       # 值一致：提交一句意图，mock 收到的 Authorization 必须逐字等于 fixture Key
-      # 提交走 ks_in.xml 坐标直点：新主页 uiautomator dump 偶发残缺，
-      # ni_tap_submit 的二次 dump 定位在合入 310 后的树上实测取不到 intent_submit
-      # （310 合入列车实证，见 PIPELINE 账本 B 行）；与第 9 段固定坐标兜底同口径。
-      KS_SUBMIT_OK=0
-      if enter_input_mode "$OUT/ks_in.xml" && ks_tap_rid ks_in "intent_input"; then
+      # 提交触发的两难（310 合入列车三轮探针实证，见 PIPELINE 账本 B 行）：
+      # ni_tap_submit 的即时 dump 在新主页偶发残缺、取不到 intent_submit；
+      # 而 ks_in.xml 是 IME 升起中的几何，缓存坐标直点会落到胶囊外，
+      # 触发 D-2 的点外退出。故落定后重拉新鲜 dump（含 intent_submit 才用）
+      # 再坐标直点，与第 9/10 段未命中重 dump 的既有口径一致。
+      ks_submit_settled() {
+        local try
+        enter_input_mode "$OUT/ks_in.xml" || return 1
+        for try in 1 2 3 4; do
+          sleep 2
+          ks_dump ks_in2
+          grep -q 'intent_submit' "$OUT/ks_in2.xml" 2> /dev/null && break
+        done
+        grep -q 'intent_submit' "$OUT/ks_in2.xml" 2> /dev/null || return 1
+        ks_tap_rid ks_in2 "intent_input" || return 1
         sleep 1
         adb shell input text "daohang" > /dev/null 2>&1 || true
         sleep 1
-        if ks_tap_rid ks_in "intent_submit"; then KS_SUBMIT_OK=1; fi
-      fi
-      if [ "$KS_SUBMIT_OK" = "1" ]; then
+        ks_tap_rid ks_in2 "intent_submit" || return 1
+        return 0
+      }
+      if ks_submit_settled; then
         KS_FOUND=0
         for i in $(seq 1 15); do
           if grep -q "^AUTH: Bearer $KS_KEY\$" "$KS_LOG" 2> /dev/null; then KS_FOUND=1; break; fi
