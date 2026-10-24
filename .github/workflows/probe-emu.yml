@@ -1,0 +1,76 @@
+name: Probe Emulator GPU (DO NOT MERGE)
+
+# PROBE ONLY — 只在 probe-ci-* 分支上手动 dispatch，永不合入 main。
+# 隔离实测：同一脚本、同一机型/镜像，只换 -gpu 模式，看模拟器能不能活过 12 分钟。
+# 判定只看两点：job 结论（alive=success / dead=failure）与 step 实际耗时
+# （dead 腿在死亡点附近提前退出，alive 腿跑满约 12 分钟脚本 + 启动）。
+# 另附 crash 证据收集步：runner 杀掉模拟器后，AVD 目录仍在 runner 磁盘上，
+# 把 emu-crash db 与 AVD 日志打进 artifact（job log 在 UI 可见，artifact 可下载）。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: control-swiftshader-indirect
+            gpu: swiftshader_indirect
+          - label: angle-indirect
+            gpu: angle_indirect
+          - label: guest
+            gpu: guest
+          - label: swiftshader
+            gpu: swiftshader
+    steps:
+      - name: Checkout probe ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install emulator system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpulse0
+          sudo chmod 666 /dev/kvm || true
+          ls -la /dev/kvm
+
+      - name: Probe emulator liveness
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu ${{ matrix.gpu }}
+          script: bash scripts/probe-emu.sh
+
+      - name: Collect emulator crash evidence
+        if: always()
+        run: |
+          mkdir -p probe-out
+          find ~/.android -name "*crash*" -o -name "*.log" 2>/dev/null | head -50 > probe-out/crash-files.txt || true
+          cat probe-out/crash-files.txt
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            cp "$f" probe-out/ 2>/dev/null || true
+            ls -la "$f" 2>/dev/null || true
+          done < probe-out/crash-files.txt
+          ls -laR ~/.android/avd/ 2>/dev/null | head -100 || true
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-emu-${{ matrix.label }}
+          path: probe-out/
+          retention-days: 14
