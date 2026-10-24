@@ -117,7 +117,7 @@ fun IslandToastHost(
             // 挖孔区；两侧吃 displayCutout inset——竖屏侧边 inset 为 0，零变化。
             .windowInsetsPadding(
                 WindowInsets.displayCutout.only(
-                    WindowInsetsSides.Start, WindowInsetsSides.End
+                    WindowInsetsSides.Start + WindowInsetsSides.End
                 )
             )
             .padding(top = 8.dp),

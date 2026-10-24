@@ -118,7 +118,7 @@ private fun StepScaffold(
             // 高于标准状态栏，不另加。
             .windowInsetsPadding(
                 WindowInsets.displayCutout.only(
-                    WindowInsetsSides.Start, WindowInsetsSides.End
+                    WindowInsetsSides.Start + WindowInsetsSides.End
                 )
             )
             .padding(32.dp),

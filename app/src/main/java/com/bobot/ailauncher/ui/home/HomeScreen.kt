@@ -420,7 +420,7 @@ fun HomeScreen(
                 .fillMaxSize()
                 .windowInsetsPadding(
                     WindowInsets.displayCutout.only(
-                        WindowInsetsSides.Start, WindowInsetsSides.End
+                        WindowInsetsSides.Start + WindowInsetsSides.End
                     )
                 )
                 .padding(top = if (isLandscapeHome) maxOf(16.dp, statusBarTopDp) else 16.dp),

@@ -182,7 +182,7 @@ fun SettingsScreen(
             // inset——竖屏侧边 inset 为 0，竖屏布局零变化。
             .windowInsetsPadding(
                 WindowInsets.displayCutout.only(
-                    WindowInsetsSides.Start, WindowInsetsSides.End
+                    WindowInsetsSides.Start + WindowInsetsSides.End
                 )
             )
             .onGloballyPositioned { rootPosInRoot = it.positionInRoot() }
