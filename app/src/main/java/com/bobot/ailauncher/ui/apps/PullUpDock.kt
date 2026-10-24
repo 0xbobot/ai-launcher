@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import com.bobot.ailauncher.ui.pet.HybridPet
 import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
@@ -268,19 +269,23 @@ fun PullUpDock(
                 // 20:31：再大一倍）、约 75% 露在面板外。外层
                 // Box 高 = 面板高 + 露出部分（面板底锚不变，只向上长）；
                 // 面板高实测回写（首帧按档位估 D2 184dp / D1 136dp，实测到
-                // 即纠正）。紧配置（字体 1.3 / 可用高 <400dp）七仔 ×0.8，
-                // 先缩它、不挤其他槽位（布局防线）。压边 25% 下七仔底探入
-                // 面板顶部约 0.13×面板高（D2 约 24dp），仍在面板顶部两层
-                // 16dp 内边距（共 32dp）之内，不盖第一排图标。
+                // 即纠正）。紧配置（字体 1.3 / 可用高 <400dp）宠物 ×0.8，
+                // 先缩它、不挤其他槽位（布局防线）。
+                // pet-hybrid-float：漂浮玻璃头（曜仔）取代坐姿七仔——头宽取
+                // 旧坐姿盒 1.8 倍（D1 约 127dp / D2 约 172dp），盒高按玻璃头
+                // 长宽比 1043:1318，底部留 12dp 气隙漂在面板上方（不再压边、
+                // 不再画脚下阴影）；外层 Box 只向上长，面板几何与锚点不动。
                 val seatCompact = density.fontScale >= 1.3f ||
                     dockAvailableHeight < 400.dp
                 var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
                 val dockPetSize = dockPanelHeight * 0.52f * (if (seatCompact) 0.8f else 1f)
-                val dockPetOverlap = dockPetSize * 0.25f
+                val floatPetWidth = dockPetSize * 1.8f
+                val floatPetHeight = floatPetWidth * (1318f / 1043f)
+                val floatPetGap = 12.dp
                 Box(
                     modifier = Modifier
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                        .height(dockPanelHeight + dockPetSize - dockPetOverlap)
+                        .height(dockPanelHeight + floatPetHeight + floatPetGap)
                 ) {
                 Column(
                     modifier = Modifier
@@ -369,9 +374,9 @@ fun PullUpDock(
                     // D1 盒 312dp 恰好占满内容宽，无视觉变化。竖屏保持默认 Start。
                     horizontalAlignment = if (isLandscapeDock) Alignment.CenterHorizontally else Alignment.Start
                 ) {
-                    // v6：坐姿七仔已移出面板 Column——面板之后画的
-                    // DockPetPerch 兄弟节点（见面板 Column 闭合后的调用），
-                    // 面板不再 clip 它，露出比例才做得出来。
+                    // pet-hybrid-float：漂浮宠物已移出面板 Column——面板之后画的
+                    // HybridPet 兄弟节点（见面板 Column 闭合后的调用），
+                    // 面板不再 clip 它，漂浮高度才放得下。
                     // 一二档内容：crossfade + scale，卡片高度弹簧跟随
                     AnimatedContent(
                         targetState = state,
@@ -424,16 +429,19 @@ fun PullUpDock(
                         }
                     }
                 }
-                // v6 静态栖坐（面板之后画 = 前面图层；面板底锚不变，七仔
-                // 只向上长；输入态不呈现，横屏面板在场时坐姿也让位，
-                // 保证任何时刻恰一只）。
+                // pet-hybrid-float 漂浮混合宠物（面板之后画；面板底锚不变，
+                // 宠物只向上长；输入态不呈现，横屏面板在场时也让位，
+                // 保证任何时刻恰一只）。点按语义不变（进输入态），testTag
+                // 沿用 dock_pet_cell（冒烟入口定位契约不变）；漂浮几何
+                // 已变，layout_check 的旧「露出比例」断言需随之上新。
                 if (!intentInputMode) {
-                    DockPetPerch(
-                        petSize = dockPetSize,
-                        onTap = onPetCellTap,
+                    HybridPet(
+                        petWidth = floatPetWidth,
+                        onPetTap = onPetCellTap,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .offset(y = -(dockPanelHeight - dockPetOverlap))
+                            .offset(y = -(dockPanelHeight + floatPetGap))
+                            .testTag("dock_pet_cell")
                     )
                 }
                 } // v6 外层 Box（面板 + 前面图层七仔）
@@ -513,7 +521,7 @@ private fun FullAppsOverlay(
 }
 
 /** 第一档：4 个常用大图标（56dp），只留图标，卡内严格垂直居中。
- *  v0.68.101：R-1 的行内七仔格已移除（七仔改坐面板上沿，见 DockPetPerch），
+ *  v0.68.101：R-1 的行内七仔格已移除（宠物改漂在面板上方，见 HybridPet），
  *  本行回到 4 应用位原始分档（56 图标 / 16 间距）。 */
 @Composable
 private fun DockRow4(
@@ -548,111 +556,6 @@ private fun DockRow4(
                     onLaunch = onLaunch,
                     onLongPress = onLongPress,
                     onDismissMenu = onDismissMenu
-                )
-            }
-        }
-    }
-}
-
-/**
- * v0.68.101（D-3 修订 + 单宠物原则，Bob 2026-10-23 08:00/08:08 拍板）：
- * Dock 坐姿七仔——全屏唯一七仔的静态呈现，进输入态的唯一门。贴面板
- * 上沿、水平居中：本体下缘与面板内容顶边齐平（半坐感），上半身探出
- * 面板之上；形态沿 R-1「对话等待态」：倾听姿态（meteor_wave，与意图
- * FETCH 同图）+ 头边「…」小对话泡 + 慢呼吸（仅主页 RESUMED 且非减动
- * 效/非低电量，省电口径同前）。
- * v6（Bob 2026-10-24 18:45 拍板，原型 input-sit-v6 图 2）：面板前面图层
- * 的栖坐——本节点是面板的兄弟（面板之后画、不 clip），脚底压进面板
- * 顶缘 25%、可见高 = 面板高 ×0.52（[petSize] 由宿主按实测面板高算入，
- * 紧配置已 ×0.8）、约 75% 露在面板外；脚底下方是落在面板面上的接触影。
- * 旧 DockPetSeat 的「头部为主裁切」就此退役：裁切是 317 真机「基本包
- * 在里面」的成因之一，本形态改全身 Fit（可见 = 盒子高）。热区：可点
- * 外框 ≥48dp（七仔矮于 48dp 时外框撑满 48dp、几何节点仍是本体盒子，
- * layout_check 的露出比例以 dock_pet_cell 几何节点为准）。testTag 沿用
- * dock_pet_cell（冒烟入口定位契约不变），点按语义不变（进输入态）。
- */
-@Composable
-private fun DockPetPerch(petSize: Dp, onTap: () -> Unit, modifier: Modifier = Modifier) {
-    val view = LocalView.current
-    val reduceMotion = com.bobot.ailauncher.ui.theme.rememberReduceMotion()
-    val lowPower by com.bobot.ailauncher.data.BatteryState.isLowPower.collectAsState()
-    var resumed by remember { mutableStateOf(false) }
-    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> resumed = true
-                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> resumed = false
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val breathing = resumed && !reduceMotion && !lowPower
-    val breatheScale: Float = if (breathing) {
-        rememberInfiniteTransition(label = "dockPetBreathe")
-            .animateFloat(
-                initialValue = 1f,
-                targetValue = 1.045f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(2300, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "dockPetBreatheVal"
-            ).value
-    } else {
-        1f
-    }
-    // 可点外框 ≥48dp（本体矮时撑满，不改几何节点）；本体盒子 = petSize
-    val touch = maxOf(petSize, 48.dp)
-    Box(
-        modifier = modifier
-            .size(width = touch, height = touch)
-            .semantics { contentDescription = "问七仔" }
-            .clickable {
-                view.tickHaptic()
-                onTap()
-            },
-        contentAlignment = Alignment.BottomCenter
-    ) {
-        // 本体几何节点：底边 = 面板顶 + 压边（宿主 offset 已算入），全身
-        // Fit 可见 = 盒子高；接触影先画（落在面板面上）、本体后画（脚底
-        // 压住影心，读出「坐在上面」不是贴纸）。
-        Box(
-            modifier = Modifier
-                .size(petSize)
-                .testTag("dock_pet_cell"),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .size(width = petSize * 0.72f, height = 8.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.14f))
-            )
-            androidx.compose.foundation.Image(
-                painter = androidx.compose.ui.res.painterResource(com.bobot.ailauncher.R.drawable.meteor_wave),
-                contentDescription = null,
-                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                modifier = Modifier
-                    .size(petSize)
-                    .graphicsLayer { scaleX = breatheScale; scaleY = breatheScale }
-            )
-            // 对话泡：头边右上，内「…」——「它在等你说话」
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(AILauncherColors.current.Card.copy(alpha = 0.92f))
-                    .padding(horizontal = 5.dp, vertical = 1.dp)
-            ) {
-                Text(
-                    text = "…",
-                    fontSize = 10.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                    color = AILauncherColors.current.Accent
                 )
             }
         }

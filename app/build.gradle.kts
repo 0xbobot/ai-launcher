@@ -102,6 +102,9 @@ dependencies {
     // lint 误报 Fragment 版本（MainActivity 通知权限）：显式声明压住
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation(libs.androidx.navigation.compose)
+    // pet-hybrid-float：视频表情高光（ExoPlayer + PlayerView，经 AndroidView 接入 Compose）
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
