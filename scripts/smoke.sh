@@ -410,7 +410,7 @@ sleep 2
 if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night auto || true; fi
 sleep 2
 
-# --- 探针（合并列车 B v4）：头部段 + 第 28 段（落定新鲜 dump 坐标直点版） ---
+# --- 探针（合并列车 B v5）：头部段 + 第 28 段（含拼音上屏补丁） ---
 
 # --- 28. 密钥存储迁移 fixture（并行线 B）：旧版 alpha06 写入的 Key，升级后原样读出 ---
 # 流程见文件头第 28 段说明。假 Key 只含字母数字与连字符（input text 不转义）。
@@ -573,6 +573,10 @@ else
         ks_tap_rid ks_in2 "intent_input" || return 1
         sleep 1
         adb shell input text "daohang" > /dev/null 2>&1 || true
+        sleep 1
+        # 拼音在 IME 组合区未上屏时 submitIfReady 的 !composing 守卫不提交
+        # （Stage1 口径）——补 ni_type_submit 同款 "%s" 上屏动作再点提交钮
+        adb shell input text "%s" > /dev/null 2>&1 || true
         sleep 1
         ks_tap_rid ks_in2 "intent_submit" || return 1
         return 0
