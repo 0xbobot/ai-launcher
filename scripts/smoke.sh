@@ -79,9 +79,13 @@ OUT="smoke-out"
 mkdir -p "$OUT"
 PASS=0
 FAIL=0
+# §9 改造（2026-10-24，310-freeze3 回执专节方案 A+B）：整机死亡三态记账
+ENV_DEATHS=0
+ENV_INVALID=0
 
 log()  { echo "[smoke] $*"; }
 ok()   { PASS=$((PASS+1)); log "PASS: $1"; }
+ok_rec() { PASS=$((PASS+1)); log "PASS(recovered): $1"; }
 ng()   { FAIL=$((FAIL+1)); log "FAIL: $1"; }
 # v0.68.99（R-1 多轮实测）：uiautomator 偶发 0 字节空 dump（ni_btn/ac_dump3/
 # suggest_after/focus_pre 先后中招）——关键单发 dump 拉回后为空时重拉一次。
@@ -417,6 +421,21 @@ sleep 2
 # 打不了中文，走的是同一条无 Key 路径，不影响断言目的。
 # 基线：上一段结束时停在 D3 应用中心（Dock 状态在 MainActivity 内，am start/HOME 回不到首页视图，
 # 首轮实测 intent-home 拍成 D3、点按误开 Contacts）→ 同第 5 段清理法：force-stop 重启回首页基线。
+log "RESULT-PARTIAL pass=$PASS fail=$FAIL"
+# death_watch（§9 改造方案 A）：每秒探活 device+pid，最长 ~20s。
+# 设备无响应（整机死亡签名）或始终等不到应用进程 → 返回 1（环境死亡），
+# 由 §9 驱动记 ENV-DEATH 并重启重试，不在此判产品 FAIL。
+death_watch() {
+  local i
+  for i in $(seq 1 20); do
+    adb get-state 2> /dev/null | grep -qx device || return 1
+    adb shell pidof "$PKG" 2> /dev/null | grep -q . && return 0
+    sleep 1
+  done
+  adb get-state 2> /dev/null | grep -qx device || return 1
+  return 1
+}
+s9_body() {
 adb shell am force-stop "$PKG" || true
 sleep 1
 adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
@@ -429,6 +448,8 @@ CX=$(SX 540); CY=$(SY 1247); BX=$(SX 928); BY=$(SY 1246)
 # 先 BACK 收键盘（焦点与输入态保留），再拉 dump 量坐标——与旧流程「dump
 # 时键盘未弹起」的坐标系一致，后续点提交的坐标才准。
 enter_input_mode "$OUT/intent_dump.xml" || true
+  # 进态后先 death_watch 探活（方案 A）：死亡签名提前返回 9，不带死机跑断言
+  death_watch || return 9
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
 adb shell uiautomator dump /sdcard/intent_dump.xml > /dev/null 2>&1 || true
@@ -492,7 +513,38 @@ else
     echo "[smoke] intent error strip: NOT FOUND after IME Done either"
   fi
 fi
-adb shell pidof "$PKG" | grep -q . && ok "intent-alive" || ng "intent-alive"
+  # 结尾探活（方案 A）：设备无响应或进程不在 → 死亡签名，返回 9 交驱动
+  adb get-state 2> /dev/null | grep -qx device || return 9
+  adb shell pidof "$PKG" 2> /dev/null | grep -q . || return 9
+  return 0
+}
+
+# §9 驱动（方案 A）：首跑死亡 → adb reboot 后重试一次；恢复则
+# PASS(recovered)，再死记 FAIL(env-double-death) 且整轮 ENV-INVALID。
+s9_body
+S9_RC=$?
+if [ "$S9_RC" = "9" ]; then
+  ENV_DEATHS=$((ENV_DEATHS+1))
+  log "ENV-DEATH: section 9 attempt 1 (device/pid lost); adb reboot + retry once"
+  adb reboot > /dev/null 2>&1 || true
+  for i in $(seq 1 40); do
+    if adb get-state 2> /dev/null | grep -qx device && [ "$(adb shell getprop sys.boot_completed 2> /dev/null | tr -d '\r')" = "1" ]; then break; fi
+    sleep 3
+  done
+  sleep 5
+  s9_body
+  S9_RC=$?
+  if [ "$S9_RC" = "9" ]; then
+    ENV_DEATHS=$((ENV_DEATHS+1))
+    ENV_INVALID=1
+    ng "env-double-death"
+    log "ENV-INVALID: section 9 died twice in one run; gate readers must void this run (not a product failure)"
+  else
+    ok_rec "intent-alive"
+  fi
+else
+  ok "intent-alive"
+fi
 
 # --- 10. 本地直达层 + 应用中心同组件（R2 UI 10-21 新规格）---
 # 首页打字出本地结果：点胶囊输 "clo" -> 七仔结果条应出现 Clock（英文标签，名称包含匹配）；
@@ -3164,5 +3216,9 @@ else
   fi
 fi
 
-log "RESULT pass=$PASS fail=$FAIL"
+if [ "$ENV_INVALID" = "1" ]; then
+  log "RESULT pass=$PASS fail=$FAIL env_deaths=$ENV_DEATHS ENV-INVALID"
+else
+  log "RESULT pass=$PASS fail=$FAIL env_deaths=$ENV_DEATHS"
+fi
 exit "$FAIL"
