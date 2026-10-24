@@ -25,6 +25,15 @@ on:
           - angle_indirect
           - guest
           - swiftshader
+      script:
+        description: "Probe script (probe-ci-gpu branch only, round 2 bisect)"
+        type: choice
+        default: probe-emu.sh
+        options:
+          - probe-emu.sh
+          - probe-app-idle.sh
+          - probe-adb-load.sh
+          - smoke-cut.sh
 
 permissions:
   actions: read
@@ -84,7 +93,7 @@ jobs:
           # -no-window：CI 无显示器，headless 运行（否则 Qt 报
           # "no Qt platform plugin could be initialized" 直接崩溃）
           emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu ${{ inputs.gpu || 'swiftshader_indirect' }}
-          script: bash scripts/probe-emu.sh
+          script: bash scripts/${{ inputs.script || 'probe-emu.sh' }}
 
       - name: Collect emulator crash evidence
         if: always()
