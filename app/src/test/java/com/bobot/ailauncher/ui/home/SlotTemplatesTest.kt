@@ -9,8 +9,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * v0.68.101（主页重构 R-2）：槽位模板纯逻辑——模板构建（schema 驱动）、
- * 填充/拦截/拼句、会议提醒派生、示例集顺序与上限。
+ * v0.68.101（主页重构 R-2）建；F 批收敛：槽位模板纯逻辑——模板构建
+ * （schema 驱动）、示例填充文案派生（exampleFillText）、会议提醒派生、
+ * 示例集顺序与上限。R-2 的 TemplateFill 填充/拦截/拼句用例随槽位 UX
+ * 退役删除（发送不再有拦截路径，缺参走协调器追问）。
  */
 class SlotTemplatesTest {
 
@@ -62,30 +64,55 @@ class SlotTemplatesTest {
         assertTrue(slot.required)
     }
 
-    // ---------- 填充与拼句 ----------
+    // ---------- 示例填充文案派生（F 批：点选即整句填入输入框） ----------
 
     @Test
-    fun fill_defaultsPrefilled_composedTextUsesValues() {
-        val fill = SlotTemplates.taxiTemplate(dacheNoParams).initialFill()
-        // 默认值预置即已填（实心芯片语义），无空必填
-        assertNull(fill.firstEmptyRequired())
-        assertEquals("打车去机场", fill.composedText())
-        val changed = fill.withValue("to", "火车站")
-        assertEquals("打车去火车站", changed.composedText())
+    fun exampleFillText_navAndTaxi_useDefaultDestination() {
+        // 有默认值 → 代入默认值（与行上显示的 chipText 同句）
+        assertEquals("导航去机场", SlotTemplates.navTemplate(daohang).exampleFillText())
+        assertEquals("打车去机场", SlotTemplates.taxiTemplate(dacheNoParams).exampleFillText())
     }
 
     @Test
-    fun fill_firstEmptyRequired_followsPartOrder_andClearReopens() {
+    fun exampleFillText_meetingReminder_fullSentenceFromEvent() {
         val now = 1_700_000_000_000L
-        val t = SlotTemplates.meetingReminder(event(now + 7_200_000L, "机场T3"), now)!!
-        var fill = t.initialFill().withValue("time", null).withValue("dest", null)
-        // 时间槽在目的地之前声明 → 拦截落点先是时间
-        assertEquals("time", fill.firstEmptyRequired()?.param)
-        fill = fill.withValue("time", "15:50")
-        assertEquals("dest", fill.firstEmptyRequired()?.param)
-        fill = fill.withValue("dest", "机场T3")
-        assertNull(fill.firstEmptyRequired())
-        assertEquals("提醒我15:50 出发去机场T3", fill.composedText())
+        val begin = now + 2 * 3_600_000L
+        val t = SlotTemplates.meetingReminder(event(begin, "公司大楼"), now)!!
+        // 时间默认（开始前 30 分钟）与地点默认都代入，拼成可直接编辑的整句
+        assertEquals(
+            "提醒我${SlotTemplates.fmtHHmm(begin - 30 * 60_000L)} 出发去公司大楼",
+            t.exampleFillText()
+        )
+    }
+
+    @Test
+    fun exampleFillText_slotWithoutDefault_fallsBackToSlotLabel() {
+        // 无默认值的槽位 → 以槽位 label 原文呈现（整句仍成立、用户可改字）
+        val t = SlotTemplate(
+            id = "bare",
+            capabilityId = null,
+            parts = listOf(
+                TemplatePart.Text("导航去"),
+                TemplatePart.Slot(
+                    SlotDef("to", "目的地", SlotKind.DESTINATION, required = true)
+                )
+            ),
+            defaults = emptyMap()
+        )
+        assertEquals("导航去目的地", t.exampleFillText())
+        // 空白默认值同样不算有默认
+        val blankDefault = t.copy(defaults = mapOf("to" to "  "))
+        assertEquals("导航去目的地", blankDefault.exampleFillText())
+    }
+
+    @Test
+    fun exampleFillText_matchesChipTextForAllDeckExamples() {
+        // 派生与行上文案永远同句：用户看到什么、点下去填入的就是什么
+        val now = 1_700_000_000_000L
+        val ex = SlotTemplates.buildExamples(
+            daohang, dacheNoParams, event(now + 7_200_000L, "机场T3"), now
+        )
+        ex.forEach { assertEquals(it.chipText(), it.exampleFillText()) }
     }
 
     // ---------- 会议提醒派生 ----------

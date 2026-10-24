@@ -451,32 +451,30 @@ fun HomeScreen(
                                     intentBoundsInRoot = it.boundsInRoot()
                                 }
                         ) {
-                            // v0.68.101（单宠物原则）：伴随七仔立在胶囊左侧
-                            // （方向二原型站位）——全屏唯一七仔的输入态
-                            // 呈现，反应姿态走 PetRepository 状态机；整行
-                            // 在意图区 bounds 内，点它不触发点外退出。
-                            androidx.compose.foundation.layout.Row(
-                                verticalAlignment = androidx.compose.ui.Alignment.Bottom
-                            ) {
-                                InputPetCompanion()
-                                IntentEntry(
-                                    state = intentState,
-                                    onSubmit = onIntentSubmit,
-                                    onConfirm = onIntentConfirm,
-                                    onDismiss = onIntentDismiss,
-                                    onCancelPlanning = onIntentCancelPlanning,
-                                    onOpenSettings = onOpenSettings,
-                                    onOpenPermissionSettings = { perm ->
-                                        openPermissionSettings(context, perm)
-                                    },
-                                    onFocusChanged = { intentFocused = it },
-                                    fieldValue = intentFieldValue,
-                                    onFieldValueChange = { intentFieldValue = it },
-                                    requestFocusOnMount = intentRequestFocus && intentFocusGateOpen,
-                                    onRequestExitInput = onExitIntentInput,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                            // F 批（输入态轻量化）：胶囊左侧 Row 站位退役
+                            // ——IntentEntry 独占整宽，七仔改在 IntentEntry
+                            // 内坐到胶囊上沿（全屏唯一、testTag pet_qizai
+                            // 不变，反应姿态仍走 PetRepository 状态机）；
+                            // 整区在意图区 bounds 内，点它不触发点外退出。
+                            // freeze3 焦点门（§9 削峰）口径保留：requestFocusOnMount
+                            // 仍须过 intentFocusGateOpen。
+                            IntentEntry(
+                                state = intentState,
+                                onSubmit = onIntentSubmit,
+                                onConfirm = onIntentConfirm,
+                                onDismiss = onIntentDismiss,
+                                onCancelPlanning = onIntentCancelPlanning,
+                                onOpenSettings = onOpenSettings,
+                                onOpenPermissionSettings = { perm ->
+                                    openPermissionSettings(context, perm)
+                                },
+                                onFocusChanged = { intentFocused = it },
+                                fieldValue = intentFieldValue,
+                                onFieldValueChange = { intentFieldValue = it },
+                                requestFocusOnMount = intentRequestFocus && intentFocusGateOpen,
+                                onRequestExitInput = onExitIntentInput,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }

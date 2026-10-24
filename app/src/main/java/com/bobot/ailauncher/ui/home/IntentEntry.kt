@@ -8,13 +8,17 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.size
@@ -74,6 +78,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -94,7 +99,6 @@ import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.data.CapabilityRegistry
-import com.bobot.ailauncher.data.SlotHistoryStore
 import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import java.text.SimpleDateFormat
@@ -136,33 +140,37 @@ fun IntentCapsuleField(
     // 进入，用户点一次就应能打字（键盘随聚焦弹起）；应用中心不传，保持点按
     // 聚焦的原行为；「问七仔」自动带起的思考/回复呈现也不传（不弹键盘）。
     requestFocusOnMount: Boolean = false,
-    // v0.68.101（主页重构 R-2）：模板态三件套（应用中心不传，行为不变）——
-    // ① 外置 FocusRequester：宿主在槽位选完值后把焦点送回胶囊；
-    // ② 提交可用覆盖：模板态字段文本为空，但发送钮须可用（点它走未填拦截）；
-    // ③ templateContent：非空时 decorationBox 渲染槽位芯片条代替文本层——
-    // 字段本体不卸载，焦点/键盘/点外收焦（.93）语义全部保持真实。
-    sharedFocusRequester: FocusRequester? = null,
-    submitEnabledOverride: Boolean? = null,
-    templateContent: (@Composable () -> Unit)? = null
+    // F 批：实心背景——首页胶囊坐在一体化面板里、七仔下半身垫在胶囊之后，
+    // 0.88 半透明底会让七仔透影；首页传 true 用不透明 Card 色（应用中心不传，
+    // 保持原半透明观感）。
+    solidBackground: Boolean = false
 ) {
-    val focusRequester = sharedFocusRequester ?: remember { FocusRequester() }
+    val focusRequester = remember { FocusRequester() }
     // v0.68.102（310 冻结修复二轮）：key 改为 requestFocusOnMount 本身——
     // 宿主（HomeScreen）的进态错峰门在进态合成落定后才把 true 送进来，
     // 本 Effect 须在 prop 翻 true 时才发聚焦请求（原 Unit key 只读首值）。
+    // F 批注：sharedFocusRequester 随槽位面板退役（无调用方再传），
+    // focusRequester 回到组件自持；错峰门 keying 原样保留。
     LaunchedEffect(requestFocusOnMount) {
         if (requestFocusOnMount) focusRequester.requestFocus()
     }
     // composing 中（拼音未上屏）禁止提交：组合区间的拉丁字母不是用户最终输入
     val composing = value.composition != null
-    val canSubmit = (submitEnabledOverride ?: value.text.isNotBlank()) && !planning && !composing
+    val canSubmit = value.text.isNotBlank() && !planning && !composing
     Row(
         modifier = modifier
+            // F 批：几何网锚点（整胶囊 bounds——layout_check 的坐沿/包含
+            // 断言以它为准，不拿 intent_input 的文本区凑数）
+            .testTag("intent_capsule")
             // R3-A：最小高度策略——fontScale 放大时允许胶囊长高，不定死 56dp 裁字；
             // 内容最高项是提交钮触控外框 48dp（R3-C），< 56dp 下限，外观仍是原规格 56dp
             .heightIn(min = 56.dp)
             .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             .clip(RoundedCornerShape(28.dp))
-            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
+            .background(
+                if (solidBackground) AILauncherColors.current.Card
+                else AILauncherColors.current.Card.copy(alpha = 0.88f)
+            )
             .clickable { focusRequester.requestFocus() }
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -204,23 +212,17 @@ fun IntentCapsuleField(
             keyboardActions = KeyboardActions(onDone = { if (canSubmit) onSubmit() }),
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (templateContent != null) {
-                        // R-2 模板态：芯片条代替文本层（字段保持挂载/聚焦，
-                        // 只是不画文本与光标——输入被宿主拦截路由到槽位面板）
-                        templateContent()
-                    } else {
-                        if (value.text.isEmpty()) {
-                            Text(
-                                text = placeholder,
-                                fontSize = 15.sp,
-                                color = AILauncherColors.current.Hint,
-                                // R3-A：大字体下占位文案单行省略，不溢出胶囊
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        innerTextField()
+                    if (value.text.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            fontSize = 15.sp,
+                            color = AILauncherColors.current.Hint,
+                            // R3-A：大字体下占位文案单行省略，不溢出胶囊
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
+                    innerTextField()
                 }
             }
         )
@@ -386,19 +388,11 @@ fun IntentEntry(
     // R3-C：胶囊焦点（驱动七仔倾听姿态）
     var capsuleFocused by remember { mutableStateOf(false) }
 
-    // v0.68.101（主页重构 R-2）：模板/槽位状态——templateFill 非空 = 胶囊
-    // 处于模板态（字段文本恒空、输入被拦截路由到槽位面板，见 onValueChange
-    // 包装）；activeSlotParam = 甲板上区正展开哪个槽位的选择面板；
-    // panelSeed = 模板态打字路由到面板自由输入的种子文本。
-    var templateFill by remember { mutableStateOf<TemplateFill?>(null) }
-    var activeSlotParam by remember { mutableStateOf<String?>(null) }
-    var panelSeed by remember { mutableStateOf("") }
-    var panelFieldFocused by remember { mutableStateOf(false) }
-    val capsuleFocusRequester = remember { FocusRequester() }
-    // 会话焦点：主字段聚焦、面板自由输入聚焦、或模板态在场，任一成立即
-    // 视为输入会话未失焦——宿主的失焦退出判定（.99）与点外收焦（.93）
-    // 都以它为准，焦点在主字段与面板之间移动不会把输入态误退掉。
-    val sessionFocused = capsuleFocused || panelFieldFocused || templateFill != null
+    // F 批（槽位 UX 退役）：R-2 的模板/槽位状态（templateFill /
+    // activeSlotParam / panelSeed）已全删——发送一律走自由文本，缺参由
+    // 协调器 NeedsInput 追问兜底。会话焦点即胶囊焦点本身：宿主的失焦
+    // 退出判定（.99）与点外收焦（.93）以它为准。
+    val sessionFocused = capsuleFocused
     LaunchedEffect(sessionFocused) { onFocusChanged(sessionFocused) }
 
     val focusManager = LocalFocusManager.current
@@ -455,29 +449,8 @@ fun IntentEntry(
     }
 
     fun submitIfReady() {
-        // R-2 模板态发送：必填槽位未填齐 → 不执行、不提交，自动跳到第一个
-        // 空槽位并展开其选择面板（事前防缺参）；填齐才拼句走既有提交路径，
-        // 提交后解析仍缺别的参，.87 的 NeedsInput 追问兜底（两者不打架：
-        // 槽位只管模板句的槽，追问管协调器解析结果）。
-        val fill = templateFill
-        if (fill != null) {
-            if (planning || composing) return
-            val empty = fill.firstEmptyRequired()
-            if (empty != null) {
-                activeSlotParam = empty.param
-                return
-            }
-            val composed = fill.composedText()
-            if (composed.isBlank()) return
-            templateFill = null
-            activeSlotParam = null
-            panelSeed = ""
-            onFieldValueChange(TextFieldValue(composed))
-            submittedText = composed
-            onSubmit(composed)
-            releaseInputFocus()
-            return
-        }
+        // F 批：发送只有自由文本一条路（R-2 的模板拼句/未填拦截已退役，
+        // 缺参由协调器 NeedsInput 追问兜底）。
         // 组合中不提交：拼音未上屏的文本不是用户的最终输入（金色钮与 IME Done 同守卫，
         // 胶囊组件内的 canSubmit 也已挡住，这里是宿主侧的第二道）
         if (text.isNotBlank() && !planning && !composing) {
@@ -489,8 +462,8 @@ fun IntentEntry(
 
     // 零打字数据（意图改进一批，R-2 沿用）：甲板常用 Top 应用
     // （AppUsageTracker.topApps：频次+当前时段亲和）+ 下一会议（经
-    // TodayEventsHolder 从 PetZone 共享）——会议只供甲板示例派生与槽位
-    // 选项，甲板本身不出会议行（简报会行是会议的唯一呈现，.93 去重契约
+    // TodayEventsHolder 从 PetZone 共享）——会议只供甲板示例派生，
+    // 甲板本身不出会议行（简报会行是会议的唯一呈现，.93 去重契约
     // 由此天然满足，不再需要 eventId 比对）。
     val nextEvent by TodayEventsHolder.nextEvent.collectAsState()
     var suggestionApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
@@ -512,14 +485,13 @@ fun IntentEntry(
             }
         }
     }
-    // 布局防线（Bob 2026-10-21，R-2 沿用并扩展到甲板）：内容先降级自身，
-    // 绝不挤压胶囊/TODAY/Dock 等其他槽位——示例行是第一牺牲位（字体放大
-    // >1.15 时收起，沿旧建议面口径）；应用行在最紧配置（字体 1.3 + 矮屏）
-    // 减到 2 个；槽位面板是功能件，不在降级之列（选项行横向滚动自适应）。
-    // 短高形态（横屏）不另收示例：示例是模板模式的唯一入口，收掉等于横屏
-    // 无槽位填充、与 L-7「横屏同语义」相悖；高度靠流式列自然裁剪末位
-    // （会行在列尾先让位），甲板/胶囊居列首不被裁，几何网在 landphone
-    // 腿对输入态实测兜底（v0.68.101 矩阵首跑定案）。
+    // 布局防线（Bob 2026-10-21，R-2 沿用并扩展到甲板；F 批口径不变）：
+    // 内容先降级自身，绝不挤压胶囊/TODAY/Dock 等其他槽位——示例行是
+    // 第一牺牲位（字体放大 >1.15 时收起，沿旧建议面口径）；应用行在
+    // 最紧配置（字体 1.3 + 矮屏）减到 2 个。短高形态（横屏）不另收示例
+    // （示例行横向滚动自适应）；高度靠流式列自然裁剪末位（会行在列尾
+    // 先让位），甲板/胶囊居列首不被裁，几何网在 landphone 腿对输入态
+    // 实测兜底（v0.68.101 矩阵首跑定案）。
     val densityNow = LocalDensity.current
     val configurationNow = LocalConfiguration.current
     val tightLayout = densityNow.fontScale >= 1.3f &&
@@ -569,7 +541,7 @@ fun IntentEntry(
         }
     }
 
-    // ---- R-2 甲板数据与槽位动作 ----
+    // ---- 甲板示例来源（F 批：模板只剩「示例整句」的派生职责） ----
     // 模板来源：能力注册表的参数 schema（daohang/dache 的 to 槽位）+
     // 下一场会派生（提醒模板）；注册表加载幂等，remember 一次即可。
     val slotCaps = remember {
@@ -583,170 +555,102 @@ fun IntentEntry(
             System.currentTimeMillis()
         )
     }
-    // 目的地历史（面板确认过才入册）：面板打开时读一次，IO 线程不扰帧。
-    var destHistory by remember { mutableStateOf<List<String>>(emptyList()) }
-    LaunchedEffect(activeSlotParam) {
-        if (activeSlotParam != null) {
-            destHistory = withContext(Dispatchers.IO) {
-                SlotHistoryStore.destinations(context)
-            }
-        }
-    }
 
+    // F 批·点选填充：点示例 = 把模板整句（exampleFillText：有默认值代入
+    // 默认值、无默认值的槽位以 label 原文呈现）写入输入框，光标落文末、
+    // 焦点留在胶囊可继续编辑；文本变非空后甲板按 showDeck 规则让位给
+    // 本地结果（与现行衔接，不另设状态）。
     fun pickExample(t: SlotTemplate) {
-        templateFill = t.initialFill()
-        panelSeed = ""
-        // 填入即展开第一个槽位的面板供复核/改值（原型 dir2-input 的形态）
-        activeSlotParam = t.slots().firstOrNull()?.param
+        val sentence = t.exampleFillText()
+        onFieldValueChange(
+            TextFieldValue(sentence, TextRange(sentence.length))
+        )
     }
 
-    fun pickSlotValue(def: SlotDef, v: String) {
-        templateFill = templateFill?.withValue(def.param, v)
-        if (def.kind == SlotKind.DESTINATION) {
-            SlotHistoryStore.recordDestination(context, v)
-        }
-        activeSlotParam = null
-        panelSeed = ""
-        // 选完回编辑态、焦点回胶囊（任务口径）
-        capsuleFocusRequester.requestFocus()
-    }
-
-    fun confirmSlotFree(def: SlotDef, raw: String) {
-        val v = raw.trim()
-        templateFill = templateFill?.withValue(def.param, v.ifEmpty { null })
-        if (v.isNotEmpty()) {
-            if (def.kind == SlotKind.DESTINATION) {
-                SlotHistoryStore.recordDestination(context, v)
-            }
-            activeSlotParam = null
-            panelSeed = ""
-            capsuleFocusRequester.requestFocus()
-        }
-        // 清空确认（v 为空）= 清除该槽位：值已清，面板保持打开等重选
-    }
-
-    val activeFill = templateFill
-    val activeDef = activeFill?.template?.slots()
-        ?.firstOrNull { it.param == activeSlotParam }
     val idleOrEditing = state is IntentUiState.Idle || state is IntentUiState.Editing
-    // 甲板可见：模板态常驻（面板/示例是编辑的一部分）；自由态仅在聚焦 +
-    // 空文本时（打字后本地结果接管下方槽位，甲板让位）。状态须为编辑系
-    // ——思考/回复/追问/权限态在场时甲板收起，不与结果槽位抢呈现。
-    val showDeck = idleOrEditing &&
-        (activeFill != null || (sessionFocused && text.isEmpty()))
+    // 甲板可见：仅在聚焦 + 空文本时（打字后本地结果接管下方槽位，甲板
+    // 让位）。状态须为编辑系——思考/回复/追问/权限态在场时甲板收起，
+    // 不与结果槽位抢呈现。
+    val showDeck = idleOrEditing && sessionFocused && text.isEmpty()
 
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        // ---- 输入甲板（R-2）：胶囊上方槽位的上区 ----
+      // ---- F 批·一体化面板：甲板 + 胶囊（含坐沿七仔）+ 结果槽位同处一面 ----
+      // 单一 Card 背景 + 24dp 圆角 + 主题描边，内部三区不再各带卡片底。
+      // 面板是静态容器：无任何尺寸/高度动画（310 冻结教训），进出仍由
+      // HomeScreen 的 fade-only AnimatedVisibility 承担。面板只活在既有
+      // 意图区内，不新开浮层、不另起列。
+      Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("intent_panel")
+            .clip(RoundedCornerShape(24.dp))
+            .background(AILauncherColors.current.Card)
+            .border(1.dp, AILauncherColors.current.Divider, RoundedCornerShape(24.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+      ) {
+        // ---- 输入甲板：面板上区（应用推荐 + 示例素行） ----
         if (showDeck) {
             Column(
-                modifier = Modifier
-                    .testTag("deck_root")
-                    .padding(bottom = 10.dp),
+                modifier = Modifier.testTag("deck_root"),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (activeFill != null && activeDef != null) {
-                    val opts = when (activeDef.kind) {
-                        SlotKind.DESTINATION -> SlotOptions.destinationOptions(
-                            current = activeFill.valueOf(activeDef.param),
-                            meetingLocation = nextEvent?.location,
-                            history = destHistory,
-                            templateDefault = activeFill.template.defaults[activeDef.param]
-                        )
-                        SlotKind.TIME -> SlotOptions.timeOptions(
-                            meetingDepartMs = nextEvent?.let { e ->
-                                (e.begin - SlotTemplates.DEPART_LEAD_MS)
-                                    .takeIf { it > System.currentTimeMillis() } ?: e.begin
-                            }
-                        )
-                    }
-                    SlotPanel(
-                        def = activeDef,
-                        options = opts,
-                        currentValue = activeFill.valueOf(activeDef.param),
-                        seedText = panelSeed,
-                        onPickOption = { v -> pickSlotValue(activeDef, v) },
-                        onConfirmFree = { raw -> confirmSlotFree(activeDef, raw) },
-                        onFreeFocusChanged = { panelFieldFocused = it }
+                if (visibleSuggestionApps.isNotEmpty()) {
+                    DeckAppsBlock(
+                        apps = visibleSuggestionApps,
+                        onOpenApp = { app ->
+                            releaseInputFocus()
+                            // v0.68.101（D-2）：甲板应用即原建议应用，同样显式
+                            // 退出输入态（明确动作，不依赖失焦边沿推断）
+                            onRequestExitInput()
+                            launchLocalApp(context, app)
+                        }
                     )
-                    if (showDeckExamples) {
-                        DeckExamplesRow(
-                            examples = deckExamples,
-                            onPick = { pickExample(it) }
-                        )
-                    }
-                } else if (activeFill != null) {
-                    if (showDeckExamples) {
-                        DeckExamplesRow(
-                            examples = deckExamples,
-                            onPick = { pickExample(it) }
-                        )
-                    }
-                } else {
-                    if (visibleSuggestionApps.isNotEmpty()) {
-                        DeckAppsBlock(
-                            apps = visibleSuggestionApps,
-                            onOpenApp = { app ->
-                                releaseInputFocus()
-                                // v0.68.101（D-2）：甲板应用即原建议应用，同样显式
-                                // 退出输入态（明确动作，不依赖失焦边沿推断）
-                                onRequestExitInput()
-                                launchLocalApp(context, app)
-                            }
-                        )
-                    }
-                    if (showDeckExamples) {
-                        DeckExamplesRow(
-                            examples = deckExamples,
-                            onPick = { pickExample(it) }
-                        )
-                    }
+                }
+                if (showDeckExamples) {
+                    DeckExamplesRow(
+                        examples = deckExamples,
+                        onPick = { pickExample(it) }
+                    )
                 }
             }
         }
 
-        // ---- 胶囊本体（与应用中心同一组件；模板态经 decorationBox 换芯片条） ----
-        IntentCapsuleField(
-            value = fieldValue,
-            onValueChange = { nv ->
-                val f = templateFill
-                when {
-                    f == null -> onFieldValueChange(nv)
-                    // 组合中（拼音未上屏）先让 IME 在字段里把字组完，
-                    // 组合结束的那次变更再走下面的路由
-                    nv.composition != null -> onFieldValueChange(nv)
-                    nv.text.isNotEmpty() -> {
-                        // 模板态打字不进主字段：转去第一个空必填槽位（无空
-                        // 槽位则第一个槽位）的选择面板，作自由输入种子文本
-                        val target = f.firstEmptyRequired()
-                            ?: f.template.slots().firstOrNull()
-                        if (target != null) {
-                            panelSeed = nv.text
-                            activeSlotParam = target.param
-                        }
-                        onFieldValueChange(TextFieldValue(""))
-                    }
-                    else -> onFieldValueChange(TextFieldValue(""))
-                }
-            },
-            onSubmit = { submitIfReady() },
-            planning = planning,
-            requestFocusOnMount = requestFocusOnMount,
-            onFocusChanged = { capsuleFocused = it },
-            sharedFocusRequester = capsuleFocusRequester,
-            submitEnabledOverride = if (templateFill != null) true else null,
-            templateContent = templateFill?.let { f ->
-                {
-                    TemplateStrip(
-                        fill = f,
-                        onSlotTap = { def -> activeSlotParam = def.param }
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
+        // ---- 胶囊行：七仔坐在胶囊上沿（F 批定稿） ----
+        // 几何：七仔总高 110dp，先画（z 在胶囊之后）；胶囊上方留 68dp
+        // 头部空间，七仔下部 42dp（≈38%）被胶囊本体盖住 → 可见高 68dp
+        // ≈ 胶囊高（56dp）的 1.2 倍，读出「坐在上沿」。水平中心 = 胶囊
+        // 左缘 + 25% 胶囊宽。静态 Box 布局，无尺寸动画（310 教训）。
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val petSize = 110.dp
+            InputPetCompanion(
+                size = petSize,
+                modifier = Modifier.offset(
+                    x = maxWidth * 0.25f - petSize / 2,
+                    y = 0.dp
+                )
+            )
+            Column {
+                Spacer(modifier = Modifier.height(68.dp))
+                // 胶囊本体（与应用中心同一组件；面板语境用实心底，
+                // 防七仔下半身透影）
+                IntentCapsuleField(
+                    value = fieldValue,
+                    onValueChange = { nv -> onFieldValueChange(nv) },
+                    onSubmit = { submitIfReady() },
+                    planning = planning,
+                    requestFocusOnMount = requestFocusOnMount,
+                    onFocusChanged = { capsuleFocused = it },
+                    solidBackground = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
 
         // ---- 结果条槽位（非模态）：本地结果 / 回复 / 错误 / 权限说明共用 ----
+        // 各 Strip 在面板内已去自身卡片底（透明，保留内边距与排版）。
         // 优先序：权限说明（需用户处理）> 本地结果（用户已改文本继续打字）> 回复/错误（对应已提交文本）
+        Column(modifier = Modifier.testTag("intent_result_slot")) {
         when (val s = state) {
             is IntentUiState.NeedsPermission -> {
                 PermissionExplainCard(
@@ -773,7 +677,7 @@ fun IntentEntry(
                 PlanningStrip(onCancel = onCancelPlanning)
             }
             else -> {
-                if (localResults.isNotEmpty() && templateFill == null &&
+                if (localResults.isNotEmpty() &&
                     state !is IntentUiState.NeedsConfirmation
                 ) {
                     LocalResultsBar(
@@ -813,6 +717,8 @@ fun IntentEntry(
                 }
             }
         }
+        } // 结果槽位 Column
+      } // 一体化面板 Column
     }
 
     // ---- 唯一弹窗：中/高风险动作确认（安全门，Bob 拍板归类） ----
@@ -882,10 +788,8 @@ private fun LocalResultsBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp)
+            // F 批：面板内透明——面板已提供统一背景，本条不再自带卡片底
             .requiredHeightIn(min = minBarHeight, max = RESULT_BAR_MAX_HEIGHT)
-            .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
             .verticalScroll(rememberScrollState())
             // R3-C 无障碍：结果一出现 TalkBack 礼貌播报（标题+应用名），不用手动找焦点
             .semantics { liveRegion = LiveRegionMode.Polite }
@@ -979,9 +883,7 @@ private fun StatusStrip(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
+            // F 批：面板内透明——面板已提供统一背景，本条不再自带卡片底
             // R3-C 无障碍：回复/错误出现时 TalkBack 礼貌播报条内文案
             .semantics { liveRegion = LiveRegionMode.Polite }
             .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
@@ -1045,10 +947,8 @@ private fun PlanningStrip(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp)
             .heightIn(max = RESULT_BAR_MAX_HEIGHT)
-            .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
+            // F 批：面板内透明——面板已提供统一背景，本条不再自带卡片底
             .semantics { liveRegion = LiveRegionMode.Polite }
             .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1090,10 +990,8 @@ private fun NeedsInputStrip(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp)
             .heightIn(max = RESULT_BAR_MAX_HEIGHT)
-            .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
+            // F 批：面板内透明——面板已提供统一背景，本条不再自带卡片底
             // 问题出现时 TalkBack 礼貌播报，用户不用找焦点也知道被问了什么
             .semantics { liveRegion = LiveRegionMode.Polite }
             .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
@@ -1140,10 +1038,8 @@ private fun PermissionExplainCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp)
             .heightIn(max = RESULT_BAR_MAX_HEIGHT)
-            .clip(RoundedCornerShape(16.dp))
-            .background(AILauncherColors.current.Card.copy(alpha = 0.92f))
+            // F 批：面板内透明——面板已提供统一背景，本卡不再自带卡片底
             .verticalScroll(rememberScrollState())
             // R3-C 无障碍：权限说明出现时 TalkBack 礼貌播报
             .semantics { liveRegion = LiveRegionMode.Polite }

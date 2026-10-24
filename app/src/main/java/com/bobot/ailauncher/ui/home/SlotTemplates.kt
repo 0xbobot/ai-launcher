@@ -7,11 +7,12 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 槽位模板（v0.68.101·主页重构 R-2 输入甲板）：甲板上的「动态示例」不再是
- * 点了就提交的整句，而是带槽位的模板——点示例只把模板填进胶囊，槽位以
- * 内嵌芯片呈现，用户在甲板上区的快捷选择面板里逐个确认/改值，必填槽位
- * 没填齐不许发送（事前防缺参；提交后解析仍缺参时 .87 的 NeedsInput 追问
- * 是兜底，两者不冲突：槽位管「模板句」，追问管「自由句与解析结果」）。
+ * 示例模板（v0.68.101 主页重构 R-2 建，F 批收敛）：甲板「动态示例」的
+ * 派生来源。模板内部仍是「固定文本段 + 槽位」的结构，但 F 批起槽位只
+ * 参与示例文案的派生（[SlotTemplate.exampleFillText]）——R-2 的槽位
+ * 填充 UX（芯片条/选择面板/发送拦截）已退役：点示例 = 把派生出的整句
+ * 纯文本填入输入框，用户可继续编辑，发送走自由文本路径，缺参由协调器
+ * NeedsInput 追问兜底。
  *
  * 槽位定义来源（不许编造）：
  * - 导航/打车模板的「目的地」槽位直接取 capabilities.json 里对应能力的
@@ -23,7 +24,7 @@ import java.util.Locale
  * 本文件全部为纯逻辑（无 Android 依赖，时间以毫秒参数传入），单测锁死。
  */
 
-/** 槽位种类：决定快捷选择面板的选项来源。 */
+/** 槽位种类：标记槽位语义（目的地/时间），F 批后仅作模板结构标注。 */
 enum class SlotKind { DESTINATION, TIME }
 
 /** 一个槽位的形式定义（param 对应能力参数名，UI 模板可用自有 param）。 */
@@ -41,8 +42,8 @@ sealed interface TemplatePart {
 }
 
 /**
- * 带槽位的示例模板。[defaults] 是填入时预置的槽位值（来自上下文，如
- * 下一场会的地点）——预置也算已填（实心芯片），用户点芯片可改。
+ * 带槽位的示例模板。[defaults] 是派生示例文案时槽位的预置值（来自上下文，
+ * 如下一场会的地点）。
  */
 data class SlotTemplate(
     val id: String,
@@ -52,11 +53,7 @@ data class SlotTemplate(
 ) {
     fun slots(): List<SlotDef> = parts.filterIsInstance<TemplatePart.Slot>().map { it.def }
 
-    /** 初始填充：默认值落位（空白默认值不算已填）。 */
-    fun initialFill(): TemplateFill =
-        TemplateFill(this, defaults.filterValues { it.isNotBlank() })
-
-    /** 示例 chips 上的文案：槽位用默认值呈现（无默认用槽位名占位）。 */
+    /** 示例行上的文案：槽位用默认值呈现（无默认用槽位名占位）。 */
     fun chipText(): String = buildString {
         for (p in parts) {
             when (p) {
@@ -67,33 +64,15 @@ data class SlotTemplate(
             }
         }
     }
-}
 
-/** 模板的一次填充状态（不可变，改值返回新实例）。 */
-data class TemplateFill(
-    val template: SlotTemplate,
-    val values: Map<String, String>
-) {
-    fun valueOf(param: String): String? = values[param]?.takeIf { it.isNotBlank() }
-
-    fun isFilled(def: SlotDef): Boolean = valueOf(def.param) != null
-
-    /** 第一个未填的必填槽位（发送拦截的落点）；全填齐返回 null。 */
-    fun firstEmptyRequired(): SlotDef? =
-        template.slots().firstOrNull { it.required && !isFilled(it) }
-
-    fun withValue(param: String, value: String?): TemplateFill =
-        copy(values = if (value.isNullOrBlank()) values - param else values + (param to value))
-
-    /** 拼成最终提交文本：槽位以已填值代入，未填槽位贡献空串（发送前必已拦截）。 */
-    fun composedText(): String = buildString {
-        for (p in template.parts) {
-            when (p) {
-                is TemplatePart.Text -> append(p.text)
-                is TemplatePart.Slot -> append(values[p.def.param].orEmpty())
-            }
-        }
-    }.trim()
+    /**
+     * F 批·示例填充文案派生（纯函数，单测锁死）：点示例时写入输入框的
+     * 整句纯文本。口径与 [chipText] 完全一致（同一派生，两个名字分别
+     * 服务「行上显示」与「点后填入」两个语义位）——有默认值代入默认值，
+     * 无默认值的槽位以槽位 label 原文呈现（如「导航去目的地」），用户
+     * 填入后可直接改字，不存在任何槽位态。
+     */
+    fun exampleFillText(): String = chipText()
 }
 
 object SlotTemplates {

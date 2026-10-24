@@ -2609,42 +2609,36 @@ else
 fi
 if [ -n "$PC_PID" ]; then kill "$PC_PID" 2> /dev/null || true; fi
 
-# --- 25. 槽位甲板（v0.68.101 主页重构 R-2：甲板 + 槽位填充端到端）---
+# --- 25. 甲板点选填充（F 批新契约：素行 + 点选整句填入 + 自由文本发送）---
+# R-2 槽位契约（模板填入/槽位芯片/选择面板/未填拦截）已随 F 批整体退役，
+# 本段按新契约重写；旧断言 slot-template-open / slot-free-fill /
+# slot-panel-reopen / slot-clear / slot-unfilled-blocked / slot-send-composed
+# 随被测功能一并删除（理由：槽位 UX 不复存在，断言对象消失）。
 # 手段同第 17/22 段（独立 mock 实例 + 预写 llm prefs，端口 18743）：
-# ①进输入态 → 甲板示例 chip「导航去机场」在场（slot-deck-examples）；
-# ②点示例 → 模板填入胶囊：槽位芯片 slot_chip_to + 目的地选择面板
-#   slot_panel 同时在场（slot-template-open），该 dump 兼作几何网的
-#   slot_focus.xml（输入态几何断言，横屏腿同口径——L-7）；
-# ③面板自由输入改填 Pudong → 确定后芯片变「Pudong ▾」、面板收起
-#   （slot-free-fill）；
-# ④点槽位芯片 → 面板重开（slot-panel-reopen）；清空自由输入并确定 =
-#   清值、面板保持（slot-clear）；
-# ⑤必填槽位空着点发送 → 不提交（mock 请求日志行数不变）、面板自动跳到
-#   空槽位保持展开（slot-unfilled-blocked）；
-# ⑥面板点选项「机场」→ 发送 → 协调器收到拼好的整句「导航去机场」
-#   （请求日志取证 slot-send-composed），mock 恒回 daohang 空参 → 落
-#   .87 NeedsInput 追问条「去哪儿」（slot-send-executes：槽位是事前防
-#   缺参、追问是解析后兜底，两段在此同框即不打架的证据）。
+# ①进输入态 → 一体化面板 intent_panel 在场、示例素行 deck_example_nav
+#   在场，全 dump 无 slot_panel / slot_chip 节点（deck-examples）；
+#   该 dump 兼作几何网的 deck_focus.xml（面板几何断言，横屏腿同口径）；
+# ②点示例「导航去机场」→ intent_input 文本 == 整句「导航去机场」、
+#   无 slot_chip/slot_panel、甲板已让位（deck_example 消失）
+#   （deck-fill-text），几何经 layout_check 的 deck-focus 行验收
+#   （deck-layout-geometry）；
+# ③点发送 → mock 收到自由文本整句（含「导航去机场」，请求日志取证
+#   deck-send-free-text），mock 恒回 daohang 空参 → 落 .87 NeedsInput
+#   追问条「去哪儿」（deck-send-executes：缺参由追问兜底的活证据）。
 # mock 起不来或 prefs 预写失败时整段跳过不计 FAIL（同第 17 段口径）；
 # 放大字体腿（SMOKE_FONT_SCALE）示例行按降级规则收起、本段前提不成立，
-# 同样整段跳过不计；段末清 llm prefs + force-stop，不污染第 23/24 段。
-sd_tap_text() {
-  local F="$1" T="$2" NODE NUMS X1 Y1 X2 Y2
-  NODE=$(grep -o "<node[^>]*text=\"$T\"[^>]*>" "$F" | head -1)
-  [ -n "$NODE" ] || return 1
-  NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-  X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
-  X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
-  [ -n "$X1" ] && [ -n "$Y2" ] || return 1
-  adb shell input swipe $(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) $(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) 150 > /dev/null 2>&1 || true
-  return 0
-}
+# 同样整段跳过不计；段末清 llm prefs + force-stop，不污染其他段。
 sd_dump() {
   adb shell uiautomator dump /sdcard/sd_poll.xml > /dev/null 2>&1 || true
   adb pull /sdcard/sd_poll.xml "$1" > /dev/null 2>&1 || true
 }
+# 取 intent_input 节点的 text 属性（属性序不定，先圈节点再取 text）
+sd_input_text() {
+  grep -o '<node[^>]*resource-id="intent_input"[^>]*>' "$1" 2> /dev/null | head -1 \
+    | sed -n 's/.* text="\([^"]*\)".*/\1/p'
+}
 SD_PORT=18743
-SD_LOG="$OUT/mock_slot_requests.log"
+SD_LOG="$OUT/mock_deck_requests.log"
 SD_PID=""
 SD_UP=0
 if command -v python3 > /dev/null 2>&1; then
@@ -2664,9 +2658,9 @@ if [ "$SD_UP" = "1" ]; then
   printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
     '    <string name="api_key">sk-mock</string>' \
     "    <string name=\"base_url\">http://127.0.0.1:$SD_PORT</string>" \
-    '    <string name="model">mock-model</string>' "</map>" > "$OUT/llm_slot.xml"
-  adb push "$OUT/llm_slot.xml" /data/local/tmp/llm_slot.xml > /dev/null 2>&1 || true
-  adb shell "run-as $PKG cp /data/local/tmp/llm_slot.xml shared_prefs/llm.xml" || true
+    '    <string name="model">mock-model</string>' "</map>" > "$OUT/llm_deck.xml"
+  adb push "$OUT/llm_deck.xml" /data/local/tmp/llm_deck.xml > /dev/null 2>&1 || true
+  adb shell "run-as $PKG cp /data/local/tmp/llm_deck.xml shared_prefs/llm.xml" || true
   adb shell "run-as $PKG chmod 660 shared_prefs/llm.xml" || true
   if adb shell "run-as $PKG cat shared_prefs/llm.xml" 2> /dev/null | grep -q '127.0.0.1'; then
     adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
@@ -2675,197 +2669,92 @@ if [ "$SD_UP" = "1" ]; then
     sleep 2
     if enter_input_mode "$OUT/sd_open.xml"; then
       sd_dump "$OUT/sd_deck.xml"
+      cp "$OUT/sd_deck.xml" "$OUT/deck_focus.xml" 2> /dev/null || true
       # 示例行在放大字体腿（SMOKE_FONT_SCALE，如 1.3）按降级规则收起——
-      # 本段的前提（示例 chips 在场）在该腿按设计不成立，整段跳过不计
+      # 本段的前提（示例素行在场）在该腿按设计不成立，整段跳过不计
       # （同第 17 段环境门控口径）；非降级腿缺示例才是真失败。
       SD_SKIP25=0
-      if [ -f "$OUT/sd_deck.xml" ] && grep -q 'resource-id="deck_example_nav"' "$OUT/sd_deck.xml"; then
-        ok "slot-deck-examples"
+      if [ -f "$OUT/sd_deck.xml" ] && grep -q 'resource-id="deck_example_nav"' "$OUT/sd_deck.xml" \
+          && grep -q 'resource-id="intent_panel"' "$OUT/sd_deck.xml" \
+          && ! grep -q 'resource-id="slot_panel"' "$OUT/sd_deck.xml" \
+          && ! grep -q 'resource-id="slot_chip' "$OUT/sd_deck.xml"; then
+        ok "deck-examples"
       elif [ -n "$SMOKE_FONT_SCALE" ]; then
         SD_SKIP25=1
-        log "slot-deck: example chips degraded away on font-scale leg - segment skipped (not counted)"
+        log "deck-fill: example row degraded away on font-scale leg - segment skipped (not counted)"
       else
-        ng "slot-deck-examples"
+        ng "deck-examples"
       fi
-      shot "slot-deck"
+      shot "deck-panel"
       if [ "$SD_SKIP25" = "1" ]; then
-        log "slot-deck: segment skipped on this leg (see above)"
+        log "deck-fill: segment skipped on this leg (see above)"
       elif tap_rid "$OUT/sd_deck.xml" "deck_example_nav"; then
         sleep 2
-        sd_dump "$OUT/sd_tpl.xml"
-        cp "$OUT/sd_tpl.xml" "$OUT/slot_focus.xml" 2> /dev/null || true
-        if [ -f "$OUT/sd_tpl.xml" ] && grep -q 'resource-id="slot_chip_to"' "$OUT/sd_tpl.xml" \
-            && grep -q 'resource-id="slot_panel"' "$OUT/sd_tpl.xml"; then
-          ok "slot-template-open"
+        sd_dump "$OUT/sd_filled.xml"
+        SD_FILLED_TEXT=$(sd_input_text "$OUT/sd_filled.xml")
+        if [ "$SD_FILLED_TEXT" = "导航去机场" ] \
+            && ! grep -q 'resource-id="slot_chip' "$OUT/sd_filled.xml" \
+            && ! grep -q 'resource-id="slot_panel"' "$OUT/sd_filled.xml" \
+            && ! grep -q 'resource-id="deck_example_nav"' "$OUT/sd_filled.xml"; then
+          ok "deck-fill-text"
         else
-          ng "slot-template-open"
+          log "deck-fill: intent_input text after tap = [$SD_FILLED_TEXT] (expected 导航去机场)"
+          ng "deck-fill-text"
         fi
-        shot "slot-panel"
-        # 输入态几何：单独跑布局网只取 slot-focus 行（全量文件都在 $OUT，
-        # 其余状态在第 21 段已判过，这里只认 slot-focus 的 FAIL）
-        SD_LAYOUT=$(python3 scripts/layout_check.py "$OUT" "$SCR_W" "$SCR_H" 2>&1 | grep "slot-focus" || true)
+        shot "deck-filled"
+        # 输入态几何：布局网的 deck-focus 行（面板/坐沿七仔/同面包含断言）
+        SD_LAYOUT=$(python3 scripts/layout_check.py "$OUT" "$SCR_W" "$SCR_H" 2>&1 | grep "deck-focus" || true)
         echo "$SD_LAYOUT" | while IFS= read -r line; do [ -n "$line" ] && log "$line"; done
         if echo "$SD_LAYOUT" | grep -q "LAYOUT FAIL"; then
-          ng "slot-layout-geometry"
+          ng "deck-layout-geometry"
         else
-          ok "slot-layout-geometry"
+          ok "deck-layout-geometry"
         fi
-        # ③ 自由输入改值：面板自由行初始带当前值「机场」，先清空再打字
-        if tap_rid "$OUT/sd_tpl.xml" "slot_free_input"; then
-          sleep 1
-          adb shell input keyevent KEYCODE_MOVE_END || true
-          for i in 1 2 3 4 5 6; do adb shell input keyevent KEYCODE_DEL || true; done
-          adb shell input text "Pudong" > /dev/null 2>&1 || true
-          sleep 1
-          sd_dump "$OUT/sd_free.xml"
-          if tap_rid "$OUT/sd_free.xml" "slot_free_confirm"; then
-            sleep 2
-            sd_dump "$OUT/sd_filled.xml"
-            if [ -f "$OUT/sd_filled.xml" ] && grep -q 'text="Pudong ▾"' "$OUT/sd_filled.xml" \
-                && ! grep -q 'resource-id="slot_panel"' "$OUT/sd_filled.xml"; then
-              ok "slot-free-fill"
-            else
-              ng "slot-free-fill"
+        # ③ 发送：自由文本整句直达协调器 → 追问兜底 + 请求日志取证
+        if tap_rid "$OUT/sd_filled.xml" "intent_submit"; then
+          SD_EXEC=0
+          for i in $(seq 1 10); do
+            sleep 1
+            sd_dump "$OUT/sd_exec.xml"
+            if [ -f "$OUT/sd_exec.xml" ] && grep -q "去哪儿" "$OUT/sd_exec.xml"; then
+              SD_EXEC=1; break
             fi
-            # ④ 点槽位芯片重开面板 → 清空确定 = 清值、面板保持
-            if tap_rid "$OUT/sd_filled.xml" "slot_chip_to"; then
-              sleep 2
-              sd_dump "$OUT/sd_reopen.xml"
-              if [ -f "$OUT/sd_reopen.xml" ] && grep -q 'resource-id="slot_panel"' "$OUT/sd_reopen.xml"; then
-                ok "slot-panel-reopen"
-              else
-                ng "slot-panel-reopen"
-              fi
-              if tap_rid "$OUT/sd_reopen.xml" "slot_free_input"; then
-                sleep 1
-                adb shell input keyevent KEYCODE_MOVE_END || true
-                for i in 1 2 3 4 5 6 7 8 9 10; do adb shell input keyevent KEYCODE_DEL || true; done
-                sd_dump "$OUT/sd_toclear.xml"
-                if tap_rid "$OUT/sd_toclear.xml" "slot_free_confirm"; then
-                  sleep 2
-                  sd_dump "$OUT/sd_cleared.xml"
-                  if [ -f "$OUT/sd_cleared.xml" ] && grep -q 'resource-id="slot_panel"' "$OUT/sd_cleared.xml" \
-                      && grep -q 'text="目的地"' "$OUT/sd_cleared.xml"; then
-                    ok "slot-clear"
-                  else
-                    ng "slot-clear"
-                  fi
-                  # ⑤ 空槽位发送拦截：日志行数不变 + 面板仍在（自动跳空槽位）
-                  SD_LINES_BEFORE=$(wc -l < "$SD_LOG" 2> /dev/null || echo 0)
-                  if tap_rid "$OUT/sd_cleared.xml" "intent_submit"; then
-                    sleep 2
-                    SD_LINES_AFTER=$(wc -l < "$SD_LOG" 2> /dev/null || echo 0)
-                    sd_dump "$OUT/sd_blocked.xml"
-                    if [ "$SD_LINES_AFTER" = "$SD_LINES_BEFORE" ] \
-                        && [ -f "$OUT/sd_blocked.xml" ] \
-                        && grep -q 'resource-id="slot_panel"' "$OUT/sd_blocked.xml"; then
-                      ok "slot-unfilled-blocked"
-                    else
-                      ng "slot-unfilled-blocked"
-                    fi
-                    # ⑥ 面板选项填值 → 发送执行（拼句取证 + 追问兜底同框）
-                    if sd_tap_text "$OUT/sd_blocked.xml" "机场"; then
-                      sleep 2
-                      sd_dump "$OUT/sd_ready.xml"
-                      if tap_rid "$OUT/sd_ready.xml" "intent_submit"; then
-                        SD_EXEC=0
-                        for i in $(seq 1 10); do
-                          sleep 1
-                          sd_dump "$OUT/sd_exec.xml"
-                          if [ -f "$OUT/sd_exec.xml" ] && grep -q "去哪儿" "$OUT/sd_exec.xml"; then
-                            SD_EXEC=1; break
-                          fi
-                        done
-                        if [ "$SD_EXEC" = "1" ]; then
-                          ok "slot-send-executes"
-                        else
-                          ng "slot-send-executes"
-                        fi
-                        shot "slot-sent"
-                        if grep -q "导航去" "$SD_LOG" && grep -q "机场" "$SD_LOG"; then
-                          ok "slot-send-composed"
-                        else
-                          ng "slot-send-composed"
-                        fi
-                      else
-                        log "slot-deck: send button not located after option fill - tail skipped"
-                        ng "slot-send-executes"
-                        ng "slot-send-composed"
-                      fi
-                    else
-                      log "slot-deck: option 机场 not located - tail skipped"
-                      ng "slot-send-executes"
-                      ng "slot-send-composed"
-                    fi
-                  else
-                    log "slot-deck: submit not located in cleared state - tail skipped"
-                    ng "slot-unfilled-blocked"
-                    ng "slot-send-executes"
-                    ng "slot-send-composed"
-                  fi
-                else
-                  log "slot-deck: free confirm (clear) not located - tail skipped"
-                  ng "slot-clear"
-                  ng "slot-unfilled-blocked"
-                  ng "slot-send-executes"
-                  ng "slot-send-composed"
-                fi
-              else
-                log "slot-deck: free input not located in reopened panel - tail skipped"
-                ng "slot-clear"
-                ng "slot-unfilled-blocked"
-                ng "slot-send-executes"
-                ng "slot-send-composed"
-              fi
-            else
-              log "slot-deck: slot chip not located after free fill - tail skipped"
-              ng "slot-panel-reopen"
-              ng "slot-clear"
-              ng "slot-unfilled-blocked"
-              ng "slot-send-executes"
-              ng "slot-send-composed"
-            fi
+          done
+          if [ "$SD_EXEC" = "1" ]; then
+            ok "deck-send-executes"
           else
-            log "slot-deck: free confirm not located - tail skipped"
-            ng "slot-free-fill"
-            ng "slot-panel-reopen"
-            ng "slot-clear"
-            ng "slot-unfilled-blocked"
-            ng "slot-send-executes"
-            ng "slot-send-composed"
+            ng "deck-send-executes"
+          fi
+          shot "deck-sent"
+          if grep -q "导航去" "$SD_LOG" && grep -q "机场" "$SD_LOG"; then
+            ok "deck-send-free-text"
+          else
+            ng "deck-send-free-text"
           fi
         else
-          log "slot-deck: free input not located in panel - tail skipped"
-          ng "slot-free-fill"
-          ng "slot-panel-reopen"
-          ng "slot-clear"
-          ng "slot-unfilled-blocked"
-          ng "slot-send-executes"
-          ng "slot-send-composed"
+          log "deck-fill: submit not located after fill - tail skipped"
+          ng "deck-send-executes"
+          ng "deck-send-free-text"
         fi
       else
-        log "slot-deck: example chip not tappable - segment counted as fail"
-        ng "slot-template-open"
-        ng "slot-layout-geometry"
-        ng "slot-free-fill"
-        ng "slot-panel-reopen"
-        ng "slot-clear"
-        ng "slot-unfilled-blocked"
-        ng "slot-send-executes"
-        ng "slot-send-composed"
+        log "deck-fill: example row not tappable - segment counted as fail"
+        ng "deck-fill-text"
+        ng "deck-layout-geometry"
+        ng "deck-send-executes"
+        ng "deck-send-free-text"
       fi
     else
-      log "slot-deck: capsule not located - segment skipped (not counted)"
+      log "deck-fill: capsule not located - segment skipped (not counted)"
     fi
     # 清理：删 llm prefs + force-stop 掉 SP 缓存，恢复无 Key 基线（同第 22 段）
     adb shell "run-as $PKG rm -f shared_prefs/llm.xml" || true
     adb reverse --remove "tcp:$SD_PORT" > /dev/null 2>&1 || true
     adb shell am force-stop "$PKG" || true
   else
-    log "slot-deck: llm prefs seed failed - segment skipped (not counted)"
+    log "deck-fill: llm prefs seed failed - segment skipped (not counted)"
   fi
 else
-  log "mock llm unavailable - slot-deck segment skipped (not counted)"
+  log "mock llm unavailable - deck-fill segment skipped (not counted)"
 fi
 if [ -n "$SD_PID" ]; then kill "$SD_PID" 2> /dev/null || true; fi
 
