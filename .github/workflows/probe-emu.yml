@@ -1,6 +1,8 @@
 name: Probe Emulator GPU (DO NOT MERGE)
 
-# PROBE ONLY — 只在 probe-ci-* 分支上手动 dispatch，永不合入 main。
+# PROBE ONLY — 永不合入 main。
+# 注意：本文件实测发现无法直接 dispatch（只在 probe 分支时按文件名查不到，404），
+# 故实际探针走 smoke-test.yml（probe 分支版）+ inputs.gpu；本文件仅作设计存档。
 # 隔离实测：同一脚本、同一机型/镜像，只换 -gpu 模式，看模拟器能不能活过 12 分钟。
 # 判定只看两点：job 结论（alive=success / dead=failure）与 step 实际耗时
 # （dead 腿在死亡点附近提前退出，alive 腿跑满约 12 分钟脚本 + 启动）。

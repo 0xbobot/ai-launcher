@@ -11,7 +11,20 @@ on:
   # 分支验证用：workflow_run 不为非默认分支的构建触发，分支冒烟靠手动 dispatch
   # （R2 UI 分支 loop-r2-ui 首次发现，2026-10-20）。dispatch 时取该分支最近一次
   # 成功构建的 APK，checkout 用 dispatch 所在 ref 的代码（含 smoke.sh）。
+  # PROBE-ONLY 修改（仅 probe-ci-gpu 分支，永不合入 main）：
+  # 新 workflow 文件（如 probe-emu.yml）只在 probe 分支时按文件名 dispatch 会 404，
+  # 故探针复用本文件：dispatch 时 inputs.gpu 选 GPU 模式，脚本换成探针。
   workflow_dispatch:
+    inputs:
+      gpu:
+        description: "Probe GPU mode (probe-ci-gpu branch only)"
+        type: choice
+        default: swiftshader_indirect
+        options:
+          - swiftshader_indirect
+          - angle_indirect
+          - guest
+          - swiftshader
 
 permissions:
   actions: read
@@ -70,13 +83,26 @@ jobs:
           disable-animations: true
           # -no-window：CI 无显示器，headless 运行（否则 Qt 报
           # "no Qt platform plugin could be initialized" 直接崩溃）
-          emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu swiftshader_indirect
-          script: bash scripts/smoke.sh
+          emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu ${{ inputs.gpu || 'swiftshader_indirect' }}
+          script: bash scripts/probe-emu.sh
 
-      - name: Upload smoke screenshots
+      - name: Collect emulator crash evidence
+        if: always()
+        run: |
+          mkdir -p probe-out
+          find ~/.android -name "*crash*" -o -name "*.log" 2>/dev/null | head -50 > probe-out/crash-files.txt || true
+          cat probe-out/crash-files.txt
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            cp "$f" probe-out/ 2>/dev/null || true
+            ls -la "$f" 2>/dev/null || true
+          done < probe-out/crash-files.txt
+          ls -laR ~/.android/avd/ 2>/dev/null | head -100 || true
+
+      - name: Upload probe evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-screenshots
-          path: smoke-out/
+          name: probe-emu-${{ inputs.gpu || 'swiftshader_indirect' }}
+          path: probe-out/
           retention-days: 14
