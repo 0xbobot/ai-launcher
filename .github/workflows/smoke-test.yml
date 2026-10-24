@@ -36,6 +36,8 @@ on:
           - smoke-cut.sh
           - smoke-cut11.sh
           - smoke-nodate.sh
+          - smoke-nodate-cut12.sh
+          - smoke-nodate-cut19.sh
 
 permissions:
   actions: read
@@ -115,5 +117,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: probe-emu-${{ inputs.gpu || 'swiftshader_indirect' }}
-          path: probe-out/
+          path: |
+            probe-out/
+            smoke-out/
           retention-days: 14
