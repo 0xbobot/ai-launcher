@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -342,9 +343,8 @@ fun AppCenterContent(
     // 应用中心升级：键盘可见检测（WindowInsets.ime 下缘 > 0）——键盘弹出
     // 专用布局的开关（隐藏 rail / 幽灵字母 / 刊头、行距切紧凑）；adjustResize
     // 下 ime inset 仍正常上报
-    // 全限定写法（同 HomeScreen 已验证的形态，避免导入解析歧义）
-    val imeVisible = androidx.compose.foundation.layout.WindowInsets.ime
-        .getBottom(density) > 0
+    // ime 是 WindowInsets.Companion 的扩展属性，须单独导入（同 HomeScreen）
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
     // 应用中心升级：搜索态或键盘弹出时行距切紧凑（64→56dp）
     val compactRows = searching || imeVisible
     // 应用中心升级：composing 期间结果区降透明度至 0.6（Bob 定稿③）——
