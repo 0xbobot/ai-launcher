@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +49,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
@@ -61,6 +63,7 @@ import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.confirmHaptic
 import kotlinx.coroutines.launch
 
 /**
@@ -105,6 +108,13 @@ fun AppCenterLandscape(
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
     val rowState = rememberLazyListState()
+    // 横屏 rail 房子上拉（Bob 2026-10-24：与竖屏一致补房子项）：进度由
+    // WaveRail 拖动回调驱动，≥1 提交一次回首页；松手后复位（见 onRelease）。
+    var housePull by remember { mutableStateOf(0f) }
+    var housePullCommitted by remember { mutableStateOf(false) }
+    val hapticView = LocalView.current
+    // 初始从 A 开始（Bob 2026-10-24）：首次进入且非搜索态时定位一次。
+    var initialScrollDone by remember { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -197,6 +207,17 @@ fun AppCenterLandscape(
         fun scrollToLetter(letter: Char) {
             letterToCol[letter]?.let { idx ->
                 scope.launch { rowState.animateScrollToItem(idx) }
+            }
+        }
+
+        // 初始从 A 开始（Bob 2026-10-24）：只在首次进入且非搜索态时定位
+        // 一次到 A（或 A 之后最近有应用的字母）列；收藏列仍在，点 ★ 回去。
+        // 守卫保证不与用户后续滚动打架、不影响搜索态。
+        LaunchedEffect(columns, searchResults) {
+            if (!initialScrollDone && searchResults == null) {
+                initialScrollDone = true
+                val target = ('A'..'Z').firstNotNullOfOrNull { letterToCol[it] }
+                if (target != null) rowState.scrollToItem(target)
             }
         }
 
@@ -452,9 +473,15 @@ fun AppCenterLandscape(
             if (searchResults == null) {
             AppRail(
                 items = remember(favApps, hiddenApps) {
+                    // 与竖屏一致（Bob 2026-10-24）：房子、分隔、★、分隔、
+                    // A-Z、分隔、👁；此前横屏缺房子项。
                     buildList {
-                        if (favApps.isNotEmpty()) add(RailItem.Star)
-                        if (favApps.isNotEmpty()) add(RailItem.Separator)
+                        add(RailItem.House)
+                        if (favApps.isNotEmpty()) {
+                            add(RailItem.Separator)
+                            add(RailItem.Star)
+                        }
+                        add(RailItem.Separator)
                         ('A'..'Z').forEach { add(RailItem.Letter(it)) }
                         if (hiddenApps.isNotEmpty()) {
                             add(RailItem.Separator)
@@ -464,6 +491,8 @@ fun AppCenterLandscape(
                 },
                 onActiveItem = { item ->
                     when (item) {
+                        // 竖屏同口径：点房子本身不跳转，回首页走上拉手势。
+                        is RailItem.House -> {}
                         is RailItem.Star -> {
                             scope.launch { rowState.animateScrollToItem(favColIdx) }
                         }
@@ -487,7 +516,26 @@ fun AppCenterLandscape(
                         else -> {}
                     }
                 },
-                onRelease = { },
+                // 房子上拉回首页：与竖屏 housePull 语义一致（≥1 提交一次）。
+                housePull = housePull,
+                onHousePull = { p ->
+                    if (!housePullCommitted && p >= 1f) {
+                        housePullCommitted = true
+                        hapticView.confirmHaptic()
+                        onHeaderSwipeRightState.value()
+                    }
+                    housePull = p.coerceIn(0f, 1f)
+                },
+                onRelease = {
+                    housePull = 0f
+                    housePullCommitted = false
+                },
+                // Rail 高度跟随容器（Bob 2026-10-24）：不再写死 400dp（横屏
+                // 屏高不足时上下裁字母），占比 0.95、字母 14sp/16sp 行高。
+                railHeight = null,
+                railFraction = 0.95f,
+                letterFontSize = 14.sp,
+                letterLineHeight = 16.sp,
                 modifier = Modifier
                     .width(56.dp)
                     .fillMaxHeight()
@@ -502,7 +550,9 @@ fun AppCenterLandscape(
 }
 
 
-private val LandscapeRowH = 68.dp
+// 横屏应用中心修（Bob 2026-10-24）：行高 68dp→60dp（仍高于 48dp 触控
+// 线），同样屏高下每列多出一行，字母列达到头 + 4 个应用。
+private val LandscapeRowH = 60.dp
 
 /** 横屏应用行（68dp，复用于列流与搜索结果列表） */
 @Composable

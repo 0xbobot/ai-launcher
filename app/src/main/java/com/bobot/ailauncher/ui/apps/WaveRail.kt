@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -117,7 +118,13 @@ internal fun WaveRail(
     explodeProgress: Float = 0f,
     // v0.68.23（Bob）：主屏 picker 长按后拖拽（避免与桌面手势冲突），统一滑动体验
     requireLongPress: Boolean = false,
-    onLongPressStart: () -> Unit = {}
+    onLongPressStart: () -> Unit = {},
+    // 横屏应用中心修（Bob 2026-10-24）：rail 占比与字母字号可参——
+    // 竖屏保持 0.85/12sp/14sp 不动；横屏传 0.95/14sp/16sp（v0.55.3 教训：
+    // G/S 底部被截断就是行高不够，14sp 字至少配 16sp 行高）。
+    railFraction: Float = 0.85f,
+    letterFontSize: TextUnit = 12.sp,
+    letterLineHeight: TextUnit = 14.sp
 ) {
     val density = LocalDensity.current
     val hapticView = LocalView.current
@@ -156,7 +163,7 @@ internal fun WaveRail(
     }
 
     // v0.43.3（Bob）：字母被截断——行高 < 字高，比例提到 0.85
-    val railFraction = 0.85f
+    // （现为参数，见签名；竖屏默认 0.85，横屏 0.95）
 
     BoxWithConstraints(
         modifier = modifier
@@ -354,8 +361,8 @@ internal fun WaveRail(
                             // v0.41.2：提示灰在透壁纸上对比度不够（Bob：看不清）→
                             // 深色 60%，字重保持常规，波浪交互不变
                             // v0.55.3（Bob）：G/S 底部被截断——显式 lineHeight 给足字高
-                            fontSize = 12.sp,
-                            lineHeight = 14.sp,
+                            fontSize = letterFontSize,
+                            lineHeight = letterLineHeight,
                             color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                             fontWeight = FontWeight.Normal,
                             maxLines = 1,
@@ -519,6 +526,13 @@ internal fun AppRail(
     requireLongPress: Boolean = false,
     onLongPressStart: () -> Unit = {},
     visible: Boolean = true,
+    // 横屏应用中心修（Bob 2026-10-24）：rail 高度可参——默认 400dp（竖屏
+    // 不动）；传 null 则不写死高度、跟随调用方容器（横屏满高，根因是
+    // 400dp 写死在横屏屏高不足时上下裁掉首尾字母）。
+    railHeight: Dp? = 400.dp,
+    railFraction: Float = 0.85f,
+    letterFontSize: TextUnit = 12.sp,
+    letterLineHeight: TextUnit = 14.sp,
     modifier: Modifier = Modifier
 ) {
     WaveRail(
@@ -536,7 +550,10 @@ internal fun AppRail(
         requireLongPress = requireLongPress,
         onLongPressStart = onLongPressStart,
         visible = visible,
-        modifier = modifier.height(400.dp)
+        railFraction = railFraction,
+        letterFontSize = letterFontSize,
+        letterLineHeight = letterLineHeight,
+        modifier = if (railHeight != null) modifier.height(railHeight) else modifier
     )
 }
 
