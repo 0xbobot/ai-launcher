@@ -29,7 +29,8 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -41,7 +42,7 @@ import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.data.PetMouth
 import com.bobot.ailauncher.data.PetRepository
-import com.bobot.ailauncher.data.PetRepository.GazeTarget
+import com.bobot.ailauncher.data.GazeTarget
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -444,9 +445,9 @@ fun PetView(
             // 平时不画，避免双重绘制的接缝。眼盒复用 QizaiScene.EYE_BOXES
             // （jump 姿态无专属眼盒，落 main 的眼盒近似）。
             if (blinkScale < 0.999f && !effectiveSleepy) {
-                val blinkPainter = painterResource(resId) as? BitmapPainter
-                val blinkBmp = blinkPainter?.imageBitmap
-                if (blinkBmp != null) {
+                // 与 QizaiScene 一致：直接取 ImageBitmap，不走 BitmapPainter
+                val blinkBmp = ImageBitmap.imageResource(resId)
+                run {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         // 与底图 ContentScale.Fit 完全一致的放置数学
                         val fit = minOf(

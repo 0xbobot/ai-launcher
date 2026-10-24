@@ -1,6 +1,6 @@
 package com.bobot.ailauncher.ui.pet
 
-import com.bobot.ailauncher.data.PetRepository.GazeTarget
+import com.bobot.ailauncher.data.GazeTarget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue

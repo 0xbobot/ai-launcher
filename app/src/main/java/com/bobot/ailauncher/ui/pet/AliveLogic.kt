@@ -1,6 +1,6 @@
 package com.bobot.ailauncher.ui.pet
 
-import com.bobot.ailauncher.data.PetRepository.GazeTarget
+import com.bobot.ailauncher.data.GazeTarget
 import kotlin.random.Random
 
 /**
@@ -57,8 +57,10 @@ class GlanceState(private val holdMs: Long = 600L) {
         untilMs = nowMs + holdMs
     }
 
-    fun current(nowMs: Long): GazeTarget? =
-        if (target != null && nowMs < untilMs) target else null
+    fun current(nowMs: Long): GazeTarget? {
+        val t = target
+        return if (t != null && nowMs < untilMs) t else null
+    }
 }
 
 /** 游走周期：基线 ±20% 随机（打破严格正弦）。 */
