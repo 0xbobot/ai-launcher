@@ -410,7 +410,7 @@ sleep 2
 if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night auto || true; fi
 sleep 2
 
-# --- 探针（合并列车 B v5）：头部段 + 第 28 段（含拼音上屏补丁） ---
+# --- 探针（合并列车 B v6）：头部段 + 第 28 段（设置页测试连接触发版） ---
 
 # --- 28. 密钥存储迁移 fixture（并行线 B）：旧版 alpha06 写入的 Key，升级后原样读出 ---
 # 流程见文件头第 28 段说明。假 Key 只含字母数字与连字符（input text 不转义）。
@@ -555,33 +555,20 @@ else
       fi
       adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
       sleep 5
-      # 值一致：提交一句意图，mock 收到的 Authorization 必须逐字等于 fixture Key
-      # 提交触发的两难（310 合入列车三轮探针实证，见 PIPELINE 账本 B 行）：
-      # ni_tap_submit 的即时 dump 在新主页偶发残缺、取不到 intent_submit；
-      # 而 ks_in.xml 是 IME 升起中的几何，缓存坐标直点会落到胶囊外，
-      # 触发 D-2 的点外退出。故落定后重拉新鲜 dump（含 intent_submit 才用）
-      # 再坐标直点，与第 9/10 段未命中重 dump 的既有口径一致。
-      ks_submit_settled() {
-        local try
-        enter_input_mode "$OUT/ks_in.xml" || return 1
-        for try in 1 2 3 4; do
-          sleep 2
-          ks_dump ks_in2
-          grep -q 'intent_submit' "$OUT/ks_in2.xml" 2> /dev/null && break
-        done
-        grep -q 'intent_submit' "$OUT/ks_in2.xml" 2> /dev/null || return 1
-        ks_tap_rid ks_in2 "intent_input" || return 1
-        sleep 1
-        adb shell input text "daohang" > /dev/null 2>&1 || true
-        sleep 1
-        # 拼音在 IME 组合区未上屏时 submitIfReady 的 !composing 守卫不提交
-        # （Stage1 口径）——补 ni_type_submit 同款 "%s" 上屏动作再点提交钮
-        adb shell input text "%s" > /dev/null 2>&1 || true
-        sleep 1
-        ks_tap_rid ks_in2 "intent_submit" || return 1
+      # 值一致：触发一次真实 LLM 调用，mock 收到的 Authorization 必须逐字
+      # 等于 fixture Key。触发改走设置页「测试连接」：合并 310 后的新主页上，
+      # CI 的 adb 驱动无法可靠完成胶囊提交（进态几何/dump 残缺/composing
+      # 守卫多轮探针实证，属 310 主页 CI 驱动家族问题）；设置页展开导航在
+      # 合并树实证可用，测试连接与意图提交共用同一 LlmRouter 读 Key 路径，
+      # 断言强度不变（AUTH 逐字 + 迁移诊断 + 新格式落盘）。
+      ks_trigger_test_connection() {
+        ks_open_settings_expand || return 1
+        ks_dump ks_trig
+        tap_text_bound ks_trig "测试连接" || return 1
+        sleep 2
         return 0
       }
-      if ks_submit_settled; then
+      if ks_trigger_test_connection; then
         KS_FOUND=0
         for i in $(seq 1 15); do
           if grep -q "^AUTH: Bearer $KS_KEY\$" "$KS_LOG" 2> /dev/null; then KS_FOUND=1; break; fi
