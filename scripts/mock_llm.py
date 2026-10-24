@@ -58,6 +58,11 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length > 0 else b""
         try:
             with open(LOG_PATH, "a", encoding="utf-8") as f:
+                # 并行线 B 第 25 段：Authorization 单独记一行——迁移 fixture 的
+                # 假 Key 只能从旧加密存储迁出后经真实请求带过来，据此断言
+                # 「迁移读出的 Key 与旧版写入的一致」。本 mock 只在 CI 本地
+                # 回环上跑、收到的永远是冒烟假 Key（sk-mock / sk-fixture-*）。
+                f.write("AUTH: " + (self.headers.get("Authorization") or "") + "\n")
                 f.write(raw.decode("utf-8", errors="replace") + "\n")
         except OSError:
             pass
