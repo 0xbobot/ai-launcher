@@ -86,47 +86,68 @@ start_app(){
   log "started, state=$(state) pid=$(curpid)"
 }
 
-# ================= 浅色 + 冷启 + 座位首入（聚焦+冷 IME） =================
-adb shell cmd uimode night no || true
-sleep 1
+# ================= 复刻冒烟 §5/§5b/§6 =================
 start_app
 if alive; then ok "setup-alive"; else ng "setup-alive"; fi
+sleep 4
+if shot home; then ok "shot-home"; else ng "shot-home"; fi
 
+# §5: 扇形拖动 3s（中途截图）后 force-stop 重启
+adb shell input swipe 900 1400 300 1400 3000 &
+SWP=$!
+sleep 1.5
+shot fan || true
+wait $SWP || true
+adb shell am force-stop $PKG || true
+sleep 1
+adb shell am start -n $PKG/.MainActivity >/dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+log "after fan1: state=$(state) pid=$(curpid)"
+
+# §5b: 扇形拖动 6s（2.5s 时 dump）后 force-stop 重启
+adb shell input swipe 900 1400 300 1400 6000 &
+SWP=$!
+sleep 2.5
+adb shell uiautomator dump /sdcard/fan_dump.xml >/dev/null 2>&1 || true
+wait $SWP || true
+adb shell am force-stop $PKG || true
+sleep 1
+adb shell am start -n $PKG/.MainActivity >/dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+log "after fan2: state=$(state) pid=$(curpid)"
+if alive; then ok "baseline3-alive"; else ng "baseline3-alive"; fi
+
+# §6: dump 定位座位 -> 150ms 按压点击 -> 0.7s 后截图（冒烟原序）
 E1RC=99
-if alive && tdump e1-home; then
-  CTR=$(center_rid "$OUT/e1-home.xml" dock_pet_cell)
+if alive && tdump pet_dump; then
+  CTR=$(center_rid "$OUT/pet_dump.xml" dock_pet_cell)
   if [ -n "$CTR" ]; then
-    log "E1: tap seat at ($CTR)"
-    adb shell input tap $CTR || true
-    death_watch "E1"; E1RC=$?
-    if [ $E1RC -eq 0 ]; then ok "E1-light-coldime-focus-entry-survived"; else ng "E1-DIED rc=$E1RC"; fi
+    set -- $CTR
+    log "S6: press seat at ($CTR) 150ms"
+    adb shell input swipe "$1" "$2" "$1" "$2" 150 || true
+    sleep 0.7
+    if shot pet; then ok "S6-shot-pet"; else ng "S6-shot-pet"; fi
+    death_watch "S6"; E1RC=$?
+    if [ $E1RC -eq 0 ]; then ok "S6-entry-survived"; else ng "S6-DIED rc=$E1RC"; fi
   else
-    ng "E1-seat-not-found"
+    ng "S6-seat-not-found"
   fi
 else
-  ng "E1-skipped-not-alive"
+  ng "S6-skipped-not-alive"
 fi
 if [ $E1RC -eq 0 ]; then
-  if tdump e1-in && grep -q 'intent_input' "$OUT/e1-in.xml"; then ok "E1-capsule-present"; else ng "E1-capsule-missing"; fi
-  if shot e1-input; then ok "E1-screencap"; else ng "E1-screencap"; fi
-  # ---- E2: 同进程退/再入（IME 已热） ----
+  if tdump s6-in && grep -q 'intent_input' "$OUT/s6-in.xml"; then ok "S6-capsule-present"; else ng "S6-capsule-missing"; fi
   adb shell input keyevent KEYCODE_BACK || true
-  sleep 2
-  if alive && tdump e2-home; then
-    CTR=$(center_rid "$OUT/e2-home.xml" dock_pet_cell)
-    if [ -n "$CTR" ]; then
-      log "E2: tap seat at ($CTR)"
-      adb shell input tap $CTR || true
-      if death_watch "E2"; then ok "E2-second-entry-survived"; else ng "E2-DIED"; fi
-      if shot e2-input; then ok "E2-screencap"; else ng "E2-screencap"; fi
-    else
-      ng "E2-seat-not-found(already-in-input?)"
-    fi
-  else
-    ng "E2-skipped"
-  fi
+  sleep 1
+  adb shell input keyevent KEYCODE_BACK || true
+  sleep 1
+  if alive; then ok "S6-exit-alive"; else ng "S6-exit-alive"; fi
 fi
 
-log "RESULT probe-freeze-v6 PASS=$PASS FAIL=$FAIL"
+log "RESULT probe-freeze-v7 PASS=$PASS FAIL=$FAIL"
 sleep 1
 kill $LOGCAT_PID 2>/dev/null || true
