@@ -47,6 +47,7 @@ import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -55,6 +56,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.MotionTokens
+import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.exp
@@ -77,6 +80,37 @@ internal sealed interface RailItem {
     data object Eye : RailItem
     // v0.68.13（Bob）：分隔线——图标组和字母组之间的视觉分隔，不可触摸
     data object Separator : RailItem
+}
+
+/**
+ * 应用中心升级（Bob 2026-10-24 定稿）：触控行映射纯函数——分隔线 weight 改 1f
+ * 后布局行高均匀，本函数即视觉行高；JVM 单测覆盖（见 RailIndexTest）。
+ * [y] 为 rail 容器内纵坐标（px），[railTopPx] 为 rail 顶边，[railHpx] 为 rail 高。
+ */
+internal fun railIndexAt(y: Float, railTopPx: Float, railHpx: Float, size: Int): Int {
+    if (size <= 0 || railHpx <= 0f) return 0
+    return (((y - railTopPx) / railHpx) * size).toInt().coerceIn(0, size - 1)
+}
+
+/**
+ * 应用中心升级：带死区滞后的触控行映射——手指在行边界 ±[deadPx] 内晃动时
+ * 保持 [lastIndex] 不切换，须越过边界 [deadPx] 才换行；[lastIndex] < 0 时无滞后。
+ */
+internal fun railIndexAtWithDeadZone(
+    y: Float,
+    railTopPx: Float,
+    railHpx: Float,
+    size: Int,
+    lastIndex: Int,
+    deadPx: Float
+): Int {
+    if (size <= 0 || railHpx <= 0f) return 0
+    val rowHpx = railHpx / size
+    val raw = railIndexAt(y, railTopPx, railHpx, size)
+    if (lastIndex < 0 || raw == lastIndex) return raw
+    val boundaryY = railTopPx + maxOf(raw, lastIndex) * rowHpx
+    val crossed = if (raw > lastIndex) y > boundaryY + deadPx else y < boundaryY - deadPx
+    return if (crossed) raw else lastIndex
 }
 
 /**
@@ -133,6 +167,9 @@ internal fun WaveRail(
     val density = LocalDensity.current
     val hapticView = LocalView.current
     val scope = rememberCoroutineScope()
+    // 应用中心升级（Bob 2026-10-24 定稿）：减动态开启时波浪跟手不做动画、
+    // 脉冲不播放（状态切换类动画沿 R3-D 豁免口径不在此列）
+    val reduceMotion = rememberReduceMotion()
     // 右侧 rail：波浪/气泡往左（向内）；左侧 rail：往右（向内）
     val dirSign = if (side == RailSide.RIGHT) -1f else 1f
     var activeIndex by remember { mutableIntStateOf(-1) }
@@ -151,8 +188,10 @@ internal fun WaveRail(
     LaunchedEffect(pulseTick) {
         if (pulseItem != null && pulseTick > 0) {
             hapticView.tickHaptic()
-            pulseScale.animateTo(1.7f, tween(180))
-            pulseScale.animateTo(1f, tween(220))
+            if (!reduceMotion) {
+                pulseScale.animateTo(1.7f, tween(180))
+                pulseScale.animateTo(1f, tween(220))
+            }
         }
     }
 
@@ -179,18 +218,20 @@ internal fun WaveRail(
         val railHpx = hPx * railFraction
         val railTopPx = (hPx - railHpx) / 2f
         val rowHpx = railHpx / items.size
-        val bulgePx = with(density) { 36.dp.toPx() }
-        val shiftPx = with(density) { 56.dp.toPx() }
+        // 应用中心升级（Bob 2026-10-24 定稿）：波浪降推挤——内鼓 36→24dp、
+        // 避让 56→40dp、纵向散开 7→4dp；气泡内移 128→96dp，少压应用名
+        val bulgePx = with(density) { 24.dp.toPx() }
+        val shiftPx = with(density) { 40.dp.toPx() }
         // v0.68.15（Bob）：波浪散开时字母纵向也拉开，更灵动不拥挤
-        val spreadPx = with(density) { 7.dp.toPx() }
+        val spreadPx = with(density) { 4.dp.toPx() }
         // 气泡在靠应用的一侧：明显离开波浪区
-        val bubbleOutX = with(density) { 128.dp.toPx() }
+        val bubbleOutX = with(density) { 96.dp.toPx() }
 
         // 波浪避让：拖动时整体往拇指反方向偏移
         // v0.40.2：更轻盈——加硬弹簧、减少晃悠，波浪更跟手
         val waveShiftX by animateFloatAsState(
             targetValue = if (displayIndex >= 0) dirSign * shiftPx else 0f,
-            animationSpec = spring(
+            animationSpec = if (reduceMotion) tween(0) else spring(
                 stiffness = Spring.StiffnessMedium,
                 dampingRatio = 0.9f
             ),
@@ -198,14 +239,22 @@ internal fun WaveRail(
         )
 
         fun indexAt(y: Float): Int {
-            return (((y - railTopPx) / railHpx) * items.size)
-                .toInt().coerceIn(items.indices)
+            return railIndexAt(y, railTopPx, railHpx, items.size)
         }
 
         // v0.68.23：抽取拖拽处理，长按/普通两种模式共用
         fun handleDragY(y: Float) {
-            val i = indexAt(y)
-            emitItem(i)
+            // 应用中心升级：行中线 + 4dp 死区滞后——手指在行边界附近晃动时
+            // 不反复切字母，须越过边界 4dp 才换行（点按路径不走这里，不受影响）
+            val deadPx = with(density) { 4.dp.toPx() }
+            val raw = indexAt(y)
+            val target = if (activeIndex >= 0 && raw != activeIndex) {
+                val boundaryY = railTopPx + maxOf(raw, activeIndex) * rowHpx
+                val crossed = if (raw > activeIndex) y > boundaryY + deadPx
+                    else y < boundaryY - deadPx
+                if (crossed) raw else activeIndex
+            } else raw
+            emitItem(target)
             // v0.68.20（Bob）：意向拉拽——房子继续上拉/眼睛继续下拉，进度 0→1
             // v0.68.21：眼睛在底部空间有限，阈值缩短到 60dp 不然触发不了
             // v0.68.24（Bob）：房子滑程再缩短，45dp 更跟手
@@ -324,9 +373,13 @@ internal fun WaveRail(
         ) {
             items.forEachIndexed { i, item ->
                 // v0.68.13（Bob）：分隔线——图标组和字母组之间，视觉分隔+拉开间距
+                // 应用中心升级：分隔线 weight 0.5f → 1f——此前布局行高不均
+                // （分隔半行、字母一行），而 indexAt / 气泡 Y 按均匀行高算，
+                // 底部累计偏差可达 1.5 行、足以选错字母；改后行高均匀，
+                // 触控行与视觉行严格对齐（rail 总高占比不变，仍由 railFraction 定）
                 if (item is RailItem.Separator) {
                     Box(
-                        modifier = Modifier.weight(0.5f),
+                        modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
@@ -344,11 +397,12 @@ internal fun WaveRail(
                 }
                 val d = if (displayIndex >= 0) (i - displayIndex).toFloat() else 999f
                 // v0.25.7：波浪更宽更平（sigma 4.5），头尾字母也有弧度，更优美
-                // v0.40.2：tween 120→80，波浪响应更快更轻盈
+                // 应用中心升级：波浪时长统一走 MotionTokens.Short（120ms），
+                // 减动态开启时 0ms（跟手不做动画）
                 val gTarget = if (displayIndex >= 0) exp(-(d * d) / 40.5f) else 0f
                 val g by animateFloatAsState(
                     targetValue = gTarget,
-                    animationSpec = tween(80),
+                    animationSpec = tween(if (reduceMotion) 0 else MotionTokens.Short),
                     label = "waveG"
                 )
                 // v0.67.13：脉冲项额外放大
@@ -539,6 +593,9 @@ internal fun AppRail(
     letterLineHeight: TextUnit = 14.sp,
     letterAlpha: Float = 0.6f,
     letterFontWeight: FontWeight = FontWeight.Normal,
+    // 应用中心升级：触控列宽可参——默认 44dp（主屏 picker 不动）；
+    // 应用中心竖屏传 48dp 补齐触控线
+    railWidth: Dp = 44.dp,
     modifier: Modifier = Modifier
 ) {
     WaveRail(
@@ -561,7 +618,11 @@ internal fun AppRail(
         letterLineHeight = letterLineHeight,
         letterAlpha = letterAlpha,
         letterFontWeight = letterFontWeight,
-        modifier = if (railHeight != null) modifier.height(railHeight) else modifier
+        railWidth = railWidth,
+        // 应用中心升级：rail 根节点挂 testTag，供 layout_check 做几何断言
+        // （在屏 + 与胶囊不相交；节点缺失时断言侧 INFO 跳过）
+        modifier = (if (railHeight != null) modifier.height(railHeight) else modifier)
+            .testTag("appcenter_rail")
     )
 }
 

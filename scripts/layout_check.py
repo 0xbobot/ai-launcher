@@ -423,10 +423,16 @@ def main():
         if r is not None:
             cap = by_rid(r, "intent_input")
             gear = by_rid(r, "appcenter_settings")
+            # 应用中心升级：rail 几何断言（节点缺失时 INFO 跳过，不破坏既有断言）——
+            # 在屏 + 与胶囊不相交（rail 跟随容器高度后不应再顶进顶栏区）；
+            # 行高/触控区/气泡位置无 dump 锚点，仍由 JVM 单测 + 真机验收覆盖
+            rail = by_rid(r, "appcenter_rail")
             check_state(r, "appcenter",
                         {"capsule": cap[0] if cap else None,
-                         "settings-gear": gear[0] if gear else None},
-                        [("capsule", "settings-gear")], W, H)
+                         "settings-gear": gear[0] if gear else None,
+                         "rail": rail[0] if rail else None},
+                        [("capsule", "settings-gear"),
+                         ("capsule", "rail")], W, H)
 
     p = os.path.join(d, "layout_settings.xml")
     if os.path.exists(p):

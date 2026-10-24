@@ -146,7 +146,11 @@ fun IntentCapsuleField(
     requestFocusOnMount: Boolean = false,
     // F 批：实心背景——首页胶囊坐在一体化面板里，0.88 半透明底在面板上
     // 显脏；首页传 true 用不透明 Card 色（应用中心不传，保持原半透明观感）。
-    solidBackground: Boolean = false
+    solidBackground: Boolean = false,
+    // 应用中心升级（Bob 2026-10-24 定稿②）：箭头 = 确认本地搜索——
+    // 调用方传此回调时，箭头钮走它（仅收键盘 + 定格结果）；不传时箭头
+    // 沿旧走 onSubmit（首页不动）；IME Done 恒走 onSubmit，不受此影响
+    onArrowSubmit: (() -> Unit)? = null
 ) {
     val focusRequester = remember { FocusRequester() }
     // v0.68.102（310 冻结修复二轮）：key 改为 requestFocusOnMount 本身——
@@ -265,7 +269,7 @@ fun IntentCapsuleField(
                 .size(48.dp)
                 // 体检批D ⑥：冒烟语义定位锚点（提交钮）
                 .testTag("intent_submit")
-                .clickable(enabled = canSubmit) { onSubmit() },
+                .clickable(enabled = canSubmit) { (onArrowSubmit ?: onSubmit)() },
             contentAlignment = Alignment.Center
         ) {
             Box(

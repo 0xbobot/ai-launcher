@@ -141,6 +141,7 @@ import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -331,7 +332,24 @@ fun AppCenterContent(
         delay(120)
         filterQuery = queryField.text
     }
+    // 应用中心升级：清除同步清过滤词（跳过 120ms 防抖）——✕ 走 onValueChange
+    // 回空时 filterQuery 立即回空，全量列表不慢一拍；不清键盘（保持现状）
+    fun onQueryFieldChange(v: TextFieldValue) {
+        queryField = v
+        if (v.text.isBlank()) filterQuery = ""
+    }
     val searching = filterQuery.trim().isNotBlank()
+    // 应用中心升级：键盘可见检测（WindowInsets.ime 下缘 > 0）——键盘弹出
+    // 专用布局的开关（隐藏 rail / 幽灵字母 / 刊头、行距切紧凑）；adjustResize
+    // 下 ime inset 仍正常上报
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    // 应用中心升级：搜索态或键盘弹出时行距切紧凑（64→56dp）
+    val compactRows = searching || imeVisible
+    // 应用中心升级：composing 期间结果区降透明度至 0.6（Bob 定稿③）——
+    // composing 守卫与 120ms 防抖本身不动，只弱化旧结果的视觉权重
+    val composingDim = queryField.composition != null
+    // 应用中心升级：减动态——悬停弹簧减动态开启时直接贴合（不做弹簧动画）
+    val reduceMotion = rememberReduceMotion()
     // v0.25.5：Niagara 式——拖动直接滚完整列表，不做内容过滤，松手零位移
     // v0.68.95（F-04）：索引随仓库快照在 IO 构建（基于同一份可见集），组合期只读。
     val searchIndex = catalog?.index ?: emptyList()
@@ -339,11 +357,20 @@ fun AppCenterContent(
         if (filterQuery.trim().isBlank()) null
         else AppSearchIndex.search(context, filterQuery, searchIndex)
     }
-    // v0.25.3：最近使用横条（搜索下方），取高频应用
-    // 开始搜索时滚到顶部
+    // 开始搜索时滚到顶部；退出搜索时恢复进入前位置
     val listState = rememberLazyListState()
+    // 应用中心升级：退出搜索恢复进入前位置（只记首次进入搜索前的位置，
+    // 首帧 searching=false 时不滚，避免与默认定位到首字母组打架）
+    var savedListPosition by remember { mutableStateOf(0) }
+    var hadSearched by remember { mutableStateOf(false) }
     LaunchedEffect(searching) {
-        if (searching) listState.scrollToItem(0)
+        if (searching) {
+            savedListPosition = listState.firstVisibleItemIndex
+            hadSearched = true
+            listState.scrollToItem(0)
+        } else if (hadSearched) {
+            listState.scrollToItem(savedListPosition)
+        }
     }
 
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
@@ -371,9 +398,20 @@ fun AppCenterContent(
     LaunchedEffect(homeTarget, homeLetter, letterAnchors) {
         when (homeTarget) {
             UiPrefs.HomeRailTarget.LETTER -> {
+                // 应用中心升级：兜底改与横屏一致（向后优先、再向前），
+                // 不再用最近字母（两端规则不一致）
                 val c = homeLetter
-                val anchor = c?.let { letterAnchors[it] }
-                    ?: letterAnchors.minByOrNull { kotlin.math.abs(it.key - (c ?: 'A')) }?.value
+                val anchor = c?.let { ch ->
+                    letterAnchors[ch] ?: run {
+                        var fwd = ch
+                        while (fwd <= 'Z' && letterAnchors[fwd] == null) fwd++
+                        if (fwd <= 'Z') letterAnchors[fwd] else {
+                            var bwd = ch
+                            while (bwd >= 'A' && letterAnchors[bwd] == null) bwd--
+                            if (bwd >= 'A') letterAnchors[bwd] else null
+                        }
+                    }
+                }
                 if (anchor != null) listState.scrollToItem(anchor)
             }
             UiPrefs.HomeRailTarget.DOCK -> listState.scrollToItem(0)
@@ -426,9 +464,10 @@ fun AppCenterContent(
         }
     }
     // v0.41.30（Bob）：顶走位移动画化——字母切换时不跳变，推到位置停住不弹回
+    // 应用中心升级：减动态开启时直接贴合
     val animatedPushPx by animateFloatAsState(
         targetValue = stuckPushPx,
-        animationSpec = spring(
+        animationSpec = if (reduceMotion) tween(0) else spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMedium
         ),
@@ -485,7 +524,7 @@ fun AppCenterContent(
     }
     val animatedDockPushPx by animateFloatAsState(
         targetValue = dockPushPx,
-        animationSpec = spring(
+        animationSpec = if (reduceMotion) tween(0) else spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMedium
         ),
@@ -517,8 +556,23 @@ fun AppCenterContent(
         mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
     }
 
+    // 应用中心升级：启动 in-flight 门——500ms 内重复点同一应用只启动一次
+    // （结果行 combinedClickable 本身无防抖，系统层合并不可靠）
+    var lastLaunch by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    // 应用中心升级：问七仔行 500ms 节流——连点不进两次协调器
+    var lastAskMs by remember { mutableStateOf(0L) }
+    fun throttledAsk(q: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastAskMs < 500L) return
+        lastAskMs = now
+        onAskQizai(q)
+    }
     // v0.25.2：松手滚动——等列表恢复全量重组完成后再滚，避免打在旧内容上
     fun launchApp(app: AppInfo) {
+        val now = System.currentTimeMillis()
+        val last = lastLaunch
+        if (last != null && last.first == app.packageName && now - last.second < 500L) return
+        lastLaunch = app.packageName to now
         focusManager.clearFocus()
         keyboardController?.hide()
         AppUsageTracker.recordLaunch(context, app.packageName)
@@ -647,12 +701,14 @@ fun AppCenterContent(
             }
         ) {
             // v0.68.66（Bob）：横屏时顶栏+搜索全由 AppCenterLandscape 提供，这里只留竖屏
-            if (!isLandscapeAc) {
+            // 应用中心升级：键盘弹出时刊头标题区隐藏（搜索胶囊与问七仔行保留）；
+            // 顶栏左轴 28→20dp，与搜索行统一 20/12dp 口径
+            if (!isLandscapeAc && !imeVisible) {
             // v0.68.44（Bob）：杂志刊头
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 28.dp, end = 12.dp, top = 8.dp)
+                    .padding(start = 20.dp, end = 12.dp, top = 8.dp)
             ) {
                 MastheadKicker(text = "INDEX · 应用索引")
                 Text(
@@ -664,7 +720,9 @@ fun AppCenterContent(
                     color = AILauncherColors.current.Title
                 )
                 Text(
-                    text = "${azApps.size} 款 · 右侧滑字母直达",
+                    // 应用中心升级：catalog 为空时不显示"0 款"空列表，改弱提示
+                    text = if (catalog == null) "正在加载…"
+                        else "${azApps.size} 款 · 右侧滑字母直达",
                     fontSize = 12.sp,
                     color = AILauncherColors.current.Hint,
                     modifier = Modifier.padding(top = 4.dp)
@@ -699,14 +757,19 @@ fun AppCenterContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // R2 UI（2026-10-21 新规格）：原搜索框删除，换成与首页同一个意图胶囊组件——
-                // 一个入口两层响应：打字走本地层过滤网格（状态层 query/searchResults 不变），
-                // 提交（按钮/IME Done）= 问七仔（回首页交协调器）。F2 起横屏同组件同契约。
+                // 一个入口两层响应：打字走本地层过滤网格（状态层 query/searchResults 不变）。
+                // 应用中心升级（Bob 定稿②）：箭头 = 确认本地搜索（仅收键盘 +
+                // 定格结果，不走 AI）；IME Done 与问七仔行仍 = 问七仔。
                 IntentCapsuleField(
                     value = queryField,
-                    onValueChange = { queryField = it },
+                    onValueChange = ::onQueryFieldChange,
                     onSubmit = {
                         val q = query.trim()
                         if (q.isNotEmpty()) onAskQizai(q)
+                    },
+                    onArrowSubmit = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
                     },
                     // 应用中心变体专属（10-21 Bob 批准）：✕ 一键清空，清空后网格恢复全量；
                     // 首页胶囊不开启，保持原设计。
@@ -733,31 +796,21 @@ fun AppCenterContent(
             }
             // R2 UI（10-21 新规格）：「问七仔」行——有输入时出现，整句交给七仔理解（回首页提交协调器）
             // 意图改进一批：本行跟随原始文本即时出现（不等防抖落定），文案与提交都用原句
+            // 应用中心升级：去 Card 底降重——文字改 Title 75%，金色只留小箭头
+            // 一处线索；连点 500ms 节流
             if (query.isNotBlank()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 20.dp, end = 12.dp, top = 10.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
-                        .clickable { onAskQizai(query.trim()) }
+                        .clickable { throttledAsk(query.trim()) }
                         .padding(horizontal = 16.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Filled.AutoAwesome,
-                        // 体检批D ⑨：装饰图标（行文案「问七仔：「…」」已表达含义）标装饰语义
-                        contentDescription = null,
-                        tint = AILauncherColors.current.Accent,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .semantics { invisibleToUser() }
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "问七仔：「${query.trim()}」",
                         fontSize = 13.sp,
-                        color = AILauncherColors.current.Accent,
+                        color = AILauncherColors.current.Title.copy(alpha = 0.75f),
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -800,12 +853,19 @@ fun AppCenterContent(
                 // 状态层的 composing 暂停守卫，拼音未上屏时过滤会乱跳）、
                 // 组件/提交/焦点礼仪与竖屏同一套（见 AppCenterLandscape）
                 searchFieldValue = queryField,
-                onSearchFieldChange = { queryField = it },
+                onSearchFieldChange = ::onQueryFieldChange,
                 searchResults = searchResults,
                 onSearchSubmit = {
                     val q = query.trim()
                     if (q.isNotEmpty()) onAskQizai(q)
                 },
+                // 应用中心升级：横屏箭头同竖屏 = 确认本地搜索
+                onSearchArrowSubmit = {
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                },
+                // 应用中心升级：横屏空结果文案区分"索引加载中"与"真无匹配"
+                indexLoading = catalog == null && query.isNotBlank(),
                 onAskQizai = onAskQizai,
                 onSearchFocusChanged = { intentFocused = it },
                 onSearchPositioned = { intentBoundsInRoot = it },
@@ -829,6 +889,8 @@ fun AppCenterContent(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
+                    // 应用中心升级：composing 期间结果区降透明度至 0.6（Bob 定稿③）
+                    .graphicsLayer { alpha = if (composingDim) 0.6f else 1f }
                     .nestedScroll(nested),
                 // v0.41.7：列表不再统一 padding（之前字母头用负 offset 伸进左留白，
                 // 在某些行渲染异常）；改为每项各自加正向 padding——应用行保持
@@ -843,7 +905,9 @@ fun AppCenterContent(
                     if (results.isEmpty()) {
                         item(key = "search-empty") {
                             Text(
-                                text = "没有找到「${filterQuery.trim()}」相关的应用",
+                                // 应用中心升级：索引缺失与真无匹配区分文案
+                                text = if (catalog == null) "正在加载应用索引，请稍后再试"
+                                    else "没有找到「${filterQuery.trim()}」相关的应用",
                                 fontSize = 14.sp,
                                 color = AILauncherColors.current.Hint,
                                 modifier = Modifier.padding(
@@ -865,16 +929,13 @@ fun AppCenterContent(
                                         if (isPopupExpanded) AILauncherColors.current.Card
                                         else Color.Transparent
                                     )
-                                    .animateContentSize(
-                                        animationSpec = tween(
-                                            durationMillis = com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
-                                            easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                                        )
-                                    )
+                                    // 应用中心升级：行展开去 animateContentSize，
+                                    // 只留 AnimatedVisibility（避免双动画叠加）
                             ) {
                                 AppRow(
                                     app = app,
                                     onLaunch = { launchApp(app) },
+                                    compact = compactRows,
                                     onLongClick = {
                                         hapticView.confirmHaptic()
                                         popupApp = app
@@ -973,6 +1034,7 @@ fun AppCenterContent(
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app) },
+                                    compact = compactRows,
                                 onLongClick = {
                                     hapticView.confirmHaptic()
                                     popupApp = app
@@ -1047,8 +1109,11 @@ fun AppCenterContent(
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dockDragOffsetY += dragAmount.y
-                                                // v0.55.2：行高 64dp + 2dp 间距 = 66dp
-                                                val rowH = with(density) { 66.dp.toPx() }
+                                                // v0.55.2：行高 64dp + 2dp 间距 = 66dp；
+                                                // 应用中心升级：紧凑行 56dp + 2dp = 58dp
+                                                val rowH = with(density) {
+                                                    (if (compactRows) 58.dp else 66.dp).toPx()
+                                                }
                                                 val curIdx = dockOrder.indexOfFirst {
                                                     it.packageName == app.packageName
                                                 }
@@ -1068,24 +1133,41 @@ fun AppCenterContent(
                             )
                         }
                     }
-                    item(key = "sp:dock") { Spacer(modifier = Modifier.height(24.dp)) }
+                    item(key = "sp:dock") { Spacer(modifier = Modifier.height(20.dp)) }
                 }
                 // A-Z 列表（v0.41.0 B 方案）
                 // v0.41.8：每组 = 应用行 + 组间间距（字母不再独占一行，Bob）。
                 // 每组首行左侧留白放幽灵字母（正向 padding，不用负 offset）；
                 // 首行滚出顶部后由悬停 overlay 接管（手动吸顶，见 stuckLetter）
+                // 应用中心升级：catalog 为空时显示加载弱提示（替代空列表）
+                if (catalog == null) {
+                    item(key = "catalog-loading") {
+                        Text(
+                            text = "正在加载应用…",
+                            fontSize = 14.sp,
+                            color = AILauncherColors.current.Hint,
+                            modifier = Modifier.padding(
+                                top = 32.dp, start = 72.dp, end = 64.dp
+                            )
+                        )
+                    }
+                }
                 azGroups.forEach { (letter, apps) ->
                     itemsIndexed(apps, key = { _, app -> "a:${app.packageName}" }) { index, app ->
                         // v0.41.7：行级 padding（列表不再统一 padding）
-                        Box(modifier = Modifier.fillMaxWidth()) {
+                        // 应用中心升级：行 Box 加 clipToBounds——字体缩放下幽灵
+                        // 字母不侵入上下行（字号不动）
+                        Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
                             // v0.68.61：横屏隐藏幽灵字母（省竖向空间，不乱）
-                            if (index == 0 && !isLandscapeAc) {
+                            // 应用中心升级：键盘弹出时隐藏幽灵字母；透明度
+                            // 0.20 → 0.35（Bob 定稿④：可以动、效果优先）
+                            if (index == 0 && !isLandscapeAc && !imeVisible) {
                                 Text(
                                     text = letter.toString(),
                                     fontFamily = FontFamily.Serif,
                                     fontSize = 56.sp,
                                     // v0.68.44（Bob）：杂志章节感——放大加深
-                                    color = AILauncherColors.current.Title.copy(alpha = 0.20f),
+                                    color = AILauncherColors.current.Title.copy(alpha = 0.35f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
                                         .padding(start = 20.dp)
@@ -1106,6 +1188,7 @@ fun AppCenterContent(
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app) },
+                                    compact = compactRows,
                                 onLongClick = {
                                     hapticView.confirmHaptic()
                                     popupApp = app
@@ -1134,7 +1217,7 @@ fun AppCenterContent(
                         }
                         }
                     }
-                    item(key = "sp:$letter") { Spacer(modifier = Modifier.height(24.dp)) }
+                    item(key = "sp:$letter") { Spacer(modifier = Modifier.height(20.dp)) }
                 }
                 // v0.41.18（Bob）：隐藏分组——主列表末尾，像 ABCD 分组一样；
                 // v0.41.20（Bob）：不显示"已隐藏"标题文字，只留幽灵图标。
@@ -1224,6 +1307,7 @@ fun AppCenterContent(
                                 AppRow(
                                     app = app,
                                     onLaunch = { launchApp(app) },
+                                    compact = compactRows,
                                     onLongClick = {
                                         hapticView.confirmHaptic()
                                         popupApp = app
@@ -1266,16 +1350,16 @@ fun AppCenterContent(
                             }
                         }
                     }
-                    item(key = "sp:hidden") { Spacer(modifier = Modifier.height(24.dp)) }
+                    item(key = "sp:hidden") { Spacer(modifier = Modifier.height(20.dp)) }
                 }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
             // v0.41.8：悬停幽灵字母——只在当前组首行滚出顶部后显示，下一组首行
             // 接近时被顶走；外层 clipToBounds 保证不会顶到搜索栏上面（Bob）。
-            // 字母弱化到 14%（Bob：太显眼），与行内字母一致。
+            // 应用中心升级：透明度跟行内幽灵字母同为 0.35；键盘弹出时隐藏
             val sl = stuckLetter
-            if (!searching) {
+            if (!searching && !imeVisible) {
                 if (stuckDock) {
                     // v0.41.31：Dock 分区悬停——幽灵 ★（与第一行幽灵一致）
                     Icon(
@@ -1309,7 +1393,7 @@ fun AppCenterContent(
                         text = sl.toString(),
                         fontFamily = FontFamily.Serif,
                         fontSize = 56.sp,
-                        color = AILauncherColors.current.Title.copy(alpha = 0.20f),
+                        color = AILauncherColors.current.Title.copy(alpha = 0.35f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 20.dp, top = 12.dp)
@@ -1329,7 +1413,8 @@ fun AppCenterContent(
             // 左边不摆 rail（摆两个很奇怪），但左侧滑动同样触发字母切换，
             // 触发后是右侧 rail 亮起波浪跟随；应用列表左侧缩进给手指留空间。
             // v0.67.11（Bob）：主屏 picker 会话中隐藏自己的 rail，避免与 picker 重叠
-            if (!searching && letters.isNotEmpty() && homeTarget == null) {
+            // 应用中心升级：键盘弹出时同样隐藏 rail（键盘弹出专用布局）
+            if (!searching && !imeVisible && letters.isNotEmpty() && homeTarget == null) {
                 // 左侧隐形区触发时，右侧可见 rail 跟随显示波浪
                 var mirrorIndex by remember { mutableStateOf<Int?>(null) }
                 // Niagara 做法：直接滚完整列表，不做内容过滤；松手时列表本来就在位置上，零位移
@@ -1420,8 +1505,10 @@ fun AppCenterContent(
                     when (item) {
                         // v0.68.20：房子不再用停留触发，改上拉手势（onHousePull）
                         is RailItem.House -> {}
-                        is RailItem.Star -> scope.launch { listState.animateScrollToItem(0) }
-                        is RailItem.Eye -> scope.launch { listState.animateScrollToItem(hiddenHeaderIndex) }
+                        // 应用中心升级：★/👁 改瞬时落位，与字母一致
+                        // （此前动画滚动与字母瞬跳交替）
+                        is RailItem.Star -> scope.launch { listState.scrollToItem(0) }
+                        is RailItem.Eye -> scope.launch { listState.scrollToItem(hiddenHeaderIndex) }
                         is RailItem.Letter -> glideToLetter(item.char)
                         is RailItem.Separator -> {}
                     }
@@ -1478,7 +1565,16 @@ fun AppCenterContent(
                     eyePull = eyePull,
                     onHousePull = onHousePull,
                     onEyePull = onEyePull,
-
+                    // 应用中心升级（Bob 定稿①）：竖屏跟进 B 方案全套——
+                    // 14sp / 16sp 行高 / 1.0 / Medium，与横屏同款
+                    // （railFraction 仍 0.85；高度改跟随列表容器，bottom 70dp 保留）
+                    railHeight = null,
+                    railFraction = 0.85f,
+                    letterFontSize = 14.sp,
+                    letterLineHeight = 16.sp,
+                    letterAlpha = 1f,
+                    letterFontWeight = FontWeight.Medium,
+                    railWidth = 48.dp,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(bottom = 70.dp)
@@ -1641,7 +1737,9 @@ private fun rememberPullDownConnection(
 
 
 
-/** v0.68.44：刊头字距 kicker（金色）；v0.68.45：给设置页共用 */
+/** v0.68.44：刊头字距 kicker；v0.68.45：给设置页共用
+ * 应用中心升级：金色 → Hint 色细体——金色只留提交钮 / 选中环 / 已收藏★，
+ * 常驻装饰金退场 */
 @Composable
 internal fun MastheadKicker(text: String) {
     Row(modifier = Modifier.padding(bottom = 6.dp)) {
@@ -1649,8 +1747,8 @@ internal fun MastheadKicker(text: String) {
             androidx.compose.material3.Text(
                 text = ch.toString(),
                 fontSize = 12.sp,
-                color = AILauncherColors.current.Accent,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                color = AILauncherColors.current.Hint,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Normal
             )
             Spacer(modifier = Modifier.width(4.dp))
         }

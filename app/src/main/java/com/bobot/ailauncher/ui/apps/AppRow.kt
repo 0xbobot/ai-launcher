@@ -89,7 +89,10 @@ internal fun AppRow(
     onUnhide: ((AppInfo) -> Unit)? = null,
     // v0.41.23（Bob v4 统一版）：右滑眼睛的保持状态（与 actionsVisible 互斥，列表级管理）
     hideVisible: Boolean = false,
-    onHideVisibleChange: (Boolean) -> Unit = {}
+    onHideVisibleChange: (Boolean) -> Unit = {},
+    // 应用中心升级：紧凑行——搜索态 / 键盘弹出时纵向 padding 12→8dp
+    // （行高 64→56dp），仅调用方传参，默认行不动
+    compact: Boolean = false
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -297,7 +300,8 @@ internal fun AppRow(
                         onLongClick = onLongClick
                     )
                     // v0.41.0（B 方案）：行距拉大——纵向 padding 12dp，图标 40dp，呼吸感
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                    // 应用中心升级：紧凑行 8dp（行高 56dp）
+                    .padding(horizontal = 12.dp, vertical = if (compact) 8.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AppIconImage(

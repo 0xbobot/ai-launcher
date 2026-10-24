@@ -33,7 +33,9 @@ object AILauncherColors {
         val Card: Color = if (isDark) Color(0xFF2A2723) else Color(0xFFFFFFFF)
         val Title: Color = if (isDark) Color(0xFFF4F2EE) else Color(0xFF1F1D1A)
         val Body: Color = if (isDark) Color(0xFFB8B2A8) else Color(0xFF5C5852)
-        val Hint: Color = if (isDark) Color(0xFF6B6560) else Color(0xFFA8A29A)
+        // 应用中心升级：浅色 Hint 加深（暖白底上对比度约 2.2:1 → 约 3.2:1），
+        // 12sp 辅助文案可读；深色沿旧
+        val Hint: Color = if (isDark) Color(0xFF6B6560) else Color(0xFF8A8378)
         val Accent: Color = Color(0xFFC9A227)      // sparkle 金（深浅通用）
         val AccentSoft: Color = if (isDark) Color(0xFF3A3226) else Color(0xFFF6ECD4)
         val Success: Color = Color(0xFF4C9A52)     // 成功绿（深浅通用）
@@ -191,6 +193,8 @@ fun AILauncherTheme(content: @Composable () -> Unit) {
  */
 object MotionTokens {
     val Fast = 150
+    // 应用中心升级：Short 120ms——波浪等跟手反馈统一走此档
+    val Short = 120
     val Medium = 250
     val Slow = 400
     val Easing = androidx.compose.animation.core.EaseOutCubic

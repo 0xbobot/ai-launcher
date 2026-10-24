@@ -23,7 +23,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -104,6 +106,10 @@ fun AppCenterLandscape(
     onSearchFieldChange: (TextFieldValue) -> Unit,
     searchResults: List<AppInfo>?,
     onSearchSubmit: () -> Unit,
+    // 应用中心升级：横屏箭头同竖屏 = 确认本地搜索；索引加载中标记
+    // （空结果文案区分"索引加载中"与"真无匹配"）
+    onSearchArrowSubmit: () -> Unit = {},
+    indexLoading: Boolean = false,
     onAskQizai: (String) -> Unit,
     // 与竖屏同一套焦点礼仪（v0.68.93）：焦点外报 + 范围捕获，
     // 供 AppCenter 根 Box 的点外部清焦观察者使用
@@ -113,6 +119,17 @@ fun AppCenterLandscape(
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    // 应用中心升级：键盘可见检测——横屏键盘弹出专用布局的开关
+    // （隐藏 rail 与 INDEX/款数、搜索结果行切紧凑、composing 降透明度）
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    // 应用中心升级：问七仔行 500ms 节流（同竖屏）
+    var lastAskMs by remember { mutableStateOf(0L) }
+    fun throttledAsk(q: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastAskMs < 500L) return
+        lastAskMs = now
+        onAskQizai(q)
+    }
     val onPullDownToD2State = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
@@ -291,6 +308,9 @@ fun AppCenterLandscape(
                 ) {
                     // v0.68.82（横屏专项第 1 项）：顶栏左半右滑 → D2（记住档，阈值沿用竖屏 48dp）
                     // 只包 INDEX + 款数：避开中间搜索框与右侧齿轮
+                    // 应用中心升级：键盘弹出时 INDEX/款数隐藏（胶囊与齿轮保留）；
+                    // INDEX 金色粗体 → Hint 色细体（同竖屏刊头口径）
+                    if (!imeVisible) {
                     Row(
                         modifier = Modifier.pointerInput(Unit) {
                             var accumX = 0f
@@ -315,9 +335,9 @@ fun AppCenterLandscape(
                         Text(
                             text = "INDEX",
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.Normal,
                             letterSpacing = 3.sp,
-                            color = AILauncherColors.current.Accent
+                            color = AILauncherColors.current.Hint
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
@@ -326,18 +346,23 @@ fun AppCenterLandscape(
                             color = AILauncherColors.current.Hint
                         )
                     }
+                    }
                     Spacer(modifier = Modifier.weight(1f))
                     // F2：与竖屏同一 IntentCapsuleField（占位/提交/✕ 清空/焦点
-                    // 礼仪全部同组件同口径）；宽度沿用原 pill 的 440dp 顶栏预算
+                    // 礼仪全部同组件同口径）
+                    // 应用中心升级：宽度 440dp 写死 → weight + 上限 440dp——
+                    // 窄高横屏下不再挤压 INDEX / 齿轮；箭头同竖屏 = 确认本地搜索
                     IntentCapsuleField(
                         value = searchFieldValue,
                         onValueChange = onSearchFieldChange,
                         onSubmit = onSearchSubmit,
+                        onArrowSubmit = onSearchArrowSubmit,
                         // 应用中心变体（同竖屏）：✕ 一键清空、清空后列流恢复全量
                         showClearButton = true,
                         onFocusChanged = onSearchFocusChanged,
                         modifier = Modifier
-                            .width(440.dp)
+                            .weight(1f)
+                            .widthIn(max = 440.dp)
                             .onGloballyPositioned { onSearchPositioned(it.boundsInRoot()) }
                     )
                     Spacer(modifier = Modifier.weight(1f))
@@ -359,6 +384,8 @@ fun AppCenterLandscape(
                 }
                 // F2：「问七仔」行与竖屏同契约同结构（跟随原始文本即时出现、
                 // 不等防抖落定，整句交七仔；横屏此前无此行）
+                // 应用中心升级：同竖屏去 Card 底降重（文字 Title 75%，
+                // 金色只留小箭头），连点 500ms 节流
                 if (searchFieldValue.text.isNotBlank()) {
                     Row(
                         modifier = Modifier
@@ -369,26 +396,14 @@ fun AppCenterLandscape(
                             // 48.0dp），§16 a11y 量到 46.9<48——下限保不变量，
                             // 内容更高时自然长高，外观与竖屏一致
                             .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(AILauncherColors.current.Card.copy(alpha = 0.88f))
-                            .clickable { onAskQizai(searchFieldValue.text.trim()) }
+                            .clickable { throttledAsk(searchFieldValue.text.trim()) }
                             .padding(horizontal = 16.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            Icons.Filled.AutoAwesome,
-                            // 装饰图标（行文案已表达含义）标装饰语义（同竖屏）
-                            contentDescription = null,
-                            tint = AILauncherColors.current.Accent,
-                            modifier = Modifier
-                                .size(16.dp)
-                                .semantics { invisibleToUser() }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "问七仔：「${searchFieldValue.text.trim()}」",
                             fontSize = 13.sp,
-                            color = AILauncherColors.current.Accent,
+                            color = AILauncherColors.current.Title.copy(alpha = 0.75f),
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -411,14 +426,21 @@ fun AppCenterLandscape(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                            .padding(horizontal = 16.dp),
+                            .padding(horizontal = 16.dp)
+                            // 应用中心升级：composing 期间结果区降透明度至 0.6
+                            // （Bob 定稿③；守卫与 120ms 防抖本身不动）
+                            .graphicsLayer {
+                                alpha = if (searchFieldValue.composition != null) 0.6f else 1f
+                            },
                         // 底部留出手势条高度，避免末行被手势条盖住（同竖屏）
                         contentPadding = PaddingValues(bottom = 96.dp)
                     ) {
                         if (results.isEmpty()) {
                             item(key = "search-empty") {
                                 Text(
-                                    text = "没有找到「${searchFieldValue.text.trim()}」相关的应用",
+                                    // 应用中心升级：索引缺失与真无匹配区分文案
+                                    text = if (indexLoading) "正在加载应用索引，请稍后再试"
+                                        else "没有找到「${searchFieldValue.text.trim()}」相关的应用",
                                     fontSize = 14.sp,
                                     color = AILauncherColors.current.Hint,
                                     modifier = Modifier.padding(
@@ -431,7 +453,11 @@ fun AppCenterLandscape(
                             // LazyListScope.items 重载解析总偏向 count:Int 版，改用 forEach+item 避开
                             results.forEach { app ->
                                 item(key = "s:${app.packageName}") {
-                                    LandscapeAppRow(app = app, onLaunch = onLaunch)
+                                    // 应用中心升级：键盘弹出时搜索结果行切紧凑
+                                    LandscapeAppRow(
+                                        app = app, onLaunch = onLaunch,
+                                        compact = imeVisible
+                                    )
                                 }
                             }
                         }
@@ -474,12 +500,14 @@ fun AppCenterLandscape(
                                     }
                                     is FlowItem.SectionHeader -> {
                                         // v0.68.75（Bob）：收藏/隐藏区头，占一个完整行位
+                                        // 应用中心升级：区头金色 → Title 色（金色只留
+                                        // 选中环 / 已收藏★ 本体，不再成片刷）
                                         Text(
                                             text = item.title,
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold,
                                             letterSpacing = 2.sp,
-                                            color = AILauncherColors.current.Accent,
+                                            color = AILauncherColors.current.Title,
                                             modifier = Modifier
                                                 .height(rowH)
                                                 .padding(start = 12.dp)
@@ -550,7 +578,8 @@ fun AppCenterLandscape(
             // v0.68.74（Bob）：右：波浪字母导航（复用竖屏 WaveRail，完整 A-Z）
             // v0.68.75（Bob）：加回收藏★和隐藏👁，核心功能不能丢
             // v0.68.82（横屏专项第 2 项）：搜索态隐藏 Rail（定位无意义，同竖屏）
-            if (searchResults == null) {
+            // 应用中心升级：键盘弹出时同样隐藏 Rail
+            if (searchResults == null && !imeVisible) {
             // 右侧挖孔：rail 整块左让 cutoutRight（无右侧挖孔时为 0，
             // 布局不变）；不要只修左不修右。
             Box(
@@ -687,13 +716,15 @@ private val LandscapeRowH = 60.dp
 private fun LandscapeAppRow(
     app: AppInfo,
     onLaunch: (AppInfo) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // 应用中心升级：键盘弹出时行高 60→56dp（图标 48dp 不动）
+    compact: Boolean = false
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .height(LandscapeRowH)
+            .height(if (compact) 56.dp else LandscapeRowH)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onLaunch(app) }
             .padding(horizontal = 8.dp)
