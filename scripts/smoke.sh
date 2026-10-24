@@ -106,14 +106,17 @@ redump_if_empty() {
   fi
 }
 shot() {
-  if adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null; then
+  # 2026-10-24 headline 楔死教训：无超时的 screencap 在 §11 headline 迭代挂约 28s
+  # 后 adb 通道断开（error: closed、截图 0 字节），随后无界 adb 调用致整轮静默
+  # 23 分钟直至 30 分钟 job 超时。正常 screencap 约 1-5s，60s 绰绰有余。
+  if timeout 60 adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null; then
     log "shot: $1.png"
   else
     ng "shot-$1"
   fi
 }
 
-adb wait-for-device
+timeout 180 adb wait-for-device || true
 adb shell input keyevent KEYCODE_WAKEUP || true
 sleep 2
 
@@ -135,7 +138,7 @@ if [ -n "$SMOKE_WM_SIZE" ] || [ -n "$SMOKE_USER_ROTATION" ]; then
   # 让整个运行期形态一致；覆写值重启后保持（同轮实测）。
   log "form-factor override: rebooting to apply"
   adb reboot > /dev/null 2>&1 || true
-  adb wait-for-device > /dev/null 2>&1 || true
+  timeout 180 adb wait-for-device > /dev/null 2>&1 || true
   BOOTED=""
   for i in $(seq 1 40); do
     if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then BOOTED=1; break; fi
@@ -906,6 +909,25 @@ fi
 adb shell settings put global auto_time 0 > /dev/null 2>&1 || true
 TPL_ALL=1
 for OFF in 0 1 2; do
+  # 2026-10-24 headline 楔死教训：上一迭代若 adb 通道已死（screencap 报
+  # error: closed），本迭代的 adb root / wait-for-device 会无界阻塞，整轮静默
+  # 至 job 超时、RESULT 永远打印不出来。迭代开始先探活：死则重启 adb server
+  # 恢复一次；仍死则记 ENV-DEATH、恢复 auto_time 后打印 RESULT-PARTIAL 并退出
+  # （12 段以后跳过、不记 pass）——宁可部分结果，不可静默超时。
+  if ! timeout 20 adb get-state 2>/dev/null | grep -qx device; then
+    log "section 11: adb transport lost before OFF=$OFF; trying adb server restart"
+    timeout 20 adb kill-server > /dev/null 2>&1 || true
+    timeout 30 adb start-server > /dev/null 2>&1 || true
+    timeout 90 adb wait-for-device > /dev/null 2>&1 || true
+    if ! timeout 20 adb get-state 2>/dev/null | grep -qx device; then
+      ENV_DEATHS=$((ENV_DEATHS+1))
+      log "ENV-DEATH: section 11 adb transport unrecoverable; sections 12+ skipped (not passed)"
+      timeout 30 adb shell settings put global auto_time 1 > /dev/null 2>&1 || true
+      log "RESULT-PARTIAL pass=$PASS fail=$FAIL env_deaths=$ENV_DEATHS ENV-INVALID"
+      if [ "$FAIL" = "0" ]; then exit 1; else exit "$FAIL"; fi
+    fi
+    log "section 11: adb transport recovered via server restart"
+  fi
   TGT=$(date -d "+$OFF day" +%m%d1000%Y.00)
   DOY=$(date -d "+$OFF day" +%j)
   RES=$((10#$DOY % 3))
@@ -914,16 +936,16 @@ for OFF in 0 1 2; do
     1) TPL=headline ;;
     *) TPL=minimal ;;
   esac
-  adb shell date "$TGT" > /dev/null 2>&1 || true
+  timeout 30 adb shell date "$TGT" > /dev/null 2>&1 || true
   sleep 1
-  NOW_DOY=$(adb shell date +%j 2>/dev/null | tr -d '\r')
+  NOW_DOY=$(timeout 30 adb shell date +%j 2>/dev/null | tr -d '\r')
   if [ "$NOW_DOY" != "$DOY" ]; then
-    adb root > /dev/null 2>&1 || true
-    adb wait-for-device > /dev/null 2>&1 || true
+    timeout 30 adb root > /dev/null 2>&1 || true
+    timeout 90 adb wait-for-device > /dev/null 2>&1 || true
     sleep 2
-    adb shell date "$TGT" > /dev/null 2>&1 || true
+    timeout 30 adb shell date "$TGT" > /dev/null 2>&1 || true
     sleep 1
-    NOW_DOY=$(adb shell date +%j 2>/dev/null | tr -d '\r')
+    NOW_DOY=$(timeout 30 adb shell date +%j 2>/dev/null | tr -d '\r')
   fi
   if [ "$NOW_DOY" != "$DOY" ]; then
     log "template switch unavailable (date set failed: want doy $DOY, got $NOW_DOY) - code-level evidence only"
@@ -1005,7 +1027,7 @@ for OFF in 0 1 2; do
     ng "tpl-$TPL-brief"
   fi
 done
-adb shell settings put global auto_time 1 > /dev/null 2>&1 || true
+timeout 30 adb shell settings put global auto_time 1 > /dev/null 2>&1 || true
 if [ "$TPL_ALL" = "1" ]; then
   log "cover templates exercised: giant/headline/minimal"
 fi
@@ -1101,7 +1123,7 @@ adb shell pm grant "$PKG" android.permission.READ_CALENDAR > /dev/null 2>&1 || t
 # content 操作走 root（本镜像 §11 已证 root 可用）：CalendarProvider 按调用 UID 查权限，
 # shell 身份在部分镜像上查不到日历表；root 后可绕过。后续段落不受影响（§11 本就会 root）。
 adb root > /dev/null 2>&1 || true
-adb wait-for-device > /dev/null 2>&1 || true
+timeout 120 adb wait-for-device > /dev/null 2>&1 || true
 sleep 1
 CAL_RAW=$(adb shell content query --uri content://com.android.calendar/calendars --projection _id 2>&1 || true)
 log "nextup calendars query#1: $(echo "$CAL_RAW" | head -3 | tr '\n' ' ')"
@@ -2061,14 +2083,14 @@ glass_root_swap_wallpaper() {
   # 任一步失败返回 1（调用方回退默认壁纸取证）。诊断追加进 glass-wp-debug.txt。
   local img="$1"
   adb root >> "$OUT/glass-wp-debug.txt" 2>&1 || return 1
-  adb wait-for-device || return 1
+  timeout 120 adb wait-for-device || return 1
   adb shell id 2>/dev/null | grep -q "uid=0" || { log "glass: adb root unavailable"; return 1; }
   adb push "$img" /data/local/tmp/wp.png >> "$OUT/glass-wp-debug.txt" 2>&1 || return 1
   adb shell "cp /data/local/tmp/wp.png /data/system/users/0/wallpaper && chown system:system /data/system/users/0/wallpaper && chmod 600 /data/system/users/0/wallpaper" >> "$OUT/glass-wp-debug.txt" 2>&1 || return 1
   adb shell "chcon u:object_r:system_data_file:s0 /data/system/users/0/wallpaper" >> "$OUT/glass-wp-debug.txt" 2>&1 || true
   log "glass: wallpaper file swapped ($img), rebooting"
   adb reboot > /dev/null 2>&1 || return 1
-  adb wait-for-device || return 1
+  timeout 120 adb wait-for-device || return 1
   local i booted=""
   for i in $(seq 1 30); do
     if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then booted=1; break; fi
