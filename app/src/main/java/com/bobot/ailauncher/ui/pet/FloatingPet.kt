@@ -28,7 +28,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -190,8 +189,9 @@ fun FloatingPet(
         modifier = modifier
             .size(width = touch, height = maxOf(petHeight, 48.dp))
             .semantics {
+                // 与旧 DockPetPerch 一致：contentDescription + clickable，
+                // TalkBack 即识别为可点按钮（本 BOM 无 Semantics role 属性）。
                 contentDescription = "问曜仔"
-                this.role = Role.Button
             }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
