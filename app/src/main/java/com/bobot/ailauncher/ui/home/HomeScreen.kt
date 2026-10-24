@@ -452,10 +452,11 @@ fun HomeScreen(
                                 }
                         ) {
                             // F 批（输入态轻量化）：胶囊左侧 Row 站位退役
-                            // ——IntentEntry 独占整宽，七仔改在 IntentEntry
-                            // 内坐到胶囊上沿（全屏唯一、testTag pet_qizai
-                            // 不变，反应姿态仍走 PetRepository 状态机）；
-                            // 整区在意图区 bounds 内，点它不触发点外退出。
+                            // ——IntentEntry 独占整宽；v4 紧凑行：七仔改在
+                            // 胶囊上方与推荐问同行（全屏唯一、testTag
+                            // pet_qizai 不变，反应姿态仍走 PetRepository
+                            // 状态机）；整区在意图区 bounds 内，点它不触发
+                            // 点外退出。
                             // freeze3 焦点门（§9 削峰）口径保留：requestFocusOnMount
                             // 仍须过 intentFocusGateOpen。
                             IntentEntry(

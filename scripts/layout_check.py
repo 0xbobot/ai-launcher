@@ -68,8 +68,8 @@ def check_state(root, state, elements, pairs, W, H, one_pet=False):
     """elements: {name: bounds or None}; pairs: [(a,b)] 需不相交"""
     if one_pet:
         # v0.68.101（单宠物原则，Bob 08:08 拍板）：任何时刻屏幕上恰一只
-        # 七仔——静态 = Dock 坐姿（dock_pet_cell）、输入态 = 坐胶囊上沿
-        # （pet_qizai，F 批站位），两者永不同时在场、也永不双缺（主页形态下）。
+        # 七仔——静态 = Dock 坐姿（dock_pet_cell）、输入态 = 紧凑行伴随体
+        # （pet_qizai，v4 站位），两者永不同时在场、也永不双缺（主页形态下）。
         n = len(by_rid(root, "dock_pet_cell")) + len(by_rid(root, "pet_qizai"))
         if n == 1:
             print(f"LAYOUT OK {state}: one-pet count={n}")
@@ -139,8 +139,8 @@ HOME_PAIRS = [
     # v0.68.101：坐姿七仔（dockpet）是 dock 面板的子节点（包含关系不查
     # dockpet×dock）；它探出面板上沿，必须与会行/hero 不相交
     ("dockpet", "nextup"), ("dockpet", "hero"), ("dockpet", "capsule"),
-    # F 批：输入态七仔与胶囊是「坐沿」交叠关系（下半身被胶囊盖住），
-    # pet×capsule 不再查不相交——改由 check_deck_focus 的坐沿断言管
+    # v4：输入态七仔已移出胶囊上沿、与胶囊不再交叠，pet×capsule
+    # 回归不相交检查（由 check_deck_focus 的紧凑行断言补间隙上限）
 ]
 FOCUS_PAIRS = [
     ("hero", "capsule"), ("capsule", "nextup"), ("hero", "nextup"),
@@ -148,7 +148,8 @@ FOCUS_PAIRS = [
     # v0.68.101（R-2）：甲板在 hero 与胶囊之间、三者与 NextUp 互不相交
     # （横屏同样适用——L-7：横屏输入态与竖屏同语义，断言不放水）
     ("hero", "deck"), ("deck", "capsule"), ("deck", "nextup"),
-    # F 批：pet×capsule 改坐沿断言（见 check_deck_focus），不在此查不相交
+    # v4：紧凑行在甲板与胶囊之间，七仔与甲板/胶囊互不相交
+    ("pet", "deck"), ("pet", "capsule"),
     # 聚焦态键盘升起，Dock 被 IME 覆盖，dump 中的 Dock bounds 不代表可见几何，不查
 ]
 
@@ -160,33 +161,72 @@ def _inside(inner, outer):
 
 
 def check_deck_focus(root, W, H):
-    """F 批·输入态面板几何（第 25 段 deck_focus.xml）：
-    通用在屏/不相交 + one_pet 之外，加三组 F 专属断言——
-    ① 七仔坐沿：pet 底边低于胶囊顶边（被胶囊盖住）、pet 顶边高于
-       胶囊顶边（头身露在胶囊之上）；
-    ② 七仔水平中心落在胶囊宽的 10%–40% 区间（原型定稿：左起约 25%）；
-    ③ 同面包含：甲板 / 胶囊 / 结果槽位（在场且有高度时）完整落在
-       一体化面板 bounds 内。
+    """v4 紧凑行几何（第 25 段 deck_focus.xml）：
+    通用在屏/不相交 + one_pet 之外，加四组 v4 专属断言——
+    ① 七仔可见高：bounds 高 × 资产填充比 0.53（F 批实测：角色在盒子内
+       纵向占比约 53%）与胶囊高之比 ∈ [0.70, 1.00]（原型定稿：约 0.88）；
+    ② 同行同带：七仔中心 y 与推荐行（deck_example_* 并集）中心 y 之差 ≤12dp；
+    ③ 紧凑间隙：行底（七仔/推荐行底边最大值）到胶囊顶 ∈ [0, 12dp]，
+       不重叠、不留大缝；
+    ④ 左右次序：推荐行左缘在七仔右缘之右；pet_qizai 全屏唯一。
+    （F 批的坐沿断言 pet-sits-on-edge 随七仔移出胶囊上沿而退役。）
+    dp 换算：CI 模拟器腿统一 1080 宽、420dpi 级（宽约 411dp），密度取 W/411。
     """
     state = "deck-focus"
     els = home_elements(root)
     check_state(root, state, els, FOCUS_PAIRS, W, H, one_pet=True)
+    density = W / 411.0 if W else 2.625
+
+    def dp(px):
+        return px / density
+
     pet, cap, panel = els.get("pet"), els.get("capsule"), els.get("panel")
-    if pet is None or cap is None:
-        print(f"LAYOUT INFO {state}: pet/capsule absent, sit assertions skipped")
+    pet_nodes = by_rid(root, "pet_qizai")
+    if len(pet_nodes) == 1:
+        print(f"LAYOUT OK {state}: pet_qizai unique count=1")
     else:
-        if pet[3] > cap[1] + EPS and pet[1] < cap[1] - EPS:
-            print(f"LAYOUT OK {state}: pet sits on capsule edge pet={pet} capsule={cap}")
+        print(f"LAYOUT FAIL {state}: pet_qizai count={len(pet_nodes)} (expected exactly 1)")
+    ex_nodes = []
+    for n in root.iter("node"):
+        rid = n.get("resource-id") or ""
+        if rid.startswith("deck_example_"):
+            b = bounds(n)
+            if b:
+                ex_nodes.append(b)
+    examples = union(ex_nodes) if ex_nodes else None
+    if pet is None or cap is None:
+        print(f"LAYOUT INFO {state}: pet/capsule absent, compact assertions skipped")
+    else:
+        cap_h = cap[3] - cap[1]
+        ratio = (pet[3] - pet[1]) * 0.53 / float(cap_h) if cap_h > 0 else -1
+        if 0.70 <= ratio <= 1.00:
+            print(f"LAYOUT OK {state}: pet visible-height ratio={ratio:.3f} within [0.70,1.00]")
         else:
-            print(f"LAYOUT FAIL {state}: pet not sitting on capsule edge "
-                  f"pet={pet} capsule_top={cap[1]} (need pet_top<capsule_top<pet_bottom)")
-        cx = (pet[0] + pet[2]) / 2.0
-        ratio = (cx - cap[0]) / float(cap[2] - cap[0]) if cap[2] > cap[0] else -1
-        if 0.10 <= ratio <= 0.40:
-            print(f"LAYOUT OK {state}: pet center-x ratio={ratio:.3f} within [0.10,0.40]")
+            print(f"LAYOUT FAIL {state}: pet visible-height ratio={ratio:.3f} outside [0.70,1.00] "
+                  f"pet={pet} capsule={cap} (bounds_h x 0.53 / capsule_h)")
+        row_bottom = pet[3]
+        if examples is not None:
+            pet_cy = (pet[1] + pet[3]) / 2.0
+            ex_cy = (examples[1] + examples[3]) / 2.0
+            if abs(dp(pet_cy - ex_cy)) <= 12.0:
+                print(f"LAYOUT OK {state}: pet/examples same band, center-y diff="
+                      f"{dp(pet_cy - ex_cy):.1f}dp")
+            else:
+                print(f"LAYOUT FAIL {state}: pet/examples center-y diff="
+                      f"{dp(pet_cy - ex_cy):.1f}dp exceeds 12dp pet={pet} examples={examples}")
+            if examples[0] >= pet[2] - EPS:
+                print(f"LAYOUT OK {state}: examples start right of pet "
+                      f"examples_left={examples[0]} pet_right={pet[2]}")
+            else:
+                print(f"LAYOUT FAIL {state}: examples start left of pet right edge "
+                      f"examples={examples} pet={pet}")
+            row_bottom = max(row_bottom, examples[3])
+        gap = dp(cap[1] - row_bottom)
+        if -EPS / density <= gap <= 12.0:
+            print(f"LAYOUT OK {state}: compact-row to capsule gap={gap:.1f}dp within [0,12]")
         else:
-            print(f"LAYOUT FAIL {state}: pet center-x ratio={ratio:.3f} outside [0.10,0.40] "
-                  f"pet={pet} capsule={cap}")
+            print(f"LAYOUT FAIL {state}: compact-row to capsule gap={gap:.1f}dp outside [0,12] "
+                  f"row_bottom={row_bottom} capsule_top={cap[1]}")
     if panel is None:
         print(f"LAYOUT FAIL {state}: intent_panel absent (integrated panel missing)")
     else:
@@ -197,6 +237,15 @@ def check_deck_focus(root, W, H):
                 continue
             if name == "resultslot" and b[3] - b[1] <= EPS:
                 print(f"LAYOUT INFO {state}/resultslot: empty slot, containment skipped")
+                continue
+            if _inside(b, panel):
+                print(f"LAYOUT OK {state}: {name} inside panel {b} in {panel}")
+            else:
+                print(f"LAYOUT FAIL {state}: {name} escapes panel {b} not in {panel}")
+        # v4：紧凑行整体（七仔 + 推荐行）也须落在面板内
+        for name, b in (("pet", pet), ("examples", examples)):
+            if b is None:
+                print(f"LAYOUT INFO {state}/{name}: absent, containment skipped")
                 continue
             if _inside(b, panel):
                 print(f"LAYOUT OK {state}: {name} inside panel {b} in {panel}")

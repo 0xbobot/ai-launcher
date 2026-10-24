@@ -66,9 +66,10 @@ fun PetView(
     sleepy: Boolean = false,
     /** 点按果冻：每次 +1 触发一次果冻回弹（纯视觉反馈） */
     jellyTick: Int = 0,
-    /** F 批：抑制 FETCH 姿态的 -52dp 上浮——坐胶囊上沿的伴随七仔必须钉在
-     * 胶囊边缘（上浮量 52dp 超过遮挡深度 42dp，会读成悬空）；Dock 栖坐等
-     * 其他语境不传，保持原姿态语言。 */
+    /** F 批起：抑制 FETCH 姿态的 -52dp 上浮——输入态伴随七仔必须钉在
+     * 既定位置（F 批坐胶囊边缘时上浮量超过遮挡深度会读成悬空；v4 紧凑
+     * 行时上浮会破坏与推荐问的居中对齐）；Dock 栖坐等其他语境不传，
+     * 保持原姿态语言。 */
     suppressPoseLift: Boolean = false,
     /** v0.43.0：场景动画（Mii 式程序化）。非 NONE 时接管本体渲染，mood 动画暂停 */
     scene: QizaiScene = QizaiScene.NONE,

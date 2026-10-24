@@ -11,14 +11,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.size
@@ -144,9 +141,8 @@ fun IntentCapsuleField(
     // 进入，用户点一次就应能打字（键盘随聚焦弹起）；应用中心不传，保持点按
     // 聚焦的原行为；「问七仔」自动带起的思考/回复呈现也不传（不弹键盘）。
     requestFocusOnMount: Boolean = false,
-    // F 批：实心背景——首页胶囊坐在一体化面板里、七仔下半身垫在胶囊之后，
-    // 0.88 半透明底会让七仔透影；首页传 true 用不透明 Card 色（应用中心不传，
-    // 保持原半透明观感）。
+    // F 批：实心背景——首页胶囊坐在一体化面板里，0.88 半透明底在面板上
+    // 显脏；首页传 true 用不透明 Card 色（应用中心不传，保持原半透明观感）。
     solidBackground: Boolean = false
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -598,7 +594,7 @@ fun IntentEntry(
     val showDeck = idleOrEditing && sessionFocused && text.isEmpty()
 
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-      // ---- F 批·一体化面板：甲板 + 胶囊（含坐沿七仔）+ 结果槽位同处一面 ----
+      // ---- F 批·一体化面板：甲板 + 紧凑行（小七仔 + 推荐问）+ 胶囊 + 结果槽位同处一面 ----
       // 单一 Card 背景 + 24dp 圆角 + 主题描边，内部三区不再各带卡片底。
       // 面板是静态容器：无任何尺寸/高度动画（310 冻结教训），进出仍由
       // HomeScreen 的 fade-only AnimatedVisibility 承担。面板只活在既有
@@ -613,7 +609,7 @@ fun IntentEntry(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
-        // ---- 输入甲板：面板上区（应用推荐 + 示例素行） ----
+        // ---- 输入甲板：面板上区（应用推荐；示例素行已移入下方紧凑行） ----
         if (showDeck) {
             Column(
                 modifier = Modifier.testTag("deck_root"),
@@ -631,44 +627,47 @@ fun IntentEntry(
                         }
                     )
                 }
-                if (showDeckExamples) {
-                    DeckExamplesRow(
-                        examples = deckExamples,
-                        onPick = { pickExample(it) }
-                    )
-                }
             }
         }
 
-        // ---- 胶囊行：七仔坐在胶囊上沿（F 批定稿） ----
-        // 几何：七仔总高 110dp，先画（z 在胶囊之后）；胶囊上方留 68dp
-        // 头部空间，七仔下部 42dp（≈38%）被胶囊本体盖住 → 可见高 68dp
-        // ≈ 胶囊高（56dp）的 1.2 倍，读出「坐在上沿」。水平中心 = 胶囊
-        // 左缘 + 25% 胶囊宽。静态 Box 布局，无尺寸动画（310 教训）。
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            val petSize = 110.dp
-            InputPetCompanion(
-                size = petSize,
-                modifier = Modifier.offset(
-                    x = maxWidth * 0.25f - petSize / 2,
-                    y = 0.dp
-                )
-            )
-            Column {
-                Spacer(modifier = Modifier.height(68.dp))
-                // 胶囊本体（与应用中心同一组件；面板语境用实心底，
-                // 防七仔下半身透影）
-                IntentCapsuleField(
-                    value = fieldValue,
-                    onValueChange = { nv -> onFieldValueChange(nv) },
-                    onSubmit = { submitIfReady() },
-                    planning = planning,
-                    requestFocusOnMount = requestFocusOnMount,
-                    onFocusChanged = { capsuleFocused = it },
-                    solidBackground = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+        // ---- v4 紧凑行 + 胶囊（Bob 2026-10-24 定稿，原型 input-sit-v4） ----
+        // 紧凑行：小七仔 + 推荐问素行同行、垂直居中，行底到胶囊顶 8dp。
+        // 七仔盒子 92dp（资产填充比约 0.53 → 可见高约 49dp ≈ 胶囊
+        // min 高 56dp 的 0.88 倍，不再是视觉主角）；推荐问沿用 F 的
+        // 素行（无底无描边、14sp、点选整句填充），只是从独立区块移进
+        // 这一行横滚。紧凑行常驻（打字后示例让位、七仔仍在场）；胶囊
+        // 本体行为不动。静态布局，无尺寸动画（310 教训）。
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("compact_row"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                InputPetCompanion(size = 92.dp)
+                if (showDeck && showDeckExamples) {
+                    DeckExamplesRow(
+                        examples = deckExamples,
+                        onPick = { pickExample(it) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
+            // 胶囊本体（与应用中心同一组件；面板语境用实心底）
+            IntentCapsuleField(
+                value = fieldValue,
+                onValueChange = { nv -> onFieldValueChange(nv) },
+                onSubmit = { submitIfReady() },
+                planning = planning,
+                requestFocusOnMount = requestFocusOnMount,
+                onFocusChanged = { capsuleFocused = it },
+                solidBackground = true,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         // ---- 结果条槽位（非模态）：本地结果 / 回复 / 错误 / 权限说明共用 ----

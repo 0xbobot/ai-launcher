@@ -2653,7 +2653,7 @@ if [ -n "$PC_PID" ]; then kill "$PC_PID" 2> /dev/null || true; fi
 # ②点示例「导航去机场」→ intent_input 文本 == 整句「导航去机场」、
 #   无 slot_chip/slot_panel、甲板已让位（deck_example 消失）
 #   （deck-fill-text），几何经 layout_check 的 deck-focus 行验收
-#   （deck-layout-geometry）；
+#   （deck-layout-geometry，v4 紧凑行口径：可见高比/同带/间隙/次序）；
 # ③点发送 → mock 收到自由文本整句（含「导航去机场」，请求日志取证
 #   deck-send-free-text），mock 恒回 daohang 空参 → 落 .87 NeedsInput
 #   追问条「去哪儿」（deck-send-executes：缺参由追问兜底的活证据）。
@@ -2734,7 +2734,7 @@ if [ "$SD_UP" = "1" ]; then
           ng "deck-fill-text"
         fi
         shot "deck-filled"
-        # 输入态几何：布局网的 deck-focus 行（面板/坐沿七仔/同面包含断言）
+        # 输入态几何：布局网的 deck-focus 行（面板/紧凑行/同面包含断言）
         SD_LAYOUT=$(python3 scripts/layout_check.py "$OUT" "$SCR_W" "$SCR_H" 2>&1 | grep "deck-focus" || true)
         echo "$SD_LAYOUT" | while IFS= read -r line; do [ -n "$line" ] && log "$line"; done
         if echo "$SD_LAYOUT" | grep -q "LAYOUT FAIL"; then
