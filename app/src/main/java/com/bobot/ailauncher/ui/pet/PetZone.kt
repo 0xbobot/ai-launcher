@@ -91,21 +91,11 @@ fun PetZone(
     // 布局分区天然不重叠，且与 .97 几何基线同构。
     intentSlot: @Composable () -> Unit = {}
 ) {
-    // v0.29.0：新通知送达
-    val deliverTick by PetRepository.deliverTick.collectAsState()
-    val deliverApp by PetRepository.deliverApp.collectAsState()
-    // v0.51.0：新通知 → 七仔开口（徽标已删，消息统一进 Today 数据管线）
-    // v0.56.0 M3：改用 sayApp（同一应用 30 秒合并 + 深夜/手势中降级）
-    // v0.68.101：原「看手机」场景演示随讲述者七仔退役，开口状态保留
-    // （PetRepository 语音状态机不动，其他呈现面可继续消费）。
-    LaunchedEffect(deliverTick) {
-        if (deliverTick > 0) {
-            // 七仔开口——只报应用名，不念内容（守门人分寸）
-            deliverApp?.let { app ->
-                PetRepository.sayApp(app)
-            }
-        }
-    }
+    // alive-p1：普通通知不再经 deliverTick 开口——通知到达的呈现收敛到
+    // PetRepository.handleIncomingNotification：普通通知只瞥视（不出声、
+    // 不弹泡），重要通知走播报（先定向再说）。sayApp 函数本身保留
+    // （合并/深夜降级规则不动），调用点随一期清单退役。
+    // （deliverTick/deliverApp 流保留在仓库层，供其他呈现面消费。）
     // v0.30.0：天气微动作
     val weatherDesc by com.bobot.ailauncher.data.WeatherState.desc.collectAsState()
     // v0.46.0：天气自动触发——突变才播场景，不打扰

@@ -75,14 +75,16 @@ fun InputPetCompanion(modifier: Modifier = Modifier, size: Dp = 92.dp) {
     val intentThinking by PetRepository.intentThinking.collectAsState()
     val mouth by PetRepository.mouth.collectAsState()
     val petState by PetRepository.petState.collectAsState()
+    // alive-p1 倾听态：意图聚焦/追问等「在听」时（intentPose==FETCH，
+    // 意图层已按 sessionFocused/NeedsInput 下发），七仔歪头约 6° 并注视
+    // 输入框；非倾听态保持 v6 定稿的 -5° 微倾（只改渲染不改布局 bounds，
+    // layout_check 的几何断言口径不受影响）。
+    val listening = intentPose == com.bobot.ailauncher.data.PetMood.FETCH
     Box(
         modifier = modifier
             .requiredSize(size)
             .testTag("pet_qizai")
-            // v6：本体微倾 -5°（顶向右侧推荐问倾，读出活感不是贴纸；
-            // graphicsLayer 只改渲染不改布局 bounds，layout_check 的
-            // 几何断言口径不受影响）
-            .graphicsLayer { rotationZ = -5f },
+            .graphicsLayer { rotationZ = if (listening) -6f else -5f },
         contentAlignment = Alignment.Center
     ) {
         // v6：头边星光（输入态 only、静态琥珀色、低调 14dp）——「它在看」
@@ -114,6 +116,7 @@ fun InputPetCompanion(modifier: Modifier = Modifier, size: Dp = 92.dp) {
             mood = intentPose ?: mood,
             mouth = mouth,
             blinking = false,
+            listening = listening,
             sleepy = petState == PetState.SLEEPY,
             // v4：紧凑行语境抑制 FETCH 上浮（-52px 会把七仔掀离与推荐问
             // 的居中对齐，读成上飘）；其他语境不传，保持原姿态语言

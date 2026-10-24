@@ -11,6 +11,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,17 +29,22 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.data.PetMouth
 import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.data.PetRepository.GazeTarget
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -56,12 +63,17 @@ import kotlin.math.sqrt
  *   IDLE 轻摆 ±2.5°，HAPPY 小跳 8dp，FILE 轻摆 ±3°，SORTING/FETCH 挥手摆 ±5°，周期 2.4s
  * - 切图 Crossfade 加快到 150ms；低电量时循环动作全停（省电）
  * mouth/blinking 为 Canvas 手绘时代遗留参数，保留签名兼容，内部不再使用。
+ * alive-p1（七仔活物一期）：眨眼改眼部纵向压缩（复用 QizaiScene 眼盒，
+ * 不再切图闪烁）；注视由注视导演统一调度（倾听 > 说话目标 > 瞥视 > 巡看）；
+ * 浮动/呼吸/小循环去周期化（三路独立游走，周期与幅度 ±20% 重抽）。
  */
 @Composable
 fun PetView(
     mood: PetMood,
     mouth: PetMouth,
     blinking: Boolean,
+    /** alive-p1：意图输入聚焦时的倾听态——注视输入框方向，巡看让位。 */
+    listening: Boolean = false,
     /** 夜晚/睡眠态：强制显示闭眼待机图 */
     sleepy: Boolean = false,
     /** 点按果冻：每次 +1 触发一次果冻回弹（纯视觉反馈） */
@@ -89,73 +101,129 @@ fun PetView(
     val effectiveSleepy = sleepy || lowPower
     // v0.56.0 M4 深夜：动作减速 30%（幅度 × 0.7）
     val nightSlow = if (PetRepository.isNight()) 0.7f else 1f
-    // idle 轻微浮动
-    val bob by rememberInfiniteTransition(label = "petBob").animateFloat(
-        initialValue = 0f,
-        targetValue = -8f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1600, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "bob"
-    )
-    // P0：呼吸——4s 一次的细微缩放，比浮动更"活"
+    // alive-p1 去周期化：浮动/呼吸/小循环各走一路独立游走相位（32ms tick），
+    // 每周期末周期与幅度在 ±20% 内重抽——严格正弦是机器最强的自白。
+    // 旧口径：浮动 3.2s 周期 -8dp、呼吸 4s 周期 1.03、小循环 2.4s 周期。
+    var bobPhase by remember { mutableFloatStateOf(0f) }
+    var bobPeriod by remember { mutableFloatStateOf(3200f) }
+    var bobAmp by remember { mutableFloatStateOf(1f) }
+    var breathePhase by remember { mutableFloatStateOf(0f) }
+    var breathePeriod by remember { mutableFloatStateOf(4000f) }
+    var breatheAmp by remember { mutableFloatStateOf(1f) }
+    var loopPhase by remember { mutableFloatStateOf(0f) }
+    var loopPeriod by remember { mutableFloatStateOf(2400f) }
+    var loopAmp by remember { mutableFloatStateOf(1f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(32)
+            val r = kotlin.random.Random
+            bobPhase += (2 * PI * 32 / bobPeriod).toFloat()
+            if (bobPhase >= 2 * PI) {
+                bobPhase -= (2 * PI).toFloat()
+                bobPeriod = wanderPeriodMs(3200f, r); bobAmp = wanderAmp(r)
+            }
+            breathePhase += (2 * PI * 32 / breathePeriod).toFloat()
+            if (breathePhase >= 2 * PI) {
+                breathePhase -= (2 * PI).toFloat()
+                breathePeriod = wanderPeriodMs(4000f, r); breatheAmp = wanderAmp(r)
+            }
+            loopPhase += (2 * PI * 32 / loopPeriod).toFloat()
+            if (loopPhase >= 2 * PI) {
+                loopPhase -= (2 * PI).toFloat()
+                loopPeriod = wanderPeriodMs(2400f, r); loopAmp = wanderAmp(r)
+            }
+        }
+    }
+    // idle 轻微浮动（余弦缓动近似原 FastOutSlowIn 往返）
+    val bob = -8f * bobAmp * (0.5f - 0.5f * cos(bobPhase))
+    // P0：呼吸——细微缩放，比浮动更"活"
     // v0.28.1：低电量时停止呼吸（静态，省电）
     val breathe: Float = if (lowPower) {
         1f
     } else {
-        rememberInfiniteTransition(label = "petBreathe").animateFloat(
-            initialValue = 1f,
-            targetValue = 1.03f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(2000, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "breathe"
-        ).value
+        1f + 0.03f * breatheAmp * (0.5f - 0.5f * cos(breathePhase))
     }
-    // P0：眨眼——0.15 秒快闪
-    // v0.56.0 M1：间隔 8 秒 ± 随机 3 秒（5~11 秒），静置不觉得死了也不吵
+    // alive-p1 眨眼：眼部纵向压缩（复用 QizaiScene 做法，废弃切图快闪）。
+    // 间隔 2–6 秒随机，约 10% 连眨；低电量 12 秒（沿用现有口径）。
     var blinkTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(lowPower) {
         while (true) {
-            val interval = if (lowPower) 12000L
-            else 8000L + (kotlin.random.Random.nextFloat() * 6000L - 3000L).toLong()
-            delay(interval.coerceAtLeast(3000L))
+            delay(BlinkPolicy.intervalMs(lowPower, kotlin.random.Random))
             blinkTick++
-            delay(150)
+            delay(140)
             blinkTick++
+            if (BlinkPolicy.isDoubleBlink(kotlin.random.Random)) {
+                delay(120)
+                blinkTick++
+                delay(140)
+                blinkTick++
+            }
         }
     }
     val isBlinking = blinkTick % 2 == 1
-    // v0.56.0 M1 巡看：瞳孔先行、头部延迟 80ms 跟随——用整体轻微左右摆模拟
-    // 瞳孔（快，200ms）→ 头部（慢，延迟 80ms 后 280ms 跟上）
-    var lookDir by remember { mutableStateOf(0f) } // -1 左 / 0 中 / 1 右
-    LaunchedEffect(lowPower) {
-        while (true) {
-            delay(9000 + kotlin.random.Random.nextLong(8000)) // 9~17 秒看一次
-            if (lowPower) continue
-            lookDir = if (kotlin.random.Random.nextBoolean()) 1f else -1f
-            delay(1200) // 停留看 1.2 秒
-            lookDir = 0f
+    // 压缩动画：70ms 闭合 + 70ms 睁开（≈原 140ms 快闪），绕眼带中心缩放。
+    val blinkScale by animateFloatAsState(
+        targetValue = if (isBlinking) 0.08f else 1f,
+        animationSpec = tween(70, easing = FastOutSlowInEasing),
+        label = "blinkScale"
+    )
+    // alive-p1 注视导演：倾听 > 说话目标 > 瞥视 > 巡看（优先级即因果链）。
+    // 瞳孔（快，200ms）→ 头部（慢，延迟 80ms 后 280ms 跟上），与原巡看同款时序。
+    val repoGazeTarget by PetRepository.gazeTarget.collectAsState()
+    val repoGlanceTarget by PetRepository.glanceTarget.collectAsState()
+    val repoGlanceTick by PetRepository.glanceTick.collectAsState()
+    var glanceTarget by remember { mutableStateOf<GazeTarget?>(null) }
+    LaunchedEffect(repoGlanceTick) {
+        if (repoGlanceTick > 0) {
+            glanceTarget = repoGlanceTarget
+            delay(600) // 瞥视至多 600ms，到期释放（新瞥视重启本 effect 刷新窗口）
+            glanceTarget = null
         }
     }
-    // 瞳孔先行：快速 200ms 到位
+    // 巡看：8–15 秒一次，落点只从桌面语义点里选，停留 1.2 秒后回正前方。
+    var patrolTarget by remember { mutableStateOf(GazeTarget.CENTER) }
+    LaunchedEffect(lowPower) {
+        while (true) {
+            delay(8000 + kotlin.random.Random.nextLong(7000))
+            if (lowPower) continue
+            patrolTarget = patrolTargetPool().random()
+            delay(1200)
+            patrolTarget = GazeTarget.CENTER
+        }
+    }
+    val effectiveGazeTarget = when {
+        listening -> GazeTarget.INPUT
+        repoGazeTarget != GazeTarget.CENTER -> repoGazeTarget
+        glanceTarget != null -> glanceTarget!!
+        else -> patrolTarget
+    }
+    val gazeOff = gazeOffsetFor(effectiveGazeTarget)
+    // 瞳孔先行：快速 200ms 到位（x ±6px，y ±4px）
     val pupilX by animateFloatAsState(
-        targetValue = lookDir * 6f,
+        targetValue = gazeOff.x * 6f,
         animationSpec = tween(200, easing = FastOutSlowInEasing),
         label = "pupilX"
     )
-    // 头部延迟 80ms 跟随：280ms 到位
-    var headLookDir by remember { mutableStateOf(0f) }
-    LaunchedEffect(lookDir) {
+    val pupilY by animateFloatAsState(
+        targetValue = gazeOff.y * 4f,
+        animationSpec = tween(200, easing = FastOutSlowInEasing),
+        label = "pupilY"
+    )
+    // 头部延迟 80ms 跟随：280ms 到位（x ±10px，y ±6px）
+    var headGaze by remember { mutableStateOf(GazeOffset(0f, 0f)) }
+    LaunchedEffect(effectiveGazeTarget) {
         delay(80)
-        headLookDir = lookDir
+        headGaze = gazeOff
     }
     val headX by animateFloatAsState(
-        targetValue = headLookDir * 10f,
+        targetValue = headGaze.x * 10f,
         animationSpec = tween(280, easing = FastOutSlowInEasing),
         label = "headX"
+    )
+    val headY by animateFloatAsState(
+        targetValue = headGaze.y * 6f,
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        label = "headY"
     )
     // P0：点按果冻——按压 120ms 后 spring 回弹（纯视觉反馈）
     // v0.56.0 M2：非对称果冻 scaleX 1.2 / scaleY 0.8，0.3 秒回弹 + 开心表情，不说话
@@ -218,12 +286,9 @@ fun PetView(
         mood == PetMood.SURPRISED -> R.drawable.meteor_wave // 惊讶：挥手（手举起）
         else -> R.drawable.meteor_wave // SORTING / FETCH
     }
-    // 眨眼时切主图闪一下（140ms）；低电量时本来就待机态，不眨了
-    val resId = if (isBlinking && !effectiveSleepy && mood != PetMood.IDLE) {
-        R.drawable.meteor_main
-    } else {
-        baseResId
-    }
+    // alive-p1：眨眼不再切图闪烁——眼带压缩覆盖层见下方 Canvas；
+    // 低电量/睡眠时本来就待机态，不眨（覆盖层同样受 effectiveSleepy 门禁）。
+    val resId = baseResId
 
     // v0.29.1：姿势切换"顿一下"——切图时先挤到 0.88（90ms），再弹簧回弹（轻微 overshoot），
     // 落点精确回到 1.0，遮掉切图的生硬感；比慢溶接更像活物在动
@@ -244,24 +309,16 @@ fun PetView(
         animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
         label = "tilt"
     )
-    // v0.29.1：Muse 式无缝小循环——sin 曲线走满 2π，Restart 模式头尾都是 0，
-    // 重复播放不突兀；周期慢（2.4s）、幅度小（不招摇）；低电量全停
-    val loopPhase by rememberInfiniteTransition(label = "petLoop").animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "loopPhase"
-    )
-    val loopTheta = (loopPhase * 2 * Math.PI).toFloat()
+    // v0.29.1：小循环——sin 曲线走满 2π，头尾都是 0，重复播放不突兀；
+    // 周期慢、幅度小（不招摇）；低电量全停。alive-p1：相位改游走驱动，
+    // 每周期末幅度在 ±20% 内重抽（loopAmp）。
+    val loopTheta = loopPhase
     val loopRot = when {
         lowPower || reduceMotion -> 0f
         mood == PetMood.HAPPY -> 0f // 开心用小跳，不转
-        mood == PetMood.IDLE || effectiveSleepy -> sin(loopTheta) * 2.5f * nightSlow
-        mood == PetMood.FILE -> sin(loopTheta) * 3f * nightSlow
-        else -> sin(loopTheta) * 5f * nightSlow // SORTING / FETCH 挥手摆动
+        mood == PetMood.IDLE || effectiveSleepy -> sin(loopTheta) * 2.5f * nightSlow * loopAmp
+        mood == PetMood.FILE -> sin(loopTheta) * 3f * nightSlow * loopAmp
+        else -> sin(loopTheta) * 5f * nightSlow * loopAmp // SORTING / FETCH 挥手摆动
     }
     val loopYdp = when {
         lowPower || reduceMotion -> 0f
@@ -349,13 +406,14 @@ fun PetView(
             }
             .then(modifier)
             .graphicsLayer {
-                // v0.56.0 M1 巡看：瞳孔 6px 先行 + 头部 10px 延迟跟随
+                // alive-p1 注视：瞳孔（x ±6px / y ±4px）先行 + 头部（x ±10px /
+                // y ±6px）延迟跟随；倾听/说话/瞥视/巡看由注视导演统一排优先级
                 // v0.56.0 M2 害羞轻颤
                 // R3-D：减动效时浮动（bob）与轻颤归零，宠物静止在原位
                 val tremble = if (mood == PetMood.SHY && !reduceMotion) shyTremble else 0f
                 val bobEff = if (reduceMotion) 0f else bob
                 translationX = with(density) { offX.dp.toPx() } + dragX + pupilX + headX + tremble
-                translationY = with(density) { (offY + bobEff * moodM + loopYdp * moodM).dp.toPx() } + dragY
+                translationY = with(density) { (offY + bobEff * moodM + loopYdp * moodM).dp.toPx() } + dragY + pupilY + headY
                 // v0.56.0 M2 晕眩旋转
                 rotationZ = (tilt + loopRot) * moodM + dizzyRot
                 // v0.56.0 M2：非对称果冻
@@ -380,6 +438,58 @@ fun PetView(
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize()
                 )
+            }
+            // alive-p1 眨眼：眼带纵向压缩覆盖层（QizaiScene 同款做法的
+            // Image 版）。只在压缩进行中绘制：scale=1 时与底图像素完全重合，
+            // 平时不画，避免双重绘制的接缝。眼盒复用 QizaiScene.EYE_BOXES
+            // （jump 姿态无专属眼盒，落 main 的眼盒近似）。
+            if (blinkScale < 0.999f && !effectiveSleepy) {
+                val blinkPainter = painterResource(resId) as? BitmapPainter
+                val blinkBmp = blinkPainter?.imageBitmap
+                if (blinkBmp != null) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        // 与底图 ContentScale.Fit 完全一致的放置数学
+                        val fit = minOf(
+                            size.width / blinkBmp.width,
+                            size.height / blinkBmp.height
+                        )
+                        val dw = blinkBmp.width * fit
+                        val dh = blinkBmp.height * fit
+                        val left = (size.width - dw) / 2f
+                        val top = (size.height - dh) / 2f
+                        val eyeKey = when (resId) {
+                            R.drawable.meteor_wave -> "wave"
+                            R.drawable.meteor_hold -> "hold"
+                            else -> "main"
+                        }
+                        for (b in EYE_BOXES.getValue(eyeKey)) {
+                            val sbl = (b.l * blinkBmp.width).toInt()
+                            val sbt = (b.t * blinkBmp.height).toInt()
+                            val sbw = ((b.r - b.l) * blinkBmp.width).toInt()
+                                .coerceAtLeast(2)
+                            val sbh = ((b.b - b.t) * blinkBmp.height).toInt()
+                                .coerceAtLeast(4)
+                            val dbl = left + b.l * dw
+                            val dbt = top + b.t * dh
+                            val dbr = left + b.r * dw
+                            val dbb = top + b.b * dh
+                            val dbw = (dbr - dbl).toInt().coerceAtLeast(2)
+                            val dbh = ((dbb - dbt) * blinkScale).toInt()
+                                .coerceAtLeast(2)
+                            val cy = (dbt + dbb) / 2f
+                            drawImage(
+                                image = blinkBmp,
+                                srcOffset = IntOffset(sbl, sbt),
+                                srcSize = IntSize(sbw, sbh),
+                                dstOffset = IntOffset(
+                                    dbl.toInt(),
+                                    (cy - dbh / 2f).toInt()
+                                ),
+                                dstSize = IntSize(dbw, dbh)
+                            )
+                        }
+                    }
+                }
             }
             // v0.56.0 M2 害羞腮红：两坨粉色椭圆
             if (mood == PetMood.SHY) {

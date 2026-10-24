@@ -27,6 +27,12 @@ enum class PetMood { IDLE, FETCH, SORTING, FILE, HAPPY, SHY, DIZZY, SURPRISED }
 enum class PetMouth { IDLE, HAPPY, BUSY, O }
 
 /**
+ * alive-p1：注视目标（语义方向，非屏幕坐标；映射见 ui.pet.gazeOffsetFor）。
+ * CENTER 为正前方；其余为七仔「在看的东西」。
+ */
+enum class GazeTarget { CENTER, TODAY_CARD, INPUT, WEATHER_SCENE, DOCK }
+
+/**
  * 宠物整理员状态机（单例）。
  * 流程：新通知 → ding → fetch → carry+sorting → sort-tag → file 动画 → 呈现一次 →
  *       8 秒无操作自动 fileToTab；之后走右侧标签栏手势。
@@ -85,13 +91,45 @@ object PetRepository {
     private val _speech = MutableStateFlow<SpeechMsg?>(null)
     val speech: StateFlow<SpeechMsg?> get() = _speech.asStateFlow()
 
-    /** 七仔说话：新消息直接替换当前（最新优先） */
-    fun say(text: String) {
-        _speech.value = SpeechMsg(System.currentTimeMillis(), text)
+    // ============ alive-p1：注视（说前先看 / 瞥视） ============
+    // 注视目标：say() 发布前先行设定，PetView 据此先转瞳孔与头再出气泡。
+    private val _gazeTarget = MutableStateFlow(GazeTarget.CENTER)
+    val gazeTarget: StateFlow<GazeTarget> get() = _gazeTarget.asStateFlow()
+    // 瞥视事件：普通通知到达时触发一次，组合层按事件持有 ≤600ms 后释放。
+    private val _glanceTarget = MutableStateFlow(GazeTarget.CENTER)
+    val glanceTarget: StateFlow<GazeTarget> get() = _glanceTarget.asStateFlow()
+    private val _glanceTick = MutableStateFlow(0)
+    val glanceTick: StateFlow<Int> get() = _glanceTick.asStateFlow()
+    // say 延迟发布任务：新 say 取消旧任务（最新优先），避免旧文案覆盖新文案。
+    private var sayJob: Job? = null
+
+    /**
+     * 七仔说话：新消息直接替换当前（最新优先）。
+     * alive-p1：播报前 200–300ms 先定向到 target 再出气泡；气泡展示时长
+     * （打字机+停留+淡出，见 ui.pet.speechDisplayMs）到后注视自动释放回
+     * 正前方——气泡在当前首页未必有渲染面，释放不依赖 clearSpeech。
+     */
+    fun say(text: String, target: GazeTarget = GazeTarget.CENTER) {
+        sayJob?.cancel()
+        _gazeTarget.value = target
+        sayJob = scope.launch {
+            delay(250)
+            _gazeTarget.value = target // 发布时重申，避免中间 clearSpeech 冲掉目标
+            _speech.value = SpeechMsg(System.currentTimeMillis(), text)
+            delay(com.bobot.ailauncher.ui.pet.speechDisplayMs(text))
+            _gazeTarget.value = GazeTarget.CENTER
+        }
     }
 
     fun clearSpeech() {
         _speech.value = null
+        _gazeTarget.value = GazeTarget.CENTER
+    }
+
+    /** 瞥视一次：不出声、不弹泡，只让七仔「注意到」——组合层按事件持有 ≤600ms。 */
+    fun glance(target: GazeTarget) {
+        _glanceTarget.value = target
+        _glanceTick.value += 1
     }
 
     // ============ R3-C：意图交互反应（对话感，Bob 2026-10-21 拍板） ============
@@ -118,6 +156,8 @@ object PetRepository {
 
     /** M3：同一应用 30 秒内合并——普通消息气泡 */
     private val lastSayPerApp = mutableMapOf<String, Long>()
+    /** alive-p1：普通通知瞥视的同应用 30 秒合并（与 sayApp 同口径）。 */
+    private val lastGlancePerApp = mutableMapOf<String, Long>()
     fun sayApp(appName: String) {
         val now = System.currentTimeMillis()
         val last = lastSayPerApp[appName] ?: 0L
@@ -336,8 +376,17 @@ object PetRepository {
         // v0.49.0：重要通知 → AI Capsule（一次只说一件）
         // v0.64.0：重要消息不再弹 Capsule，只走七仔表情+头顶气泡+TODAY P0 置顶
         if (cat == PetCat.IMP) {
-            // 重要消息七仔也开口
-            say("${n.appName}有重要消息")
+            // 重要消息七仔也开口（alive-p1：先定向到 TODAY 再说）
+            say("${n.appName}有重要消息", GazeTarget.TODAY_CARD)
+        } else {
+            // alive-p1：普通通知只瞥视一次（≤600ms，不出声、不弹泡；
+            // 同应用 30 秒内合并，沿用 sayApp 的合并口径，不刷屏）。
+            val nowGlance = System.currentTimeMillis()
+            val lastGlance = lastGlancePerApp[n.packageName] ?: 0L
+            if (nowGlance - lastGlance >= 30_000L) {
+                lastGlancePerApp[n.packageName] = nowGlance
+                glance(GazeTarget.TODAY_CARD)
+            }
         }
         // v0.64.0：十万火急判断（IMP 才判）
         val urgent = cat == PetCat.IMP &&
