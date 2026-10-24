@@ -45,7 +45,7 @@ import java.io.IOException
  *
  * 状态联动（复用 PetStateMachine/mood 与事件）：
  * - 回到主页 → GREET（一次，3 秒）
- * - 点宠物 / 任务完成 → HAPPY（一次；点按先播片，片播完再进输入态）
+ * - 任务完成（mood HAPPY）→ HAPPY（一次）；点宠物 → 立即进输入态，不播片
  * - AI 出结果等待（FETCH）→ THINKING（循环，mood 离开 FETCH 即停）
  * - 气泡播报（speech 非空）→ SPEAKING（循环，speech 清空即停，停后
  *   若仍在 FETCH 则回到 THINKING）
@@ -56,8 +56,7 @@ import java.io.IOException
  * 内未切成则 150ms 交叉淡化兜底。一次只播一条：循环片可被新片打断，
  * 一次片播完前的新请求排队（单槽，后来者覆盖）。
  *
- * 门禁：只在主页 RESUMED 时播；切后台或低电量即停回代码层（点按
- * 挂起的进输入动作直接丢弃，不补发）。片源缺失时不切层、不崩溃、
+ * 门禁：只在主页 RESUMED 时播；切后台或低电量即停回代码层。片源缺失时不切层、不崩溃、
  * 行为与无视频时完全一致。播放器音量恒为 0（高光片全部静音）。
  * 生成片是实色灰底，播放层做圆形裁剪（徽章式），不做抠像。
  */
@@ -107,7 +106,6 @@ fun HybridPet(
     var pendingClip by remember { mutableStateOf<HighlightClip?>(null) }
     var queuedClip by remember { mutableStateOf<HighlightClip?>(null) }
     var blinkCut by remember { mutableStateOf(false) }
-    var tapPending by remember { mutableStateOf(false) }
     var firstFrameClip by remember { mutableStateOf<HighlightClip?>(null) }
 
     fun assetExists(clip: HighlightClip): Boolean = try {
@@ -175,7 +173,7 @@ fun HybridPet(
     LaunchedEffect(videoActive, resumed) {
         player.playWhenReady = videoActive && resumed
     }
-    // —— 播放结束与错误：回代码层，触发排队片与挂起的点按 ——
+    // —— 播放结束与错误：回代码层，触发排队片 ——
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() {
@@ -184,12 +182,7 @@ fun HybridPet(
 
             override fun onPlaybackStateChanged(state: Int) {
                 if (state != Player.STATE_ENDED) return
-                val ended = loadedClip
                 stopVideo()
-                if (tapPending && ended == HighlightClip.HAPPY) {
-                    tapPending = false
-                    latestOnPetTap()
-                }
                 val next = queuedClip
                 queuedClip = null
                 if (next != null) {
@@ -231,13 +224,12 @@ fun HybridPet(
         videoActive = true
         pendingClip = null
     }
-    // —— 切后台 / 低电量：停回代码层，挂起动作全部丢弃 ——
+    // —— 切后台 / 低电量：停回代码层 ——
     LaunchedEffect(resumed, lowPower) {
         if (!resumed || lowPower) {
             stopVideo()
             pendingClip = null
             queuedClip = null
-            tapPending = false
             loadedClip = null
             player.stop()
         }
@@ -265,14 +257,9 @@ fun HybridPet(
         }
     }
 
-    // —— 点按：先播 HAPPY，片播完再进输入；片源缺失则立即进输入 ——
+    // —— 点按：立即进输入，不播片；HAPPY 只由任务完成（mood HAPPY）触发 ——
     fun hybridTap() {
-        if (resumed && !lowPower && assetExists(HighlightClip.HAPPY)) {
-            tapPending = true
-            play(HighlightClip.HAPPY)
-        } else {
-            latestOnPetTap()
-        }
+        latestOnPetTap()
     }
 
     // —— 两层交叉：代码层 + 视频层（圆形徽章）——
