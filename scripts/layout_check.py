@@ -68,7 +68,7 @@ def check_state(root, state, elements, pairs, W, H, one_pet=False):
     """elements: {name: bounds or None}; pairs: [(a,b)] 需不相交"""
     if one_pet:
         # v0.68.101（单宠物原则，Bob 08:08 拍板）：任何时刻屏幕上恰一只
-        # 七仔——静态 = Dock 坐姿（dock_pet_cell）、输入态 = 紧凑行伴随体
+        # 七仔——静态 = Dock 漂浮（dock_pet_cell）、输入态 = 紧凑行伴随体
         # （pet_qizai，v4 站位），两者永不同时在场、也永不双缺（主页形态下）。
         n = len(by_rid(root, "dock_pet_cell")) + len(by_rid(root, "pet_qizai"))
         if n == 1:
@@ -136,8 +136,8 @@ HOME_PAIRS = [
     ("capsule", "nextup"), ("capsule", "dock"), ("submit", "dock"),
     ("nextup", "dock"), ("pet", "nextup"),
     ("pet", "dock"),
-    # v0.68.101：坐姿七仔（dockpet）是 dock 面板的子节点（包含关系不查
-    # dockpet×dock）；它探出面板上沿，必须与会行/hero 不相交
+    # pet-hybrid-float：漂浮曜仔（dockpet）悬在面板上方 12dp（不查
+    # dockpet×dock）；它整只在面板之上，必须与会行/hero 不相交
     ("dockpet", "nextup"), ("dockpet", "hero"), ("dockpet", "capsule"),
     # v4：输入态七仔已移出胶囊上沿、与胶囊不再交叠，pet×capsule
     # 回归不相交检查（由 check_deck_focus 的紧凑行断言补间隙上限）
@@ -326,15 +326,18 @@ def check_deck_focus(root, W, H):
 
 
 def check_dock_pet(root, W, H, state):
-    """v6 静态 Dock 栖坐几何（首页 dumps，dock_pet_cell 在场时）：
-    ① 露出比例：（面板顶 - 七仔顶）/ 七仔高 ∈ [0.65, 0.85]（规格约 0.75）；
-    ② 压边：（七仔底 - 面板顶）/ 七仔高 ∈ [0.15, 0.35]（规格约 0.25）；
-    ③ 高比（仅两排面板：面板高 ≥160dp 时——D2 面板约 184dp、D1 约
-       136dp，门槛取两者之间）：七仔高 / 面板高 ∈ [0.44, 0.60]
-       （规格 0.52，v6 后调整再大一倍；一排面板矮、比值口径按两排
-       面板定义，故跳过）；
-    ④ 前面图层：dump 文档序中 dock_pet_cell 在 dock_panel 之后（后画）；
-    ⑤ 居中：七仔中心 x 与面板中心 x 之差 ≤12dp。
+    """pet-hybrid-float 漂浮几何（首页 dumps，dock_pet_cell 在场时）：
+    ① 悬浮间隙：（面板顶 - 宠物底）∈ [6, 18]dp（规格 12dp，呼吸
+       起伏 ±4–6px ≈ ±2dp，余量放宽）；
+    ② 完全露出：（面板顶 - 宠物顶）/ 宠物高 ∈ [1.00, 1.20]（整只
+       在面板之上；旧坐姿 0.65–0.85 已作废）；
+    ③ 无压边：（宠物底 - 面板顶）/ 宠物高 ≤ 0.02（漂浮不压面板；
+       旧 0.15–0.35 已作废）；
+    ④ 高比：宠物高 / 面板高 ∈ [0.80, 1.10]（头宽取旧坐姿盒 1.8 倍：
+       D1 约 127dp / 面板约 136dp、D2 约 172dp / 面板约 184dp，
+       均约 0.93；两排面板均适用，旧 160dp 门槛已作废）；
+    ⑤ 前面图层：dump 文档序中 dock_pet_cell 在 dock_panel 之后（后画）；
+    ⑥ 居中：宠物中心 x 与面板中心 x 之差 ≤12dp。
     """
     els = home_elements(root)
     pet, dock = els.get("dockpet"), els.get("dock")
@@ -348,28 +351,30 @@ def check_dock_pet(root, W, H, state):
 
     pet_h = pet[3] - pet[1]
     dock_h = dock[3] - dock[1]
-    exposure = (dock[1] - pet[1]) / float(pet_h) if pet_h > 0 else -1
-    if 0.65 <= exposure <= 0.85:
-        print(f"LAYOUT OK {state}: dockpet exposure={exposure:.3f} within [0.65,0.85]")
+    gap = dp(dock[1] - pet[3])
+    if 6.0 <= gap <= 18.0:
+        print(f"LAYOUT OK {state}: dockpet float gap={gap:.1f}dp within [6,18]")
     else:
-        print(f"LAYOUT FAIL {state}: dockpet exposure={exposure:.3f} outside [0.65,0.85] "
+        print(f"LAYOUT FAIL {state}: dockpet float gap={gap:.1f}dp outside [6,18] "
+              f"pet={pet} dock={dock}")
+    exposure = (dock[1] - pet[1]) / float(pet_h) if pet_h > 0 else -1
+    if 1.00 <= exposure <= 1.20:
+        print(f"LAYOUT OK {state}: dockpet exposure={exposure:.3f} within [1.00,1.20]")
+    else:
+        print(f"LAYOUT FAIL {state}: dockpet exposure={exposure:.3f} outside [1.00,1.20] "
               f"pet={pet} dock={dock}")
     ov = (pet[3] - dock[1]) / float(pet_h) if pet_h > 0 else -1
-    if 0.15 <= ov <= 0.35:
-        print(f"LAYOUT OK {state}: dockpet overlap into panel={ov:.3f} within [0.15,0.35]")
+    if ov <= 0.02:
+        print(f"LAYOUT OK {state}: dockpet overlap into panel={ov:.3f} <= 0.02 (floating)")
     else:
-        print(f"LAYOUT FAIL {state}: dockpet overlap into panel={ov:.3f} outside [0.15,0.35] "
+        print(f"LAYOUT FAIL {state}: dockpet overlap into panel={ov:.3f} exceeds 0.02 "
+              f"(floating pet must not press into panel) pet={pet} dock={dock}")
+    ratio = pet_h / float(dock_h) if dock_h > 0 else -1
+    if 0.80 <= ratio <= 1.10:
+        print(f"LAYOUT OK {state}: dockpet height ratio={ratio:.3f} within [0.80,1.10]")
+    else:
+        print(f"LAYOUT FAIL {state}: dockpet height ratio={ratio:.3f} outside [0.80,1.10] "
               f"pet={pet} dock={dock}")
-    if dp(dock_h) >= 160.0:
-        ratio = pet_h / float(dock_h) if dock_h > 0 else -1
-        if 0.44 <= ratio <= 0.60:
-            print(f"LAYOUT OK {state}: dockpet height ratio={ratio:.3f} within [0.44,0.60]")
-        else:
-            print(f"LAYOUT FAIL {state}: dockpet height ratio={ratio:.3f} outside [0.44,0.60] "
-                  f"pet={pet} dock={dock}")
-    else:
-        print(f"LAYOUT INFO {state}: dock height {dp(dock_h):.0f}dp < 160dp "
-              f"(one-row panel; ratio defined vs two-row panel, skipped)")
     pet_idx = first_index(root, "dock_pet_cell")
     dock_idx = first_index(root, "dock_panel")
     if pet_idx is not None and dock_idx is not None and pet_idx > dock_idx:

@@ -432,8 +432,8 @@ fun PullUpDock(
                 // pet-hybrid-float 漂浮混合宠物（面板之后画；面板底锚不变，
                 // 宠物只向上长；输入态不呈现，横屏面板在场时也让位，
                 // 保证任何时刻恰一只）。点按语义不变（进输入态），testTag
-                // 沿用 dock_pet_cell（冒烟入口定位契约不变）；漂浮几何
-                // 已变，layout_check 的旧「露出比例」断言需随之上新。
+                // 沿用 dock_pet_cell（冒烟入口定位契约不变）；layout_check
+                // 已随之上新为漂浮几何（间隙/完全露出/无压边/高比）。
                 if (!intentInputMode) {
                     HybridPet(
                         petWidth = floatPetWidth,
