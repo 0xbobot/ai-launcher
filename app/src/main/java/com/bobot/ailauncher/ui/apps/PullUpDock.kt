@@ -264,15 +264,18 @@ fun PullUpDock(
                 )
                 // v6 静态栖坐（Bob 2026-10-24 18:45 拍板，原型 input-sit-v6 图 2）：
                 // 七仔改在面板前面图层（面板之后画、不 clip），脚底压进面板
-                // 顶缘 25%、可见高 = 面板高 ×0.26、约 75% 露在面板外。外层
+                // 顶缘 25%、可见高 = 面板高 ×0.52（v6 后调整，Bob 2026-10-24
+                // 20:31：再大一倍）、约 75% 露在面板外。外层
                 // Box 高 = 面板高 + 露出部分（面板底锚不变，只向上长）；
                 // 面板高实测回写（首帧按档位估 D2 184dp / D1 136dp，实测到
                 // 即纠正）。紧配置（字体 1.3 / 可用高 <400dp）七仔 ×0.8，
-                // 先缩它、不挤其他槽位（布局防线）。
+                // 先缩它、不挤其他槽位（布局防线）。压边 25% 下七仔底探入
+                // 面板顶部约 0.13×面板高（D2 约 24dp），仍在面板顶部两层
+                // 16dp 内边距（共 32dp）之内，不盖第一排图标。
                 val seatCompact = density.fontScale >= 1.3f ||
                     dockAvailableHeight < 400.dp
                 var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
-                val dockPetSize = dockPanelHeight * 0.26f * (if (seatCompact) 0.8f else 1f)
+                val dockPetSize = dockPanelHeight * 0.52f * (if (seatCompact) 0.8f else 1f)
                 val dockPetOverlap = dockPetSize * 0.25f
                 Box(
                     modifier = Modifier
@@ -552,7 +555,7 @@ private fun DockRow4(
  * 效/非低电量，省电口径同前）。
  * v6（Bob 2026-10-24 18:45 拍板，原型 input-sit-v6 图 2）：面板前面图层
  * 的栖坐——本节点是面板的兄弟（面板之后画、不 clip），脚底压进面板
- * 顶缘 25%、可见高 = 面板高 ×0.26（[petSize] 由宿主按实测面板高算入，
+ * 顶缘 25%、可见高 = 面板高 ×0.52（[petSize] 由宿主按实测面板高算入，
  * 紧配置已 ×0.8）、约 75% 露在面板外；脚底下方是落在面板面上的接触影。
  * 旧 DockPetSeat 的「头部为主裁切」就此退役：裁切是 317 真机「基本包
  * 在里面」的成因之一，本形态改全身 Fit（可见 = 盒子高）。热区：可点

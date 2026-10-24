@@ -205,13 +205,13 @@ class SlotTemplatesTest {
     }
 
     @Test
-    fun buildExpandedExamples_split_main5GuessRest() {
-        // IntentEntry 切分口径：前 5 条主行、其余猜你想问行
+    fun buildExpandedExamples_mainRowUsesFullPool() {
+        // v6 后调整：猜你想问行已删，主行用整池横滚——池子全量 9 条
+        // （无会议时），日程与微信同在主行，不再切分。
         val now = 1_700_000_000_000L
         val ex = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
-        assertEquals(5, ex.take(5).size)
-        assertEquals(4, ex.drop(5).size)
-        assertTrue(ex.take(5).map { it.id }.contains("rili"))
-        assertTrue(ex.drop(5).map { it.id }.contains("wechat"))
+        assertEquals(9, ex.size)
+        assertTrue(ex.map { it.id }.contains("rili"))
+        assertTrue(ex.map { it.id }.contains("wechat"))
     }
 }

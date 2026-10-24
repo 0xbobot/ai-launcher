@@ -568,8 +568,8 @@ fun IntentEntry(
     // 模板来源：能力注册表的参数 schema（daohang/dache 的 to 槽位）+
     // 下一场会派生（提醒模板）+ 能力发散固定模板（见
     // SlotTemplates.buildExpandedExamples）；注册表加载幂等，remember
-    // 一次即可。切分：前 5 条进胶囊上方主行，其余进胶囊下方「猜你想
-    // 问」行——同一池子，不另编文案。
+    // 一次即可。整池进胶囊上方主行横滚（v6 后调整：猜你想问行已删，
+    // 切分口径退役）——同一池子，不另编文案。
     val slotCaps = remember {
         CapabilityRegistry.load(context)
         CapabilityRegistry.find("daohang") to CapabilityRegistry.find("dache")
@@ -581,8 +581,9 @@ fun IntentEntry(
             System.currentTimeMillis()
         )
     }
-    val deckExamples = deckExamplePool.take(5)
-    val deckGuessExamples = deckExamplePool.drop(5)
+    // v6 后调整（Bob 2026-10-24 20:31：胶囊下方「猜你想问」行删除）：
+    // 主行用整池横滚，不再切分——发散覆盖面保留，不退回旧 5 项池子。
+    val deckExamples = deckExamplePool
 
     // F 批·点选填充：点示例 = 把模板整句（exampleFillText：有默认值代入
     // 默认值、无默认值的槽位以 label 原文呈现）写入输入框，光标落文末、
@@ -602,7 +603,7 @@ fun IntentEntry(
     val showDeck = idleOrEditing && sessionFocused && text.isEmpty()
 
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-      // ---- F 批·一体化面板：甲板 + 输入区（七仔栖坐胶囊上沿 + 推荐行）+ 猜你想问行 + 结果槽位同处一面 ----
+      // ---- F 批·一体化面板：甲板 + 输入区（七仔栖坐胶囊上沿 + 推荐行）+ 结果槽位同处一面 ----
       // 单一 Card 背景 + 24dp 圆角 + 主题描边，内部三区不再各带卡片底。
       // 面板是静态容器：无任何尺寸/高度动画（310 冻结教训），进出仍由
       // HomeScreen 的 fade-only AnimatedVisibility 承担。面板只活在既有
@@ -645,8 +646,8 @@ fun IntentEntry(
         // 行同行居中口径随之退役）。几何（全部按可见高口径，不用盒子
         // 尺寸换算）：七仔盒子 = 胶囊实测高 ×1.3（intentPose 资产撑满盒子，
         // 可见 ≈ 盒子）；脚底压边 = 七仔高 ×10%；推荐行底距胶囊顶 8dp
-        // （底部对齐，不顶七仔顶部——v6 原型的顶部对齐作废）；推荐行与
-        // 猜你想问行均为素行（不要 pill，Bob 三处改之 a）。胶囊高/宽实测：
+        // （底部对齐，不顶七仔顶部——v6 原型的顶部对齐作废）；推荐行
+        // 素行（不要 pill，Bob 三处改之 a）。胶囊高/宽实测：
         // onGloballyPositioned 回写（首帧默认 56dp = 胶囊 min 高，实测到
         // 即纠正；七仔 1500ms 延迟挂载在后，尺寸纠正不闪）。七仔常驻
         // （打字后示例让位、七仔仍在场）；胶囊本体行为不动。静态布局，
@@ -714,33 +715,9 @@ fun IntentEntry(
             }
         }
 
-        // ---- v6 猜你想问行（胶囊下方、结果槽位上方，Bob 2026-10-24 18:45
-        // 拍板保留 v6 结构） ----
-        // 素行（不要 pill），数据 = 示例池后半段（同一池子、不另编文案）；
-        // 独立数据缺口见回执：代码里没有专用的「后续推荐」数据集，本行
-        // 是池子切分、不是基于上文的真后续推荐。行高 48dp 触控，与主行
-        // 同门；位置在胶囊与结果槽位之间，不挤工具条/键盘（键盘是系统
-        // IME，不在面板内）。
-        if (showDeck && showDeckExamples) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "猜你想问",
-                    fontSize = 12.sp,
-                    color = AILauncherColors.current.Hint,
-                    maxLines = 1
-                )
-                DeckExamplesRow(
-                    examples = deckGuessExamples,
-                    onPick = { pickExample(it) },
-                    modifier = Modifier.weight(1f),
-                    tagPrefix = "deck_guess_"
-                )
-            }
-        }
+        // ---- v6 后调整（Bob 2026-10-24 20:31）：胶囊下方「猜你想问」行
+        // 整行删除（标签 + 后续推荐素行）；面板 Column 的 spacedBy(12.dp)
+        // 自动收拢间距，不留空带；结果槽位直接回到胶囊下方。 ----
 
         // ---- 结果条槽位（非模态）：本地结果 / 回复 / 错误 / 权限说明共用 ----
         // 各 Strip 在面板内已去自身卡片底（透明，保留内边距与排版）。

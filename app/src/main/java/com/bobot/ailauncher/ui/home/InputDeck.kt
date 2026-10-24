@@ -80,16 +80,15 @@ fun DeckAppsBlock(
  * 视觉容器不等于热区缩小）。
  *
  * v6：行尾补 16dp 末尾 padding——横滚行最后一项此前在面板边缘硬截断
- * （317 真机反馈），留白后末项可完整滚入视野；[tagPrefix] 供胶囊下方
- * 「猜你想问」行复用（deck_guess_*，与主行 deck_example_* 分开，
- * layout_check 的底部对齐断言只取主行）。
+ * （317 真机反馈），留白后末项可完整滚入视野；v6 后调整（Bob
+ * 2026-10-24 20:31：猜你想问行删除），tagPrefix 参数随之退役，主行
+ * 固定用 deck_example_*。
  */
 @Composable
 fun DeckExamplesRow(
     examples: List<SlotTemplate>,
     onPick: (SlotTemplate) -> Unit,
-    modifier: Modifier = Modifier,
-    tagPrefix: String = "deck_example_"
+    modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
@@ -100,7 +99,7 @@ fun DeckExamplesRow(
         examples.forEach { t ->
             Row(
                 modifier = Modifier
-                    .testTag("$tagPrefix${t.id}")
+                    .testTag("deck_example_${t.id}")
                     .heightIn(min = 48.dp)
                     .clickable { onPick(t) }
                     .padding(horizontal = 2.dp),

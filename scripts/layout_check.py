@@ -217,7 +217,8 @@ def check_deck_focus(root, W, H):
     ③ 底部对齐：推荐主行底边到胶囊顶 ∈ [4dp, 12dp]（规格 8dp，
        不顶七仔顶部——v6 原型的顶部对齐作废）；
     ④ 前面图层：dump 文档序中 pet_qizai 在 intent_capsule 之后（后画）；
-    ⑤ 素行：主行与猜你想问行均无 pill 容器包裹；
+    ⑤ 素行：主行无 pill 容器包裹；猜你想问行已删（v6 后调整，
+       deck_guess_ 节点残留即 FAIL）；
     ⑥ 左右次序：推荐行左缘在七仔右缘之右；pet_qizai 全屏唯一。
     dp 换算：CI 模拟器腿统一 1080 宽、420dpi 级（宽约 411dp），密度取 W/411。
     （F 批的坐沿断言 pet-sits-on-edge 与 v4 的同行同带/紧凑间隙断言
@@ -249,7 +250,12 @@ def check_deck_focus(root, W, H):
         elif rid.startswith("deck_guess_"):
             guess_nodes.append((rid, b))
     examples = union([b for (_, b) in ex_nodes]) if ex_nodes else None
-    guess = union([b for (_, b) in guess_nodes]) if guess_nodes else None
+    # v6 后调整：猜你想问行已删，任何 deck_guess_ 节点残留即 FAIL。
+    if guess_nodes:
+        print(f"LAYOUT FAIL {state}: guess row residual deck_guess_ nodes present "
+              f"({len(guess_nodes)} nodes, e.g. {guess_nodes[0][0]}) -- guess row must be deleted")
+    else:
+        print(f"LAYOUT OK {state}: no deck_guess_ nodes (guess row deleted)")
     if pet is None or cap is None:
         print(f"LAYOUT INFO {state}: pet/capsule absent, v6 assertions skipped")
     else:
@@ -293,16 +299,6 @@ def check_deck_focus(root, W, H):
             check_no_pill_wrappers(root, state, "examples", ex_nodes, panel)
         else:
             print(f"LAYOUT INFO {state}: no deck_example_ nodes, main-row assertions skipped")
-        if guess is not None:
-            if guess[1] >= cap[3] - EPS:
-                print(f"LAYOUT OK {state}: guess row below capsule "
-                      f"guess_top={guess[1]} capsule_bottom={cap[3]}")
-            else:
-                print(f"LAYOUT FAIL {state}: guess row NOT below capsule "
-                      f"guess={guess} capsule={cap}")
-            check_no_pill_wrappers(root, state, "guess", guess_nodes, panel)
-        else:
-            print(f"LAYOUT INFO {state}: no deck_guess_ nodes, guess-row assertions skipped")
     if panel is None:
         print(f"LAYOUT FAIL {state}: intent_panel absent (integrated panel missing)")
     else:
@@ -318,8 +314,8 @@ def check_deck_focus(root, W, H):
                 print(f"LAYOUT OK {state}: {name} inside panel {b} in {panel}")
             else:
                 print(f"LAYOUT FAIL {state}: {name} escapes panel {b} not in {panel}")
-        # v6：输入区整体（七仔 + 推荐行 + 猜你想问行）也须落在面板内
-        for name, b in (("pet", pet), ("examples", examples), ("guess", guess)):
+        # v6：输入区整体（七仔 + 推荐行）也须落在面板内
+        for name, b in (("pet", pet), ("examples", examples)):
             if b is None:
                 print(f"LAYOUT INFO {state}/{name}: absent, containment skipped")
                 continue
@@ -334,8 +330,9 @@ def check_dock_pet(root, W, H, state):
     ① 露出比例：（面板顶 - 七仔顶）/ 七仔高 ∈ [0.65, 0.85]（规格约 0.75）；
     ② 压边：（七仔底 - 面板顶）/ 七仔高 ∈ [0.15, 0.35]（规格约 0.25）；
     ③ 高比（仅两排面板：面板高 ≥160dp 时——D2 面板约 184dp、D1 约
-       136dp，门槛取两者之间）：七仔高 / 面板高 ∈ [0.20, 0.32]
-       （规格 0.26；一排面板矮、比值口径按两排面板定义，故跳过）；
+       136dp，门槛取两者之间）：七仔高 / 面板高 ∈ [0.44, 0.60]
+       （规格 0.52，v6 后调整再大一倍；一排面板矮、比值口径按两排
+       面板定义，故跳过）；
     ④ 前面图层：dump 文档序中 dock_pet_cell 在 dock_panel 之后（后画）；
     ⑤ 居中：七仔中心 x 与面板中心 x 之差 ≤12dp。
     """
@@ -365,10 +362,10 @@ def check_dock_pet(root, W, H, state):
               f"pet={pet} dock={dock}")
     if dp(dock_h) >= 160.0:
         ratio = pet_h / float(dock_h) if dock_h > 0 else -1
-        if 0.20 <= ratio <= 0.32:
-            print(f"LAYOUT OK {state}: dockpet height ratio={ratio:.3f} within [0.20,0.32]")
+        if 0.44 <= ratio <= 0.60:
+            print(f"LAYOUT OK {state}: dockpet height ratio={ratio:.3f} within [0.44,0.60]")
         else:
-            print(f"LAYOUT FAIL {state}: dockpet height ratio={ratio:.3f} outside [0.20,0.32] "
+            print(f"LAYOUT FAIL {state}: dockpet height ratio={ratio:.3f} outside [0.44,0.60] "
                   f"pet={pet} dock={dock}")
     else:
         print(f"LAYOUT INFO {state}: dock height {dp(dock_h):.0f}dp < 160dp "
