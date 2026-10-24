@@ -786,6 +786,8 @@ fun AppCenterContent(
                 totalCount = azApps.size,
                 favApps = dockApps,
                 hiddenApps = hiddenApps,
+                hiddenUnlocked = hiddenUnlocked,
+                onUnlockHiddenApps = { unlockHiddenApps() },
                 onLaunch = ::launchApp,
                 onLongPress = { popupApp = it },
                 onOpenSettings = onOpenSettings,
