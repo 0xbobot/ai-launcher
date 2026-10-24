@@ -710,9 +710,8 @@ fun AppCenterContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 12.dp, top = 8.dp)
+                    .padding(start = 20.dp, end = 12.dp, top = 16.dp)
             ) {
-                MastheadKicker(text = "INDEX · 应用索引")
                 Text(
                     text = "全部应用",
                     fontFamily = FontFamily.Serif,
@@ -1741,20 +1740,4 @@ private fun rememberPullDownConnection(
 
 
 
-/** v0.68.44：刊头字距 kicker；v0.68.45：给设置页共用
- * 应用中心升级：金色 → Hint 色细体——金色只留提交钮 / 选中环 / 已收藏★，
- * 常驻装饰金退场 */
-@Composable
-internal fun MastheadKicker(text: String) {
-    Row(modifier = Modifier.padding(bottom = 6.dp)) {
-        text.forEach { ch ->
-            androidx.compose.material3.Text(
-                text = ch.toString(),
-                fontSize = 12.sp,
-                color = AILauncherColors.current.Hint,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Normal
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-        }
-    }
-}
+

@@ -127,7 +127,7 @@ fun AppCenterLandscape(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     // 应用中心升级：键盘可见检测——横屏键盘弹出专用布局的开关
-    // （隐藏 rail 与 INDEX/款数、搜索结果行切紧凑、composing 降透明度）
+    // （隐藏 rail 与款数、搜索结果行切紧凑、composing 降透明度）
     // ime 是 WindowInsets.Companion 的扩展属性，须单独导入（同 HomeScreen）
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
     // 应用中心升级：问七仔行 500ms 节流（同竖屏）
@@ -315,9 +315,9 @@ fun AppCenterLandscape(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // v0.68.82（横屏专项第 1 项）：顶栏左半右滑 → D2（记住档，阈值沿用竖屏 48dp）
-                    // 只包 INDEX + 款数：避开中间搜索框与右侧齿轮
-                    // 应用中心升级：键盘弹出时 INDEX/款数隐藏（胶囊与齿轮保留）；
-                    // INDEX 金色粗体 → Hint 色细体（同竖屏刊头口径）
+                    // 只包款数：避开中间搜索框与右侧齿轮
+                    // 应用中心升级：键盘弹出时款数隐藏（胶囊与齿轮保留）；
+                    // 款数 Hint 色细体（同竖屏刊头口径）
                     if (!imeVisible) {
                     Row(
                         modifier = Modifier.pointerInput(Unit) {
@@ -341,14 +341,6 @@ fun AppCenterLandscape(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "INDEX",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Normal,
-                            letterSpacing = 3.sp,
-                            color = AILauncherColors.current.Hint
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
                             text = "$totalCount 款",
                             fontSize = 12.sp,
                             color = AILauncherColors.current.Hint
@@ -359,7 +351,7 @@ fun AppCenterLandscape(
                     // F2：与竖屏同一 IntentCapsuleField（占位/提交/✕ 清空/焦点
                     // 礼仪全部同组件同口径）
                     // 应用中心升级：宽度 440dp 写死 → weight + 上限 440dp——
-                    // 窄高横屏下不再挤压 INDEX / 齿轮；箭头同竖屏 = 确认本地搜索
+                    // 窄高横屏下不再挤压款数 / 齿轮；箭头同竖屏 = 确认本地搜索
                     IntentCapsuleField(
                         value = searchFieldValue,
                         onValueChange = onSearchFieldChange,

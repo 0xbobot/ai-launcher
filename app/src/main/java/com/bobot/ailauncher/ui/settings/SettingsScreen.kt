@@ -204,8 +204,8 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            // v0.68.45：杂志刊头——和应用中心完全一致（28.dp 左 / 8.dp 顶 / 同款 kicker / 32.sp 宋体）
-            // v0.68.46：返回做成 kicker 的一部分（‹ CONFIG）——整行可点，无独立按钮，刊头干净
+            // v0.68.45：杂志刊头——和应用中心完全一致（28.dp 左 / 8.dp 顶 / 32.sp 宋体）
+            // v0.68.46：返回行（‹ ）——整行可点，无独立按钮，刊头干净
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -230,7 +230,6 @@ fun SettingsScreen(
                         color = AILauncherColors.current.Accent,
                         fontWeight = FontWeight.Bold
                     )
-                    com.bobot.ailauncher.ui.apps.MastheadKicker(text = "CONFIG · 设置")
                 }
                 Text(
                     text = "设置",
