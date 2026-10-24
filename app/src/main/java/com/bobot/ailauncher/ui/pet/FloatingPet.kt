@@ -23,8 +23,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -242,8 +244,7 @@ fun FloatingPet(
             )
             if (eyeScale < 0.999f) {
                 // 与 PetView 一致：直接取 ImageBitmap，不走 BitmapPainter。
-                val blinkBmp = androidx.compose.ui.graphics.ImageBitmap
-                    .imageResource(R.drawable.glass_head)
+                val blinkBmp = ImageBitmap.imageResource(R.drawable.glass_head)
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     // 与底图 ContentScale.Fit 完全一致的放置数学
                     // （盒子与位图同比，实际无留白）。
