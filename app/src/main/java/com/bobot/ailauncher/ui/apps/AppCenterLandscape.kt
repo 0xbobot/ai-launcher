@@ -121,7 +121,9 @@ fun AppCenterLandscape(
     val density = LocalDensity.current
     // 应用中心升级：键盘可见检测——横屏键盘弹出专用布局的开关
     // （隐藏 rail 与 INDEX/款数、搜索结果行切紧凑、composing 降透明度）
-    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    // 全限定写法（同 HomeScreen 已验证的形态，避免导入解析歧义）
+    val imeVisible = androidx.compose.foundation.layout.WindowInsets.ime
+        .getBottom(density) > 0
     // 应用中心升级：问七仔行 500ms 节流（同竖屏）
     var lastAskMs by remember { mutableStateOf(0L) }
     fun throttledAsk(q: String) {
