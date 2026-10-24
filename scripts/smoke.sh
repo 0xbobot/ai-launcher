@@ -410,7 +410,7 @@ sleep 2
 if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night auto || true; fi
 sleep 2
 
-# --- 探针（合并列车 B）：跳过第 9 段起的中后段，直达第 28 段密钥迁移 ---
+# --- 探针（合并列车 B v3）：跳过第 9 段起的中后段，直达第 28 段密钥迁移（产品脚本已含坐标直点补丁） ---
 
 # --- 28. 密钥存储迁移 fixture（并行线 B）：旧版 alpha06 写入的 Key，升级后原样读出 ---
 # 流程见文件头第 28 段说明。假 Key 只含字母数字与连字符（input text 不转义）。
@@ -431,6 +431,18 @@ ks_dump() {
 ks_tap_text() { # $1=已拉取的 dump 基名 $2=节点 text 原文；命中点按返回 0
   local NODE NUMS X1 Y1 X2 Y2
   NODE=$(grep -o "<node[^>]*text=\"$2\"[^>]*>" "$OUT/$1.xml" 2> /dev/null | head -1)
+  [ -n "$NODE" ] || return 1
+  NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+  X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+  [ -n "$X1" ] && [ -n "$Y2" ] || return 1
+  adb shell input swipe $(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) \
+    $(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) 150 || true
+  return 0
+}
+ks_tap_rid() { # $1=已拉取的 dump 基名 $2=resource-id；命中点按返回 0
+  local NODE NUMS X1 Y1 X2 Y2
+  NODE=$(grep -o "<node[^>]*resource-id=\"$2\"[^>]*>" "$OUT/$1.xml" 2> /dev/null | head -1)
   [ -n "$NODE" ] || return 1
   NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
   X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
@@ -544,26 +556,22 @@ else
       adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
       sleep 5
       # 值一致：提交一句意图，mock 收到的 Authorization 必须逐字等于 fixture Key
-      if enter_input_mode "$OUT/ks_in.xml" && ni_type_submit "daohang"; then
+      # 提交走 ks_in.xml 坐标直点：新主页 uiautomator dump 偶发残缺，
+      # ni_tap_submit 的二次 dump 定位在合入 310 后的树上实测取不到 intent_submit
+      # （310 合入列车实证，见 PIPELINE 账本 B 行）；与第 9 段固定坐标兜底同口径。
+      KS_SUBMIT_OK=0
+      if enter_input_mode "$OUT/ks_in.xml" && ks_tap_rid ks_in "intent_input"; then
+        sleep 1
+        adb shell input text "daohang" > /dev/null 2>&1 || true
+        sleep 1
+        if ks_tap_rid ks_in "intent_submit"; then KS_SUBMIT_OK=1; fi
+      fi
+      if [ "$KS_SUBMIT_OK" = "1" ]; then
         KS_FOUND=0
         for i in $(seq 1 15); do
           if grep -q "^AUTH: Bearer $KS_KEY\$" "$KS_LOG" 2> /dev/null; then KS_FOUND=1; break; fi
           sleep 1
         done
-        # 探针插桩（仅探针分支）：首触发未命中时记录现场并换无本地命中的串重试
-        if [ "$KS_FOUND" != "1" ]; then
-          log "ks-probe mock-tail-1: $(tail -4 "$KS_LOG" 2> /dev/null | tr '\n' '|')"
-          adb shell uiautomator dump /sdcard/ks_submit.xml > /dev/null 2>&1 || true
-          adb pull /sdcard/ks_submit.xml "$OUT/ks_submit.xml" > /dev/null 2>&1 || true
-          log "ks-probe submit-dump-texts: $(grep -o 'text="[^"]\+"' "$OUT/ks_submit.xml" 2> /dev/null | sort -u | tr '\n' '|' | head -c 600)"
-          if ni_type_submit "zzqqxx"; then
-            for i in $(seq 1 15); do
-              if grep -q "^AUTH: Bearer $KS_KEY\$" "$KS_LOG" 2> /dev/null; then KS_FOUND=1; break; fi
-              sleep 1
-            done
-          fi
-          log "ks-probe mock-tail-2: $(tail -4 "$KS_LOG" 2> /dev/null | tr '\n' '|')"
-        fi
         if [ "$KS_FOUND" = "1" ]; then ok "keystore-migration-value-match"; else ng "keystore-migration-value-match"; fi
       else
         ng "keystore-migration-value-match"
@@ -581,8 +589,8 @@ else
         EBYTES=$(echo -n "$EXML" | wc -c)
         log "ks-evidence[$ETAG] diag=[$EDIAG] prefs=[$ELS] newfmt_bytes=$EBYTES has_v1=$EV1 has_plain=$EPLAIN"
       }
+      log "ks-probe mock-tail: $(tail -4 "$KS_LOG" 2> /dev/null | tr '\n' '|')"
       ks_evidence t0-after-value-match
-      log "ks-probe diag-tail: $(adb shell "run-as $PKG tail -8 files/crashes/diagnostics.log" 2> /dev/null | tr -d '\r' | tr '\n' '|')"
       shot "keystore-migrated"
       # 新格式落盘：llm_keystore.xml 含 v1: 密文且通篇不含 Key 明文
       KS_NEWXML=$(adb shell "run-as $PKG cat shared_prefs/llm_keystore.xml" 2> /dev/null | tr -d '\r')
