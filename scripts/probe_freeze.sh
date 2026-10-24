@@ -31,14 +31,14 @@ if [ -f "$APK" ]; then
 else
   ng "apk-missing($APK)"
 fi
-adb shell mkdir -p /sdcard/Android/data/$PKG/files || true
-adb shell run-as $PKG mkdir -p shared_prefs 2>/dev/null || true
 printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes'?>" "<map>" \
-  "<boolean name=\"onboarding_done\" value=\"true\" />" \
-  "<boolean name=\"pet_has_interacted\" value=\"true\" />" "</map>" > /tmp/seed.xml
-adb push /tmp/seed.xml /sdcard/seed.xml >/dev/null 2>&1 || true
-adb shell "cat /sdcard/seed.xml > /data/data/$PKG/shared_prefs/ai_launcher_prefs.xml" 2>/dev/null || adb shell run-as $PKG sh -c "cat /sdcard/seed.xml > shared_prefs/ai_launcher_prefs.xml" 2>/dev/null || true
-if adb shell run-as $PKG ls shared_prefs 2>/dev/null | grep -q ai_launcher_prefs; then ok "seed-prefs"; else ng "seed-prefs"; fi
+' <boolean name="battery_asked" value="true" />' \
+' <boolean name="onboarded" value="true" />' "</map>" > "$OUT/ai_launcher.xml"
+adb push "$OUT/ai_launcher.xml" /data/local/tmp/ai_launcher.xml > /dev/null 2>&1
+adb shell "run-as $PKG mkdir -p shared_prefs" > /dev/null 2>&1
+adb shell "run-as $PKG cp /data/local/tmp/ai_launcher.xml shared_prefs/ai_launcher.xml" > /dev/null 2>&1
+adb shell "run-as $PKG chmod 660 shared_prefs/ai_launcher.xml" > /dev/null 2>&1
+if adb shell "run-as $PKG cat shared_prefs/ai_launcher.xml" 2>/dev/null | grep -q 'name="onboarded" value="true"'; then ok "seed-prefs"; else ng "seed-prefs"; fi
 adb shell cmd package set-home-activity $PKG/.MainActivity >/dev/null 2>&1 || true
 
 tdump(){
