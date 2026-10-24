@@ -3,7 +3,7 @@ package com.bobot.ailauncher.ui.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -55,7 +55,9 @@ fun InputPetCompanion(modifier: Modifier = Modifier, size: Dp = 110.dp) {
     if (!settled) {
         Box(
             modifier = modifier
-                .size(size)
+                // requiredSize：坐沿几何是定稿尺寸，不许被宿主剩余高度钳制
+                // （CI 首轮实测节点高被钳到 68dp、遮挡归零）
+                .requiredSize(size)
                 .testTag("pet_qizai")
         )
         return
@@ -67,7 +69,7 @@ fun InputPetCompanion(modifier: Modifier = Modifier, size: Dp = 110.dp) {
     val petState by PetRepository.petState.collectAsState()
     Box(
         modifier = modifier
-            .size(size)
+            .requiredSize(size)
             .testTag("pet_qizai"),
         contentAlignment = Alignment.Center
     ) {
@@ -76,7 +78,9 @@ fun InputPetCompanion(modifier: Modifier = Modifier, size: Dp = 110.dp) {
             mouth = mouth,
             blinking = false,
             sleepy = petState == PetState.SLEEPY,
-            modifier = Modifier.size(size)
+            // F 批：坐沿语境抑制 FETCH 上浮（-52dp 会把七仔掀离胶囊边缘）
+            suppressPoseLift = true,
+            modifier = Modifier.requiredSize(size)
         )
         // 意图思考态：头顶思考点点（随新站位落在头顶，与原讲述者同一语言，
         // 深色小药丸保底）

@@ -66,6 +66,10 @@ fun PetView(
     sleepy: Boolean = false,
     /** 点按果冻：每次 +1 触发一次果冻回弹（纯视觉反馈） */
     jellyTick: Int = 0,
+    /** F 批：抑制 FETCH 姿态的 -52dp 上浮——坐胶囊上沿的伴随七仔必须钉在
+     * 胶囊边缘（上浮量 52dp 超过遮挡深度 42dp，会读成悬空）；Dock 栖坐等
+     * 其他语境不传，保持原姿态语言。 */
+    suppressPoseLift: Boolean = false,
     /** v0.43.0：场景动画（Mii 式程序化）。非 NONE 时接管本体渲染，mood 动画暂停 */
     scene: QizaiScene = QizaiScene.NONE,
     onSceneDone: () -> Unit = {},
@@ -182,7 +186,7 @@ fun PetView(
     )
 
     val targetX = if (mood == PetMood.FILE) 104f else 0f
-    val targetY = if (mood == PetMood.FETCH) -52f else 0f
+    val targetY = if (mood == PetMood.FETCH && !suppressPoseLift) -52f else 0f
     val targetScale = if (mood == PetMood.HAPPY) 1.15f else 1f
     val offX by animateFloatAsState(
         targetValue = targetX,
