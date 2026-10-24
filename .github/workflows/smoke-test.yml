@@ -34,6 +34,8 @@ on:
           - probe-app-idle.sh
           - probe-adb-load.sh
           - smoke-cut.sh
+          - smoke-cut11.sh
+          - smoke-nodate.sh
 
 permissions:
   actions: read
