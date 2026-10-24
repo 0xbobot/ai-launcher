@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -99,6 +100,9 @@ fun HybridPet(
     }
 
     var loadedClip by remember { mutableStateOf<HighlightClip?>(null) }
+    // 同一条片二次播时 loadedClip 值不变，加载 effect 不重跑、播放器会
+    // 停在 ENDED 不重播；nonce 强制重跑加载 effect（重 prepare 即从头播）。
+    var loadNonce by remember { mutableStateOf(0) }
     var videoActive by remember { mutableStateOf(false) }
     var pendingClip by remember { mutableStateOf<HighlightClip?>(null) }
     var queuedClip by remember { mutableStateOf<HighlightClip?>(null) }
@@ -131,6 +135,7 @@ fun HybridPet(
             queuedClip = clip
             return
         }
+        if (loadedClip == clip) loadNonce++
         loadedClip = clip
         pendingClip = clip
     }
@@ -156,12 +161,14 @@ fun HybridPet(
     }
 
     // —— 换片：加载 MediaItem（隐藏预加载，首帧就绪才允许切层）——
-    LaunchedEffect(loadedClip) {
+    LaunchedEffect(loadedClip, loadNonce) {
         firstFrameClip = null
         val clip = loadedClip ?: return@LaunchedEffect
         player.repeatMode = if (clip.loop) Player.REPEAT_MODE_ONE
             else Player.REPEAT_MODE_OFF
-        player.setMediaItem(MediaItem.fromUri("asset:///${clip.assetFile}"))
+        player.setMediaItem(
+            MediaItem.Builder().setUri("asset:///${clip.assetFile}").build()
+        )
         player.prepare()
     }
     // —— 播放/暂停跟随可见性与前后台 ——
@@ -279,7 +286,9 @@ fun HybridPet(
         animationSpec = tween(if (blinkCut) 0 else 150),
         label = "hybridCodeAlpha",
     )
-    val petHeight = petWidth * (1318f / 1043f)
+    val density = LocalDensity.current
+    // 视频圆心对准玻璃头球心（盒高约 62% 处）：盒中心 50% + 下移 12%。
+    val videoOffsetYPx = with(density) { (petWidth * (1318f / 1043f)).toPx() * 0.12f }
 
     Box(
         modifier = modifier,
@@ -304,7 +313,7 @@ fun HybridPet(
                 .size(petWidth)
                 .graphicsLayer {
                     alpha = videoAlpha
-                    translationY = petHeight * 0.12f
+                    translationY = videoOffsetYPx
                 }
                 .clickable(
                     enabled = videoActive,
