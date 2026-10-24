@@ -164,4 +164,54 @@ class SlotTemplatesTest {
         )
         assertEquals(listOf("taxi", "nav"), ex2.map { it.id })
     }
+
+    // ---------- v6 扩展示例池 ----------
+
+    @Test
+    fun buildExpandedExamples_coversTravelWorkLifeSocialPay() {
+        val now = 1_700_000_000_000L
+        val ex = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
+        // 出行（打车/导航/航班/地铁/酒店）+ 办公（日程）+ 生活（外卖）
+        // + 通讯（微信）+ 支付（支付宝），每条都有真实能力 id
+        assertEquals(
+            listOf(
+                "taxi", "nav", "hangban", "rili", "meituan",
+                "ditie", "wechat", "zhifubao", "jiudian"
+            ),
+            ex.map { it.id }
+        )
+        assertEquals(
+            listOf(
+                "dache", "daohang", "hangban", "rili", "meituan",
+                "ditie", "wechat", "zhifubao", "jiudian"
+            ),
+            ex.map { it.capabilityId }
+        )
+        // 行上文案与点后填入同句（固定模板整句即文案）
+        ex.forEach { assertEquals(it.chipText(), it.exampleFillText()) }
+        assertEquals("查明天飞上海的航班", ex[2].exampleFillText())
+        assertEquals("查我明天的日程", ex[3].exampleFillText())
+    }
+
+    @Test
+    fun buildExpandedExamples_withMeeting_insertsReminderSecond() {
+        val now = 1_700_000_000_000L
+        val ex = SlotTemplates.buildExpandedExamples(
+            daohang, dacheNoParams, event(now + 7_200_000L, "机场T3"), now
+        )
+        assertEquals("meeting-reminder", ex[1].id)
+        assertNull(ex[1].capabilityId) // 上下文派生，背后无能力 schema
+        assertEquals(10, ex.size)
+    }
+
+    @Test
+    fun buildExpandedExamples_split_main5GuessRest() {
+        // IntentEntry 切分口径：前 5 条主行、其余猜你想问行
+        val now = 1_700_000_000_000L
+        val ex = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
+        assertEquals(5, ex.take(5).size)
+        assertEquals(4, ex.drop(5).size)
+        assertTrue(ex.take(5).map { it.id }.contains("rili"))
+        assertTrue(ex.drop(5).map { it.id }.contains("wechat"))
+    }
 }

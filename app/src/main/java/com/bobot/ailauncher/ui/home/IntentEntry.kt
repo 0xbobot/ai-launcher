@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.size
@@ -60,6 +62,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -561,20 +564,25 @@ fun IntentEntry(
         }
     }
 
-    // ---- 甲板示例来源（F 批：模板只剩「示例整句」的派生职责） ----
+    // ---- 甲板示例来源（v6 能力发散，Bob 2026-10-24 18:45） ----
     // 模板来源：能力注册表的参数 schema（daohang/dache 的 to 槽位）+
-    // 下一场会派生（提醒模板）；注册表加载幂等，remember 一次即可。
+    // 下一场会派生（提醒模板）+ 能力发散固定模板（见
+    // SlotTemplates.buildExpandedExamples）；注册表加载幂等，remember
+    // 一次即可。切分：前 5 条进胶囊上方主行，其余进胶囊下方「猜你想
+    // 问」行——同一池子，不另编文案。
     val slotCaps = remember {
         CapabilityRegistry.load(context)
         CapabilityRegistry.find("daohang") to CapabilityRegistry.find("dache")
     }
-    val deckExamples = remember(slotCaps, nextEvent) {
-        SlotTemplates.buildExamples(
+    val deckExamplePool = remember(slotCaps, nextEvent) {
+        SlotTemplates.buildExpandedExamples(
             slotCaps.first, slotCaps.second,
             nextEvent?.takeIf { it.end > System.currentTimeMillis() },
             System.currentTimeMillis()
         )
     }
+    val deckExamples = deckExamplePool.take(5)
+    val deckGuessExamples = deckExamplePool.drop(5)
 
     // F 批·点选填充：点示例 = 把模板整句（exampleFillText：有默认值代入
     // 默认值、无默认值的槽位以 label 原文呈现）写入输入框，光标落文末、
@@ -594,7 +602,7 @@ fun IntentEntry(
     val showDeck = idleOrEditing && sessionFocused && text.isEmpty()
 
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-      // ---- F 批·一体化面板：甲板 + 紧凑行（小七仔 + 推荐问）+ 胶囊 + 结果槽位同处一面 ----
+      // ---- F 批·一体化面板：甲板 + 输入区（七仔栖坐胶囊上沿 + 推荐行）+ 猜你想问行 + 结果槽位同处一面 ----
       // 单一 Card 背景 + 24dp 圆角 + 主题描边，内部三区不再各带卡片底。
       // 面板是静态容器：无任何尺寸/高度动画（310 冻结教训），进出仍由
       // HomeScreen 的 fade-only AnimatedVisibility 承担。面板只活在既有
@@ -630,33 +638,33 @@ fun IntentEntry(
             }
         }
 
-        // ---- v4 紧凑行 + 胶囊（Bob 2026-10-24 定稿，原型 input-sit-v4） ----
-        // 紧凑行：小七仔 + 推荐问素行同行、垂直居中，行底到胶囊顶 8dp。
-        // 七仔盒子 92dp（资产填充比约 0.53 → 可见高约 49dp ≈ 胶囊
-        // min 高 56dp 的 0.88 倍，不再是视觉主角）；推荐问沿用 F 的
-        // 素行（无底无描边、14sp、点选整句填充），只是从独立区块移进
-        // 这一行横滚。紧凑行常驻（打字后示例让位、七仔仍在场）；胶囊
-        // 本体行为不动。静态布局，无尺寸动画（310 教训）。
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        // ---- v6 输入区：七仔栖坐胶囊上沿 + 胶囊（Bob 2026-10-24 18:45
+        // 拍板，原型 input-sit-v6，带三处改） ----
+        // 图层顺序即绘制顺序：胶囊 → 接触影 → 七仔（七仔在胶囊前面图层，
+        // 脚底压进胶囊顶缘；父级 Box 不 clip，七仔可探出带外；v4 的紧凑
+        // 行同行居中口径随之退役）。几何（全部按可见高口径，不用盒子
+        // 尺寸换算）：七仔盒子 = 胶囊实测高 ×1.3（intentPose 资产撑满盒子，
+        // 可见 ≈ 盒子）；脚底压边 = 七仔高 ×10%；推荐行底距胶囊顶 8dp
+        // （底部对齐，不顶七仔顶部——v6 原型的顶部对齐作废）；推荐行与
+        // 猜你想问行均为素行（不要 pill，Bob 三处改之 a）。胶囊高/宽实测：
+        // onGloballyPositioned 回写（首帧默认 56dp = 胶囊 min 高，实测到
+        // 即纠正；七仔 1500ms 延迟挂载在后，尺寸纠正不闪）。七仔常驻
+        // （打字后示例让位、七仔仍在场）；胶囊本体行为不动。静态布局，
+        // 无尺寸动画（310 教训）。
+        var capsuleHeight by remember { mutableStateOf(56.dp) }
+        var capsuleWidth by remember { mutableStateOf(320.dp) }
+        val petSize = capsuleHeight * 1.3f
+        val petOverlap = petSize * 0.10f
+        // 七仔中心 = 胶囊左缘起 8% 宽处（参考图实测）；盒子左缘 = 中心 -
+        // 盒子半宽（可为负：盒子略探出胶囊左缘、仍在面板 16dp 内边距内）
+        val petCenterX = capsuleWidth * 0.08f
+        val petOffsetX = petCenterX - petSize / 2f
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("input_pet_band")
+                .height(capsuleHeight + petSize - petOverlap)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("compact_row"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                InputPetCompanion(size = 92.dp)
-                if (showDeck && showDeckExamples) {
-                    DeckExamplesRow(
-                        examples = deckExamples,
-                        onPick = { pickExample(it) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
             // 胶囊本体（与应用中心同一组件；面板语境用实心底）
             IntentCapsuleField(
                 value = fieldValue,
@@ -666,8 +674,72 @@ fun IntentEntry(
                 requestFocusOnMount = requestFocusOnMount,
                 onFocusChanged = { capsuleFocused = it },
                 solidBackground = true,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .onGloballyPositioned { coords ->
+                        with(densityNow) {
+                            capsuleHeight = coords.size.height.toDp()
+                            capsuleWidth = coords.size.width.toDp()
+                        }
+                    }
             )
+            // 接触影：落在胶囊面上、七仔脚底正下方（胶囊之后、七仔之前画）
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = petCenterX - petSize * 0.36f, y = -(capsuleHeight - 4.dp))
+                    .size(width = petSize * 0.72f, height = 10.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.14f))
+            )
+            // 七仔：前面图层（胶囊之后画），脚底压进胶囊顶缘 petOverlap
+            InputPetCompanion(
+                size = petSize,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = petOffsetX, y = -(capsuleHeight - petOverlap))
+            )
+            // 推荐问主行：底部对齐（行底距胶囊顶 8dp），从七仔右缘起横滚
+            if (showDeck && showDeckExamples) {
+                DeckExamplesRow(
+                    examples = deckExamples,
+                    onPick = { pickExample(it) },
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(start = petOffsetX + petSize + 12.dp)
+                        .offset(y = -(capsuleHeight + 8.dp))
+                )
+            }
+        }
+
+        // ---- v6 猜你想问行（胶囊下方、结果槽位上方，Bob 2026-10-24 18:45
+        // 拍板保留 v6 结构） ----
+        // 素行（不要 pill），数据 = 示例池后半段（同一池子、不另编文案）；
+        // 独立数据缺口见回执：代码里没有专用的「后续推荐」数据集，本行
+        // 是池子切分、不是基于上文的真后续推荐。行高 48dp 触控，与主行
+        // 同门；位置在胶囊与结果槽位之间，不挤工具条/键盘（键盘是系统
+        // IME，不在面板内）。
+        if (showDeck && showDeckExamples) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "猜你想问",
+                    fontSize = 12.sp,
+                    color = AILauncherColors.current.Hint,
+                    maxLines = 1
+                )
+                DeckExamplesRow(
+                    examples = deckGuessExamples,
+                    onPick = { pickExample(it) },
+                    modifier = Modifier.weight(1f),
+                    tagPrefix = "deck_guess_"
+                )
+            }
         }
 
         // ---- 结果条槽位（非模态）：本地结果 / 回复 / 错误 / 权限说明共用 ----

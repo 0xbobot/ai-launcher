@@ -31,7 +31,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -45,6 +47,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemGestures
@@ -259,13 +262,34 @@ fun PullUpDock(
                     ),
                     label = "dockBg"
                 )
+                // v6 静态栖坐（Bob 2026-10-24 18:45 拍板，原型 input-sit-v6 图 2）：
+                // 七仔改在面板前面图层（面板之后画、不 clip），脚底压进面板
+                // 顶缘 25%、可见高 = 面板高 ×0.26、约 75% 露在面板外。外层
+                // Box 高 = 面板高 + 露出部分（面板底锚不变，只向上长）；
+                // 面板高实测回写（首帧按档位估 D2 184dp / D1 136dp，实测到
+                // 即纠正）。紧配置（字体 1.3 / 可用高 <400dp）七仔 ×0.8，
+                // 先缩它、不挤其他槽位（布局防线）。
+                val seatCompact = density.fontScale >= 1.3f ||
+                    dockAvailableHeight < 400.dp
+                var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
+                val dockPetSize = dockPanelHeight * 0.26f * (if (seatCompact) 0.8f else 1f)
+                val dockPetOverlap = dockPetSize * 0.25f
+                Box(
+                    modifier = Modifier
+                        .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
+                        .height(dockPanelHeight + dockPetSize - dockPetOverlap)
+                ) {
                 Column(
                     modifier = Modifier
                         // v0.68.97（布局普查批）：冒烟几何断言锚点（Dock 面板整体）
                         .testTag("dock_panel")
+                        .align(Alignment.BottomCenter)
                         // v0.68.82（第 3 项）：横屏包内容（右下角），不再 148dp 右侧窄条
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                        .onGloballyPositioned { coords ->
+                            with(density) { dockPanelHeight = coords.size.height.toDp() }
+                        }
                         .clip(RoundedCornerShape(28.dp))
                         // 玻璃试点批：Dock 强玻璃（AGSL 折射+模糊增色，只换材质不改尺寸/位置）。
                         // 模拟档（老设备/省电/桌面不可见）逐像素回原行为：默认全透明、
@@ -334,23 +358,9 @@ fun PullUpDock(
                             )
                         }
                 ) {
-                    // v0.68.101（D-3 修订·单宠物原则，Bob 08:00/08:08 拍板）：
-                    // 七仔坐姿入口——贴面板上沿、水平居中，半坐在面板顶边。
-                    // D1 行 / D2 网格 / 横屏右下面板共用这一个形态（锚定面板
-                    // 本身：在面板 Column 的流式首位，居中对齐——面板在哪
-                    // 它坐哪）；R-1 的 D1 行内格随之移除。图标行绝对位置
-                    // 不因它下移以外的变化（面板底锚，本节点只向上长）。
-                    // 输入态不呈现：全屏唯一七仔此时在胶囊旁（伴随体），
-                    // 横屏面板虽留在场、坐姿也让位，保证任何时刻恰一只。
-                    if (!intentInputMode) {
-                        val seatCompact = LocalDensity.current.fontScale >= 1.3f ||
-                            dockAvailableHeight < 400.dp
-                        DockPetSeat(
-                            compact = seatCompact,
-                            onTap = onPetCellTap,
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        )
-                    }
+                    // v6：坐姿七仔已移出面板 Column——面板之后画的
+                    // DockPetPerch 兄弟节点（见面板 Column 闭合后的调用），
+                    // 面板不再 clip 它，露出比例才做得出来。
                     // 一二档内容：crossfade + scale，卡片高度弹簧跟随
                     AnimatedContent(
                         targetState = state,
@@ -403,6 +413,19 @@ fun PullUpDock(
                         }
                     }
                 }
+                // v6 静态栖坐（面板之后画 = 前面图层；面板底锚不变，七仔
+                // 只向上长；输入态不呈现，横屏面板在场时坐姿也让位，
+                // 保证任何时刻恰一只）。
+                if (!intentInputMode) {
+                    DockPetPerch(
+                        petSize = dockPetSize,
+                        onTap = onPetCellTap,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .offset(y = -(dockPanelHeight - dockPetOverlap))
+                    )
+                }
+                } // v6 外层 Box（面板 + 前面图层七仔）
             }
         }
 
@@ -479,7 +502,7 @@ private fun FullAppsOverlay(
 }
 
 /** 第一档：4 个常用大图标（56dp），只留图标，卡内严格垂直居中。
- *  v0.68.101：R-1 的行内七仔格已移除（七仔改坐面板上沿，见 DockPetSeat），
+ *  v0.68.101：R-1 的行内七仔格已移除（七仔改坐面板上沿，见 DockPetPerch），
  *  本行回到 4 应用位原始分档（56 图标 / 16 间距）。 */
 @Composable
 private fun DockRow4(
@@ -525,15 +548,20 @@ private fun DockRow4(
  * Dock 坐姿七仔——全屏唯一七仔的静态呈现，进输入态的唯一门。贴面板
  * 上沿、水平居中：本体下缘与面板内容顶边齐平（半坐感），上半身探出
  * 面板之上；形态沿 R-1「对话等待态」：倾听姿态（meteor_wave，与意图
- * FETCH 同图）头部为主裁切 + 头边「…」小对话泡 + 慢呼吸（仅主页
- * RESUMED 且非减动效/非低电量，省电口径同前）。
- * 热区 68×44dp（≥48 宽；紧配置 56×36 + 本体收小——布局防线：高度
- * 不够先缩它，不挤其他槽位）。testTag 沿用 dock_pet_cell（冒烟入口
- * 定位契约不变），点按语义不变（进输入态）。原 R-1 行内格 DockPetCell
- * 已随本形态删除。
+ * FETCH 同图）+ 头边「…」小对话泡 + 慢呼吸（仅主页 RESUMED 且非减动
+ * 效/非低电量，省电口径同前）。
+ * v6（Bob 2026-10-24 18:45 拍板，原型 input-sit-v6 图 2）：面板前面图层
+ * 的栖坐——本节点是面板的兄弟（面板之后画、不 clip），脚底压进面板
+ * 顶缘 25%、可见高 = 面板高 ×0.26（[petSize] 由宿主按实测面板高算入，
+ * 紧配置已 ×0.8）、约 75% 露在面板外；脚底下方是落在面板面上的接触影。
+ * 旧 DockPetSeat 的「头部为主裁切」就此退役：裁切是 317 真机「基本包
+ * 在里面」的成因之一，本形态改全身 Fit（可见 = 盒子高）。热区：可点
+ * 外框 ≥48dp（七仔矮于 48dp 时外框撑满 48dp、几何节点仍是本体盒子，
+ * layout_check 的露出比例以 dock_pet_cell 几何节点为准）。testTag 沿用
+ * dock_pet_cell（冒烟入口定位契约不变），点按语义不变（进输入态）。
  */
 @Composable
-private fun DockPetSeat(compact: Boolean, onTap: () -> Unit, modifier: Modifier = Modifier) {
+private fun DockPetPerch(petSize: Dp, onTap: () -> Unit, modifier: Modifier = Modifier) {
     val view = LocalView.current
     val reduceMotion = com.bobot.ailauncher.ui.theme.rememberReduceMotion()
     val lowPower by com.bobot.ailauncher.data.BatteryState.isLowPower.collectAsState()
@@ -565,13 +593,11 @@ private fun DockPetSeat(compact: Boolean, onTap: () -> Unit, modifier: Modifier 
     } else {
         1f
     }
-    val boxWidth = if (compact) 56.dp else 68.dp
-    val slotHeight = if (compact) 36.dp else 44.dp
-    val imgSize = if (compact) 44.dp else 54.dp
+    // 可点外框 ≥48dp（本体矮时撑满，不改几何节点）；本体盒子 = petSize
+    val touch = maxOf(petSize, 48.dp)
     Box(
         modifier = modifier
-            .size(width = boxWidth, height = slotHeight)
-            .testTag("dock_pet_cell")
+            .size(width = touch, height = touch)
             .semantics { contentDescription = "问七仔" }
             .clickable {
                 view.tickHaptic()
@@ -579,17 +605,28 @@ private fun DockPetSeat(compact: Boolean, onTap: () -> Unit, modifier: Modifier 
             },
         contentAlignment = Alignment.BottomCenter
     ) {
-        // 本体簇：底边与槽位底边齐平（=面板内容顶边），上半身探出槽位
-        // 之上（父级不裁剪，半坐感由此而来）
-        Box(modifier = Modifier.size(imgSize)) {
+        // 本体几何节点：底边 = 面板顶 + 压边（宿主 offset 已算入），全身
+        // Fit 可见 = 盒子高；接触影先画（落在面板面上）、本体后画（脚底
+        // 压住影心，读出「坐在上面」不是贴纸）。
+        Box(
+            modifier = Modifier
+                .size(petSize)
+                .testTag("dock_pet_cell"),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .size(width = petSize * 0.72f, height = 8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.14f))
+            )
             androidx.compose.foundation.Image(
                 painter = androidx.compose.ui.res.painterResource(com.bobot.ailauncher.R.drawable.meteor_wave),
                 contentDescription = null,
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                alignment = Alignment.TopCenter,
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                 modifier = Modifier
-                    .size(imgSize - 6.dp)
-                    .align(Alignment.BottomCenter)
+                    .size(petSize)
                     .graphicsLayer { scaleX = breatheScale; scaleY = breatheScale }
             )
             // 对话泡：头边右上，内「…」——「它在等你说话」

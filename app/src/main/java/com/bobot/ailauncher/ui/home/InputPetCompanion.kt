@@ -1,9 +1,11 @@
 package com.bobot.ailauncher.ui.home
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -12,6 +14,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -19,20 +23,23 @@ import com.bobot.ailauncher.core.pet.PetState
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.pet.PetView
 import com.bobot.ailauncher.ui.pet.ThinkDots
+import com.bobot.ailauncher.ui.theme.AILauncherColors
 
 /**
- * 输入态七仔（v0.68.101 单宠物原则；v4 紧凑行）：全屏唯一的七仔在输入态
- * 的呈现——站在胶囊上方紧凑行左侧，与推荐问素行同行（原型定稿
- * input-sit-v4 图 1）。承担反应姿态（倾听/思考/开心，沿用 PetRepository
- * 的 intentPose 反应状态机）。静态时它不在场（Dock 上沿栖坐七仔在场），
- * 输入态时 Dock 栖坐随 Dock 让位——任何时刻屏幕上恰有一只七仔
- * （layout_check 的 one_pet 断言两态各验）。
+ * 输入态七仔（v0.68.101 单宠物原则；v6 栖坐胶囊上沿）：全屏唯一的七仔
+ * 在输入态的呈现——站在胶囊顶缘极左（原型定稿 input-sit-v6 图 1，
+ * Bob 2026-10-24 18:45 拍板，带三处改）。承担反应姿态（倾听/思考/
+ * 开心，沿用 PetRepository 的 intentPose 反应状态机）。静态时它不在场
+ * （Dock 上沿栖坐七仔在场），输入态时 Dock 栖坐随 Dock 让位——任何时刻
+ * 屏幕上恰有一只七仔（layout_check 的 one_pet 断言两态各验）。
  *
  * 本体不可点：输入态的退出走点外观察者（本节点在意图区 bounds 内，
  * 点它不退出也不吞手势语义，与 R-1 输入态点讲述者的防竞态口径一致）。
  *
- * [size] 默认 92dp（v4 定稿：盒子 92dp，资产填充比约 0.53 → 可见高
- * 约 49dp ≈ 胶囊 min 高 56dp 的 0.88 倍，不再是视觉主角）。
+ * v6 活感（Bob 2026-10-24 18:13：坐还是站关系不大、重点是看上去像、
+ * 不要只是一个摆件）：本体微倾 -5°（朝向右侧推荐问一侧）+ 头边一颗
+ * 静态琥珀星光——倾斜与星光只做「它在场、在看推荐」的读法，不做动画
+ * （省电口径不变）；尺寸由宿主按胶囊高 ×1.3 传入，[size] 不再定死 92dp。
  */
 @Composable
 fun InputPetCompanion(modifier: Modifier = Modifier, size: Dp = 92.dp) {
@@ -71,9 +78,34 @@ fun InputPetCompanion(modifier: Modifier = Modifier, size: Dp = 92.dp) {
     Box(
         modifier = modifier
             .requiredSize(size)
-            .testTag("pet_qizai"),
+            .testTag("pet_qizai")
+            // v6：本体微倾 -5°（顶向右侧推荐问倾，读出活感不是贴纸；
+            // graphicsLayer 只改渲染不改布局 bounds，layout_check 的
+            // 几何断言口径不受影响）
+            .graphicsLayer { rotationZ = -5f },
         contentAlignment = Alignment.Center
     ) {
+        // v6：头边星光（输入态 only、静态琥珀色、低调 14dp）——「它在看」
+        // 的点缀，与思考点点（intentThinking 时）不冲突（各居一角）
+        Canvas(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 6.dp, end = 2.dp)
+                .size(14.dp)
+        ) {
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            val r = size.width / 2f
+            val star = Path().apply {
+                moveTo(cx, cy - r)
+                quadraticTo(cx, cy, cx + r, cy)
+                quadraticTo(cx, cy, cx, cy + r)
+                quadraticTo(cx, cy, cx - r, cy)
+                quadraticTo(cx, cy, cx, cy - r)
+                close()
+            }
+            drawPath(star, color = AILauncherColors.current.Accent)
+        }
         PetView(
             mood = intentPose ?: mood,
             mouth = mouth,

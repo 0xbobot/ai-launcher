@@ -143,6 +143,8 @@ object SlotTemplates {
     /**
      * 甲板示例集（顺序同原型 chips：打车 / 会議提醒 / 导航），上限 3 条。
      * 会议提醒只在下一场会有地点且未开始时出现，其余时候回落静态模板集。
+     * （v6 起 IntentEntry 不再用它，改用 [buildExpandedExamples]；本函数
+     * 保留供单测与旧口径对照，不许删。）
      */
     fun buildExamples(
         daohang: Capability?,
@@ -155,6 +157,49 @@ object SlotTemplates {
         if (nextEvent != null) meetingReminder(nextEvent, nowMs)?.let { out += it }
         out += navTemplate(daohang)
         return out.take(3)
+    }
+
+    /**
+     * 固定文案示例（v6 能力发散）：整句即模板，无槽位；capabilityId 必须
+     * 指向 capabilities.json 里真实存在的能力，不编不存在的能力。文案里
+     * 的「明天/上海」与 DEFAULT_DESTINATION 的「机场」同属模板自带示例
+     * 值，非用户数据。
+     */
+    fun fixedTemplate(id: String, capabilityId: String, sentence: String): SlotTemplate =
+        SlotTemplate(
+            id = id,
+            capabilityId = capabilityId,
+            parts = listOf(TemplatePart.Text(sentence))
+        )
+
+    /**
+     * v6 扩展示例池（Bob 2026-10-24 18:45：推荐问要结合能力发散一点，
+     * 不要只换文案不换覆盖面）：出行（打车/导航/航班/地铁/酒店）+
+     * 办公（日程）+ 生活（外卖）+ 通讯（微信）+ 支付（支付宝）——每条
+     * 都对应注册表里的真实能力；会议提醒仍是上下文派生（有地点且未
+     * 开始时插在第 2 位）。IntentEntry 切分：前 5 条进胶囊上方主行，
+     * 其余进胶囊下方「猜你想问」行（同一池子、不另编文案）。
+     * 注意缺口（v6 回执待 Bob 定夺）：注册表里没有系统操作类能力
+     * （闹钟/手电/亮度等），故本池没有系统操作代表——没编不存在的能力。
+     */
+    fun buildExpandedExamples(
+        daohang: Capability?,
+        dache: Capability?,
+        nextEvent: CalEvent?,
+        nowMs: Long
+    ): List<SlotTemplate> {
+        val out = mutableListOf<SlotTemplate>()
+        out += taxiTemplate(dache)
+        if (nextEvent != null) meetingReminder(nextEvent, nowMs)?.let { out += it }
+        out += navTemplate(daohang)
+        out += fixedTemplate("hangban", "hangban", "查明天飞上海的航班")
+        out += fixedTemplate("rili", "rili", "查我明天的日程")
+        out += fixedTemplate("meituan", "meituan", "帮我点一份午饭外卖")
+        out += fixedTemplate("ditie", "ditie", "查去机场的地铁")
+        out += fixedTemplate("wechat", "wechat", "打开微信")
+        out += fixedTemplate("zhifubao", "zhifubao", "打开支付宝")
+        out += fixedTemplate("jiudian", "jiudian", "帮我订一间上海的酒店")
+        return out
     }
 
     /** HH:mm（与封面条/提醒文案同一格式口径）。 */

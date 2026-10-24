@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
@@ -76,12 +78,18 @@ fun DeckAppsBlock(
  * 14sp 主体色文字，横向滚动保留；点 = 把模板整句填进胶囊输入框（不直接
  * 提交、不进任何模板态）。触控高 ≥48dp（heightIn 下限保证，行本身无
  * 视觉容器不等于热区缩小）。
+ *
+ * v6：行尾补 16dp 末尾 padding——横滚行最后一项此前在面板边缘硬截断
+ * （317 真机反馈），留白后末项可完整滚入视野；[tagPrefix] 供胶囊下方
+ * 「猜你想问」行复用（deck_guess_*，与主行 deck_example_* 分开，
+ * layout_check 的底部对齐断言只取主行）。
  */
 @Composable
 fun DeckExamplesRow(
     examples: List<SlotTemplate>,
     onPick: (SlotTemplate) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    tagPrefix: String = "deck_example_"
 ) {
     Row(
         modifier = modifier
@@ -92,7 +100,7 @@ fun DeckExamplesRow(
         examples.forEach { t ->
             Row(
                 modifier = Modifier
-                    .testTag("deck_example_${t.id}")
+                    .testTag("$tagPrefix${t.id}")
                     .heightIn(min = 48.dp)
                     .clickable { onPick(t) }
                     .padding(horizontal = 2.dp),
@@ -114,5 +122,6 @@ fun DeckExamplesRow(
                 )
             }
         }
+        Spacer(modifier = Modifier.width(16.dp))
     }
 }
