@@ -11,6 +11,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -108,6 +113,13 @@ fun IslandToastHost(
             // v0.68.56：回落到状态栏下方——B 方案走系统通道时这里不显示，
             // 只有无通知权限时才用应用内 pill，必须干净不重叠
             .statusBarsTopPadding()
+            // 刘海避让（Bob 2026-10-25 全页检查）：横屏下长文案 pill 可能伸到两侧
+            // 挖孔区；两侧吃 displayCutout inset——竖屏侧边 inset 为 0，零变化。
+            .windowInsetsPadding(
+                WindowInsets.displayCutout.only(
+                    WindowInsetsSides.Start, WindowInsetsSides.End
+                )
+            )
             .padding(top = 8.dp),
         contentAlignment = Alignment.TopCenter
     ) {

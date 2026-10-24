@@ -9,13 +9,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -315,7 +322,7 @@ fun HomeScreen(
 
     // v0.31.0：首屏只留 Dock（Bob），日历/宠物逻辑待重想，先移除
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .onGloballyPositioned { coords ->
@@ -401,10 +408,22 @@ fun HomeScreen(
         // v0.43.0 的七仔场景改的是一段从未被调用的代码，所以真机上看不到。
         // v0.65.8：顶部对齐（之前居中导致宠物上方大量空白）——七仔贴近状态栏下方，
         // TODAY 卡片和应用图标整体上移，首屏显示更多内容。
+        // 横屏刘海/状态栏避让（Bob 2026-10-25）：此前根容器只有固定 16dp 顶距、
+        // 无任何显式 inset——横屏下挖孔移到左右两侧边，hero 固定 28dp 边距顶不到
+        // 横屏 displayCutout 侧边 inset（打孔屏常 30-40dp+），顶端内容会顶到挖孔区。
+        // 修法：两侧直接吃 displayCutout inset——竖屏侧边 inset 为 0，竖屏布局零变化；
+        // 顶部横屏取 max(16dp, 状态栏高)，竖屏保持 16dp 不动。
+        val isLandscapeHome = maxWidth > maxHeight
+        val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 16.dp),
+                .windowInsetsPadding(
+                    WindowInsets.displayCutout.only(
+                        WindowInsetsSides.Start, WindowInsetsSides.End
+                    )
+                )
+                .padding(top = if (isLandscapeHome) maxOf(16.dp, statusBarTopDp) else 16.dp),
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {

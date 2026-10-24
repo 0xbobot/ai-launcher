@@ -13,7 +13,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -108,6 +113,14 @@ private fun StepScaffold(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // 刘海避让（Bob 2026-10-25 全页检查）：横屏下两侧挖孔区；两侧吃
+            // displayCutout inset——竖屏侧边 inset 为 0，零变化；顶部 32dp 本就
+            // 高于标准状态栏，不另加。
+            .windowInsetsPadding(
+                WindowInsets.displayCutout.only(
+                    WindowInsetsSides.Start, WindowInsetsSides.End
+                )
+            )
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

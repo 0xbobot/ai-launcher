@@ -3,7 +3,10 @@ package com.bobot.ailauncher.ui
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +28,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
@@ -316,7 +321,17 @@ private fun HomeHost(
     glassState.active = homeResumed && dockState != DockState.D3
 
     CompositionLocalProvider(LocalGlassBackdrop provides glassState) {
-    Box(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        // 横屏刘海避让（Bob 2026-10-25，与应用中心横屏 rail 同款）：首页 picker rail
+        // 在右边缘，横屏下挖孔移到右侧边、且 400dp 写死高在横屏屏高不足时顶缘被裁
+        // （房子顶到状态栏带）；横屏改容器跟随高 + 右侧让 cutoutRight + 底距 16dp
+        // （横屏 Dock 居中 344dp 不与右边缘 rail 相交，70dp 底距的竖屏理由不存在）。
+        // 竖屏：400dp 高 + 70dp 底距 + 无 cutout 垫，一律不动。
+        val pickerDensity = LocalDensity.current
+        val isLandscapePicker = maxWidth > maxHeight
+        val pickerCutoutRight = with(pickerDensity) {
+            WindowInsets.displayCutout.getRight(pickerDensity, LayoutDirection.Ltr).toDp()
+        }
         // v0.68.50（Bob）：罩纱——暖纸渐变罩在系统壁纸上，调和壁纸与 UI 色调
         // 顶部 75% 不透明（hero 文字可读），底部 45%（透出壁纸氛围）
         // v0.32.0 的"全透明"作废：杂志风需要纸面统一
@@ -511,9 +526,14 @@ private fun HomeHost(
                     }
                 },
                 visible = pickerActive,
+                // 横屏刘海避让（见 HomeHost 根部注释）：横屏容器跟随高 + 右侧让位 + 底距 16dp；竖屏不动。
+                railHeight = if (isLandscapePicker) null else 400.dp,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 70.dp)
+                    .padding(
+                        bottom = if (isLandscapePicker) 16.dp else 70.dp,
+                        end = if (isLandscapePicker) pickerCutoutRight else 0.dp
+                    )
                     .width(56.dp)
             )
         }
