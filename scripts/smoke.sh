@@ -589,27 +589,94 @@ if [ -n "$RCX" ]; then
 else
   ng "intent-open-app"
 fi
-# 应用中心：上滑开 D3（同第 7 段基线）。竖屏顶部应是统一胶囊；横屏是
-# AppCenterLandscape 的旧搜索框（R2 合并未并入，横屏归专项/冲突 4），分开断言。
+# 应用中心：上滑开 D3（同第 7 段基线）。竖横屏顶部同为统一胶囊契约
+# （F2 销账后横屏并入 IntentCapsuleField），断言集同构、仅入场车道有别。
 adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
 sleep 3
 shot "appcenter2"
 adb shell uiautomator dump /sdcard/ac_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/ac_dump.xml "$OUT/ac_dump.xml" > /dev/null 2>&1 || true
 if [ "$LANDSCAPE" = "1" ]; then
-  # 横屏分支：断言横屏现实——旧搜索框在场 + 输 "clo" 过滤出 Clock；
-  # 胶囊/问七仔/✕ 在横屏不存在，跳过不判失败（产品差异记为 R4 发现 F2）。
+  # 横屏分支（F2 销账·线 C）：横屏搜索已与竖屏统一契约（同一 IntentCapsuleField /
+  # TextFieldValue 状态层 / 问七仔行 / ✕ 清空），断言按新契约与竖屏同集：
+  # search（胶囊在场）/ filter（输 clo 过滤出 Clock）/ ask-row（问七仔行在场）/
+  # clear（✕ 清空后占位复原、问七仔行消失）。旧口径只判自绘 pill 的占位文案
+  # 「搜索应用，支持拼音/首字母」+ filter 并明文跳过其余三项；新口径走统一占位
+  # 与 testTag 锚点，与竖屏等价且更强（覆盖面从 2 条扩到 4 条，不再依赖横屏
+  # 专属文案）。
+  #
+  # 入场修复（证据定性，不是放宽）：.100 卫生批矩阵 landphone 工件 ac_dump.xml
+  # 实测——本段前半把主页留在输入态时，上面的固定中线竖滑起点在手机横屏落在
+  # 本地结果条/左区上，D3 根本没打开：dump 里只有 cover_hero 与输入中的 "clo"，
+  # 无 AC 任何节点，两条旧断言实际测的是主页；同批平板横屏因屏高足够、起点在
+  # 结果条之下侥幸打开（其 ac_dump 里 INDEX/占位俱在）。故先判到达——判据用
+  # appcenter_settings 锚点（F2 起横屏齿轮带此锚点，到达判据第一次可靠；
+  # 此前横屏齿轮是裸 Icon 无锚点，§21 到达校验同样测不到）——未到达依次补滑：
+  # ① Dock 面板车道（起点取 dock_panel 中心；竖屏同滑成立正因起点落在全宽
+  # Dock 上，手机横屏面板在右下）② 原中线车道 ③ §21 同款左下车道。
+  # 到达后再断言，避免把「没打开」误记成「搜索坏了」。
+  if [ -f "$OUT/ac_dump.xml" ] && ! grep -q 'resource-id="appcenter_settings"' "$OUT/ac_dump.xml"; then
+    AC_LANE=""
+    PANEL=$(grep -o '<node[^>]*resource-id="dock_panel"[^>]*>' "$OUT/ac_dump.xml" | head -1)
+    if [ -n "$PANEL" ]; then
+      PNUMS=$(echo "$PANEL" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+      PX1=$(echo "$PNUMS" | sed -n 1p); PY1=$(echo "$PNUMS" | sed -n 2p)
+      PX2=$(echo "$PNUMS" | sed -n 3p); PY2=$(echo "$PNUMS" | sed -n 4p)
+      if [ -n "$PX1" ] && [ -n "$PY2" ]; then
+        PCX=$(( (PX1 + PX2) / 2 )); PCY=$(( (PY1 + PY2) / 2 ))
+        adb shell input swipe "$PCX" "$PCY" "$PCX" "$(SY 300)" 300 || true
+        AC_LANE="dock-panel"
+        sleep 3
+        adb shell uiautomator dump /sdcard/ac_dump.xml > /dev/null 2>&1 || true
+        adb pull /sdcard/ac_dump.xml "$OUT/ac_dump.xml" > /dev/null 2>&1 || true
+      fi
+    fi
+    if ! grep -q 'resource-id="appcenter_settings"' "$OUT/ac_dump.xml" 2>/dev/null; then
+      adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+      AC_LANE="${AC_LANE:+$AC_LANE+}center"
+      sleep 3
+      adb shell uiautomator dump /sdcard/ac_dump.xml > /dev/null 2>&1 || true
+      adb pull /sdcard/ac_dump.xml "$OUT/ac_dump.xml" > /dev/null 2>&1 || true
+    fi
+    if ! grep -q 'resource-id="appcenter_settings"' "$OUT/ac_dump.xml" 2>/dev/null; then
+      adb shell input swipe "$(SX 200)" "$(SY 2250)" "$(SX 200)" "$(SY 1000)" 300 || true
+      AC_LANE="${AC_LANE:+$AC_LANE+}left"
+      sleep 3
+      adb shell uiautomator dump /sdcard/ac_dump.xml > /dev/null 2>&1 || true
+      adb pull /sdcard/ac_dump.xml "$OUT/ac_dump.xml" > /dev/null 2>&1 || true
+      shot "appcenter2"
+    fi
+    log "landscape AC arrival lanes tried: ${AC_LANE:-none}"
+  fi
   LSX=""; LSY=""
-  if [ -f "$OUT/ac_dump.xml" ] && grep -q '搜索应用' "$OUT/ac_dump.xml"; then
+  if [ -f "$OUT/ac_dump.xml" ] && { grep -q 'text="想做什么？"' "$OUT/ac_dump.xml" || grep -q 'resource-id="intent_input"' "$OUT/ac_dump.xml"; }; then
     ok "appcenter-landscape-search"
-    LSNODE=$(grep -o '<node[^>]*text="[^"]*搜索应用[^"]*"[^>]*>' "$OUT/ac_dump.xml" | head -1)
-    if [ -n "$LSNODE" ]; then
-      LSNUMS=$(echo "$LSNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+    # 点胶囊定位：占位文本节点优先——主页输入态胶囊同屏时显示的是已输入
+    # 文本、无占位节点，不冲突；占位缺席时退 intent_input 并取 y 最小者
+    # （AC 胶囊在顶栏，主页那颗在左区中部）
+    CAPNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/ac_dump.xml" | head -1)
+    if [ -z "$CAPNODE" ] && command -v python3 > /dev/null 2>&1; then
+      CAPNODE=$(python3 - "$OUT/ac_dump.xml" <<'PYEOF'
+import re, sys
+x = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+nodes = re.findall(r'<node[^>]*resource-id="intent_input"[^>]*>', x)
+def y1(n):
+    m = re.search(r'bounds="\[\d+,(\d+)\]', n)
+    return int(m.group(1)) if m else 1 << 30
+print(min(nodes, key=y1) if nodes else "")
+PYEOF
+)
+    fi
+    if [ -z "$CAPNODE" ]; then
+      CAPNODE=$(grep -o '<node[^>]*resource-id="intent_input"[^>]*>' "$OUT/ac_dump.xml" | head -1)
+    fi
+    if [ -n "$CAPNODE" ]; then
+      LSNUMS=$(echo "$CAPNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
       LX1=$(echo "$LSNUMS" | sed -n 1p); LY1=$(echo "$LSNUMS" | sed -n 2p)
       LX2=$(echo "$LSNUMS" | sed -n 3p); LY2=$(echo "$LSNUMS" | sed -n 4p)
       if [ -n "$LX1" ] && [ -n "$LY2" ]; then
         LSX=$(( (LX1 + LX2) / 2 )); LSY=$(( (LY1 + LY2) / 2 ))
-        log "landscape search field at ($LSX,$LSY)"
+        log "landscape capsule at ($LSX,$LSY)"
       fi
     fi
   else
@@ -630,10 +697,53 @@ if [ "$LANDSCAPE" = "1" ]; then
     else
       ng "appcenter-landscape-filter"
     fi
+    # 问七仔行：与竖屏 appcenter-ask-row 同判据（同 dump、同文案）
+    if [ -f "$OUT/ac_dump2.xml" ] && grep -q '问七仔' "$OUT/ac_dump2.xml"; then
+      ok "appcenter-landscape-ask-row"
+    else
+      ng "appcenter-landscape-ask-row"
+    fi
+    # ✕ 清空：定位同竖屏（content-desc「清空」优先，testTag intent_clear 覆写），
+    # 点法同竖屏（150ms 长按式点按防竞态）；判据同竖屏 appcenter-cleared
+    KX=""; KY=""
+    CLNODE=$(grep -o '<node[^>]*content-desc="清空"[^>]*>' "$OUT/ac_dump2.xml" 2>/dev/null | head -1)
+    if [ -n "$CLNODE" ]; then
+      KNUMS=$(echo "$CLNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+      KX1=$(echo "$KNUMS" | sed -n 1p); KY1=$(echo "$KNUMS" | sed -n 2p)
+      KX2=$(echo "$KNUMS" | sed -n 3p); KY2=$(echo "$KNUMS" | sed -n 4p)
+      if [ -n "$KX1" ] && [ -n "$KY2" ]; then
+        KX=$(( (KX1 + KX2) / 2 )); KY=$(( (KY1 + KY2) / 2 ))
+      fi
+    fi
+    KRID=$(center_rid "$OUT/ac_dump2.xml" intent_clear)
+    if [ -n "$KRID" ]; then
+      KX=$(echo "$KRID" | cut -d' ' -f1); KY=$(echo "$KRID" | cut -d' ' -f2)
+      log "landscape clear button via testTag at ($KX,$KY)"
+    fi
+    if [ -n "$KX" ]; then
+      adb shell input swipe "$KX" "$KY" "$KX" "$KY" 150 || true
+      sleep 2
+      shot "appcenter-cleared"
+      adb shell uiautomator dump /sdcard/ac_dump3.xml > /dev/null 2>&1 || true
+      adb pull /sdcard/ac_dump3.xml "$OUT/ac_dump3.xml" > /dev/null 2>&1 || true
+      if [ ! -s "$OUT/ac_dump3.xml" ]; then
+        sleep 1
+        adb shell uiautomator dump /sdcard/ac_dump3.xml > /dev/null 2>&1 || true
+        adb pull /sdcard/ac_dump3.xml "$OUT/ac_dump3.xml" > /dev/null 2>&1 || true
+      fi
+      if [ -f "$OUT/ac_dump3.xml" ] && grep -q 'text="想做什么？"' "$OUT/ac_dump3.xml" && ! grep -q '问七仔' "$OUT/ac_dump3.xml"; then
+        ok "appcenter-landscape-clear"
+      else
+        ng "appcenter-landscape-clear"
+      fi
+    else
+      ng "appcenter-landscape-clear"
+    fi
   else
     ng "appcenter-landscape-filter"
+    ng "appcenter-landscape-ask-row"
+    ng "appcenter-landscape-clear"
   fi
-  log "landscape: capsule/ask-row/clear assertions skipped (landscape search not merged; finding F2)"
 else
 ACX=$(SX 540); ACY=$(SY 330)
 if [ -f "$OUT/ac_dump.xml" ]; then
@@ -1996,6 +2106,25 @@ fi
 # 不离开表面的前提下装上腾讯地图桩：A-Z 列表应自己长出「腾讯地图桩」；再卸
 # 掉，列表应自己消掉。与第 17 段阶段 B（装桩后重启进程验能力绑定）互补：
 # 那里验「重启后对」，这里验「活着就刷新」。桩的构建复用 ni_build_stub。
+# F2 线 C 定性（.100 卫生批矩阵 landphone 的 catalog-install-refresh FAIL，
+# 约 49 秒轮询窗内未等到）：同批工件 fresh_dump.xml 证明横屏 AC 本身开着、
+# 列流在场（INDEX/「12 款」俱全），AppCatalog 失效/重建链与方向无关、竖屏
+# 与平板横屏同段皆过——不是产品在横屏刷新慢。landphone 的特有变量在断言
+# 侧：装桩前列表停在哪一列不确定（前段导航遗留），12 轮「dump+横滑」在慢腿
+# 上单轮成本高、约 49 秒即耗尽，既要等 IO 重建落地又要从不确定起点滑到
+# T 列，窗口不够。加固：装后先 fresh_scroll_top 定起点、窗口加倍到 24 轮、
+# fresh_find_label 逐轮留进度日志——再失败时可从日志直接区分「始终没出现」
+# （产品侧）与「滑到时窗已尽」（窗口侧）。卸载方向同批已过（scroll_top +
+# 12 轮判空），维持原窗口不动。
+# 续（线 C 矩阵 39880105848 / 39885224811 两轮）：窗口加固后 landphone 仍
+# 红，工件截图实证真因是断言过程被带偏——慢腿上横滑误展开应用长按面板、
+# 后续手势命中「应用信息」跳进系统设置页，剩余轮次全在错误表面上空找；
+# 中间试过 BACK 绕行自愈（fresh_find_label 内保留，竖屏同样受益），但
+# BACK 落点不确定（终局 dump 停在主页），横屏不靠它收口。.100 矩阵复跑
+# （attempt 2）同腿同断言全过，产品刷新链本身始终无缺陷证据。
+# 定版对策：横屏三处检查（装前缺席/装后出现/卸后消亡）改走 fresh_search_label
+# 搜索探针（与列表同源快照、判据等价，见函数注）；竖屏扫列路径与窗口
+# 加固（scroll_top 定起点 + 24 轮 + 进度日志）保持不变。
 log "freshness: segment start"
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
@@ -2011,14 +2140,17 @@ fresh_dump() {
 # 非 App 刷新问题，横屏数据同样来自 AppCenterContent 的 azGroups）。
 fresh_swipe_fwd() {
   if [ "$LANDSCAPE" = "1" ]; then
-    adb shell input swipe "$(SX 800)" "$(SY 1200)" "$(SX 280)" "$(SY 1200)" 300 || true
+    # 横屏 150ms（竖屏 300ms 不动）：慢腿上输入派发延迟会把 300ms 横滑的
+    # 按下相位拖过长按阈值、误展开应用长按面板（本轮 landphone 实测教训，
+    # 详见 fresh_find_label 的绕行恢复注）
+    adb shell input swipe "$(SX 800)" "$(SY 1200)" "$(SX 280)" "$(SY 1200)" 150 || true
   else
     adb shell input swipe "$(SX 540)" "$(SY 1600)" "$(SX 540)" "$(SY 650)" 300 || true
   fi
 }
 fresh_swipe_back() {
   if [ "$LANDSCAPE" = "1" ]; then
-    adb shell input swipe "$(SX 280)" "$(SY 1200)" "$(SX 800)" "$(SY 1200)" 300 || true
+    adb shell input swipe "$(SX 280)" "$(SY 1200)" "$(SX 800)" "$(SY 1200)" 150 || true
   else
     adb shell input swipe "$(SX 540)" "$(SY 650)" "$(SX 540)" "$(SY 1600)" 300 || true
   fi
@@ -2027,8 +2159,24 @@ fresh_find_label() {
   local label="$1" tries="$2" i
   for i in $(seq 1 "$tries"); do
     fresh_dump
+    # 绕行恢复（F2 线 C 本轮 landphone 实测）：慢腿上横滑误触应用长按面板后，
+    # 后续滑动命中其「应用信息」图标、跳进系统设置应用信息页——此后所有
+    # dump 都是设置页，标签永远找不到（卸载判空也因此假过；工件截图
+    # appcenter-fresh-installed.png 实证停在 App info / Camera 页）。
+    # 检出该页（有 App info 标题且无 AC 的 INDEX 标志）即 BACK 退回重拉，
+    # 本轮继续找——是断言过程自愈，不改判据本身。
+    if [ -f "$OUT/fresh_dump.xml" ] && grep -q 'text="App info"' "$OUT/fresh_dump.xml" && ! grep -q 'INDEX' "$OUT/fresh_dump.xml"; then
+      log "fresh-find: app-info detour detected, backing out and re-dumping"
+      adb shell input keyevent KEYCODE_BACK || true
+      sleep 1
+      fresh_dump
+    fi
     if [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"; then
+      log "fresh-find: '$label' visible on try $i/$tries"
       return 0
+    fi
+    if [ $((i % 6)) -eq 0 ]; then
+      log "fresh-find: '$label' not visible yet (try $i/$tries)"
     fi
     fresh_swipe_fwd
     sleep 1
@@ -2043,8 +2191,85 @@ fresh_scroll_top() {
     sleep 0.5
   done
 }
+# 横屏专用探针（F2 线 C 定版）：经 F2 统一后的胶囊搜索面验刷新——点胶囊、
+# 输入桩拼音 "tengxun"（AppSearchIndex 以 pinyinFull 子串命中「腾讯地图桩」），
+# 结果里出现/不出现该标签即快照已/未包含它。为什么横屏不用横滑扫列（竖屏
+# 继续扫列表）：AppCatalog 同一快照同时派生 visibleApps（列表）与 index
+# （搜索），本段验的性质（装/卸 -> epoch -> IO 重建 -> 快照换表）是数据层
+# 性质，两面同源、判据等价；而横滑扫列在 landphone 慢腿上已被多轮实测证伪
+# 为探针不可靠——输入派发延迟把滑动按下相位拖过长按阈值、误展开应用长按
+# 面板，后续手势命中其「应用信息」跳进系统设置页（39880105848 /
+# 39885224811 两轮工件截图实证），BACK 恢复落点还不确定（终局 dump 停在
+# 主页）。搜索探针全程只有点胶囊/打字/点清空三个小动作、不横滑过应用行，
+# 绕开该失效模式。A-Z 列表自身的渲染由第 7/10/21 段在每条腿上另行覆盖。
+# 用法：fresh_search_label <标签> <拼音查询> <轮询次数>
+# 返回：0=结果中见到标签；1=探针跑完未见到；2=胶囊定位失败、探针没跑成
+# （缺席类断言必须把 2 判为失败，不得当「不在场」假过）。
+fresh_search_label() {
+  local label="$1" query="$2" polls="$3" i capnode capnums cx1 cy1 cx2 cy2 cx cy
+  fresh_dump
+  capnode=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/fresh_dump.xml" 2>/dev/null | head -1)
+  if [ -z "$capnode" ]; then
+    capnode=$(grep -o '<node[^>]*resource-id="intent_input"[^>]*>' "$OUT/fresh_dump.xml" 2>/dev/null | head -1)
+  fi
+  if [ -z "$capnode" ]; then
+    log "fresh-search: capsule not found in dump - probe invalid"
+    return 2
+  fi
+  capnums=$(echo "$capnode" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  cx1=$(echo "$capnums" | sed -n 1p); cy1=$(echo "$capnums" | sed -n 2p)
+  cx2=$(echo "$capnums" | sed -n 3p); cy2=$(echo "$capnums" | sed -n 4p)
+  if [ -z "$cx1" ] || [ -z "$cy2" ]; then
+    log "fresh-search: capsule node has no bounds - probe invalid"
+    return 2
+  fi
+  cx=$(( (cx1 + cx2) / 2 )); cy=$(( (cy1 + cy2) / 2 ))
+  adb shell input swipe "$cx" "$cy" "$cx" "$cy" 150 || true
+  sleep 1
+  # 清残留文本防追加（上一探针若异常退出可能留有查询）：移到文末连删
+  adb shell input keyevent KEYCODE_MOVE_END \
+    KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL \
+    KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL \
+    KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL \
+    KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL || true
+  adb shell input text "$query" || true
+  sleep 1
+  adb shell input keyevent KEYCODE_BACK || true
+  sleep 1
+  for i in $(seq 1 "$polls"); do
+    fresh_dump
+    if [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"; then
+      log "fresh-search: '$label' visible in results on poll $i/$polls"
+      fresh_search_clear
+      return 0
+    fi
+    sleep 3
+  done
+  log "fresh-search: '$label' not in results after $polls polls"
+  fresh_search_clear
+  return 1
+}
+# 探针收尾：点胶囊 ✕ 清空查询，AC 回到列流全量态（供后续段落/卸载方向用）
+fresh_search_clear() {
+  local ctr
+  ctr=$(center_rid "$OUT/fresh_dump.xml" intent_clear)
+  if [ -n "$ctr" ]; then
+    adb shell input swipe $(echo "$ctr" | cut -d' ' -f1) $(echo "$ctr" | cut -d' ' -f2) \
+      $(echo "$ctr" | cut -d' ' -f1) $(echo "$ctr" | cut -d' ' -f2) 150 || true
+    sleep 1
+  fi
+}
 STUB_LABEL="腾讯地图桩"
-if ! fresh_find_label "$STUB_LABEL" 1; then
+if [ "$LANDSCAPE" = "1" ]; then
+  fresh_search_label "$STUB_LABEL" "tengxun" 2
+  FRESH_RC=$?
+  if [ "$FRESH_RC" = "1" ]; then
+    ok "catalog-preinstall-absent"
+  else
+    log "freshness: preinstall probe rc=$FRESH_RC (0=label present, 2=probe invalid)"
+    ng "catalog-preinstall-absent"
+  fi
+elif ! fresh_find_label "$STUB_LABEL" 1; then
   ok "catalog-preinstall-absent"
 else
   log "freshness: stub label unexpectedly present before install"
@@ -2054,20 +2279,46 @@ if ni_build_stub && adb install -r "$STUB_APK" > /dev/null 2>&1; then
   log "freshness: stub installed while AppCenter open"
   # 广播 -> epoch -> IO 重建 -> 快照换表，给慢腿留足轮询窗口
   sleep 3
-  if fresh_find_label "$STUB_LABEL" 12; then
-    ok "catalog-install-refresh"
+  if [ "$LANDSCAPE" = "1" ]; then
+    # 横屏：搜索探针（理由见 fresh_search_label 注）；轮询 8 次 x 约 4 秒，
+    # 覆盖慢腿上的重建落地延迟
+    if fresh_search_label "$STUB_LABEL" "tengxun" 8; then
+      ok "catalog-install-refresh"
+    else
+      ng "catalog-install-refresh"
+    fi
   else
-    ng "catalog-install-refresh"
+    # 竖屏：扫列表。装桩前列表停在哪不确定（前段导航遗留），先滑回起点
+    # 再找；窗口 12 -> 24 轮，逐轮进度日志留证（F2 线 C 加固）
+    fresh_scroll_top
+    if fresh_find_label "$STUB_LABEL" 24; then
+      ok "catalog-install-refresh"
+    else
+      ng "catalog-install-refresh"
+    fi
   fi
   shot "appcenter-fresh-installed"
   adb shell pm uninstall com.tencent.map > /dev/null 2>&1 || true
   log "freshness: stub uninstalled while AppCenter open"
   sleep 3
-  fresh_scroll_top
-  if ! fresh_find_label "$STUB_LABEL" 12; then
-    ok "catalog-uninstall-refresh"
+  if [ "$LANDSCAPE" = "1" ]; then
+    # 横屏：搜索探针判消亡（rc=1 才算真不在场；rc=2 探针无效判失败，
+    # 不许像扫列时代那样在错误表面上判空假过）
+    fresh_search_label "$STUB_LABEL" "tengxun" 3
+    FRESH_RC=$?
+    if [ "$FRESH_RC" = "1" ]; then
+      ok "catalog-uninstall-refresh"
+    else
+      log "freshness: uninstall probe rc=$FRESH_RC (0=label still present, 2=probe invalid)"
+      ng "catalog-uninstall-refresh"
+    fi
   else
-    ng "catalog-uninstall-refresh"
+    fresh_scroll_top
+    if ! fresh_find_label "$STUB_LABEL" 12; then
+      ok "catalog-uninstall-refresh"
+    else
+      ng "catalog-uninstall-refresh"
+    fi
   fi
   shot "appcenter-fresh-uninstalled"
 else

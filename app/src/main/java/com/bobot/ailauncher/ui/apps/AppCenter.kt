@@ -119,7 +119,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
@@ -609,7 +608,7 @@ fun AppCenterContent(
                 )
             }
             }  // else 竖屏刊头结束
-            // v0.68.72：搜索框横屏隐藏（横屏用 AppCenterLandscape 的搜索）
+            // 本搜索区仅竖屏组合；横屏由 AppCenterLandscape 组合（F2 起同一胶囊契约）
             if (!isLandscapeAc) {
             Row(
                 modifier = Modifier
@@ -638,7 +637,7 @@ fun AppCenterContent(
             ) {
                 // R2 UI（2026-10-21 新规格）：原搜索框删除，换成与首页同一个意图胶囊组件——
                 // 一个入口两层响应：打字走本地层过滤网格（状态层 query/searchResults 不变），
-                // 提交（按钮/IME Done）= 问七仔（回首页交协调器）。横屏仍用 AppCenterLandscape 自己的搜索。
+                // 提交（按钮/IME Done）= 问七仔（回首页交协调器）。F2 起横屏同组件同契约。
                 IntentCapsuleField(
                     value = queryField,
                     onValueChange = { queryField = it },
@@ -731,12 +730,20 @@ fun AppCenterContent(
                 onPullDownToD2 = { onPullDownState.value() },
                 onHeaderSwipeRight = { onHeaderSwipeRightState.value() },
                 onBottomSwipeUp = { onBottomSwipeUpState.value() },
-                // v0.68.82（横屏专项第 2 项）：真搜索框（状态层复用竖屏）
-                // 意图改进一批：横屏仍是 String 契约——向下传文本、向上把整串包回
-                // TextFieldValue（光标置尾）；横屏自己的输入框 UI 不动（归横屏专项）
-                query = query,
-                onQueryChange = { queryField = TextFieldValue(it, TextRange(it.length)) },
+                // F2 销账（线 C）：横屏搜索契约与竖屏统一——状态层 TextFieldValue
+                // 直传（不再手工包 TFV：旧写法 composition 恒为 null，绕过了
+                // 状态层的 composing 暂停守卫，拼音未上屏时过滤会乱跳）、
+                // 组件/提交/焦点礼仪与竖屏同一套（见 AppCenterLandscape）
+                searchFieldValue = queryField,
+                onSearchFieldChange = { queryField = it },
                 searchResults = searchResults,
+                onSearchSubmit = {
+                    val q = query.trim()
+                    if (q.isNotEmpty()) onAskQizai(q)
+                },
+                onAskQizai = onAskQizai,
+                onSearchFocusChanged = { intentFocused = it },
+                onSearchPositioned = { intentBoundsInRoot = it },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
