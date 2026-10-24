@@ -287,8 +287,13 @@ fun PullUpDock(
                         // v0.68.97（布局普查批）：冒烟几何断言锚点（Dock 面板整体）
                         .testTag("dock_panel")
                         .align(Alignment.BottomCenter)
-                        // v0.68.82（第 3 项）：横屏包内容（右下角），不再 148dp 右侧窄条
-                        .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
+                        // 横屏首页修（Bob 2026-10-25）：横屏面板定宽，不再随档位包内容——
+                        // D1 面板宽 = DockRow4 横屏盒宽 312dp（4×56 图标 + 3×16 间距 + 2×20 内边距）
+                        //   + 本面板左右内边距 32dp（16 + 16）= 344dp；D2 网格盒 270dp
+                        //   （5×46 + 4×4 + 2×12）比它窄 42dp，旧 wrapContent 下档位切换面板宽跳 42dp。
+                        // 定宽落在画玻璃背景的本层（不是内层行）；竖屏 fillMaxWidth 口径不动；
+                        // 图标尺寸与间距一律不动，背景圆角与内边距不变。
+                        .let { if (isLandscapeDock) it.width(344.dp) else it.fillMaxWidth() }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .onGloballyPositioned { coords ->
                             with(density) { dockPanelHeight = coords.size.height.toDp() }
@@ -359,7 +364,10 @@ fun PullUpDock(
                                     }
                                 }
                             )
-                        }
+                        },
+                    // 横屏首页修：D2 网格盒（270dp）比面板内容宽（312dp）窄，横屏下在面板内居中；
+                    // D1 盒 312dp 恰好占满内容宽，无视觉变化。竖屏保持默认 Start。
+                    horizontalAlignment = if (isLandscapeDock) Alignment.CenterHorizontally else Alignment.Start
                 ) {
                     // v6：坐姿七仔已移出面板 Column——面板之后画的
                     // DockPetPerch 兄弟节点（见面板 Column 闭合后的调用），

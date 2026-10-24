@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -116,6 +117,11 @@ fun AppCenterLandscape(
     // 供 AppCenter 根 Box 的点外部清焦观察者使用
     onSearchFocusChanged: (Boolean) -> Unit = {},
     onSearchPositioned: (Rect) -> Unit = {},
+    // 横屏首页修（Bob 2026-10-25）：主屏 picker 会话状态（由调用点透传竖屏已有的
+    // UiPrefs.homeRailTarget collectAsState 值）；rail 门与竖屏 AppCenter.kt:1419 同款——
+    // 进场手势未松手时只显示首页 picker rail，松手后 dismissPicker 置 null，
+    // 应用中心自己的 rail 再出现。默认 null 保持旧调用点行为不变。
+    homeTarget: UiPrefs.HomeRailTarget? = null,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -581,7 +587,9 @@ fun AppCenterLandscape(
             // v0.68.75（Bob）：加回收藏★和隐藏👁，核心功能不能丢
             // v0.68.82（横屏专项第 2 项）：搜索态隐藏 Rail（定位无意义，同竖屏）
             // 应用中心升级：键盘弹出时同样隐藏 Rail
-            if (searchResults == null && !imeVisible) {
+            // 横屏首页修：主屏 picker 会话中隐藏自己的 rail（同竖屏 homeTarget==null 门，
+            // 否则进场手势未松手时首页 picker rail 与本 rail 同时在场）
+            if (searchResults == null && !imeVisible && homeTarget == null) {
             // 右侧挖孔：rail 整块左让 cutoutRight（无右侧挖孔时为 0，
             // 布局不变）；不要只修左不修右。
             Box(
@@ -699,7 +707,7 @@ fun AppCenterLandscape(
                     .fillMaxHeight()
             )
             }  // Box：右侧挖孔让位结束
-            }  // if (searchResults == null) 搜索态隐藏 Rail 结束
+            }  // Rail 隐藏门结束（搜索态 / 键盘弹出 / 主屏 picker 会话）
         }
         // v0.68.82 的底部 88dp 透明手势条已于 D-6 删除（同竖屏：它盖住的
         // 底部带内行点按永不成立，CI 二分实证摘条即恢复）；「底部上滑回

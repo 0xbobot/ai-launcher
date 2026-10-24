@@ -868,6 +868,8 @@ fun AppCenterContent(
                 },
                 // 应用中心升级：横屏空结果文案区分"索引加载中"与"真无匹配"
                 indexLoading = catalog == null && query.isNotBlank(),
+                // 横屏首页修：把主屏 picker 会话状态透传给横屏 rail 门（同竖屏 AppCenter.kt:1419）
+                homeTarget = homeTarget,
                 onAskQizai = onAskQizai,
                 onSearchFocusChanged = { intentFocused = it },
                 onSearchPositioned = { intentBoundsInRoot = it },
