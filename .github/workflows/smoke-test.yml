@@ -40,6 +40,8 @@ on:
           - smoke-nodate-cut19.sh
           - smoke-nodate-cut22.sh
           - smoke-nodate-cut30.sh
+          - smoke-nodate-cut24.sh
+          - smoke-nodate-cut28.sh
 
 permissions:
   actions: read
