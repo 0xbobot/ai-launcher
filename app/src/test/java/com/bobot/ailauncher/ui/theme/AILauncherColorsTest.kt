@@ -21,7 +21,9 @@ class AILauncherColorsTest {
         assertEquals(Color(0xFFFFFFFF), p.Card)
         assertEquals(Color(0xFF1F1D1A), p.Title)
         assertEquals(Color(0xFF5C5852), p.Body)
-        assertEquals(Color(0xFFA8A29A), p.Hint)
+        // 应用中心升级 P0-1（Bob 定稿：12sp Hint 加深）：浅色 Hint
+        // 0xFFA8A29A → 0xFF8A8378（暖白底对比约 2.2:1 → 约 3.2:1）
+        assertEquals(Color(0xFF8A8378), p.Hint)
         assertEquals(Color(0xFFC9A227), p.Accent)
         assertEquals(Color(0xFFF6ECD4), p.AccentSoft)
         assertEquals(Color(0xFF4C9A52), p.Success)
