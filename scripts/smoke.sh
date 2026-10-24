@@ -410,7 +410,7 @@ sleep 2
 if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night auto || true; fi
 sleep 2
 
-# --- 探针（合并列车 B v6）：头部段 + 第 28 段（设置页测试连接触发版） ---
+# --- 探针（合并列车 B v7）：头部段 + 第 28 段（测试连接触发修正版） ---
 
 # --- 28. 密钥存储迁移 fixture（并行线 B）：旧版 alpha06 写入的 Key，升级后原样读出 ---
 # 流程见文件头第 28 段说明。假 Key 只含字母数字与连字符（input text 不转义）。
@@ -564,7 +564,7 @@ else
       ks_trigger_test_connection() {
         ks_open_settings_expand || return 1
         ks_dump ks_trig
-        tap_text_bound ks_trig "测试连接" || return 1
+        ks_tap_text ks_trig "测试连接" || return 1
         sleep 2
         return 0
       }
