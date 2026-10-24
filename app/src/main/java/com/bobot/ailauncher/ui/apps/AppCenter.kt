@@ -108,6 +108,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import com.bobot.ailauncher.ui.theme.confirmHaptic
@@ -160,6 +162,67 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * - v0.22：分类区取消（Bob 决定，等需要时再重新设计）；AllAppsScreen 死代码删除
  * - 手势签名：左滑=多 / 右滑=少
  */
+/**
+ * D-6：「底部上滑 → 回桌面」观察者（v0.40.0 功能，D-6 改挂载点）。
+ *
+ * 旧实现是压在列表上方的 88dp 透明手势条（detectVerticalDragGestures +
+ * 回调 consume）：它盖住的底部 88dp 内行点按永不成立（Bob .100 真机点名）。
+ * CI 二分实证（fix-appcenter-bottom-band 分支取证轮）：条在 = 带内行点不开
+ * （同行滚到中屏、或点在条上沿 27px 处的同一行都可点）；把条改成「只观察
+ * 不消费」仍点不开；整条摘除 = 带内恢复可点——覆盖节点本身占据命中路径
+ * 即足以让其下行点按落空。故观察者改挂行的祖先容器（竖屏 = 列表容器、
+ * 横屏 = 其根容器；与 clearIntentFocusOnOutsideTap 同为祖先级 Initial 观察
+ * 者，该形态已实证不挡任何点按）：只追踪起点落在底部
+ * 88dp 带内的手势，旁观累计位移、上滑过阈值触发一次，全程不消费任何事件，
+ * 带内行点击、列表滚动、Rail 交互均不受影响。
+ *
+ * [rightExclusionPx]：起点 x 超出（容器宽 − 该值）时不追踪（横屏让出 Rail
+ * 区，沿旧手势条右端让 57dp 的口径）；竖屏用默认 0。
+ */
+internal fun Modifier.observeBottomSwipeUp(
+    rightExclusionPx: () -> Float = { 0f },
+    onSwipeUp: () -> Unit
+): Modifier = this.pointerInput(Unit) {
+    val bandPx = 88.dp.toPx()
+    val firePx = 56.dp.toPx() + viewConfiguration.touchSlop
+    awaitPointerEventScope {
+        var activeId: PointerId? = null
+        var lastY = 0f
+        var accumY = 0f
+        var fired = false
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            val change = if (activeId == null) {
+                event.changes.firstOrNull {
+                    it.pressed &&
+                        it.position.y >= size.height - bandPx &&
+                        it.position.x <= size.width - rightExclusionPx()
+                }
+            } else {
+                event.changes.firstOrNull { it.id == activeId }
+            } ?: continue
+            if (activeId == null) {
+                activeId = change.id
+                lastY = change.position.y
+                accumY = 0f
+                fired = false
+            }
+            if (change.pressed) {
+                accumY += change.position.y - lastY
+                lastY = change.position.y
+                if (!fired && accumY < -firePx) {
+                    fired = true
+                    onSwipeUp()
+                }
+            } else {
+                activeId = null
+                accumY = 0f
+                fired = false
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppCenterContent(
@@ -756,6 +819,9 @@ fun AppCenterContent(
                 .fillMaxWidth()
                 .weight(1f)
                 .clipToBounds()
+                // D-6：底部上滑回桌面观察者挂列表容器（行的祖先，不覆盖行；
+                // 原 88dp 覆盖条已删，见 observeBottomSwipeUp 注）
+                .observeBottomSwipeUp { onBottomSwipeUpState.value() }
         ) {
             LazyColumn(
                 state = listState,
@@ -1249,33 +1315,10 @@ fun AppCenterContent(
                     )
                 }
             }
-            // v0.40.0：底部上滑 → 回桌面（Bob）。
-            // 系统手势导航会吃掉最底部边缘的触摸，这里在系统手势区之上放一条
-            // 透明手势条：从底部向上滑过阈值就关闭应用中心，回到记住的 Dock 档。
-            // 放在 Rail 之前绘制，Rail 保持可交互。
-            val bottomStripPx = with(density) { 56.dp.toPx() }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(88.dp)
-                    .pointerInput(Unit) {
-                        var accumY = 0f
-                        var fired = false
-                        detectVerticalDragGestures(
-                            onDragStart = { accumY = 0f; fired = false },
-                            onVerticalDrag = { change, dragAmount ->
-                                change.consume()
-                                if (fired) return@detectVerticalDragGestures
-                                accumY += dragAmount
-                                if (accumY < -bottomStripPx) {
-                                    fired = true
-                                    onBottomSwipeUpState.value()
-                                }
-                            }
-                        )
-                    }
-            )
+            // v0.40.0 的底部 88dp 透明手势条已于 D-6 删除：它盖住的底部带内
+            // 行点按永不成立（Bob .100 真机点名 + CI 二分实证，摘条即恢复）。
+            // 「底部上滑回桌面」改由本容器上的 observeBottomSwipeUp 观察者
+            // 承担（祖先级观察、不覆盖任何行，见该函数注）。
             // Rail：波浪字母导航（v0.24，学 Niagara/参考视频）——只做定位
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）
             // v0.21：搜索态隐藏 rail（定位无意义）

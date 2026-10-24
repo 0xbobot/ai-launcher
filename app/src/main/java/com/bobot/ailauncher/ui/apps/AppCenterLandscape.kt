@@ -106,7 +106,17 @@ fun AppCenterLandscape(
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
     val rowState = rememberLazyListState()
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            // D-6：底部上滑回桌面观察者挂根容器（原 88dp 覆盖条已删，见文末注）；
+            // 起点让出右侧 57dp Rail 区，搜索态 Rail 隐藏时不让
+            .observeBottomSwipeUp(
+                rightExclusionPx = {
+                    if (searchResults == null) with(density) { 57.dp.toPx() } else 0f
+                }
+            ) { onBottomSwipeUpState.value() }
+    ) {
         val rowH = LandscapeRowH
         // v0.68.73：字母头占一个完整行位（rowH），与应用同高
         // v0.68.75（Bob）：减去顶栏 56.dp + 底部分隔 8.dp，否则多算一行导致末行被压缩
@@ -484,32 +494,10 @@ fun AppCenterLandscape(
             )
             }  // if (searchResults == null) 搜索态隐藏 Rail 结束
         }
-        // v0.68.82（横屏专项第 1 项）：底部 88dp 透明手势条，上滑 → D2（记住档）
-        // 后于内容 Row 声明：手势条优先于列表（同竖屏）；右端让出 57dp 给 AppRail（Rail 优先，同竖屏）
-        // 搜索态 Rail 隐藏时手势条占满整宽
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .width(maxWidth - if (searchResults == null) 57.dp else 0.dp)
-                .height(88.dp)
-                .pointerInput(Unit) {
-                    var accumY = 0f
-                    var fired = false
-                    val bottomStripPx = with(density) { 56.dp.toPx() }
-                    detectVerticalDragGestures(
-                        onDragStart = { accumY = 0f; fired = false },
-                        onVerticalDrag = { change, dragAmount ->
-                            change.consume()
-                            if (fired) return@detectVerticalDragGestures
-                            accumY += dragAmount
-                            if (accumY < -bottomStripPx) {
-                                fired = true
-                                onBottomSwipeUpState.value()
-                            }
-                        }
-                    )
-                }
-        )
+        // v0.68.82 的底部 88dp 透明手势条已于 D-6 删除（同竖屏：它盖住的
+        // 底部带内行点按永不成立，CI 二分实证摘条即恢复）；「底部上滑回
+        // 桌面」改由根容器的 observeBottomSwipeUp 观察者承担，起点右端让
+        // 57dp 给 Rail 的旧口径由 rightExclusionPx 保留（见根 BoxWithConstraints）。
     }
 }
 

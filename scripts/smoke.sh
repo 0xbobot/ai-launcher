@@ -39,6 +39,9 @@
 # v0.68.102（310 合并批）段号统一：R-2 槽位甲板 = 第 25 段；热修 D-2 输入态
 # 不误退 = 第 26 段；热修 D-5 点加入只发一次 = 第 27 段（三段同插在第 22 段
 # 之后、第 23/24 段之前——第 24 段故意崩溃必须保持最后两段的既有约束）。
+# D-6（应用中心底部条带点不动，Bob .100 真机点名）= 第 30 段（列车统一编号：原线 D-6 第 28 段，与线 B 第 28 段撞号），插在第 27 段
+# 之后、第 23 段之前：D3 内对同一个应用做底部 88dp 带内点（A）与滚到中屏
+# 点（B）的同应用对照，并把带区节点打进日志留档（ac_band*.xml）。
 # crash-log-content / crash-relaunch-alive：debug 专用 intent extra 触发一次
 # 真崩溃 -> files/crashes 落盘且含异常首行 -> 正常重启存活不进崩溃循环）。
 # 本段故意产生 FATAL，必须排在第 23 段 no-fatal-crash 之后。
@@ -2883,6 +2886,139 @@ if nextup_seed_event "SmokeJoinOnce" "https://zoom.us/j/9876543210"; then
 else
   log "join-once: seed failed - segment skipped (not counted)"
 fi
+
+# --- 30. 应用中心底部条带可点（D-6，Bob .100 真机点名）：v0.40.0 的底部
+# 88dp 透明手势条（detectVerticalDragGestures + 回调 consume）压在列表上
+# 方，它盖住的底部带内行点按永不成立（真机对照：同一行滚到中屏可点）。
+# 定版修法：删除覆盖条，「底部上滑回桌面」改挂列表容器的祖先级观察者
+# observeBottomSwipeUp（Initial pass 只观察、不消费、起点带内门控）。
+# 本段同应用 A/B：同一个应用先在底部 88dp 带内点（A = appcenter-band-
+# row-tap），再滚到中屏点（B = appcenter-band-sameapp-mid）——同应用对照
+# 排除「应用本身打不开」的混杂变量；A 点后另把带区节点按文档序打进日志
+# 留档（ac_band.xml / ac_band_after.xml）。横屏腿同段执行（横屏同源问题，
+# 几何按 SCR/DENSITY 实测换算；横屏观察者挂其根容器、让 Rail 57dp）。
+log "band-tap: segment start"
+band_open_d3() {
+  adb shell am force-stop "$PKG" > /dev/null 2>&1 || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+  sleep 3
+}
+band_dump() {
+  adb shell uiautomator dump "/sdcard/$1.xml" > /dev/null 2>&1 || true
+  adb pull "/sdcard/$1.xml" "$OUT/$1.xml" > /dev/null 2>&1 || true
+  redump_if_empty "$1"
+}
+band_label_bounds() {
+  # $1=dump 文件 $2=label：输出 "cx cy y1 y2"，找不到返回 1
+  local F="$1" LBL="$2" NODE NUMS X1 Y1 X2 Y2
+  NODE=$(grep -o "<node[^>]*text=\"$LBL\"[^>]*>" "$F" | head -1)
+  [ -n "$NODE" ] || return 1
+  NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+  X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+  [ -n "$X1" ] && [ -n "$Y2" ] || return 1
+  echo "$(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) $Y1 $Y2"
+}
+band_fg_opened() {
+  # 点按后轮询 6 秒：前台 topResumedActivity 不再是本包 = 应用被打开
+  local I FG=""
+  for I in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    sleep 0.5
+    FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
+    if [ -n "$FG" ] && ! echo "$FG" | grep -q "$PKG"; then
+      log "band-tap: foreground after tap: $FG"
+      return 0
+    fi
+  done
+  log "band-tap: foreground still ours after tap: $FG"
+  return 1
+}
+BAND_PX=$(( 88 * DENSITY / 160 ))
+BAND_TOP=$(( SCR_H - BAND_PX ))
+MID_LO=$(( SCR_H * 38 / 100 ))
+MID_HI=$(( SCR_H * 62 / 100 ))
+log "band-tap: screen ${SCR_W}x${SCR_H} density=$DENSITY band=[${BAND_TOP},${SCR_H}] mid=[${MID_LO},${MID_HI}]"
+band_open_d3
+# A：底部带内第一个应用（带内无行时逐次上滑列表找行）
+A_LBL=""; A_CX=0; A_CY=0
+for TRY in 1 2 3 4 5; do
+  band_dump ac_band
+  if [ -f "$OUT/ac_band.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band.xml"; then
+    for LBL in Clock Calendar Camera Contacts Phone Settings Messaging Gallery Files Search; do
+      B=$(band_label_bounds "$OUT/ac_band.xml" "$LBL" || true)
+      [ -n "$B" ] || continue
+      CY=$(echo "$B" | cut -d' ' -f2)
+      if [ "$CY" -ge "$BAND_TOP" ] && [ "$CY" -lt "$SCR_H" ]; then
+        A_LBL="$LBL"; A_CX=$(echo "$B" | cut -d' ' -f1); A_CY="$CY"
+        break
+      fi
+    done
+    [ -n "$A_LBL" ] && break
+  fi
+  adb shell input swipe "$(SX 540)" "$(SY 1300)" "$(SX 540)" "$(SY 800)" 300 || true
+  sleep 1
+done
+A_OK=0
+if [ -n "$A_LBL" ]; then
+  log "band-tap: A band tap '$A_LBL' at ($A_CX,$A_CY) (band top=$BAND_TOP)"
+  shot "appcenter-band"
+  adb shell input swipe "$A_CX" "$A_CY" "$A_CX" "$A_CY" 150 || true
+  if band_fg_opened; then ok "appcenter-band-row-tap"; A_OK=1; else ng "appcenter-band-row-tap"; fi
+  shot "appcenter-band-after"
+  band_dump ac_band_after
+  # 带区节点全量打印（文档序）：覆盖层/展开卡/弹窗类节点的留档指认
+  python3 - "$OUT/ac_band_after.xml" "$BAND_TOP" "$SCR_H" <<'PYEOF' || true
+import re, sys
+data = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+top, bot = int(sys.argv[2]), int(sys.argv[3])
+for i, n in enumerate(re.findall(r"<node[^>]*>", data)):
+    m = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if not m: continue
+    x1, y1, x2, y2 = (int(v) for v in m.groups())
+    if y2 > top and y1 < bot:
+        def attr(k):
+            mm = re.search(k + r'="([^"]*)"', n)
+            return mm.group(1) if mm else None
+        print("band-zone: idx=%d bounds=[%d,%d][%d,%d] text=%r rid=%r clickable=%s class=%s" % (
+            i, x1, y1, x2, y2, attr("text"), attr("resource-id"), attr("clickable"), attr("class")))
+PYEOF
+else
+  log "band-tap: no app row reached the bottom band after scrolls"
+  ng "appcenter-band-row-tap"
+fi
+# B：同一应用滚到中屏再点（A 已打开时先回 D3 基线）
+if [ -n "$A_LBL" ]; then
+  if [ "$A_OK" = "1" ]; then band_open_d3; fi
+  B_HIT=""
+  for TRY in 1 2 3 4 5 6; do
+    band_dump ac_band_b
+    if [ -f "$OUT/ac_band_b.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band_b.xml"; then
+      B=$(band_label_bounds "$OUT/ac_band_b.xml" "$A_LBL" || true)
+      if [ -n "$B" ]; then
+        BCY=$(echo "$B" | cut -d' ' -f2)
+        if [ "$BCY" -ge "$MID_LO" ] && [ "$BCY" -lt "$MID_HI" ]; then B_HIT="$B"; break; fi
+      fi
+    fi
+    adb shell input swipe "$(SX 540)" "$(SY 1300)" "$(SX 540)" "$(SY 800)" 300 || true
+    sleep 1
+  done
+  if [ -n "$B_HIT" ]; then
+    BX=$(echo "$B_HIT" | cut -d' ' -f1); BY=$(echo "$B_HIT" | cut -d' ' -f2)
+    log "band-tap: B mid tap same app '$A_LBL' at ($BX,$BY)"
+    adb shell input swipe "$BX" "$BY" "$BX" "$BY" 150 || true
+    if band_fg_opened; then ok "appcenter-band-sameapp-mid"; else ng "appcenter-band-sameapp-mid"; fi
+  else
+    log "band-tap: same app '$A_LBL' never reached mid zone"
+    ng "appcenter-band-sameapp-mid"
+  fi
+fi
+adb shell input keyevent KEYCODE_HOME || true
+sleep 1
 
 # --- 23. crash 检查（只看本包 FATAL，避免系统噪音）---
 if adb logcat -d 2>/dev/null | grep -i "FATAL EXCEPTION" | grep -q "$PKG"; then
