@@ -86,16 +86,20 @@ fun InputPetCompanion(modifier: Modifier = Modifier, size: Dp = 92.dp) {
         contentAlignment = Alignment.Center
     ) {
         // v6：头边星光（输入态 only、静态琥珀色、低调 14dp）——「它在看」
-        // 的点缀，与思考点点（intentThinking 时）不冲突（各居一角）
+        // 的点缀，与思考点点（intentThinking 时）不冲突（各居一角）。
+        // 注意：Canvas draw 块内不能调 @Composable（AILauncherColors.current）
+        // 且 size 参数会遮住 DrawScope.size——颜色先在组合期读出、画布
+        // 尺寸用 this.size 显式取 DrawScope 的。
+        val sparkleColor = AILauncherColors.current.Accent
         Canvas(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = 6.dp, end = 2.dp)
                 .size(14.dp)
         ) {
-            val cx = size.width / 2f
-            val cy = size.height / 2f
-            val r = size.width / 2f
+            val cx = this.size.width / 2f
+            val cy = this.size.height / 2f
+            val r = this.size.width / 2f
             val star = Path().apply {
                 moveTo(cx, cy - r)
                 quadraticTo(cx, cy, cx + r, cy)
@@ -104,7 +108,7 @@ fun InputPetCompanion(modifier: Modifier = Modifier, size: Dp = 92.dp) {
                 quadraticTo(cx, cy, cx, cy - r)
                 close()
             }
-            drawPath(star, color = AILauncherColors.current.Accent)
+            drawPath(star, color = sparkleColor)
         }
         PetView(
             mood = intentPose ?: mood,
