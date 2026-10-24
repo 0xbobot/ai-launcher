@@ -2733,6 +2733,18 @@ ks_tap_text() { # $1=已拉取的 dump 基名 $2=节点 text 原文；命中点�
     $(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) 150 || true
   return 0
 }
+ks_tap_rid() { # $1=已拉取的 dump 基名 $2=resource-id；命中点按返回 0
+  local NODE NUMS X1 Y1 X2 Y2
+  NODE=$(grep -o "<node[^>]*resource-id=\"$2\"[^>]*>" "$OUT/$1.xml" 2> /dev/null | head -1)
+  [ -n "$NODE" ] || return 1
+  NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+  X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
+  X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
+  [ -n "$X1" ] && [ -n "$Y2" ] || return 1
+  adb shell input swipe $(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) \
+    $(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) 150 || true
+  return 0
+}
 ks_open_settings_expand() { # 前置：本 App 主页在前台；成功后 ks_set.xml 为展开态 dump
   adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
   sleep 3
@@ -2836,8 +2848,20 @@ else
       fi
       adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
       sleep 5
-      # 值一致：提交一句意图，mock 收到的 Authorization 必须逐字等于 fixture Key
-      if enter_input_mode "$OUT/ks_in.xml" && ni_type_submit "daohang"; then
+      # 值一致：触发一次真实 LLM 调用，mock 收到的 Authorization 必须逐字
+      # 等于 fixture Key。触发改走设置页「测试连接」：合并 310 后的新主页上，
+      # CI 的 adb 驱动无法可靠完成胶囊提交（进态几何/dump 残缺/composing
+      # 守卫多轮探针实证，属 310 主页 CI 驱动家族问题）；设置页展开导航在
+      # 合并树实证可用，测试连接与意图提交共用同一 LlmRouter 读 Key 路径，
+      # 断言强度不变（AUTH 逐字 + 迁移诊断 + 新格式落盘）。
+      ks_trigger_test_connection() {
+        ks_open_settings_expand || return 1
+        ks_dump ks_trig
+        ks_tap_text ks_trig "测试连接" || return 1
+        sleep 2
+        return 0
+      }
+      if ks_trigger_test_connection; then
         KS_FOUND=0
         for i in $(seq 1 15); do
           if grep -q "^AUTH: Bearer $KS_KEY\$" "$KS_LOG" 2> /dev/null; then KS_FOUND=1; break; fi
