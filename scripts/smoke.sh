@@ -550,6 +550,20 @@ else
           if grep -q "^AUTH: Bearer $KS_KEY\$" "$KS_LOG" 2> /dev/null; then KS_FOUND=1; break; fi
           sleep 1
         done
+        # 探针插桩（仅探针分支）：首触发未命中时记录现场并换无本地命中的串重试
+        if [ "$KS_FOUND" != "1" ]; then
+          log "ks-probe mock-tail-1: $(tail -4 "$KS_LOG" 2> /dev/null | tr '\n' '|')"
+          adb shell uiautomator dump /sdcard/ks_submit.xml > /dev/null 2>&1 || true
+          adb pull /sdcard/ks_submit.xml "$OUT/ks_submit.xml" > /dev/null 2>&1 || true
+          log "ks-probe submit-dump-texts: $(grep -o 'text="[^"]\+"' "$OUT/ks_submit.xml" 2> /dev/null | sort -u | tr '\n' '|' | head -c 600)"
+          if ni_type_submit "zzqqxx"; then
+            for i in $(seq 1 15); do
+              if grep -q "^AUTH: Bearer $KS_KEY\$" "$KS_LOG" 2> /dev/null; then KS_FOUND=1; break; fi
+              sleep 1
+            done
+          fi
+          log "ks-probe mock-tail-2: $(tail -4 "$KS_LOG" 2> /dev/null | tr '\n' '|')"
+        fi
         if [ "$KS_FOUND" = "1" ]; then ok "keystore-migration-value-match"; else ng "keystore-migration-value-match"; fi
       else
         ng "keystore-migration-value-match"
@@ -568,6 +582,7 @@ else
         log "ks-evidence[$ETAG] diag=[$EDIAG] prefs=[$ELS] newfmt_bytes=$EBYTES has_v1=$EV1 has_plain=$EPLAIN"
       }
       ks_evidence t0-after-value-match
+      log "ks-probe diag-tail: $(adb shell "run-as $PKG tail -8 files/crashes/diagnostics.log" 2> /dev/null | tr -d '\r' | tr '\n' '|')"
       shot "keystore-migrated"
       # 新格式落盘：llm_keystore.xml 含 v1: 密文且通篇不含 Key 明文
       KS_NEWXML=$(adb shell "run-as $PKG cat shared_prefs/llm_keystore.xml" 2> /dev/null | tr -d '\r')
