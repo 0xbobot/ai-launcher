@@ -18,6 +18,16 @@ import org.json.JSONObject
 object AppSearchIndex {
 
     /**
+     * 查询侧拼音流换算（并行线 D 拼音流版）：已上屏文本 → 拼音全拼流。
+     * 与索引构建共用同一字典与 [pinyinOf] 口径（汉字逐字取字典主读音、
+     * 拉丁/数字小写原样、字典缺字原样占位、符号略过），保证查询流与
+     * 索引侧 Entry.pinyinFull 的编码方式逐字一致。只做换算，不改变
+     * search 的匹配与排序行为。
+     */
+    fun pinyinStreamOf(context: Context, text: String): String =
+        pinyinOf(text, loadDict(context)).first
+
+    /**
      * 单个汉字的拼音首字母（大写），查不到返回 '#'。
      * 供应用中心 A-Z 分组使用，比 GB2312 区位码更准（覆盖 20924 字）。
      */

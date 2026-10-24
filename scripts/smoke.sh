@@ -51,6 +51,13 @@
 # 断言发往 mock 的 Authorization 与旧版写入逐字一致、新格式密文落盘、
 # 删旧格式文件后仍可读。旧包下载不到 = 环境问题整段跳过不计 FAIL；
 # 形态覆写腿（横屏/平板/大字体）设置 UI 布局不同，整段跳过。形态 env 追加 SMOKE_WM_SIZE /
+# 并行线 D 追加：第 29 段（列车统一编号）为胶囊有效查询派生的存活性守卫
+# （pinyin-latin-responds / pinyin-han-committed /
+# pinyin-recovers-after-han：拉丁串出本地结果 -> 末尾追加汉字且回读
+# 确认进字段后结果随已上屏查询变化 -> 清空重输拉丁、结果恢复；汉字
+# 注不进的镜像后半段跳过不计。程序化置文无 composing，派生口径本体
+# 由 LocalSearchGateTest 单测锁死，composing 排除归真机项）。
+# 形态 env 追加 SMOKE_WM_SIZE /
 # SMOKE_USER_ROTATION：第 0 段几何读取前覆写显示尺寸与旋转锁定（矩阵的
 # 横屏手机短高、平板竖屏腿用），不带 env 时行为不变。
 # 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
@@ -3104,6 +3111,76 @@ else
     fi
   fi
 fi
+
+# --- 29. 胶囊有效查询派生（并行线 D 合入，列车统一编号：原线 D 第 26 段）：存活性守卫 ---
+# 程序化置文没有 composing 过程：派生口径本体（无已上屏汉字用全文、
+# 含 composing 中的拼音字母；有汉字上屏只按已上屏内容、未上屏拼音
+# 不拼入）由 LocalSearchGateTest 单测锁死，composing 排除只能靠真机
+# 拼音输入法验证（如实登记为真机项）。本段是 CI 可观测层的守卫：
+# 拉丁串出本地结果 -> 末尾追加汉字串、回读 dump 确认汉字真进了字段
+# （adb input text 对汉字的支持随镜像而异，注不进则后半段跳过不计）
+# -> 结果应随已上屏查询（"clo微信"，无应用命中）消退 -> 清空重输
+# 拉丁串，结果应恢复（证落定链在汉字插曲后仍活着、没被闩死）。
+adb shell am force-stop "$PKG" || true
+sleep 1
+adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+sleep 4
+adb shell input keyevent KEYCODE_HOME || true
+sleep 2
+enter_input_mode "$OUT/pinyin_dump0.xml" || true
+pg_has_result() {
+  grep -q 'resource-id="result_item"' "$1" || grep -q 'text="Clock"' "$1" || \
+    grep -q 'content-desc="Clock"' "$1"
+}
+PG_CAPSULE=$(center_rid "$OUT/pinyin_dump0.xml" "intent_input")
+if [ -n "$PG_CAPSULE" ]; then
+  adb shell input swipe $(echo "$PG_CAPSULE" | cut -d' ' -f1) $(echo "$PG_CAPSULE" | cut -d' ' -f2) \
+    $(echo "$PG_CAPSULE" | cut -d' ' -f1) $(echo "$PG_CAPSULE" | cut -d' ' -f2) 150 || true
+  sleep 2
+  adb shell input text "clo" || true
+  sleep 2
+  adb shell uiautomator dump /sdcard/pinyin_lat.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/pinyin_lat.xml "$OUT/pinyin_lat.xml" > /dev/null 2>&1 || true
+  redump_if_empty pinyin_lat
+  if pg_has_result "$OUT/pinyin_lat.xml"; then
+    ok "pinyin-latin-responds"
+    # 末尾追加汉字（光标在文本末尾）：已上屏内容变为 "clo微信"
+    adb shell input text "微信" || true
+    sleep 2
+    adb shell uiautomator dump /sdcard/pinyin_han.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/pinyin_han.xml "$OUT/pinyin_han.xml" > /dev/null 2>&1 || true
+    redump_if_empty pinyin_han
+    if grep -q '微' "$OUT/pinyin_han.xml"; then
+      if pg_has_result "$OUT/pinyin_han.xml"; then
+        ng "pinyin-han-committed"
+      else
+        ok "pinyin-han-committed"
+      fi
+      # 清空重输：连按 DEL 足量清空（空文本上多按无副作用，67 = KEYCODE_DEL）
+      for i in 1 2 3 4 5 6 7 8; do adb shell input keyevent 67 > /dev/null 2>&1 || true; done
+      sleep 1
+      adb shell input text "clo" || true
+      sleep 2
+      adb shell uiautomator dump /sdcard/pinyin_rec.xml > /dev/null 2>&1 || true
+      adb pull /sdcard/pinyin_rec.xml "$OUT/pinyin_rec.xml" > /dev/null 2>&1 || true
+      redump_if_empty pinyin_rec
+      if pg_has_result "$OUT/pinyin_rec.xml"; then
+        ok "pinyin-recovers-after-han"
+      else
+        ng "pinyin-recovers-after-han"
+      fi
+    else
+      log "pinyin-gate: Han text injection unsupported on this image - han segments skipped (not counted)"
+    fi
+  else
+    ng "pinyin-latin-responds"
+    log "pinyin-gate: latin baseline missing - han segments skipped (not counted)"
+  fi
+else
+  log "pinyin-gate: capsule not located - segment skipped (not counted)"
+fi
+
+
 
 if [ "$ENV_INVALID" = "1" ]; then
   log "RESULT pass=$PASS fail=$FAIL env_deaths=$ENV_DEATHS ENV-INVALID"

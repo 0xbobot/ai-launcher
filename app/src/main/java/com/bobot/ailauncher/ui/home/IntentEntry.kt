@@ -122,8 +122,12 @@ private val RESULT_BAR_MAX_HEIGHT = 180.dp
  * 出 ✕ 一键清空（点后文本清空、网格恢复全量）；首页胶囊保持原设计不开，避免和提交钮抢位。
  *
  * 输入状态用 [TextFieldValue]（意图改进一批）：为了感知中文输入法的 composing
- * （拼音组合）区间——组合未上屏时金色钮与 IME Done 都不许提交半成品文本；
- * 宿主侧据此在组合期间暂停本地搜索更新并做防抖。首页与应用中心同享这套语义。
+ * （拼音组合）区间——组合未上屏时金色钮与 IME Done 都不许提交半成品文本。
+ * 本地搜索的有效查询不在组件内派生，由宿主各自决定：首页逐键经
+ * LocalSearchGate 派生双键（字面键 = 已上屏内容/无汉字时全文；拼音
+ * 流键 = 已上屏汉字换算拼音与 composing 字母接成的连续流，见
+ * LocalSearchGate），应用中心过滤沿用其组合暂停口径；两侧状态互不
+ * 共用、互不影响。
  */
 @Composable
 fun IntentCapsuleField(
@@ -404,14 +408,23 @@ fun IntentEntry(
         keyboardController?.hide()
     }
 
-    // 本地搜索词（意图改进一批·防抖+组合暂停）：fieldValue 每次变化重启计时，
-    // 组合中（拼音未上屏）直接返回不落定——组合区间的拉丁串不触发搜索重算，
-    // 组合结束/停键 120ms 后才把文本落定为搜索词（与索引懒构建共用同一落定值）。
-    var committedQuery by remember { mutableStateOf("") }
+    // 本地搜索词（意图改进一批·防抖落定；并行线 D 拼音流口径）：落定值
+    // 逐键经 LocalSearchGate 派生双键——字面键沿用派生版规则（无已上屏
+    // 汉字时以全文、含 composing 中未上屏拼音字母为查询；有汉字上屏后
+    // 只按已上屏内容查、还在敲的拼音不拼入字面键）；拼音流键把已上屏
+    // 汉字逐字换算拼音、与 composing 字母接成一条流（已上屏「微」+ 正
+    // 敲 xin → 流键 weixin，全程活搜不冻结）。停键 120ms 防抖不变（与
+    // 索引懒构建共用同一落定值）。旧口径「组合中直接返回、暂停落定」
+    // 废止。提交侧的 composing 守卫（submitIfReady / 胶囊组件
+    // canSubmit）与应用中心过滤的组合暂停（其自有状态层）不在此列、
+    // 保持原样。流键换算要读拼音字典（单例缓存、与索引构建共用），
+    // 落定计算放 Default 线程，免首次解析压主线程。
+    var committedKeys by remember { mutableStateOf(LocalSearchKeys("", "")) }
     LaunchedEffect(fieldValue) {
-        if (fieldValue.composition != null) return@LaunchedEffect
         delay(120)
-        committedQuery = fieldValue.text
+        committedKeys = withContext(Dispatchers.Default) {
+            localSearchKeys(fieldValue) { AppSearchIndex.pinyinStreamOf(context, it) }
+        }
     }
 
     // 本地直达层数据源：与应用中心 azApps 完全一致（listLaunchableApps 去自己、去隐藏），
@@ -428,8 +441,8 @@ fun IntentEntry(
     var indexEpoch by remember { mutableIntStateOf(-1) }
     val installedEpoch by InstalledApps.epoch.collectAsState()
     LaunchedEffect(Unit) { InstalledApps.ensureRegistered(context) }
-    LaunchedEffect(committedQuery, installedEpoch) {
-        if (committedQuery.isNotBlank() && (localIndex == null || indexEpoch != installedEpoch)) {
+    LaunchedEffect(committedKeys.literal, installedEpoch) {
+        if (committedKeys.literal.isNotBlank() && (localIndex == null || indexEpoch != installedEpoch)) {
             val built = withContext(Dispatchers.IO) {
                 val hidden = HiddenApps.getHidden(context)
                 val apps = listLaunchableApps(context).filter {
@@ -442,10 +455,21 @@ fun IntentEntry(
             indexEpoch = installedEpoch
         }
     }
-    val localResults = remember(committedQuery, localIndex, submittedText) {
+    val localResults = remember(committedKeys, localIndex, submittedText) {
         val idx = localIndex
-        if (committedQuery.isBlank() || committedQuery == submittedText || idx == null) emptyList()
-        else AppSearchIndex.search(context, committedQuery, idx).take(4)
+        val keys = committedKeys
+        if (keys.literal.isBlank() || keys.literal == submittedText || idx == null) emptyList()
+        else {
+            // 双键各搜一遍、字面命中在前合并（流键与字面键相等时只搜一遍，
+            // 与派生版严格等价）；提交后抑制沿用字面键对 submittedText 的口径。
+            val literalHits = AppSearchIndex.search(context, keys.literal, idx)
+            val merged = if (keys.phonetic == keys.literal) literalHits
+            else mergeLiteralFirst(
+                literalHits,
+                AppSearchIndex.search(context, keys.phonetic, idx),
+            ) { it.packageName }
+            merged.take(4)
+        }
     }
 
     fun submitIfReady() {
