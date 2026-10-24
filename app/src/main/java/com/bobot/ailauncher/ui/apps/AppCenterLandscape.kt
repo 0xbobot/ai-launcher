@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,6 +60,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
@@ -64,6 +68,7 @@ import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.tickHaptic
 import kotlinx.coroutines.launch
 
 /**
@@ -80,6 +85,10 @@ fun AppCenterLandscape(
     totalCount: Int,
     favApps: List<AppInfo> = emptyList(),
     hiddenApps: List<AppInfo> = emptyList(),
+    // 横屏隐藏补齐（Bob 2026-10-24，竖屏同款）：解锁状态与解锁回调由
+    // 调用点（AppCenter.kt）传入竖屏已有的状态源，不得另起一套。
+    hiddenUnlocked: Boolean = false,
+    onUnlockHiddenApps: () -> Unit = {},
     onLaunch: (AppInfo) -> Unit,
     onLongPress: (AppInfo) -> Unit,
     onOpenSettings: () -> Unit,
@@ -108,10 +117,29 @@ fun AppCenterLandscape(
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
     val rowState = rememberLazyListState()
+    // 横屏挖孔留白（Bob 2026-10-24）：横屏下左侧是竖屏状态栏位置
+    // （摄像头/刘海），此前内容顶到左边缘、第一列会被挖孔遮挡。
+    // 取系统 displayCutout inset，不写死数值；无挖孔的设备/模拟器上
+    // inset 为 0，布局与此前逐像素一致（CI 证据因此继续有效）。
+    // 列区起始留白 = max(16dp, 挖孔左侧 inset)：16dp 是现有列区水
+    // 平留白；容器级统一加（cutoutLeft - 16dp）的正部——header 行与
+    // 列区同量右移，相对位置不变，不引入新错位。
+    // 注：getLeft/getRight 需显式传 layoutDirection；本文件全部按 LTR
+    // 布局（start 即物理左），故传 Ltr，与现有 padding(start=…) 口径一致。
+    val cutoutLeft = with(density) { WindowInsets.displayCutout.getLeft(density, LayoutDirection.Ltr).toDp() }
+    val cutoutRight = with(density) { WindowInsets.displayCutout.getRight(density, LayoutDirection.Ltr).toDp() }
+    val contentStartExtra = (cutoutLeft - 16.dp).coerceAtLeast(0.dp)
     // 横屏 rail 房子上拉（Bob 2026-10-24：与竖屏一致补房子项）：进度由
     // WaveRail 拖动回调驱动，≥1 提交一次回首页；松手后复位（见 onRelease）。
     var housePull by remember { mutableStateOf(0f) }
     var housePullCommitted by remember { mutableStateOf(false) }
+    // 横屏隐藏补齐（竖屏同款 eyePull 语义）：👁下拉进度由 WaveRail 拖动
+    // 回调驱动，≥1 提交一次生物识别解锁；松手后复位并重新武装。
+    var eyePull by remember { mutableStateOf(0f) }
+    var eyePullCommitted by remember { mutableStateOf(false) }
+    var eyePullArmed by remember { mutableStateOf(true) }
+    var lastEyePull by remember { mutableStateOf(0f) }
+    val onUnlockHiddenAppsState = rememberUpdatedState(onUnlockHiddenApps)
     val hapticView = LocalView.current
     // 初始从 A 开始（Bob 2026-10-24）：首次进入且非搜索态时定位一次。
     var initialScrollDone by remember { mutableStateOf(false) }
@@ -123,7 +151,9 @@ fun AppCenterLandscape(
             // 起点让出右侧 57dp Rail 区，搜索态 Rail 隐藏时不让
             .observeBottomSwipeUp(
                 rightExclusionPx = {
-                    if (searchResults == null) with(density) { 57.dp.toPx() } else 0f
+                    // rail 右移后排除区同量右扩，保证排除区仍盖住整条 rail
+                    // （57dp 是原 rail 区宽度口径；无右侧挖孔时与此前一致）。
+                    if (searchResults == null) with(density) { (57.dp + cutoutRight).toPx() } else 0f
                 }
             ) { onBottomSwipeUpState.value() }
     ) {
@@ -135,7 +165,9 @@ fun AppCenterLandscape(
         // 按字母切列：每个字母从新列顶部开始，字母头占首行位（Bob）
         // 首列：[字母头 rowH][应用...]；续列：无头，应用直接从顶部开始
         // v0.68.75（Bob）：收藏放最前、隐藏放最后，核心功能不能丢
-        val columns = remember(azGroups, favApps, hiddenApps, rowsPerCol) {
+        // hiddenUnlocked 必须进 key：解锁前后隐藏列形态不同（锁定占位 ↔
+        // 应用列），否则解锁后列流不重建。
+        val columns = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, rowsPerCol) {
             val cols = mutableListOf<MutableList<FlowItem>>()
             var cur = mutableListOf<FlowItem>()
             fun colCap(): Int = rowsPerCol
@@ -170,17 +202,22 @@ fun AppCenterLandscape(
                     cur.add(FlowItem.App(app)); count++
                 }
             }
-            // 隐藏区（👁头）
+            // 隐藏区（👁头）：竖屏同款门禁——未解锁时只放锁定占位（点按
+            // 触发指纹/面部），解锁后才列出隐藏应用、可直接打开。
             if (hiddenApps.isNotEmpty()) {
                 flush()
                 cur.add(FlowItem.SectionHeader("👁 隐藏"))
-                var cap = colCap() - 1
-                var count = 0
-                hiddenApps.forEach { app ->
-                    if (count >= cap) {
-                        flush(); cap = colCap(); count = 0
+                if (!hiddenUnlocked) {
+                    cur.add(FlowItem.LockPlaceholder)
+                } else {
+                    var cap = colCap() - 1
+                    var count = 0
+                    hiddenApps.forEach { app ->
+                        if (count >= cap) {
+                            flush(); cap = colCap(); count = 0
+                        }
+                        cur.add(FlowItem.App(app)); count++
                     }
-                    cur.add(FlowItem.App(app)); count++
                 }
             }
             flush()
@@ -210,9 +247,10 @@ fun AppCenterLandscape(
             }
         }
 
-        // 初始从 A 开始（Bob 2026-10-24）：只在首次进入且非搜索态时定位
-        // 一次到 A（或 A 之后最近有应用的字母）列；收藏列仍在，点 ★ 回去。
-        // 守卫保证不与用户后续滚动打架、不影响搜索态。
+        // 初始从首个有应用的字母开始（Bob 2026-10-24 + 字母 B 方案）：
+        // 只在首次进入且非搜索态时定位一次到首个有应用的字母列（A 有
+        // 应用时就是 A 列）；收藏列仍在，点 ★ 回去。守卫保证不与用户
+        // 后续滚动打架、不影响搜索态。
         LaunchedEffect(columns, searchResults) {
             if (!initialScrollDone && searchResults == null) {
                 initialScrollDone = true
@@ -222,8 +260,9 @@ fun AppCenterLandscape(
         }
 
         Row(Modifier.fillMaxSize()) {
-            // 左：内容区
-            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            // 左：内容区（容器级挖孔偏移：header 行与列区同量右移，
+            // 无挖孔时偏移为 0，布局不变）
+            Column(modifier = Modifier.weight(1f).fillMaxHeight().padding(start = contentStartExtra)) {
                 // 紧凑顶栏
                 // v0.68.82（横屏专项第 1 项）：顶栏下滑 → D2（阈值沿用竖屏 80dp）
                 val headThreshPx = with(density) { 80.dp.toPx() }
@@ -447,6 +486,47 @@ fun AppCenterLandscape(
                                                 .wrapContentHeight(Alignment.CenterVertically)
                                         )
                                     }
+                                    is FlowItem.LockPlaceholder -> {
+                                        // 竖屏同款锁定占位（横屏列格样式）：点按触发
+                                        // 指纹/面部解锁；CI 只能验占位渲染，生物识别
+                                        // 本身归真机验收。
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(rowH)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable { onUnlockHiddenAppsState.value() }
+                                                .testTag("hidden_locked")
+                                                .padding(horizontal = 12.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(AILauncherColors.current.Divider),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Fingerprint,
+                                                    contentDescription = null,
+                                                    tint = AILauncherColors.current.Hint,
+                                                    modifier = Modifier
+                                                        .size(22.dp)
+                                                        .semantics { invisibleToUser() }
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Text(
+                                                text = "点击解锁查看",
+                                                fontSize = 14.sp,
+                                                color = AILauncherColors.current.Title,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
                                     is FlowItem.App -> {
                                         LandscapeAppRow(
                                             app = item.app,
@@ -471,10 +551,21 @@ fun AppCenterLandscape(
             // v0.68.75（Bob）：加回收藏★和隐藏👁，核心功能不能丢
             // v0.68.82（横屏专项第 2 项）：搜索态隐藏 Rail（定位无意义，同竖屏）
             if (searchResults == null) {
+            // 右侧挖孔：rail 整块左让 cutoutRight（无右侧挖孔时为 0，
+            // 布局不变）；不要只修左不修右。
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(end = cutoutRight)
+            ) {
             AppRail(
-                items = remember(favApps, hiddenApps) {
+                items = remember(favApps, hiddenApps, letters) {
                     // 与竖屏一致（Bob 2026-10-24）：房子、分隔、★、分隔、
-                    // A-Z、分隔、👁；此前横屏缺房子项。
+                    // 字母、分隔、👁；此前横屏缺房子项。
+                    // 字母 B 方案（Bob 2026-10-24）：rail 只显示有应用的字
+                    // 母——letters 即调用点按 azGroups 派生的有应用字母集
+                    // （与竖屏 rail 同源），不再硬编码完整 A-Z；过滤后每个
+                    // 字母都有列，最近字母兜底仅作保险。
                     buildList {
                         add(RailItem.House)
                         if (favApps.isNotEmpty()) {
@@ -482,7 +573,7 @@ fun AppCenterLandscape(
                             add(RailItem.Star)
                         }
                         add(RailItem.Separator)
-                        ('A'..'Z').forEach { add(RailItem.Letter(it)) }
+                        letters.forEach { add(RailItem.Letter(it)) }
                         if (hiddenApps.isNotEmpty()) {
                             add(RailItem.Separator)
                             add(RailItem.Eye)
@@ -496,13 +587,20 @@ fun AppCenterLandscape(
                         is RailItem.Star -> {
                             scope.launch { rowState.animateScrollToItem(favColIdx) }
                         }
+                        // 横屏隐藏补齐（竖屏同款）：未解锁时点 👁触发生物
+                        // 识别解锁；解锁后点 👁滚到隐藏列。
                         is RailItem.Eye -> {
-                            hiddenColIdx?.let { idx ->
-                                scope.launch { rowState.animateScrollToItem(idx) }
+                            if (!hiddenUnlocked) {
+                                onUnlockHiddenAppsState.value()
+                            } else {
+                                hiddenColIdx?.let { idx ->
+                                    scope.launch { rowState.animateScrollToItem(idx) }
+                                }
                             }
                         }
                         is RailItem.Letter -> {
-                            // 找该字母或之后最近有应用的字母
+                            // 找该字母或之后最近有应用的字母（过滤后一般直
+                            // 中，兜底保留作保险）
                             var c = item.char
                             while (c <= 'Z' && !letterToCol.containsKey(c)) c++
                             if (c <= 'Z') scrollToLetter(c)
@@ -526,20 +624,50 @@ fun AppCenterLandscape(
                     }
                     housePull = p.coerceIn(0f, 1f)
                 },
+                // 👁下拉解锁：与竖屏 eyePull 语义一致（≥1 提交一次生物
+                // 识别；未解锁时才生效，解锁后下拉不再触发）。
+                eyePull = eyePull,
+                onEyePull = { p ->
+                    if (!eyePullCommitted && eyePullArmed && !hiddenUnlocked) {
+                        val cp = p.coerceIn(0f, 1f)
+                        eyePull = cp
+                        if (cp >= 0.5f && lastEyePull < 0.5f) {
+                            hapticView.tickHaptic()
+                        }
+                        if (cp >= 1f) {
+                            eyePullCommitted = true
+                            eyePullArmed = false
+                            hapticView.confirmHaptic()
+                            onUnlockHiddenAppsState.value()
+                            eyePull = 0f
+                            lastEyePull = 0f
+                            eyePullCommitted = false
+                        }
+                        lastEyePull = cp
+                    }
+                },
                 onRelease = {
                     housePull = 0f
                     housePullCommitted = false
+                    eyePull = 0f
+                    eyePullCommitted = false
+                    eyePullArmed = true
                 },
                 // Rail 高度跟随容器（Bob 2026-10-24）：不再写死 400dp（横屏
                 // 屏高不足时上下裁字母），占比 0.95、字母 14sp/16sp 行高。
+                // 字母 B 方案：对比度拉满（横屏路径）——透明度 1.0 + Medium
+                // 字重；竖屏默认值 0.6/Normal 不变。
                 railHeight = null,
                 railFraction = 0.95f,
                 letterFontSize = 14.sp,
                 letterLineHeight = 16.sp,
+                letterAlpha = 1f,
+                letterFontWeight = FontWeight.Medium,
                 modifier = Modifier
                     .width(56.dp)
                     .fillMaxHeight()
             )
+            }  // Box：右侧挖孔让位结束
             }  // if (searchResults == null) 搜索态隐藏 Rail 结束
         }
         // v0.68.82 的底部 88dp 透明手势条已于 D-6 删除（同竖屏：它盖住的
@@ -592,5 +720,6 @@ private fun LandscapeAppRow(
 private sealed interface FlowItem {
     data class Header(val letter: Char) : FlowItem
     data class SectionHeader(val title: String) : FlowItem
+    data object LockPlaceholder : FlowItem
     data class App(val app: AppInfo) : FlowItem
 }

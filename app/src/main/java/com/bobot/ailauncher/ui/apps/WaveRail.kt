@@ -122,9 +122,13 @@ internal fun WaveRail(
     // 横屏应用中心修（Bob 2026-10-24）：rail 占比与字母字号可参——
     // 竖屏保持 0.85/12sp/14sp 不动；横屏传 0.95/14sp/16sp（v0.55.3 教训：
     // G/S 底部被截断就是行高不够，14sp 字至少配 16sp 行高）。
+    // 横屏字母 B 方案（Bob 2026-10-24）：字母透明度与字重同样可参——
+    // 竖屏保持 0.6/Normal 不动；横屏传 1.0/Medium（对比度拉满）。
     railFraction: Float = 0.85f,
     letterFontSize: TextUnit = 12.sp,
-    letterLineHeight: TextUnit = 14.sp
+    letterLineHeight: TextUnit = 14.sp,
+    letterAlpha: Float = 0.6f,
+    letterFontWeight: FontWeight = FontWeight.Normal
 ) {
     val density = LocalDensity.current
     val hapticView = LocalView.current
@@ -363,8 +367,8 @@ internal fun WaveRail(
                             // v0.55.3（Bob）：G/S 底部被截断——显式 lineHeight 给足字高
                             fontSize = letterFontSize,
                             lineHeight = letterLineHeight,
-                            color = AILauncherColors.current.Title.copy(alpha = 0.6f),
-                            fontWeight = FontWeight.Normal,
+                            color = AILauncherColors.current.Title.copy(alpha = letterAlpha),
+                            fontWeight = letterFontWeight,
                             maxLines = 1,
                             // v0.68.96（F-07）：单字母标签形式对齐——超宽字形省略而非硬裁
                             overflow = TextOverflow.Ellipsis,
@@ -533,6 +537,8 @@ internal fun AppRail(
     railFraction: Float = 0.85f,
     letterFontSize: TextUnit = 12.sp,
     letterLineHeight: TextUnit = 14.sp,
+    letterAlpha: Float = 0.6f,
+    letterFontWeight: FontWeight = FontWeight.Normal,
     modifier: Modifier = Modifier
 ) {
     WaveRail(
@@ -553,6 +559,8 @@ internal fun AppRail(
         railFraction = railFraction,
         letterFontSize = letterFontSize,
         letterLineHeight = letterLineHeight,
+        letterAlpha = letterAlpha,
+        letterFontWeight = letterFontWeight,
         modifier = if (railHeight != null) modifier.height(railHeight) else modifier
     )
 }
