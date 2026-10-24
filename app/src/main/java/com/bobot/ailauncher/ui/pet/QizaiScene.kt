@@ -54,10 +54,11 @@ fun QizaiScene.durationSec(): Float = when (this) {
     QizaiScene.NONE -> 0f
 }
 
-private data class FRect(val l: Float, val t: Float, val r: Float, val b: Float)
+internal data class FRect(val l: Float, val t: Float, val r: Float, val b: Float)
 
 /** 眼部包围盒（相对位图坐标，Python 离线检测） */
-private val EYE_BOXES = mapOf(
+// alive-p1：PetView 眨眼压缩复用同一套眼盒（单一事实源，不另抄一份）。
+internal val EYE_BOXES = mapOf(
     "main" to listOf(
         FRect(0.1766f, 0.2687f, 0.5469f, 0.4198f),
         FRect(0.4531f, 0.2677f, 0.7000f, 0.4198f)
