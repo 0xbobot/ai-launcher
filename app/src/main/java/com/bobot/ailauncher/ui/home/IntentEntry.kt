@@ -694,7 +694,7 @@ fun IntentEntry(
                 .testTag("input_pet_band")
                 .height(capsuleHeight + if (showExamplesRow) 56.dp else 0.dp)
         ) {
-            // 胶囊本体（与应用中心同一组件；面板语境用实心底）
+            // 胶囊本体（与应用中心同一组件；面板语境用卡片同款玻璃，见上）
             IntentCapsuleField(
                 value = fieldValue,
                 onValueChange = { nv -> onFieldValueChange(nv) },
