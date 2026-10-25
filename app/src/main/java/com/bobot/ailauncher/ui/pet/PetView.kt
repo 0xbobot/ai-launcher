@@ -1,7 +1,7 @@
 package com.bobot.ailauncher.ui.pet
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutLinearEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -179,7 +179,7 @@ fun PetView(
         blinkMutex.withLock {
             blinkScale.animateTo(
                 if (half) BLINK_HALF_TARGET else BLINK_FULL_TARGET,
-                tween(BLINK_CLOSE_MS, easing = FastOutLinearEasing)
+                tween(BLINK_CLOSE_MS, easing = FastOutLinearInEasing)
             )
             delay(BLINK_HOLD_MS.toLong())
             blinkScale.animateTo(
@@ -247,7 +247,7 @@ fun PetView(
         launch {
             pupilX.animateTo(
                 pupilX.value + (tx - pupilX.value) * SACCADE_OVERSHOOT,
-                tween(SACCADE_OUT_MS, easing = FastOutLinearEasing)
+                tween(SACCADE_OUT_MS, easing = FastOutLinearInEasing)
             )
             pupilX.animateTo(
                 tx,
@@ -257,7 +257,7 @@ fun PetView(
         launch {
             pupilY.animateTo(
                 pupilY.value + (ty - pupilY.value) * SACCADE_OVERSHOOT,
-                tween(SACCADE_OUT_MS, easing = FastOutLinearEasing)
+                tween(SACCADE_OUT_MS, easing = FastOutLinearInEasing)
             )
             pupilY.animateTo(
                 ty,
@@ -279,12 +279,12 @@ fun PetView(
     }
     val jitterXAnim by animateFloatAsState(
         targetValue = jitterX,
-        animationSpec = tween(MICRO_SACCADE_STEP_MS, easing = FastOutLinearEasing),
+        animationSpec = tween(MICRO_SACCADE_STEP_MS, easing = FastOutLinearInEasing),
         label = "jitterX"
     )
     val jitterYAnim by animateFloatAsState(
         targetValue = jitterY,
-        animationSpec = tween(MICRO_SACCADE_STEP_MS, easing = FastOutLinearEasing),
+        animationSpec = tween(MICRO_SACCADE_STEP_MS, easing = FastOutLinearInEasing),
         label = "jitterY"
     )
     // 头部延迟 80ms 跟随：spring d0.7 自带 ~3% overshoot（x ±10px，y ±6px）
