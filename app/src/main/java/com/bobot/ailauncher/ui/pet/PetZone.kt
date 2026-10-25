@@ -7,9 +7,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.displayCutout
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,8 +17,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -35,11 +30,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.IntOffset
@@ -50,6 +43,7 @@ import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.core.pet.PetState
 import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.ui.glass.GlassPolicy
 import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
 import com.bobot.ailauncher.ui.home.BriefMeetingRow
 import com.bobot.ailauncher.ui.home.CoverHero
@@ -257,9 +251,11 @@ fun PetZone(
         coverPaletteFor(coverHour, coverIsDark)
     }
 
-    // 简报自适应字色（Bob 2026-10-25 21:17 拍板：自适应字色、去纱）：
-    // 简报区不再靠罩纱保可读性，改靠字色自适应——纱平时不可见（淡出），
-    // 只在对比度不够／读不到壁纸时回退 347 纱（淡入），边缘问题从根上消失。
+    // 简报自适应字色（Bob 2026-10-25 21:17 拍板：自适应字色、去纱；
+    // 2026-10-25 22:31 再令：罩纱彻底去掉，包括回退路径）：
+    // 简报区不再靠罩纱保可读性，改靠字色自适应；回退态也不再画纱，
+    // 改选简报区均值下对比度更高的那档字色（不再保证处处过 4.5，
+    // 这是 Bob 接受的如实后果）。无带数据时沿用时间段配色，同样不画纱。
     // 亮度只看简报区那一带：玻璃层已读的 48×48 缩略图顶部带（与 PetZone
     // 本身高度对应的带数），不用整张壁纸平均；与时间段配色（CoverPalette）
     // 的关系：本处只覆盖传给 CoverHero／BriefMeetingRow 的 palette，简报区
@@ -281,13 +277,23 @@ fun PetZone(
         BriefingAdaptiveText.decide(briefingZoneBands, briefingPrevDecision)
     }
     LaunchedEffect(briefingDecision) { briefingPrevDecision = briefingDecision }
-    val briefingScrimFallback = briefingDecision == BriefingTextMode.FALLBACK_SCRIM
-    // 纱淡入淡出：决策翻转时不硬切（首帧壁纸加载完成、换壁纸时各一次），300ms 过渡。
-    val briefingScrimAlpha by animateFloatAsState(
-        targetValue = if (briefingScrimFallback) 1f else 0f,
-        animationSpec = tween(300), label = "briefingScrim"
-    )
-    val briefingPalette = when (briefingDecision) {
+    // 回退改选对比度更高档：decide() 本身与单测一字不动（仍返回
+    // FALLBACK_SCRIM），渲染层在此把回退映射到相对更好的字色档；
+    // 迟滞（briefingPrevDecision）仍按 decide() 原值回写，不受映射影响。
+    val briefingRenderMode = if (
+        briefingDecision == BriefingTextMode.FALLBACK_SCRIM &&
+        briefingZoneBands.isNotEmpty()
+    ) {
+        val zoneMean = briefingZoneBands.map { it.mean.toDouble() }.average()
+        val darkLum =
+            GlassPolicy.relativeLuminance(BriefingAdaptiveText.DARK_TITLE_ARGB.toInt())
+        val lightLum =
+            GlassPolicy.relativeLuminance(BriefingAdaptiveText.LIGHT_TITLE_ARGB.toInt())
+        if (GlassPolicy.contrastRatio(darkLum, zoneMean) >=
+            GlassPolicy.contrastRatio(lightLum, zoneMean)
+        ) BriefingTextMode.DARK_TEXT else BriefingTextMode.LIGHT_TEXT
+    } else briefingDecision
+    val briefingPalette = when (briefingRenderMode) {
         BriefingTextMode.DARK_TEXT -> coverPalette.copy(
             title = Color(BriefingAdaptiveText.DARK_TITLE_ARGB),
             body = Color(BriefingAdaptiveText.DARK_BODY_ARGB),
@@ -300,8 +306,8 @@ fun PetZone(
         )
         BriefingTextMode.FALLBACK_SCRIM -> coverPalette
     }
-    // 刊头金：亮底上原金色对比不足，切深铜金保品牌感；暗底与回退态沿用现行金。
-    val briefingAccent = when (briefingDecision) {
+    // 刊头金：亮底上原金色对比不足，切深铜金保品牌感；暗底与无数据回退态沿用现行金。
+    val briefingAccent = when (briefingRenderMode) {
         BriefingTextMode.DARK_TEXT -> Color(BriefingAdaptiveText.DARK_ACCENT_ARGB)
         BriefingTextMode.LIGHT_TEXT -> Color(BriefingAdaptiveText.LIGHT_ACCENT_ARGB)
         BriefingTextMode.FALLBACK_SCRIM -> AILauncherColors.current.Accent
@@ -327,113 +333,16 @@ fun PetZone(
         } else {
             1f
         }
-        // v0.68.101（D-4）：简报罩纱——原全屏渐变（MainScreen 0.75→0.45）
-        // 到会议行高度只剩弱洗底，金色眉题压在繁忙壁纸上对比不足。本层
-        // 渐变衬底跟随简报内容（hero+槽位+会行）延伸：上部轻洗不抢简报
-        // 的通透、中下部持平浓度托住会议行、到会行下缘之下再渐隐收尾。
-        // 纯渐变无边框无圆角——不做成卡片、不复活 NextUp 卡形态。
-        // v0.68.102（310 冻结修复）：渐变改挂 Column 自身 background，不再
-        // 用独立 Box + matchParentSize 覆层——二分实证（probe-freeze-*）：
-        // 该覆层与 inputCompact 同在时，进输入态 UI 确定性冻结（摘其一即
-        // 活）；渐变作为内容容器自身背景，视觉口径不变（同色标、同范围：
-        // 容器高度本就由内容决定），动画路径上少一个跟随测量的节点。
-        // 简报罩纱框线修复（Bob 2026-10-25 真机截图）：PetZone 是 HomeScreen
-        // 根 Column 的第一个孩子，根 Column 的顶距（竖屏 16dp、横屏
-        // max(16dp, 状态栏高)）与两侧 displayCutout inset 把罩纱 Column 框在
-        // 内侧；原 background 只画到 Column 边界，边界外侧只有 MainScreen
-        // 罩纱，边界处 alpha 台阶约 0.22——真机上就是顶部与左侧的两道框线
-        // （横屏挖孔在侧边故左右都有线，竖屏侧边 inset 为 0 故只见顶线）。
-        // 修法：罩纱改 drawBehind 出界绘制——上 bleed 根 Column 顶距、左右
-        // bleed 两侧 cutout inset，罩纱铺满到屏边，边界处不再有台阶；纵向
-        // 渐变映射不变（startY=0/endY=Column 高，出界区按首色平铺），内容
-        // 上的浓度与之前一字不动；drawBehind 不引入布局节点，v0.68.102 的
-        // 冻结修复口径不受影响；字号、间距、布局、手势一字不动。
-        // 简报渐变重设计（Bob 2026-10-25 19:29 真机实拍）：旧曲线 0.86→1.0
-        // 一段线性直落、收尾点就在问候语下 26dp 处——问候语正好压在过渡带
-        // 上；且线性段两端斜率突变（平台→斜坡、斜坡→0）在人眼里形成 Mach
-        // 带，看起来就是一道横向明暗分界。345 取消全屏罩纱后，简报罩纱成
-        // 为壁纸上唯一一层纱，边缘比以前更显眼。
-        // 新曲线：平台期盖住全部简报文字（含问候语＋26dp 尾巴）；收尾改在
-        // 内容下方 84dp 的空壁纸区做 smoothstep 缓动（两端斜率为零，无
-        // Mach 带）、精确归零；上升段同样用 smoothstep 采样，消除 0.55 处
-        // 平台拐点的带。峰值 0.46 与顶部 0.22 不变，文字对比度与之前一致；
-        // 下 bleed 只落在 PetZone 下方的空壁纸区（正常态其下无内容，Dock
-        // 在屏底另层绘制），横屏 Dock 顶部是否吃到尾巴尖列入真机验证。
-        val scrimColor = AILauncherColors.current.Background
-        val veilDensity = LocalDensity.current
-        val veilLayoutDirection = LocalLayoutDirection.current
-        val veilStatusBarTopDp =
-            with(veilDensity) { WindowInsets.statusBars.getTop(veilDensity).toDp() }
-        val veilTopBleedPx = with(veilDensity) {
-            (if (isLandscapeCover) maxOf(16.dp, veilStatusBarTopDp) else 16.dp).toPx()
-        }
-        val veilStartBleedPx =
-            WindowInsets.displayCutout.getLeft(veilDensity, veilLayoutDirection).toFloat()
-        val veilEndBleedPx =
-            WindowInsets.displayCutout.getRight(veilDensity, veilLayoutDirection).toFloat()
-        // 收尾羽化距离：内容下方空壁纸区的 smoothstep 缓动长度。
-        val veilTailPx = with(veilDensity) { 84.dp.toPx() }
+        // 简报罩纱简史（已退役，勿复活）：101 衬底 → 102 挂 Column
+        // background → 343 出界绘制修框线 → 347 渐变重设计 → 350 自适应
+        // 字色（平时不画、回退画纱）。2026-10-25 22:31 Bob 真机反馈：
+        // 繁忙壁纸下回退纱仍可见，令罩纱彻底去掉（含回退路径）——
+        // 本 Column 自此不再画任何衬底，字色可读性只靠自适应档
+        // （含回退改选对比度更高档）。布局、字号、间距、手势一字不动。
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .onGloballyPositioned { briefingColumnHPx = it.size.height }
-                .drawBehind {
-                    // 自适应字色激活时纱不画（淡出到 0 后直接跳过绘制）；回退态
-                    // 画 347 渐变（淡入）。alpha 乘在每个色标上，动画期间逐帧重绘。
-                    if (briefingScrimAlpha <= 0f) return@drawBehind
-                    // smoothstep：两端斜率为零，平台↔缓动、缓动↔0 的接头处
-                    // 无斜率突变，故无 Mach 带；分段线性直接拼是旧曲线的病根。
-                    fun smooth(t: Float): Float = t * t * (3f - 2f * t)
-                    // 注意：buildList 的 lambda 接收者是 MutableList，其自带
-                    // size 属性会遮住 DrawScope.size，故列高须先提到外层变量，
-                    // 否则 buildList 内写 size.height 编译失败（CI 实测）。
-                    val columnH = size.height
-                    val gradLen = columnH + veilTailPx
-                    fun stopAt(y: Float, alpha: Float) =
-                        (y / gradLen).coerceIn(0f, 1f) to
-                            scrimColor.copy(alpha = alpha)
-                    val riseEnd = 0.55f * columnH
-                    val stops = buildList {
-                        add(0f to scrimColor.copy(alpha = 0.22f * briefingScrimAlpha))
-                        // 上升段：0.22→0.46，smoothstep 采样（端点与旧值一致）。
-                        for (t in listOf(0.25f, 0.5f, 0.75f)) {
-                            add(stopAt(t * riseEnd, (0.22f + 0.24f * smooth(t)) * briefingScrimAlpha))
-                        }
-                        // 平台期：盖住全部简报文字＋26dp 尾巴，浓度与旧值一致。
-                        add(stopAt(riseEnd, 0.46f * briefingScrimAlpha))
-                        add(stopAt(columnH, 0.46f * briefingScrimAlpha))
-                        // 收尾段：内容下方空壁纸区，0.46→0，smoothstep 采样、
-                        // 精确归零；问候语已不在过渡带内。
-                        for (t in listOf(
-                            0.125f, 0.25f, 0.375f, 0.5f,
-                            0.625f, 0.75f, 0.875f
-                        )) {
-                            add(
-                                stopAt(
-                                    columnH + t * veilTailPx,
-                                    0.46f * (1f - smooth(t)) * briefingScrimAlpha
-                                )
-                            )
-                        }
-                        add(1f to scrimColor.copy(alpha = 0.0f))
-                    }
-                    val brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                        *stops.toTypedArray(),
-                        startY = 0f,
-                        endY = gradLen
-                    )
-                    drawRect(
-                        brush = brush,
-                        topLeft = androidx.compose.ui.geometry.Offset(
-                            -veilStartBleedPx,
-                            -veilTopBleedPx
-                        ),
-                        size = androidx.compose.ui.geometry.Size(
-                            size.width + veilStartBleedPx + veilEndBleedPx,
-                            size.height + veilTopBleedPx + veilTailPx
-                        )
-                    )
-                }
         ) {
         // v0.68.101（D-1）：横屏输入态 hero 整体让位——横屏 IME 抬升后
         // 可用高度只剩约四成，左区只装胶囊堆栈；竖屏走各模板 inputCompact。
@@ -469,7 +378,7 @@ fun PetZone(
                 modifier = Modifier.fillMaxWidth(coverLeftFrac)
             )
         }
-        // 罩纱尾巴：会行（或简报末尾）之下留一段渐隐距离，衬底在此收尾
+        // 末尾留白 26dp（原罩纱尾巴间距保留，纱已删，布局不动）
         Spacer(modifier = Modifier.height(26.dp))
         }  // Column 结束
     }  // v0.68.74：BoxWithConstraints 结束

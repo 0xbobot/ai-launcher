@@ -162,12 +162,21 @@ private class DockShoulderShape(
 }
 
 /**
- * 肩线拱 Path（从 (x0, yBase) 到 (x1, yBase)，峰顶在 yBase - rise）。
+ * 肩线拱（从 (x0, yBase) 到 (x1, yBase)，峰顶在 yBase - rise），
+ * 追加到当前 Path 而不是自建 Path。
  * peak=0 时与 339 两段 cubicTo 一字不动；peak≠0 时在两段三次贝塞尔
  * 采样点上叠加余弦衰减隆起（弦端 0、峰顶 1），两端锚定不动——
  * 皮筋式隆起，不是整条线平移。
+ * moveToStart=true（默认）时先 moveTo 到弦端——独立描边（如 dressing
+ * 拱高光）用；false 时从当前点直接续画——圆肩轮廓用，轮廓必须保持
+ * 单一 contour：旧写法用 addPath 拼独立拱 Path，addPath 另起 contour，
+ * 末尾 close() 会从轮廓末点（左下）向拱 contour 起点（左弦端）拉一
+ * 条对角线，轮廓描边（亮带／亮边／暗描边）全都沿这条线走——真机上
+ * Dock 左侧那道斜线就是它（Bob 2026-10-25 22:31）。单 contour 后
+ * close() 只是回到起点，不再有对角线；填充区域与之前两 contour
+ * 并集一字不动（对角线本就是两 contour 共边），clip／叠色不受影响。
  */
-private fun shoulderArchPath(
+private fun Path.appendShoulderArch(
     x0: Float,
     x1: Float,
     cx: Float,
@@ -175,35 +184,34 @@ private fun shoulderArchPath(
     risePx: Float,
     peakPx: Float,
     yBase: Float,
-): Path {
-    return Path().apply {
-        if (peakPx == 0f) {
-            moveTo(x0, yBase)
-            cubicTo(x0 + k, yBase, cx - k, yBase - risePx, cx, yBase - risePx)
-            cubicTo(cx + k, yBase - risePx, x1 - k, yBase, x1, yBase)
-        } else {
-            val steps = 24
-            fun cubicPoint(t: Float, p0: Float, p1: Float, p2: Float, p3: Float): Float {
-                val u = 1f - t
-                return u * u * u * p0 + 3f * u * u * t * p1 + 3f * u * t * t * p2 + t * t * t * p3
-            }
-            moveTo(x0, yBase)
-            for (i in 1..steps) {
-                val t = i.toFloat() / steps
-                val fall = 0.5f - 0.5f * kotlin.math.cos(Math.PI.toFloat() * t)
-                lineTo(
-                    cubicPoint(t, x0, x0 + k, cx - k, cx),
-                    cubicPoint(t, yBase, yBase, yBase - risePx, yBase - risePx) - peakPx * fall
-                )
-            }
-            for (i in 1..steps) {
-                val t = i.toFloat() / steps
-                val fall = 0.5f + 0.5f * kotlin.math.cos(Math.PI.toFloat() * t)
-                lineTo(
-                    cubicPoint(t, cx, cx + k, x1 - k, x1),
-                    cubicPoint(t, yBase - risePx, yBase - risePx, yBase, yBase) - peakPx * fall
-                )
-            }
+    moveToStart: Boolean = true,
+) {
+    if (peakPx == 0f) {
+        if (moveToStart) moveTo(x0, yBase)
+        cubicTo(x0 + k, yBase, cx - k, yBase - risePx, cx, yBase - risePx)
+        cubicTo(cx + k, yBase - risePx, x1 - k, yBase, x1, yBase)
+    } else {
+        val steps = 24
+        fun cubicPoint(t: Float, p0: Float, p1: Float, p2: Float, p3: Float): Float {
+            val u = 1f - t
+            return u * u * u * p0 + 3f * u * u * t * p1 + 3f * u * t * t * p2 + t * t * t * p3
+        }
+        if (moveToStart) moveTo(x0, yBase)
+        for (i in 1..steps) {
+            val t = i.toFloat() / steps
+            val fall = 0.5f - 0.5f * kotlin.math.cos(Math.PI.toFloat() * t)
+            lineTo(
+                cubicPoint(t, x0, x0 + k, cx - k, cx),
+                cubicPoint(t, yBase, yBase, yBase - risePx, yBase - risePx) - peakPx * fall
+            )
+        }
+        for (i in 1..steps) {
+            val t = i.toFloat() / steps
+            val fall = 0.5f + 0.5f * kotlin.math.cos(Math.PI.toFloat() * t)
+            lineTo(
+                cubicPoint(t, cx, cx + k, x1 - k, x1),
+                cubicPoint(t, yBase - risePx, yBase - risePx, yBase, yBase) - peakPx * fall
+            )
         }
     }
 }
@@ -229,7 +237,8 @@ private fun dockShoulderPath(
         lineTo(0f, cornerPx)
         quadraticTo(0f, 0f, cornerPx, 0f)
         lineTo(x0, 0f)
-        addPath(shoulderArchPath(x0, x1, cx, k, risePx, peakPx, 0f))
+        // 单 contour 续画拱（moveToStart=false）：不用 addPath，杜绝对角线。
+        appendShoulderArch(x0, x1, cx, k, risePx, peakPx, 0f, moveToStart = false)
         lineTo(w - cornerPx, 0f)
         quadraticTo(w, 0f, w, cornerPx)
         lineTo(w, h - cornerPx)
@@ -267,7 +276,7 @@ private fun Modifier.dockShoulderDressing(
     val k = half * 0.5f
     // 肩线内侧 3dp 的拱（与轮廓肩线同形、下移 3dp，含弹性峰值）。
     val yBase = 3.dp.toPx()
-    val arch = shoulderArchPath(x0, x1, cx, k, rise, peak, yBase)
+    val arch = Path().apply { appendShoulderArch(x0, x1, cx, k, rise, peak, yBase) }
     drawPath(
         path = arch,
         brush = Brush.horizontalGradient(
@@ -617,7 +626,13 @@ fun PullUpDock(
                             // 玻璃质感 v2：Dock 专用光影（对角明暗 + 高光面 +
                             // 左下出口 + 沉底暖核 + 方向性亮带）；其他玻璃面
                             // 不传此参数、一字不动。
-                            dockLight = DockLightParams()
+                            dockLight = DockLightParams(),
+                            // 玻璃边框效果不要（Bob 2026-10-25 22:31）：跳过全部
+                            // 轮廓描边（暗描边＋方向性亮带＋1dp 顶部亮边），
+                            // 仅 Dock 面板；意图卡片等其他玻璃面一字不动。
+                            // Dock 左侧斜线另由圆肩轮廓单 contour 化根除（见
+                            // appendShoulderArch），与本开关无关。
+                            noRim = true
                         )
                         // 圆肩批：弧形高光 + 暖白内晕（玻璃之上、图标之下）。
                         .dockShoulderDressing(

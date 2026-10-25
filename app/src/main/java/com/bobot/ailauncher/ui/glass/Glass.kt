@@ -195,6 +195,9 @@ data class DockLightParams(
  *   （肩线 rise），玻璃裁剪/叠色/亮边一律沿该轮廓走。
  * @param dockLight Dock 专用光影（玻璃质感 v2）；默认 null 时 glassDraw
  *   一字不动，其他玻璃面不受影响。SIMULATED 档不进 glassDraw，故该档无 v2 光影。
+ * @param noRim true 时跳过全部轮廓描边（外侧暗描边、v2 方向性亮带、
+ *   1dp 顶部亮边）：Dock 面板专用（Bob 2026-10-25 22:31：玻璃边框效果不要），
+ *   默认 false，其他玻璃面一字不动。
  */
 @Composable
 fun Modifier.glassSurface(
@@ -205,6 +208,7 @@ fun Modifier.glassSurface(
     tintBoost: Float = 0f,
     shape: Shape? = null,
     dockLight: DockLightParams? = null,
+    noRim: Boolean = false,
 ): Modifier {
     val fallbackShape = shape ?: RoundedCornerShape(cornerRadius)
     val state = LocalGlassBackdrop.current
@@ -221,7 +225,7 @@ fun Modifier.glassSurface(
         return this.background(fallbackColor, fallbackShape)
     }
     return this.then(
-        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost, shape, dockLight)
+        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost, shape, dockLight, noRim)
     )
 }
 
@@ -260,6 +264,7 @@ private fun glassDraw(
     tintBoost: Float,
     shape: Shape? = null,
     dockLight: DockLightParams? = null,
+    noRim: Boolean = false,
 ): Modifier {
     val composeDensity = LocalDensity.current.density
     val patchBlur = rememberGraphicsLayer()
@@ -389,7 +394,7 @@ private fun glassDraw(
             patchBlur.topLeft = IntOffset(-cache.margin, -cache.margin)
             // v0.68.96：外侧暗描边——线心压在几何边缘上，外半线落在玻璃之外，
             // 在亮背景上衬出切面轮廓（亮边在浅色场景里单独不够辨认）。
-            if (params.rimAlpha > 0f) {
+            if (!noRim && params.rimAlpha > 0f) {
                 if (outlinePath != null) {
                     // 自定义轮廓：描边直接压在轮廓线上（线心在边上，与原
                     // 外扩圆角矩形同一口径：外半线落在玻璃之外）。
@@ -500,6 +505,8 @@ private fun glassDraw(
                     // ⑤ 方向性亮带：窄环全周（对角线向右上递增）+ 宽环只在右上
                     //（对角线向左下衰减到 0）。描边线心压在轮廓线上，外半线被
                     // clip 截掉，与引擎暗描边同一口径；宽环 11dp 描边约 5.5dp 落在面内。
+                    // noRim 时整段跳过（Dock 边框效果不要，Bob 2026-10-25 22:31）。
+                    if (!noRim) {
                     drawPath(
                         path = shapePath,
                         brush = Brush.linearGradient(
@@ -524,9 +531,11 @@ private fun glassDraw(
                         ),
                         style = Stroke(width = dockLight.rimWideWidth.toPx()),
                     )
+                    }
                 }
-                // 1dp 亮边：顶部最亮、向下渐隐（内缩半线宽整线落在面内）
-                if (outlinePath != null) {
+                // 1dp 亮边：顶部最亮、向下渐隐（内缩半线宽整线落在面内）；
+                // noRim 时整段跳过（Dock 边框效果不要，Bob 2026-10-25 22:31）。
+                if (!noRim) if (outlinePath != null) {
                     // 自定义轮廓：描边压在轮廓线上，渐变起止取轮廓包围盒
                     // （肩线峰顶即最亮处，与平顶缘口径一致）。
                     val top = outlinePath.getBounds().top
