@@ -342,29 +342,19 @@ private fun HomeHost(
         val pickerCutoutRight = with(pickerDensity) {
             WindowInsets.displayCutout.getRight(pickerDensity, LayoutDirection.Ltr).toDp()
         }
-        // v0.68.50（Bob）：罩纱——暖纸渐变罩在系统壁纸上，调和壁纸与 UI 色调
-        // 顶部 75% 不透明（hero 文字可读），底部 45%（透出壁纸氛围）
-        // v0.32.0 的"全透明"作废：杂志风需要纸面统一
-        // 玻璃试点批：这一层（内绘系统壁纸 + 罩纱）整体录为玻璃背景源；绘制内容
-        // 与顺序不变，壁纸读不到时内绘层不画、系统壁纸照常透出。
+        // v0.68.50（Bob）全屏罩纱已于 2026-10-25 取消：壁纸太蒙、感觉不精致，
+        // 整层去掉（不是改 alpha），壁纸除简报区外原样透出；简报区仍有
+        // PetZone 自己的罩纱（343 drawBehind 出界绘制）保文字可读性，本单
+        // 一字未动。回退：把下面删除的罩纱 Box 原样加回即可（旧值：
+        // Background 暖纸色 verticalGradient，顶部 alpha 0.75、底部 0.45）。
+        // 玻璃试点批：内绘系统壁纸层仍录为玻璃背景源；壁纸读不到时内绘层
+        // 不画、系统壁纸照常透出。
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .glassBackdropSource(glassState)
         ) {
             SystemWallpaperLayer(glassState)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        androidx.compose.ui.graphics.Brush.verticalGradient(
-                            colors = listOf(
-                                com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.75f),
-                                com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.45f)
-                            )
-                        )
-                    )
-            )
         }
         // 单页桌面：只有首页；v0.16 首页上滑直达 D3，不再经 D1
         // v0.31.0：首屏只留 Dock（Bob）
