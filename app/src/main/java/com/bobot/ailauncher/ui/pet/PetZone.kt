@@ -294,6 +294,17 @@ fun PetZone(
         // 渐变映射不变（startY=0/endY=Column 高，出界区按首色平铺），内容
         // 上的浓度与之前一字不动；drawBehind 不引入布局节点，v0.68.102 的
         // 冻结修复口径不受影响；字号、间距、布局、手势一字不动。
+        // 简报渐变重设计（Bob 2026-10-25 19:29 真机实拍）：旧曲线 0.86→1.0
+        // 一段线性直落、收尾点就在问候语下 26dp 处——问候语正好压在过渡带
+        // 上；且线性段两端斜率突变（平台→斜坡、斜坡→0）在人眼里形成 Mach
+        // 带，看起来就是一道横向明暗分界。345 取消全屏罩纱后，简报罩纱成
+        // 为壁纸上唯一一层纱，边缘比以前更显眼。
+        // 新曲线：平台期盖住全部简报文字（含问候语＋26dp 尾巴）；收尾改在
+        // 内容下方 84dp 的空壁纸区做 smoothstep 缓动（两端斜率为零，无
+        // Mach 带）、精确归零；上升段同样用 smoothstep 采样，消除 0.55 处
+        // 平台拐点的带。峰值 0.46 与顶部 0.22 不变，文字对比度与之前一致；
+        // 下 bleed 只落在 PetZone 下方的空壁纸区（正常态其下无内容，Dock
+        // 在屏底另层绘制），横屏 Dock 顶部是否吃到尾巴尖列入真机验证。
         val scrimColor = AILauncherColors.current.Background
         val veilDensity = LocalDensity.current
         val veilLayoutDirection = LocalLayoutDirection.current
@@ -306,19 +317,52 @@ fun PetZone(
             WindowInsets.displayCutout.getLeft(veilDensity, veilLayoutDirection).toFloat()
         val veilEndBleedPx =
             WindowInsets.displayCutout.getRight(veilDensity, veilLayoutDirection).toFloat()
+        // 收尾羽化距离：内容下方空壁纸区的 smoothstep 缓动长度。
+        val veilTailPx = with(veilDensity) { 84.dp.toPx() }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .drawBehind {
+                    // smoothstep：两端斜率为零，平台↔缓动、缓动↔0 的接头处
+                    // 无斜率突变，故无 Mach 带；分段线性直接拼是旧曲线的病根。
+                    fun smooth(t: Float): Float = t * t * (3f - 2f * t)
+                    // 注意：buildList 的 lambda 接收者是 MutableList，其自带
+                    // size 属性会遮住 DrawScope.size，故列高须先提到外层变量，
+                    // 否则 buildList 内写 size.height 编译失败（CI 实测）。
+                    val columnH = size.height
+                    val gradLen = columnH + veilTailPx
+                    fun stopAt(y: Float, alpha: Float) =
+                        (y / gradLen).coerceIn(0f, 1f) to
+                            scrimColor.copy(alpha = alpha)
+                    val riseEnd = 0.55f * columnH
+                    val stops = buildList {
+                        add(0f to scrimColor.copy(alpha = 0.22f))
+                        // 上升段：0.22→0.46，smoothstep 采样（端点与旧值一致）。
+                        for (t in listOf(0.25f, 0.5f, 0.75f)) {
+                            add(stopAt(t * riseEnd, 0.22f + 0.24f * smooth(t)))
+                        }
+                        // 平台期：盖住全部简报文字＋26dp 尾巴，浓度与旧值一致。
+                        add(stopAt(riseEnd, 0.46f))
+                        add(stopAt(columnH, 0.46f))
+                        // 收尾段：内容下方空壁纸区，0.46→0，smoothstep 采样、
+                        // 精确归零；问候语已不在过渡带内。
+                        for (t in listOf(
+                            0.125f, 0.25f, 0.375f, 0.5f,
+                            0.625f, 0.75f, 0.875f
+                        )) {
+                            add(
+                                stopAt(
+                                    columnH + t * veilTailPx,
+                                    0.46f * (1f - smooth(t))
+                                )
+                            )
+                        }
+                        add(1f to scrimColor.copy(alpha = 0.0f))
+                    }
                     val brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0.0f to scrimColor.copy(alpha = 0.22f),
-                            0.55f to scrimColor.copy(alpha = 0.46f),
-                            0.86f to scrimColor.copy(alpha = 0.46f),
-                            1.0f to scrimColor.copy(alpha = 0.0f)
-                        ),
+                        *stops.toTypedArray(),
                         startY = 0f,
-                        endY = size.height
+                        endY = gradLen
                     )
                     drawRect(
                         brush = brush,
@@ -328,7 +372,7 @@ fun PetZone(
                         ),
                         size = androidx.compose.ui.geometry.Size(
                             size.width + veilStartBleedPx + veilEndBleedPx,
-                            size.height + veilTopBleedPx
+                            size.height + veilTopBleedPx + veilTailPx
                         )
                     )
                 }
