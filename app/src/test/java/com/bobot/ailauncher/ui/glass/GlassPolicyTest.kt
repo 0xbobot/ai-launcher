@@ -242,4 +242,48 @@ class GlassPolicyTest {
         assertTrue(bands.all { it == BackdropKind.FLAT })
         assertEquals(BackdropKind.FLAT, GlassPolicy.kindAtFraction(emptyList(), 0.5f))
     }
+
+    // ---- 简报自适应字色用带亮度（线性光）----
+
+    @Test
+    fun `band luminance of solid colors`() {
+        val black = GlassPolicy.bandLuminance(IntArray(36) { argb(0, 0, 0) }, 6, 6)
+        assertEquals(GlassPolicy.BACKDROP_BANDS, black.size)
+        assertTrue(black.all { it.mean == 0f && it.stdDev == 0f })
+        val white = GlassPolicy.bandLuminance(IntArray(36) { argb(255, 255, 255) }, 6, 6)
+        assertTrue(white.all { it.mean == 1f && it.stdDev == 0f })
+    }
+
+    @Test
+    fun `band luminance splits top and bottom halves`() {
+        // 高 6 行 = 6 带，每带 1 行：上半白、下半黑。
+        val px = IntArray(36) { i -> if (i / 6 < 3) argb(255, 255, 255) else argb(0, 0, 0) }
+        val bands = GlassPolicy.bandLuminance(px, 6, 6)
+        assertTrue(bands.take(3).all { it.mean == 1f })
+        assertTrue(bands.drop(3).all { it.mean == 0f })
+    }
+
+    @Test
+    fun `band luminance guards bad input`() {
+        val bands = GlassPolicy.bandLuminance(IntArray(0), 0, 0)
+        assertEquals(GlassPolicy.BACKDROP_BANDS, bands.size)
+        assertTrue(bands.all { it.mean == 0f })
+    }
+
+    @Test
+    fun `relative luminance and contrast ratio follow WCAG`() {
+        assertEquals(0.0, GlassPolicy.relativeLuminance(argb(0, 0, 0)), 1e-9)
+        assertEquals(1.0, GlassPolicy.relativeLuminance(argb(255, 255, 255)), 1e-9)
+        assertEquals(
+            21.0,
+            GlassPolicy.contrastRatio(1.0, 0.0),
+            1e-9
+        )
+        // 深铜金刊头在白底上必须过 4.5（亮底字色档的金色替代）。
+        val bronze = GlassPolicy.relativeLuminance(0xFF7A5F0F.toInt())
+        assertTrue(
+            "bronze on white must pass 4.5, was ${GlassPolicy.contrastRatio(bronze, 1.0)}",
+            GlassPolicy.contrastRatio(bronze, 1.0) >= 4.5
+        )
+    }
 }

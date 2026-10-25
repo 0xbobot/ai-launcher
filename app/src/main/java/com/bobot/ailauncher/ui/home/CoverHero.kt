@@ -32,7 +32,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.ui.rememberNowMillis
-import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.CoverPalette
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -61,6 +60,7 @@ fun CoverHero(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
+    accent: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
     // v0.68.101（Stage 1 热修·单宠物原则）：输入态紧凑——简报让位给胶囊
     // 堆栈（D-1：键盘上沿之上要装下胶囊+结果条），各模板收顶距/字号。
@@ -78,9 +78,9 @@ fun CoverHero(
             CoverHeroLandscape(summary, weatherDesc, palette, Modifier.fillMaxWidth())
         } else {
             when (coverTemplateFor(nowMillis)) {
-                CoverTemplate.HEADLINE -> CoverHeroHeadline(summary, weatherDesc, palette, Modifier.fillMaxWidth(), inputCompact)
-                CoverTemplate.MINIMAL -> CoverHeroMinimal(summary, weatherDesc, palette, Modifier.fillMaxWidth(), inputCompact)
-                CoverTemplate.GIANT_TIME -> CoverHeroGiantTime(summary, weatherDesc, palette, Modifier.fillMaxWidth(), inputCompact)
+                CoverTemplate.HEADLINE -> CoverHeroHeadline(summary, weatherDesc, palette, accent, Modifier.fillMaxWidth(), inputCompact)
+                CoverTemplate.MINIMAL -> CoverHeroMinimal(summary, weatherDesc, palette, accent, Modifier.fillMaxWidth(), inputCompact)
+                CoverTemplate.GIANT_TIME -> CoverHeroGiantTime(summary, weatherDesc, palette, accent, Modifier.fillMaxWidth(), inputCompact)
             }
         }
     }
@@ -91,6 +91,7 @@ fun CoverHeroGiantTime(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
+    accent: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
     inputCompact: Boolean = false
 ) {
@@ -154,7 +155,7 @@ fun CoverHeroGiantTime(
                     modifier = Modifier
                         .width(44.dp)
                         .height(3.dp)
-                        .background(AILauncherColors.current.Accent)
+                        .background(accent)
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -181,7 +182,7 @@ fun CoverHeroGiantTime(
                         text = ":",
                         fontSize = timeSize,
                         fontWeight = FontWeight.Bold,
-                        color = AILauncherColors.current.Accent,
+                        color = accent,
                         lineHeight = timeSize
                     )
                     Text(
@@ -310,6 +311,7 @@ fun CoverHeroHeadline(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
+    accent: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
     inputCompact: Boolean = false
 ) {
@@ -333,7 +335,7 @@ fun CoverHeroHeadline(
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     TrackedText(text = "TODAY · 今日简报", fontSize = 12.sp, tracking = 4.dp,
-                        color = AILauncherColors.current.Accent)
+                        color = accent)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
@@ -350,10 +352,10 @@ fun CoverHeroHeadline(
             Box(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     TrackedText(text = "TODAY · 今日简报", fontSize = 12.sp, tracking = 4.dp,
-                        color = AILauncherColors.current.Accent)
+                        color = accent)
                     Spacer(modifier = Modifier.height(12.dp))
                     Box(modifier = Modifier.width(44.dp).height(3.dp)
-                        .background(AILauncherColors.current.Accent))
+                        .background(accent))
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
@@ -384,6 +386,7 @@ fun CoverHeroMinimal(
     summary: String,
     weatherDesc: String,
     palette: CoverPalette,
+    accent: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
     inputCompact: Boolean = false
 ) {
@@ -411,7 +414,7 @@ fun CoverHeroMinimal(
                     fontWeight = FontWeight.Bold, letterSpacing = (-2).sp,
                     color = palette.title, lineHeight = timeSize)
                 Text(text = ":", fontSize = timeSize, fontWeight = FontWeight.Bold,
-                    color = AILauncherColors.current.Accent, lineHeight = timeSize)
+                    color = accent, lineHeight = timeSize)
                 Text(text = parts.getOrElse(1) { "--" }, fontSize = timeSize,
                     fontWeight = FontWeight.Bold, letterSpacing = (-2).sp,
                     color = palette.title, lineHeight = timeSize)
@@ -419,7 +422,7 @@ fun CoverHeroMinimal(
             Spacer(modifier = Modifier.height(20.dp))
             // 金线（居中短线）
             Box(modifier = Modifier.width(32.dp).height(2.dp)
-                .background(AILauncherColors.current.Accent))
+                .background(accent))
             Spacer(modifier = Modifier.height(20.dp))
             // 一行简报（单行省略——MINIMAL 只给锚点，不展开）
             Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
@@ -512,6 +515,7 @@ fun CoverHeroLandscape(
 fun BriefMeetingRow(
     event: CalEvent,
     palette: CoverPalette,
+    accent: androidx.compose.ui.graphics.Color,
     onJoin: (CalEvent) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -545,7 +549,7 @@ fun BriefMeetingRow(
                     text = "接下来 · $timeText",
                     fontSize = 12.sp,
                     tracking = 3.dp,
-                    color = AILauncherColors.current.Accent
+                    color = accent
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
@@ -563,14 +567,14 @@ fun BriefMeetingRow(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(99.dp))
-                    .background(AILauncherColors.current.Accent.copy(alpha = 0.16f))
+                    .background(accent.copy(alpha = 0.16f))
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text(
                     text = "加入",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.current.Accent
+                    color = accent
                 )
             }
         }

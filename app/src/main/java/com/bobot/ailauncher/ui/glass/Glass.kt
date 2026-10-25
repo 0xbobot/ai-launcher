@@ -81,6 +81,16 @@ class GlassBackdropState internal constructor() {
      */
     var backdropBands by mutableStateOf<List<BackdropKind>>(listOf(BackdropKind.FLAT))
 
+    /**
+     * 背景的水平带亮度（线性光 0..1，与 backdropBands 同批缩略图、同带划分，
+     * 见 GlassPolicy.bandLuminance）：简报自适应字色只看顶部若干带。
+     * 空 = 尚未加载成功（动态壁纸／读取失败），调用方一律回退 347 纱。
+     */
+    var backdropLuminance by mutableStateOf<List<GlassPolicy.BandLuminance>>(emptyList())
+
+    /** 壁纸重采样 tick：壁纸变化监听回调时 +1，SystemWallpaperLayer 据此重载。 */
+    var wallpaperTick by mutableIntStateOf(0)
+
     /** 整图概览（无位置信息时的兜底）：任一带为照片即按照片对待。 */
     val backdropKind: BackdropKind get() = GlassPolicy.overallKind(backdropBands)
 

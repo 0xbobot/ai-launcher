@@ -20,6 +20,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -47,6 +50,7 @@ import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.core.pet.PetState
 import com.bobot.ailauncher.data.PetRepository
+import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
 import com.bobot.ailauncher.ui.home.BriefMeetingRow
 import com.bobot.ailauncher.ui.home.CoverHero
 import com.bobot.ailauncher.ui.rememberNowMillis
@@ -253,6 +257,56 @@ fun PetZone(
         coverPaletteFor(coverHour, coverIsDark)
     }
 
+    // 简报自适应字色（Bob 2026-10-25 21:17 拍板：自适应字色、去纱）：
+    // 简报区不再靠罩纱保可读性，改靠字色自适应——纱平时不可见（淡出），
+    // 只在对比度不够／读不到壁纸时回退 347 纱（淡入），边缘问题从根上消失。
+    // 亮度只看简报区那一带：玻璃层已读的 48×48 缩略图顶部带（与 PetZone
+    // 本身高度对应的带数），不用整张壁纸平均；与时间段配色（CoverPalette）
+    // 的关系：本处只覆盖传给 CoverHero／BriefMeetingRow 的 palette，简报区
+    // 字色以壁纸亮度为准，其他区域的时间段配色不动；intentSlot 与 Dock
+    // 不经过本处，一律不动。
+    val glassState = LocalGlassBackdrop.current
+    var briefingColumnHPx by remember { mutableIntStateOf(0) }
+    val briefingBackdropHPx = glassState?.backdropHeightPx ?: 0
+    val briefingZoneFraction =
+        if (briefingBackdropHPx > 0 && briefingColumnHPx > 0)
+            (briefingColumnHPx.toFloat() / briefingBackdropHPx).coerceIn(0f, 1f) else 0f
+    val briefingZoneBands = remember(glassState?.backdropLuminance, briefingZoneFraction) {
+        BriefingAdaptiveText.bandsForZone(
+            glassState?.backdropLuminance ?: emptyList(), briefingZoneFraction
+        )
+    }
+    var briefingPrevDecision by remember { mutableStateOf<BriefingTextMode?>(null) }
+    val briefingDecision = remember(briefingZoneBands, briefingPrevDecision) {
+        BriefingAdaptiveText.decide(briefingZoneBands, briefingPrevDecision)
+    }
+    LaunchedEffect(briefingDecision) { briefingPrevDecision = briefingDecision }
+    val briefingScrimFallback = briefingDecision == BriefingTextMode.FALLBACK_SCRIM
+    // 纱淡入淡出：决策翻转时不硬切（首帧壁纸加载完成、换壁纸时各一次），300ms 过渡。
+    val briefingScrimAlpha by animateFloatAsState(
+        targetValue = if (briefingScrimFallback) 1f else 0f,
+        animationSpec = tween(300), label = "briefingScrim"
+    )
+    val briefingPalette = when (briefingDecision) {
+        BriefingTextMode.DARK_TEXT -> coverPalette.copy(
+            title = Color(BriefingAdaptiveText.DARK_TITLE_ARGB),
+            body = Color(BriefingAdaptiveText.DARK_BODY_ARGB),
+            divider = Color(BriefingAdaptiveText.DARK_DIVIDER_ARGB)
+        )
+        BriefingTextMode.LIGHT_TEXT -> coverPalette.copy(
+            title = Color(BriefingAdaptiveText.LIGHT_TITLE_ARGB),
+            body = Color(BriefingAdaptiveText.LIGHT_BODY_ARGB),
+            divider = Color(BriefingAdaptiveText.LIGHT_DIVIDER_ARGB)
+        )
+        BriefingTextMode.FALLBACK_SCRIM -> coverPalette
+    }
+    // 刊头金：亮底上原金色对比不足，切深铜金保品牌感；暗底与回退态沿用现行金。
+    val briefingAccent = when (briefingDecision) {
+        BriefingTextMode.DARK_TEXT -> Color(BriefingAdaptiveText.DARK_ACCENT_ARGB)
+        BriefingTextMode.LIGHT_TEXT -> Color(BriefingAdaptiveText.LIGHT_ACCENT_ARGB)
+        BriefingTextMode.FALLBACK_SCRIM -> AILauncherColors.current.Accent
+    }
+
     // v0.68.44（Bob）：封面模式——杂志 hero + 紧凑条；TodaySection 只跑数据不上 UI
     // v0.68.45：恢复点七仔快捷面板（Bob：快捷服务别删）；无会议时紧凑条隐藏（Bob：别和 hero 重复）
     // v0.68.47：装备环包进宠物槽位、以宠物为中心（Bob：散落不优雅）
@@ -322,7 +376,11 @@ fun PetZone(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .onGloballyPositioned { briefingColumnHPx = it.size.height }
                 .drawBehind {
+                    // 自适应字色激活时纱不画（淡出到 0 后直接跳过绘制）；回退态
+                    // 画 347 渐变（淡入）。alpha 乘在每个色标上，动画期间逐帧重绘。
+                    if (briefingScrimAlpha <= 0f) return@drawBehind
                     // smoothstep：两端斜率为零，平台↔缓动、缓动↔0 的接头处
                     // 无斜率突变，故无 Mach 带；分段线性直接拼是旧曲线的病根。
                     fun smooth(t: Float): Float = t * t * (3f - 2f * t)
@@ -336,14 +394,14 @@ fun PetZone(
                             scrimColor.copy(alpha = alpha)
                     val riseEnd = 0.55f * columnH
                     val stops = buildList {
-                        add(0f to scrimColor.copy(alpha = 0.22f))
+                        add(0f to scrimColor.copy(alpha = 0.22f * briefingScrimAlpha))
                         // 上升段：0.22→0.46，smoothstep 采样（端点与旧值一致）。
                         for (t in listOf(0.25f, 0.5f, 0.75f)) {
-                            add(stopAt(t * riseEnd, 0.22f + 0.24f * smooth(t)))
+                            add(stopAt(t * riseEnd, (0.22f + 0.24f * smooth(t)) * briefingScrimAlpha))
                         }
                         // 平台期：盖住全部简报文字＋26dp 尾巴，浓度与旧值一致。
-                        add(stopAt(riseEnd, 0.46f))
-                        add(stopAt(columnH, 0.46f))
+                        add(stopAt(riseEnd, 0.46f * briefingScrimAlpha))
+                        add(stopAt(columnH, 0.46f * briefingScrimAlpha))
                         // 收尾段：内容下方空壁纸区，0.46→0，smoothstep 采样、
                         // 精确归零；问候语已不在过渡带内。
                         for (t in listOf(
@@ -353,7 +411,7 @@ fun PetZone(
                             add(
                                 stopAt(
                                     columnH + t * veilTailPx,
-                                    0.46f * (1f - smooth(t))
+                                    0.46f * (1f - smooth(t)) * briefingScrimAlpha
                                 )
                             )
                         }
@@ -383,7 +441,8 @@ fun PetZone(
             CoverHero(
                 summary = coverSummary,
                 weatherDesc = weatherDesc ?: "",
-                palette = coverPalette,
+                palette = briefingPalette,
+                accent = briefingAccent,
                 inputCompact = inputActive
             )
         }
@@ -404,7 +463,8 @@ fun PetZone(
             Spacer(modifier = Modifier.height(14.dp))
             BriefMeetingRow(
                 event = coverNextEvent!!,
-                palette = coverPalette,
+                palette = briefingPalette,
+                accent = briefingAccent,
                 onJoin = { e -> joinMeeting(e) },
                 modifier = Modifier.fillMaxWidth(coverLeftFrac)
             )

@@ -4,9 +4,12 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,17 +33,44 @@ import kotlinx.coroutines.withContext
  * 系统壁纸照常透出，背景分类保持 FLAT（轻霜档），玻璃降级但不破相。
  * 位图按屏幕尺寸中心裁剪绘制，近似系统壁纸的呈现方式。
  */
+/** 系统壁纸一次加载的全部产物：位图（玻璃内绘）＋带分类（玻璃档位）＋带亮度（简报自适应字色）。 */
+internal data class LoadedWallpaper(
+    val bitmap: Bitmap,
+    val kinds: List<BackdropKind>,
+    val luminance: List<GlassPolicy.BandLuminance>,
+)
+
 @Composable
 internal fun SystemWallpaperLayer(state: GlassBackdropState, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(Unit) {
+    // 壁纸更换跟上（简报自适应字色用）：系统壁纸颜色变化时 bump tick 触发重载。
+    // API 27+（minSdk 29 可用）；回调走主线程 Handler，状态写安全。只跟系统壁纸，
+    // 锁屏壁纸变化不触发（FLAG_SYSTEM 过滤）。
+    DisposableEffect(context) {
+        val wm = runCatching { WallpaperManager.getInstance(context) }.getOrNull()
+        val listener = WallpaperManager.OnColorsChangedListener { _, which ->
+            if (which and WallpaperManager.FLAG_SYSTEM != 0) state.wallpaperTick++
+        }
+        runCatching {
+            wm?.addOnColorsChangedListener(listener, Handler(Looper.getMainLooper()))
+        }
+        onDispose {
+            runCatching { wm?.removeOnColorsChangedListener(listener) }
+        }
+    }
+    LaunchedEffect(state.wallpaperTick) {
         val loaded = withContext(Dispatchers.IO) {
             runCatching { loadSystemWallpaper(context) }.getOrNull()
         }
         if (loaded != null) {
-            bitmap = loaded.first
-            state.backdropBands = loaded.second
+            bitmap = loaded.bitmap
+            state.backdropBands = loaded.kinds
+            state.backdropLuminance = loaded.luminance
+        } else {
+            // 读不到（动态壁纸 getDrawable 返回 null、个别厂商限制、异常）：
+            // 亮度清空 → 简报回退 347 纱；玻璃旧位图保持既有降级行为（不破相）。
+            state.backdropLuminance = emptyList()
         }
     }
     val bmp = bitmap ?: return
@@ -52,7 +82,7 @@ internal fun SystemWallpaperLayer(state: GlassBackdropState, modifier: Modifier 
     )
 }
 
-private fun loadSystemWallpaper(context: Context): Pair<Bitmap, List<BackdropKind>>? {
+private fun loadSystemWallpaper(context: Context): LoadedWallpaper? {
     val wm = WallpaperManager.getInstance(context) ?: return null
     val drawable = runCatching { wm.drawable }.getOrNull() ?: return null
     val dm = context.resources.displayMetrics
@@ -78,5 +108,10 @@ private fun loadSystemWallpaper(context: Context): Pair<Bitmap, List<BackdropKin
     val small = Bitmap.createScaledBitmap(bmp, thumb, thumb, true)
     val pixels = IntArray(thumb * thumb)
     small.getPixels(pixels, 0, thumb, 0, 0, thumb, thumb)
-    return bmp to GlassPolicy.classifyBands(pixels, thumb, thumb)
+    // 带分类与带亮度同批缩略图、同带划分，两份数据一一对应；简报只取顶部带。
+    return LoadedWallpaper(
+        bitmap = bmp,
+        kinds = GlassPolicy.classifyBands(pixels, thumb, thumb),
+        luminance = GlassPolicy.bandLuminance(pixels, thumb, thumb),
+    )
 }

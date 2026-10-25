@@ -308,4 +308,61 @@ object GlassPolicy {
         val idx = (fraction.coerceIn(0f, 0.999f) * bands.size).toInt()
         return bands[idx.coerceIn(0, bands.size - 1)]
     }
+
+    /**
+     * 单带亮度（线性光 0..1）：均值 + 标准差，供简报自适应字色决策。
+     * 注意与 [luminanceOf] 区分：后者是 gamma 编码加权和（玻璃分类用），
+     * 线性光才能算 WCAG 对比度——gamma 值会扭曲中段对比，不可混用。
+     * 与 [classifyBands] 同批缩略图、同带划分，两份带数据一一对应。
+     */
+    data class BandLuminance(val mean: Float, val stdDev: Float)
+
+    fun bandLuminance(pixels: IntArray, width: Int, height: Int): List<BandLuminance> {
+        if (width < 1 || height < 1 || pixels.size < width * height) {
+            return List(BACKDROP_BANDS) { BandLuminance(0f, 0f) }
+        }
+        return (0 until BACKDROP_BANDS).map { band ->
+            val y0 = band * height / BACKDROP_BANDS
+            val y1 = (band + 1) * height / BACKDROP_BANDS
+            var sum = 0.0
+            var sumSq = 0.0
+            var n = 0L
+            for (y in y0 until y1) {
+                val rowOff = y * width
+                for (x in 0 until width) {
+                    val lum = relativeLuminance(pixels[rowOff + x])
+                    sum += lum
+                    sumSq += lum * lum
+                    n++
+                }
+            }
+            if (n == 0L) {
+                BandLuminance(0f, 0f)
+            } else {
+                val mean = sum / n
+                val variance = (sumSq / n - mean * mean).coerceAtLeast(0.0)
+                BandLuminance(mean.toFloat(), kotlin.math.sqrt(variance).toFloat())
+            }
+        }
+    }
+
+    /** sRGB 通道 → 线性光（WCAG 相对亮度定义）。 */
+    private fun linearChannel(c: Int): Double {
+        val s = c / 255.0
+        return if (s <= 0.04045) s / 12.92 else Math.pow((s + 0.055) / 1.055, 2.4)
+    }
+
+    /** WCAG 相对亮度（线性光 0..1）：0xFF000000 → 0，0xFFFFFFFF → 1。 */
+    fun relativeLuminance(px: Int): Double {
+        val r = linearChannel((px shr 16) and 0xFF)
+        val g = linearChannel((px shr 8) and 0xFF)
+        val b = linearChannel(px and 0xFF)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+
+    /** WCAG 对比度：(亮方 + 0.05) / (暗方 + 0.05)，黑白 = 21。 */
+    fun contrastRatio(lumA: Double, lumB: Double): Double {
+        val (hi, lo) = if (lumA >= lumB) lumA to lumB else lumB to lumA
+        return (hi + 0.05) / (lo + 0.05)
+    }
 }
