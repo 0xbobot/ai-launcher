@@ -16,6 +16,9 @@ class AliveLogicTest {
         assertEquals(GazeOffset(0f, 0f), gazeOffsetFor(GazeTarget.CENTER))
         assertEquals(GazeOffset(1f, 0f), gazeOffsetFor(GazeTarget.INPUT))
         assertEquals(GazeOffset(0f, 1f), gazeOffsetFor(GazeTarget.DOCK))
+        // 肩线弹性：Dock 图标点按注视左右方位（纯水平，无上下分量）
+        assertEquals(GazeOffset(-1f, 0f), gazeOffsetFor(GazeTarget.DOCK_LEFT))
+        assertEquals(GazeOffset(1f, 0f), gazeOffsetFor(GazeTarget.DOCK_RIGHT))
         // 上方目标 y 为负（屏幕坐标下正），且带水平分量以区分两者
         assertTrue(gazeOffsetFor(GazeTarget.TODAY_CARD).y < 0f)
         assertTrue(gazeOffsetFor(GazeTarget.WEATHER_SCENE).y < 0f)

@@ -30,7 +30,7 @@ enum class PetMouth { IDLE, HAPPY, BUSY, O }
  * alive-p1：注视目标（语义方向，非屏幕坐标；映射见 ui.pet.gazeOffsetFor）。
  * CENTER 为正前方；其余为七仔「在看的东西」。
  */
-enum class GazeTarget { CENTER, TODAY_CARD, INPUT, WEATHER_SCENE, DOCK }
+enum class GazeTarget { CENTER, TODAY_CARD, INPUT, WEATHER_SCENE, DOCK, DOCK_LEFT, DOCK_RIGHT }
 
 /**
  * 宠物整理员状态机（单例）。

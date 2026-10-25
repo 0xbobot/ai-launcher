@@ -23,6 +23,9 @@ fun gazeOffsetFor(target: GazeTarget): GazeOffset = when (target) {
     GazeTarget.TODAY_CARD -> GazeOffset(-0.3f, -1f)
     GazeTarget.WEATHER_SCENE -> GazeOffset(0.3f, -1f)
     GazeTarget.DOCK -> GazeOffset(0f, 1f)
+    // 肩线弹性（2026-10-25）：Dock 图标点按时注视转向被点图标方位。
+    GazeTarget.DOCK_LEFT -> GazeOffset(-1f, 0f)
+    GazeTarget.DOCK_RIGHT -> GazeOffset(1f, 0f)
 }
 
 /** 巡看游离落点池：只从桌面语义点里选，不再纯随机坐标。 */

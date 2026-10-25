@@ -18,6 +18,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.slideOut
 import androidx.compose.animation.slideOutVertically
@@ -58,15 +60,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -86,6 +92,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import com.bobot.ailauncher.ui.pet.HybridPet
 import com.bobot.ailauncher.data.AppCatalog
+import com.bobot.ailauncher.data.GazeTarget
+import com.bobot.ailauncher.data.PetRepository
+import kotlinx.coroutines.launch
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.InstalledApps
@@ -131,6 +140,8 @@ private class DockShoulderShape(
     private val chordDp: Dp,
     private val riseDp: Dp,
     private val cornerDp: Dp,
+    // 肩线弹性（2026-10-25）：峰值隆起量，默认 0 即 339 静止形态。
+    private val peakDp: Dp = 0.dp,
 ) : Shape {
     override fun createOutline(
         size: Size,
@@ -140,16 +151,65 @@ private class DockShoulderShape(
         val chord = with(density) { chordDp.toPx() }
         val rise = with(density) { riseDp.toPx() }
         val corner = with(density) { cornerDp.toPx() }
-        return Outline.Generic(dockShoulderPath(size, chord, rise, corner))
+        val peak = with(density) { peakDp.toPx() }
+        return Outline.Generic(dockShoulderPath(size, chord, rise, corner, peak))
     }
 }
 
-/** 圆肩轮廓 Path（布局坐标：原点在布局左上，y 向下；肩峰在 y=-rise）。 */
+/**
+ * 肩线拱 Path（从 (x0, yBase) 到 (x1, yBase)，峰顶在 yBase - rise）。
+ * peak=0 时与 339 两段 cubicTo 一字不动；peak≠0 时在两段三次贝塞尔
+ * 采样点上叠加余弦衰减隆起（弦端 0、峰顶 1），两端锚定不动——
+ * 皮筋式隆起，不是整条线平移。
+ */
+private fun shoulderArchPath(
+    x0: Float,
+    x1: Float,
+    cx: Float,
+    k: Float,
+    risePx: Float,
+    peakPx: Float,
+    yBase: Float,
+): Path {
+    return Path().apply {
+        if (peakPx == 0f) {
+            moveTo(x0, yBase)
+            cubicTo(x0 + k, yBase, cx - k, yBase - risePx, cx, yBase - risePx)
+            cubicTo(cx + k, yBase - risePx, x1 - k, yBase, x1, yBase)
+        } else {
+            val steps = 24
+            fun cubicPoint(t: Float, p0: Float, p1: Float, p2: Float, p3: Float): Float {
+                val u = 1f - t
+                return u * u * u * p0 + 3f * u * u * t * p1 + 3f * u * t * t * p2 + t * t * t * p3
+            }
+            moveTo(x0, yBase)
+            for (i in 1..steps) {
+                val t = i.toFloat() / steps
+                val fall = 0.5f - 0.5f * kotlin.math.cos(Math.PI.toFloat() * t)
+                lineTo(
+                    cubicPoint(t, x0, x0 + k, cx - k, cx),
+                    cubicPoint(t, yBase, yBase, yBase - risePx, yBase - risePx) - peakPx * fall
+                )
+            }
+            for (i in 1..steps) {
+                val t = i.toFloat() / steps
+                val fall = 0.5f + 0.5f * kotlin.math.cos(Math.PI.toFloat() * t)
+                lineTo(
+                    cubicPoint(t, cx, cx + k, x1 - k, x1),
+                    cubicPoint(t, yBase - risePx, yBase - risePx, yBase, yBase) - peakPx * fall
+                )
+            }
+        }
+    }
+}
+
+/** 圆肩轮廓 Path（布局坐标：原点在布局左上，y 向下；肩峰在 y=-rise-peak）。 */
 private fun dockShoulderPath(
     size: Size,
     chordPx: Float,
     risePx: Float,
     cornerPx: Float,
+    peakPx: Float = 0f,
 ): Path {
     val w = size.width
     val h = size.height
@@ -164,8 +224,7 @@ private fun dockShoulderPath(
         lineTo(0f, cornerPx)
         quadraticTo(0f, 0f, cornerPx, 0f)
         lineTo(x0, 0f)
-        cubicTo(x0 + k, 0f, cx - k, -risePx, cx, -risePx)
-        cubicTo(cx + k, -risePx, x1 - k, 0f, x1, 0f)
+        addPath(shoulderArchPath(x0, x1, cx, k, risePx, peakPx, 0f))
         lineTo(w - cornerPx, 0f)
         quadraticTo(w, 0f, w, cornerPx)
         lineTo(w, h - cornerPx)
@@ -180,36 +239,36 @@ private fun dockShoulderPath(
  * Dock 圆肩材质 dressing（玻璃之上、图标之下，链上游 clip 已把
  * 绘制截在圆肩轮廓内）：
  * ① 沿肩线内侧 3dp 的弧形高光：宽 14dp 淡 + 窄 5dp 亮两道描边
- *    叠出柔边，水平渐变左上最亮向右渐隐；
- * ② 暖白径向内晕：中心在面板顶部偏上（宠物正下方），呼应宠物
- *    球体的内发光暖核。
+ *    叠出柔边；光方向与宠物同源（右上）：水平渐变右亮左隐
+ *    （旧左亮方向已作废，2026-10-25 纠正）；
+ * ② 暖白径向内晕：中心偏右上（x 右移 7% 宽、y 上移），呼应宠物
+ *    球体的内发光暖核，并叠加右侧增亮。
+ * 高光拱跟随肩线弹性形变（与轮廓同一拱函数）。
  */
 private fun Modifier.dockShoulderDressing(
     chordDp: Dp,
     riseDp: Dp,
     cornerDp: Dp,
+    peakDp: Dp = 0.dp,
 ): Modifier = drawBehind {
     val chord = chordDp.toPx()
     val rise = riseDp.toPx()
     val corner = cornerDp.toPx()
+    val peak = peakDp.toPx()
     val cx = size.width / 2f
     val half = (chord / 2f).coerceAtMost((size.width / 2f - corner).coerceAtLeast(0f))
     val x0 = cx - half
     val x1 = cx + half
     val k = half * 0.5f
-    // 肩线内侧 3dp 的拱（与轮廓肩线同形、下移 3dp）。
+    // 肩线内侧 3dp 的拱（与轮廓肩线同形、下移 3dp，含弹性峰值）。
     val yBase = 3.dp.toPx()
-    val arch = Path().apply {
-        moveTo(x0, yBase)
-        cubicTo(x0 + k, yBase, cx - k, yBase - rise, cx, yBase - rise)
-        cubicTo(cx + k, yBase - rise, x1 - k, yBase, x1, yBase)
-    }
+    val arch = shoulderArchPath(x0, x1, cx, k, rise, peak, yBase)
     drawPath(
         path = arch,
         brush = Brush.horizontalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.10f),
                 Color.White.copy(alpha = 0.0f),
+                Color.White.copy(alpha = 0.10f),
             ),
             startX = x0,
             endX = x1,
@@ -220,8 +279,8 @@ private fun Modifier.dockShoulderDressing(
         path = arch,
         brush = Brush.horizontalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.32f),
                 Color.White.copy(alpha = 0.0f),
+                Color.White.copy(alpha = 0.32f),
             ),
             startX = x0,
             endX = x1,
@@ -234,8 +293,19 @@ private fun Modifier.dockShoulderDressing(
                 Color(0xFFFFF6E8).copy(alpha = 0.38f),
                 Color(0xFFFFF6E8).copy(alpha = 0.0f),
             ),
-            center = Offset(cx, 0f),
+            center = Offset(cx + size.width * 0.07f, -size.height * 0.05f),
             radius = size.width * 0.5f,
+        ),
+    )
+    // 右侧增亮：与宠物右上光源同向的暖白横向渐变。
+    drawRect(
+        brush = Brush.horizontalGradient(
+            colors = listOf(
+                Color(0xFFFFF6E8).copy(alpha = 0.0f),
+                Color(0xFFFFF6E8).copy(alpha = 0.10f),
+            ),
+            startX = size.width * 0.4f,
+            endX = size.width,
         ),
     )
 }
@@ -293,9 +363,43 @@ fun PullUpDock(
     }
     val top4 = remember(top10) { top10.take(4) }
 
+    // 肩线弹性（2026-10-25，Bob 拍板）：仅 Dock 图标点按触发。
+    // 峰值动画单位 dp：0 静止 → 7 峰值 → -1 落回过冲 → 0。
+    val shoulderScope = rememberCoroutineScope()
+    val shoulderPeakAnim = remember { Animatable(0f) }
+    val shoulderPeakDp by shoulderPeakAnim.asState()
+    // 涟漪与注视定位：图标窗口中心（包名 → Offset）与面板窗口原点/宽。
+    val dockIconCenters = remember { mutableStateMapOf<String, Offset>() }
+    var dockPanelOrigin by remember { mutableStateOf(Offset.Zero) }
+    var dockPanelWidthPx by remember { mutableFloatStateOf(0f) }
+    var rippleCenter by remember { mutableStateOf<Offset?>(null) }
+    val rippleAnim = remember { Animatable(0f) }
+
     fun launchApp(app: AppInfo) {
         AppUsageTracker.recordLaunch(context, app.packageName)
         usageTick++
+        // 肩线弹性三联（fire-and-forget，不阻塞应用启动）：
+        // ① 肩线峰值动画；② 注视转向被点图标方位；③ 图标中心涟漪。
+        val iconCenter = dockIconCenters[app.packageName]
+        if (iconCenter != null && dockPanelWidthPx > 0f) {
+            val panelCenterX = dockPanelOrigin.x + dockPanelWidthPx / 2f
+            val dx = iconCenter.x - panelCenterX
+            val sideThreshold = with(density) { 8.dp.toPx() }
+            if (dx < -sideThreshold) PetRepository.glance(GazeTarget.DOCK_LEFT)
+            else if (dx > sideThreshold) PetRepository.glance(GazeTarget.DOCK_RIGHT)
+            rippleCenter = iconCenter - dockPanelOrigin
+            shoulderScope.launch {
+                rippleAnim.snapTo(0f)
+                rippleAnim.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+            }
+        }
+        shoulderScope.launch {
+            shoulderPeakAnim.animateTo(
+                7f, tween(250, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f))
+            )
+            shoulderPeakAnim.animateTo(-1f, tween(150, easing = FastOutSlowInEasing))
+            shoulderPeakAnim.animateTo(0f, tween(150, easing = FastOutSlowInEasing))
+        }
         try {
             val intent = context.packageManager
                 .getLaunchIntentForPackage(app.packageName)
@@ -421,17 +525,18 @@ fun PullUpDock(
                 // 圆肩轮廓（弦长 = 宠物宽 + 两侧各 25dp）；shape 只影响
                 // 绘制（clip / 玻璃 / 高光 / 内晕），不改变布局尺寸，故
                 // dockPanelHeight 回写不会引起布局循环。
-                val shoulderShape = remember(dockPanelHeight, seatCompact) {
+                val shoulderShape = remember(dockPanelHeight, seatCompact, shoulderPeakDp) {
                     DockShoulderShape(
                         chordDp = floatPetWidth + 50.dp,
                         riseDp = shoulderRise,
                         cornerDp = 28.dp,
+                        peakDp = shoulderPeakDp.dp,
                     )
                 }
                 Box(
                     modifier = Modifier
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                        .height(dockPanelHeight + floatPetHeight + shoulderRise - petPress)
+                        .height(dockPanelHeight + floatPetHeight + shoulderRise - petPress + shoulderPeakDp.dp)
                 ) {
                 Column(
                     modifier = Modifier
@@ -448,6 +553,8 @@ fun PullUpDock(
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .onGloballyPositioned { coords ->
                             with(density) { dockPanelHeight = coords.size.height.toDp() }
+                            dockPanelOrigin = coords.positionInWindow()
+                            dockPanelWidthPx = coords.size.width.toFloat()
                         }
                         .clip(shoulderShape)
                         // 玻璃试点批：Dock 强玻璃（AGSL 折射+模糊增色，只换材质不改尺寸/位置）。
@@ -466,8 +573,23 @@ fun PullUpDock(
                         .dockShoulderDressing(
                             chordDp = floatPetWidth + 50.dp,
                             riseDp = shoulderRise,
-                            cornerDp = 28.dp
+                            cornerDp = 28.dp,
+                            peakDp = shoulderPeakDp.dp
                         )
+                        // 肩线弹性：图标中心涟漪（内容之上、细白圈、不盖字形）。
+                        .drawWithContent {
+                            drawContent()
+                            val c = rippleCenter
+                            val p = rippleAnim.value
+                            if (c != null && p > 0f && p < 1f) {
+                                drawCircle(
+                                    color = Color.White.copy(alpha = 0.75f * (1f - p)),
+                                    radius = 40.dp.toPx() * p,
+                                    center = c,
+                                    style = Stroke(width = 1.5.dp.toPx())
+                                )
+                            }
+                        }
                         .combinedClickable(
                             interactionSource = dockPressSource,
                             indication = null,  // 用背景显隐做反馈，不要水波纹
@@ -568,7 +690,8 @@ fun PullUpDock(
                                 menuApp = popupApp,
                                 onLongPress = { popupApp = it },
                                 onDismissMenu = { popupApp = null },
-                                isLandscape = isLandscapeDock
+                                isLandscape = isLandscapeDock,
+                                onIconPositioned = { pkg, center -> dockIconCenters[pkg] = center }
                             )
                         } else {
                             DockRow4(
@@ -577,7 +700,8 @@ fun PullUpDock(
                                 menuApp = popupApp,
                                 onLongPress = { popupApp = it },
                                 onDismissMenu = { popupApp = null },
-                                isLandscape = isLandscapeDock
+                                isLandscape = isLandscapeDock,
+                                onIconPositioned = { pkg, center -> dockIconCenters[pkg] = center }
                             )
                         }
                         }
@@ -594,7 +718,7 @@ fun PullUpDock(
                         onPetTap = onPetCellTap,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .offset(y = -(dockPanelHeight + shoulderRise - petPress))
+                            .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress))
                             .testTag("dock_pet_cell")
                     )
                 }
@@ -684,7 +808,9 @@ private fun DockRow4(
     menuApp: AppInfo?,
     onLongPress: (AppInfo) -> Unit,
     onDismissMenu: () -> Unit,
-    isLandscape: Boolean = false
+    isLandscape: Boolean = false,
+    // 肩线弹性：上报图标窗口中心（供涟漪中心与注视方位计算）
+    onIconPositioned: (String, Offset) -> Unit = { _, _ -> }
 ) {
     // v0.68.82（第 3 项）：横屏改回横向（同竖屏），不再竖排
     BoxWithConstraints(
@@ -709,7 +835,8 @@ private fun DockRow4(
                     menuApp = menuApp,
                     onLaunch = onLaunch,
                     onLongPress = onLongPress,
-                    onDismissMenu = onDismissMenu
+                    onDismissMenu = onDismissMenu,
+                    onIconPositioned = onIconPositioned
                 )
             }
         }
@@ -724,7 +851,9 @@ private fun DockGrid10(
     menuApp: AppInfo?,
     onLongPress: (AppInfo) -> Unit,
     onDismissMenu: () -> Unit,
-    isLandscape: Boolean = false
+    isLandscape: Boolean = false,
+    // 肩线弹性：上报图标窗口中心（供涟漪中心与注视方位计算）
+    onIconPositioned: (String, Offset) -> Unit = { _, _ -> }
 ) {
     // v0.68.82（第 3 项）：横屏改回横向 5 列（同竖屏），不再 2 列竖排
     val cols = 5
@@ -752,7 +881,8 @@ private fun DockGrid10(
                             menuApp = menuApp,
                             onLaunch = onLaunch,
                             onLongPress = onLongPress,
-                            onDismissMenu = onDismissMenu
+                            onDismissMenu = onDismissMenu,
+                            onIconPositioned = onIconPositioned
                         )
                     }
                 }
@@ -775,10 +905,22 @@ private fun DockIconButton(
     onLaunch: (AppInfo) -> Unit,
     onLongPress: (AppInfo) -> Unit,
     onDismissMenu: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // 肩线弹性：上报图标窗口中心（供涟漪中心与注视方位计算）
+    onIconPositioned: (String, Offset) -> Unit = { _, _ -> }
 ) {
     val hapticView = LocalView.current
-    Box(modifier = modifier) {
+    Box(modifier = modifier
+        .onGloballyPositioned { coords ->
+            onIconPositioned(
+                app.packageName,
+                coords.positionInWindow() + Offset(
+                    coords.size.width / 2f,
+                    coords.size.height / 2f
+                )
+            )
+        }
+    ) {
         AppIconImage(
             drawable = app.icon,
             contentDescription = app.label.toString(),
