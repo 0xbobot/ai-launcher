@@ -28,6 +28,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.LayoutDirection
@@ -527,6 +528,12 @@ private fun HomeHost(
                 },
                 visible = pickerActive,
                 // 横屏刘海避让（见 HomeHost 根部注释）：横屏容器跟随高 + 右侧让位 + 底距 16dp；竖屏不动。
+                // 字母导航精修（Bob 2026-10-25）：与应用中心同一套字——14sp/16sp 行高/1.0/Normal，
+                // 不再走 12sp/0.6 旧默认值，三条导航观感统一。
+                letterFontSize = 14.sp,
+                letterLineHeight = 16.sp,
+                letterAlpha = 1f,
+                letterFontWeight = FontWeight.Normal,
                 railHeight = if (isLandscapePicker) null else 400.dp,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)

@@ -693,7 +693,7 @@ fun AppCenterLandscape(
                 letterFontSize = 14.sp,
                 letterLineHeight = 16.sp,
                 letterAlpha = 1f,
-                letterFontWeight = FontWeight.Medium,
+                letterFontWeight = FontWeight.Normal,
                 modifier = Modifier
                     .width(56.dp)
                     .fillMaxHeight()

@@ -1576,7 +1576,7 @@ fun AppCenterContent(
                     letterFontSize = 14.sp,
                     letterLineHeight = 16.sp,
                     letterAlpha = 1f,
-                    letterFontWeight = FontWeight.Medium,
+                    letterFontWeight = FontWeight.Normal,
                     railWidth = 48.dp,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)

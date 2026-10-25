@@ -56,7 +56,6 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.theme.AILauncherColors
-import com.bobot.ailauncher.ui.theme.MotionTokens
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import kotlin.math.PI
 import kotlin.math.cos
@@ -229,11 +228,13 @@ internal fun WaveRail(
 
         // 波浪避让：拖动时整体往拇指反方向偏移
         // v0.40.2：更轻盈——加硬弹簧、减少晃悠，波浪更跟手
+        // 字母导航精修（Bob 2026-10-25）：高硬度＋阻尼 0.7 轻欠阻尼——滑动与松手
+        // 回位时各一次轻微回弹再稳住，不晃个不停；减动态仍走 tween(0)
         val waveShiftX by animateFloatAsState(
             targetValue = if (displayIndex >= 0) dirSign * shiftPx else 0f,
             animationSpec = if (reduceMotion) tween(0) else spring(
-                stiffness = Spring.StiffnessMedium,
-                dampingRatio = 0.9f
+                stiffness = Spring.StiffnessHigh,
+                dampingRatio = 0.7f
             ),
             label = "waveShift"
         )
@@ -397,12 +398,12 @@ internal fun WaveRail(
                 }
                 val d = if (displayIndex >= 0) (i - displayIndex).toFloat() else 999f
                 // v0.25.7：波浪更宽更平（sigma 4.5），头尾字母也有弧度，更优美
-                // 应用中心升级：波浪时长统一走 MotionTokens.Short（120ms），
-                // 减动态开启时 0ms（跟手不做动画）
+                // 字母导航精修（Bob 2026-10-25）：波浪跟手只走 60ms（不再共用
+                // MotionTokens.Short 的 120ms），减动态开启时 0ms（跟手不做动画）
                 val gTarget = if (displayIndex >= 0) exp(-(d * d) / 40.5f) else 0f
                 val g by animateFloatAsState(
                     targetValue = gTarget,
-                    animationSpec = tween(if (reduceMotion) 0 else MotionTokens.Short),
+                    animationSpec = tween(if (reduceMotion) 0 else 60),
                     label = "waveG"
                 )
                 // v0.67.13：脉冲项额外放大
