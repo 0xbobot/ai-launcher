@@ -686,16 +686,18 @@ fun AppCenterLandscape(
                 },
                 // Rail 高度跟随容器（Bob 2026-10-24）：不再写死 400dp（横屏
                 // 屏高不足时上下裁字母），占比 0.95、字母 14sp/16sp 行高。
-                // 字母 B 方案：对比度拉满（横屏路径）——透明度 1.0 + Medium
-                // 字重；竖屏默认值 0.6/Normal 不变。
+                // 字母 B 方案：对比度拉满（横屏路径）——透明度 1.0 + Normal
+                // 字重（329 起三条导航统一）；触控列宽与竖屏同为 48dp
+                // （此前默认 44dp，modifier 上 56dp 被列宽覆盖、属于死码，
+                // 随之删除）。
                 railHeight = null,
                 railFraction = 0.95f,
                 letterFontSize = 14.sp,
                 letterLineHeight = 16.sp,
                 letterAlpha = 1f,
                 letterFontWeight = FontWeight.Normal,
+                railWidth = 48.dp,
                 modifier = Modifier
-                    .width(56.dp)
                     .fillMaxHeight()
             )
             }  // Box：右侧挖孔让位结束
