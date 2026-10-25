@@ -64,7 +64,8 @@ import kotlin.math.roundToInt
  *
  * v0.68.99（主页重构 R-1）：静态主页只剩简报 + Dock 两层——意图胶囊槽位
  * 撤除（改由 HomeScreen 在输入态下底部浮现），NextUp 紧凑条退役、会行以
- * BriefMeetingRow 形式长进简报；七仔点按 = 进入输入态（onPetTap）。
+ * BriefMeetingRow 形式长进简报；七仔点按语义见 PullUpDock
+ *（2026-10-25 动作清单批起：点按开关动作清单，直进输入作废）。
  *
  * v0.68.96（F-01 退役）：非封面分支（宠物舞台 + 全量 TODAY 列表卡 + 编辑模式）
  * 整段删除——自 v0.68.44 杂志封面改版起唯一调用点写死封面模式，该分支无入口
