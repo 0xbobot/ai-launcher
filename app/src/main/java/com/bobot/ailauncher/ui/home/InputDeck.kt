@@ -5,7 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,57 +20,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.PlatformTextStyle
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 
 /**
  * 输入甲板组件（v0.68.101 主页重构 R-2 建，F 批改素行）：聚焦且未打字时，
- * 一体化面板上区的呈现——常用应用块 + 动态示例素行。
+ * 一体化面板内的呈现——动态示例素行（能力问题，做事型推荐）。
  *
- * 甲板只活在输入态（与重构定案一致：建议撤出静态主页）；会议不在这里
- * 复刻——简报会行是会议的唯一呈现（.93 去重契约由「甲板根本不出会议
- * 行」天然满足）。高度守槽位纪律（见 IntentEntry 的降级规则：先收示例
- * 行、再由宿主收应用量，绝不新开浮层）。
+ * 2026-10-25 意图卡片统一：甲板常用应用块（DeckAppsBlock）整段删除——
+ * Dock 里已有应用推荐，意图初始状态再推一遍多为重复（Bob 原话；
+ * 2026-10-22「同一信息只在一处呈现」原则）。甲板只活在输入态（与重构
+ * 定案一致：建议撤出静态主页）；会议不在这里复刻——简报会行是会议的
+ * 唯一呈现（.93 去重契约由「甲板根本不出会议行」天然满足）。
  *
  * F 批变更：R-2 的槽位 UX（胶囊内 TemplateStrip、甲板 SlotPanel、槽位
  * 芯片）已整体退役——示例行从胶囊 chips 改为无容器素行，点选 = 把整句
  * 填入输入框（见 IntentEntry.pickExample），发送一律走自由文本路径。
  */
-
-/** 甲板·常用应用块：标题与应用项与旧建议面完全一致（点选直达打开）。 */
-@Composable
-fun DeckAppsBlock(
-    apps: List<AppInfo>,
-    onOpenApp: (AppInfo) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier) {
-        Text(
-            text = "七仔猜你现在想用",
-            fontSize = 12.sp,
-            color = AILauncherColors.current.Hint,
-            style = TextStyle(
-                lineHeight = 15.sp,
-                platformStyle = PlatformTextStyle(includeFontPadding = false)
-            )
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            apps.forEach { app ->
-                ResultAppItem(app = app, onOpen = onOpenApp)
-            }
-        }
-    }
-}
 
 /**
  * 甲板·动态示例素行（F 批）：无背景、无描边、无圆角容器——小琥珀点 +

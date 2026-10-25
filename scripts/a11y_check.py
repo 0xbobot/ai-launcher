@@ -112,83 +112,81 @@ def main():
             item = find_first(root, lambda n: n.get("class") == "android.view.View" and n.get("content-desc") == "Clock")
         report("result-item", item, density, pm)
 
-    # 意图改进一批：建议面布局不变量（suggest_dump.xml，聚焦+空文本+收键盘后拉取）
+    # 2026-10-25 意图卡片统一：建议面（应用推荐行）已删除——本段改验初始态
+    # （suggest_dump.xml，聚焦+空文本+收键盘后拉取）：面板在场为前提；示例
+    # 行（deck_example_*）有行时验首项触控与屏内，示例池滤空时行隐藏是
+    # 设计行为（不判 FAIL）。
     root = parse(os.path.join(out, "suggest_dump.xml"))
     if root is not None:
         pm = parent_map(root)
         first = find_first(root, lambda n: True)
         rb = bounds(first) if first is not None else None  # 首节点=根窗口，bounds 即屏面
-        title = find_first(root, lambda n: n.get("text") == "七仔猜你现在想用")
-        if title is None:
-            print("A11Y FAIL suggest-panel: title node missing in suggest_dump")
+        panel = find_first(root, lambda n: (n.get("resource-id") or "").endswith("intent_panel"))
+        if panel is None:
+            print("A11Y FAIL intent-panel: panel node missing in suggest_dump")
         else:
-            # 建议项：标题之后（文档序≈布局序）第一个带 content-desc 的节点
-            seen_title = False
-            item = None
-            for n in root.iter("node"):
-                if n is title:
-                    seen_title = True
+            # 示例行首项：resource-id 前缀 deck_example_（文档序≈布局序第一项）
+            item = find_first(root, lambda n: (n.get("resource-id") or "").startswith("deck_example_"))
+            if item is None:
+                print("A11Y INFO deck-example: row hidden (empty executable pool by design)")
+            else:
+                report("deck-example-item", item, density, pm)
+                # 胶囊（占位节点）与示例行不重叠
+                cap = find_first(root, lambda n: n.get("text") == "想做什么？")
+                eb = bounds(item)
+                cb = bounds(cap) if cap is not None else None
+                if eb and cb:
+                    overlap = not (cb[2] <= eb[0] or eb[2] <= cb[0] or
+                                   cb[3] <= eb[1] or eb[3] <= cb[1])
+                    print(f"A11Y {'FAIL' if overlap else 'OK'} deck-example-overlap: "
+                          f"capsule={cb} example={eb}")
+                # 示例项完整落在屏内
+                if rb:
+                    ib = bounds(clickable_ancestor(item, pm))
+                    if ib:
+                        inside = (ib[0] >= rb[0] and ib[1] >= rb[1] and
+                                  ib[2] <= rb[2] and ib[3] <= rb[3])
+                        print(f"A11Y {'OK' if inside else 'FAIL'} deck-example-in-bounds: "
+                              f"item={ib} screen={rb}")
+        # Dock 仍在屏内：底部带（中心 y > 85% 屏高）存在完整落在屏内的可点节点。
+        # v0.68.99（R-1 断言迁移）：输入态下 Dock 按设计让位（胶囊进简报槽），
+        # suggest_dump 的底部带按定义为空——「Dock 在屏内」这一属性改在静态
+        # 主页 dump（pet_dump.xml，第 6 段封面静态帧，Dock 在场）上验，带宽
+        # 与完整落屏内的判据不变；pet_dump 缺失时回退 suggest_dump 旧口径。
+        dock_root = parse(os.path.join(out, "pet_dump.xml")) or root
+        if rb:
+            dock = None
+            for n in dock_root.iter("node"):
+                if n.get("clickable") != "true":
                     continue
-                if seen_title and (n.get("content-desc") or ""):
-                    item = n
-                    break
-            report("suggest-item", item, density, pm)
-            # 胶囊（占位节点）与建议面标题不重叠
-            cap = find_first(root, lambda n: n.get("text") == "想做什么？")
-            tb = bounds(title)
-            cb = bounds(cap) if cap is not None else None
-            if tb and cb:
-                overlap = not (cb[2] <= tb[0] or tb[2] <= cb[0] or
-                               cb[3] <= tb[1] or tb[3] <= cb[1])
-                print(f"A11Y {'FAIL' if overlap else 'OK'} suggest-overlap: "
-                      f"capsule={cb} suggest-title={tb}")
-            # 建议项完整落在屏内
-            if rb and item is not None:
-                ib = bounds(clickable_ancestor(item, pm))
-                if ib:
-                    inside = (ib[0] >= rb[0] and ib[1] >= rb[1] and
-                              ib[2] <= rb[2] and ib[3] <= rb[3])
-                    print(f"A11Y {'OK' if inside else 'FAIL'} suggest-in-bounds: "
-                          f"item={ib} screen={rb}")
-            # Dock 仍在屏内：底部带（中心 y > 85% 屏高）存在完整落在屏内的可点节点。
-            # v0.68.99（R-1 断言迁移）：输入态下 Dock 按设计让位（胶囊进简报槽），
-            # suggest_dump 的底部带按定义为空——「Dock 在屏内」这一属性改在静态
-            # 主页 dump（pet_dump.xml，第 6 段封面静态帧，Dock 在场）上验，带宽
-            # 与完整落屏内的判据不变；pet_dump 缺失时回退 suggest_dump 旧口径。
-            dock_root = parse(os.path.join(out, "pet_dump.xml")) or root
-            if rb:
-                dock = None
-                for n in dock_root.iter("node"):
-                    if n.get("clickable") != "true":
-                        continue
-                    b = bounds(n)
-                    if not b:
-                        continue
-                    w = (b[2] - b[0]) * 160.0 / density
-                    h = (b[3] - b[1]) * 160.0 / density
-                    if w > 300 and h > 300:  # 排除全屏根容器
-                        continue
-                    if landscape:
-                        # 横屏 Dock 是右下面板：其格位中心在约 79% 屏高处，
-                        # 「中心入带」是竖屏口径——横屏改验底边入带 + 完整在
-                        # 屏内（锚底且不溢出，属性等价）。
-                        in_band = b[3] > rb[3] * 0.85
-                        contained = (b[0] >= rb[0] and b[1] >= rb[1] and
-                                     b[2] <= rb[2] and b[3] <= rb[3])
-                        if in_band and contained:
-                            dock = b
-                            break
-                        continue
-                    cy = (b[1] + b[3]) / 2.0
-                    if cy > rb[3] * 0.85 and b[2] <= rb[2] and b[3] <= rb[3]:
+                b = bounds(n)
+                if not b:
+                    continue
+                w = (b[2] - b[0]) * 160.0 / density
+                h = (b[3] - b[1]) * 160.0 / density
+                if w > 300 and h > 300:  # 排除全屏根容器
+                    continue
+                if landscape:
+                    # 横屏 Dock 是右下面板：其格位中心在约 79% 屏高处，
+                    # 「中心入带」是竖屏口径——横屏改验底边入带 + 完整在
+                    # 屏内（锚底且不溢出，属性等价）。
+                    in_band = b[3] > rb[3] * 0.85
+                    contained = (b[0] >= rb[0] and b[1] >= rb[1] and
+                                 b[2] <= rb[2] and b[3] <= rb[3])
+                    if in_band and contained:
                         dock = b
                         break
-                if dock:
-                    print(f"A11Y OK dock-in-bounds: bottom clickable node={dock} "
-                          f"screen={rb}")
-                else:
-                    print("A11Y FAIL dock-in-bounds: no clickable node in bottom "
-                          "band of static home dump")
+                    continue
+                cy = (b[1] + b[3]) / 2.0
+                if cy > rb[3] * 0.85 and b[2] <= rb[2] and b[3] <= rb[3]:
+                    dock = b
+                    break
+            if dock:
+                print(f"A11Y OK dock-in-bounds: bottom clickable node={dock} "
+                      f"screen={rb}")
+            else:
+                print("A11Y FAIL dock-in-bounds: no clickable node in bottom "
+                      "band of static home dump")
 
     # 扇形：只测量，逐节点列出（smoke.sh 第 5b 段在按住窗口内 dump）。
     # 扇区为 Canvas 绘制，是否有语义节点、尺寸多大，由报告人工据此判定，不自动下结论。

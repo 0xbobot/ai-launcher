@@ -14,7 +14,7 @@
 # 不依赖 UI 坐标；若预写失败，用固定坐标点按做兜底（pixel_6 1080x2400，对话框位置稳定）。
 # R4 矩阵化：写死坐标一律按 1080x2400 基准经 SX/SY 按实际分辨率换算；SMOKE_FONT_SCALE /
 # SMOKE_NIGHT / SMOKE_LABEL 环境参数供 smoke-matrix.yml 多组合复用（不带 env 时行为不变）；
-# 第 15 段为意图改进一批（零打字建议面 + 提交后焦点释放），第 16 段为 a11y 触控目标
+# 第 15 段为意图改进一批（零打字初始态 + 提交后焦点释放），第 16 段为 a11y 触控目标
 # 尺寸断言（scripts/a11y_check.py 量 uiautomator dump，含建议面布局不变量）。
 # 第 17 段为意图改进二批：本机 mock LLM（scripts/mock_llm.py）+ 预写 llm prefs 把
 # 协调器逼进缺参追问态实拍（intent-needsinput.png / intent-needsinput-answered.png），
@@ -982,19 +982,20 @@ for OFF in 0 1 2; do
       if [ -n "$CTR" ]; then TCX=$(echo "$CTR" | cut -d' ' -f1); TCY=$(echo "$CTR" | cut -d' ' -f2); log "tpl capsule by tag at ($TCX,$TCY)"; fi
       adb shell input swipe "$TCX" "$TCY" "$TCX" "$TCY" 150 || true
       sleep 2
-      # 意图改进一批：聚焦+空文本先截建议面（三模板各一张供人工亲验）并断言标题在场；
-      # 之后照旧输 "clo" 验本地结果（文本非空后建议面必须让位给本地结果）
+      # 2026-10-25 意图卡片统一：聚焦+空文本先截初始态（三模板各一张供人工亲验）
+      # 并断言面板在场且应用推荐标题已消失（应用推荐行已删）；之后照旧输
+      # "clo" 验本地结果（文本非空后初始态必须让位给本地结果）
       shot "intent-tpl-$TPL-suggest"
       # v0.68.99（R-1）：几何断言用的聚焦态 dump 改在收键盘后拉——胶囊底部
       # 锚定，IME 弹起时窗口被压缩，胶囊在压缩帧里压住 hero 下沿（真实视觉
-      # 即输入浮层盖住简报下部，与聊天类 App 一致）；收键盘后焦点与建议面
+      # 即输入浮层盖住简报下部，与聊天类 App 一致）；收键盘后焦点与面板
       # 保留、窗口恢复全高，此时验 hero/pet 与胶囊两两不相交（同第 15 段
       # suggest_dump 的既有口径）。截图仍是键盘弹起态，不受影响。
       adb shell input keyevent KEYCODE_BACK || true
       sleep 1
       adb shell uiautomator dump /sdcard/tpl_dump_s.xml > /dev/null 2>&1 || true
       adb pull /sdcard/tpl_dump_s.xml "$OUT/tpl_${TPL}_suggest.xml" > /dev/null 2>&1 || true
-      if [ -f "$OUT/tpl_${TPL}_suggest.xml" ] && grep -q '七仔猜你现在想用' "$OUT/tpl_${TPL}_suggest.xml"; then
+      if [ -f "$OUT/tpl_${TPL}_suggest.xml" ] && grep -q 'resource-id="intent_panel"' "$OUT/tpl_${TPL}_suggest.xml" && ! grep -q '七仔猜你现在想用' "$OUT/tpl_${TPL}_suggest.xml"; then
         ok "tpl-$TPL-suggest"
       else
         ng "tpl-$TPL-suggest"
@@ -1333,8 +1334,8 @@ PYEOF
 nextup_dedupe_flow() {
   # $1=事件标题。v0.68.93（布局与交互 Loop 一批④）：同一会议双处呈现去重断言。
   # v0.68.99（主页重构 R-1）：会议常驻主场由 NextUp 条迁移为简报会行
-  # （today_nextup 在简报内）：种子事件在场、进输入态出建议面时，该标题在
-  # 全屏 dump 里只能出现一次（简报会行标题），建议面内不得再有会议行。
+  # （today_nextup 在简报内）：种子事件在场、进输入态出意图面板时，该标题在
+  # 全屏 dump 里只能出现一次（简报会行标题），面板内不得再有会议行。
   # 环境门同 nextup_tap_flow：种子事件进不了 Instances 视图时简报会行无从
   # 呈现，明示 SKIP 不计数（不冒充已验，报告如实标注）。
   local TITLE="$1"
@@ -1360,10 +1361,10 @@ nextup_dedupe_flow() {
     ng "nextup-dedupe-home"
     return
   fi
-  # v0.68.99：点 Dock 七仔格进输入态出建议面（静态无胶囊可聚焦）
+  # v0.68.99：点 Dock 七仔格进输入态（静态无胶囊可聚焦）
   enter_input_mode "$OUT/dedupe_in.xml" || true
-  # BACK 只收键盘、焦点与建议面保留、输入态不退（同第 15 段法）：之后 dump
-  # 里简报会行与建议面同屏——正是去重要验的同屏状态。
+  # BACK 只收键盘、焦点与面板保留、输入态不退（同第 15 段法）：之后 dump
+  # 里简报会行与意图面板同屏——正是去重要验的同屏状态。
   adb shell input keyevent KEYCODE_BACK || true
   sleep 1
   shot "intent-dedupe-suggest"
@@ -1376,14 +1377,17 @@ nextup_dedupe_flow() {
     ng "nextup-dedupe"
     return
   fi
-  # 前提：建议面真的在场（否则"无会议行"是空断言，直接判失败而非通过）
-  if ! grep -q '七仔猜你现在想用' "$OUT/dedupe_dump.xml"; then
-    log "nextup-dedupe: suggestion panel not present - assertion precondition missing"
+  # 前提：意图面板真的在场（否则"无会议行"是空断言，直接判失败而非通过）
+  # 2026-10-25 意图卡片统一：建议面（应用推荐行）已删除，前提改验面板在场；
+  # 去重不变量本身不变（会行标题仍只应出现一处，面板不再是复刻源）。
+  if ! grep -q 'resource-id="intent_panel"' "$OUT/dedupe_dump.xml"; then
+    log "nextup-dedupe: intent panel not present - assertion precondition missing"
     ng "nextup-dedupe"
     return
   fi
   # 标题出现次数：简报会行标题一处（纯标题文本节点；行自身的
-  # content-desc 是另一属性不计入）；建议面若复刻会议行会有第二处同名文本。
+  # content-desc 是另一属性不计入）；意图面板不再出会议行（应用推荐行已删），
+  # 第二处同名文本只可能来自其他复刻源。
   local CNT
   CNT=$(grep -o "text=\"[^\"]*${TITLE}[^\"]*\"" "$OUT/dedupe_dump.xml" | wc -l | tr -d ' ')
   log "nextup-dedupe: title occurrences=$CNT (expect 1, brief meeting row only)"
@@ -1510,12 +1514,12 @@ else
   fi
 fi
 
-# --- 15. 意图改进一批：零打字建议面 + 点 Top1 打开 + 提交后焦点释放 ---
-# force-stop 回首页基线 -> press 点胶囊（聚焦+空文本）-> 结果条槽位应出建议面
-# （标题"七仔猜你现在想用"在 dump 中）；press 点第一个建议应用 -> 前台离开本包
-# （或 logcat 有目标 START 派发）；再聚焦输整句、在键盘弹起状态下定位提交钮直接
-# 提交（不预收键盘）-> 无 Key 错误条出现且 dump 无 focused="true" 节点，即焦点
-# 已释放——clearFocus+收 IME 的可观测代理证据（IME 本体可见性在 CI 无稳定读法，
+# --- 15. 意图改进一批：零打字初始态 + 提交后焦点释放 ---
+# force-stop 回首页基线 -> press 点胶囊（聚焦+空文本）-> 意图面板在场且应用
+# 推荐标题已消失（2026-10-25 意图卡片统一：应用推荐行删除，点 Top1 打开
+# 随之退役）；再聚焦输整句、在键盘弹起状态下定位提交钮直接提交（不预收键盘）
+# -> 无 Key 错误条出现且 dump 无 focused="true" 节点，即焦点已释放——
+# clearFocus+收 IME 的可观测代理证据（IME 本体可见性在 CI 无稳定读法，
 # 以焦点状态取证，报告中如实标注）。会议行在 CI 无日历事件，不在此段覆盖。
 adb shell am force-stop "$PKG" || true
 sleep 1
@@ -1553,71 +1557,27 @@ sleep 1
 shot "intent-suggest-full"
 adb shell uiautomator dump /sdcard/suggest_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/suggest_dump.xml "$OUT/suggest_dump.xml" > /dev/null 2>&1 || true
-if ! grep -q '七仔猜你现在想用' "$OUT/suggest_dump.xml" 2>/dev/null; then
+if ! grep -q 'resource-id="intent_panel"' "$OUT/suggest_dump.xml" 2>/dev/null; then
   sleep 1
   adb shell uiautomator dump /sdcard/suggest_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/suggest_dump.xml "$OUT/suggest_dump.xml" > /dev/null 2>&1 || true
 fi
-if [ -f "$OUT/suggest_dump.xml" ] && grep -q '七仔猜你现在想用' "$OUT/suggest_dump.xml"; then
+# 2026-10-25 意图卡片统一：初始态断言 = 面板在场 + 应用推荐标题已消失
+if [ -f "$OUT/suggest_dump.xml" ] && grep -q 'resource-id="intent_panel"' "$OUT/suggest_dump.xml" && ! grep -q '七仔猜你现在想用' "$OUT/suggest_dump.xml"; then
   ok "suggest-panel"
 else
   ng "suggest-panel"
 fi
-# 点第一个建议应用：体检批D ⑥ 起优先按 testTag result_item 取第一个节点
-# （文档序≈布局序，第一项即 Top1，其 bounds 即整项可点容器）；
-# 未命中退回旧启发式：标题文本之后第一个带 content-desc 的节点（应用项图标的
-# 合并语义节点）。打开证据同第 10 段双路。
-T1X=""; T1Y=""
-CTR=$(center_rid "$OUT/suggest_dump.xml" "result_item")
-if [ -n "$CTR" ]; then
-  T1X=$(echo "$CTR" | cut -d' ' -f1); T1Y=$(echo "$CTR" | cut -d' ' -f2)
-  log "suggest top1 by tag at ($T1X,$T1Y)"
-fi
-if [ -z "$T1X" ] && [ -f "$OUT/suggest_dump.xml" ]; then
-  AFTER=$(sed 's/.*七仔猜你现在想用//' "$OUT/suggest_dump.xml")
-  INODE=$(echo "$AFTER" | grep -o '<node[^>]*content-desc="[^"]\{1,\}"[^>]*>' | head -1)
-  if [ -n "$INODE" ]; then
-    INUMS=$(echo "$INODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    IX1=$(echo "$INUMS" | sed -n 1p); IY1=$(echo "$INUMS" | sed -n 2p)
-    IX2=$(echo "$INUMS" | sed -n 3p); IY2=$(echo "$INUMS" | sed -n 4p)
-    if [ -n "$IX1" ] && [ -n "$IY2" ]; then
-      T1X=$(( (IX1 + IX2) / 2 )); T1Y=$(( (IY1 + IY2) / 2 ))
-      log "suggest top1 at ($T1X,$T1Y) node: $INODE"
-    fi
-  fi
-fi
-if [ -n "$T1X" ]; then
-  adb logcat -c > /dev/null 2>&1 || true
-  adb shell input swipe "$T1X" "$T1Y" "$T1X" "$T1Y" 150 || true
-  OPENED2=0
-  FG2=""
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    sleep 0.5
-    FG2=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
-    if [ -n "$FG2" ] && ! echo "$FG2" | grep -q "$PKG"; then OPENED2=1; break; fi
-  done
-  shot "intent-suggest-opened"
-  log "foreground after suggest open: $FG2"
-  if [ "$OPENED2" = "1" ]; then
-    ok "suggest-open-app"
-  elif adb logcat -d 2>/dev/null | grep "START u0" | grep -v "$PKG" | grep -q .; then
-    log "suggest target start dispatched (foreground did not stick)"
-    ok "suggest-open-app"
-  else
-    ng "suggest-open-app"
-  fi
-  adb shell input keyevent KEYCODE_HOME || true
-  sleep 2
-else
-  ng "suggest-open-app"
-fi
+# 2026-10-25 意图卡片统一：点 Top1 建议应用打开随应用推荐行删除而退役
+# （初始状态不再出应用行，无 Top1 可点）；本段余下直接走提交后焦点释放。
+log "suggest-open-app retired with deck apps row (2026-10-25 intent-card-unify)"
 # 提交后焦点释放：重新聚焦 -> 输整句 -> 键盘弹起时重新 dump 定位提交钮（坐标随
 # 窗口 resize 变）-> 直接点提交 -> 错误条在场且无 focused 节点
 # 注（首轮实测）：输完 "open wechat" 后末词在 LatinIME 里仍处 composing（下划线+
 # 候选栏），新 composing 守卫会正确挡下提交（截图中提交钮呈禁用暗色，即守卫实证）；
 # 真实中文输入法流程同样是先点候选上屏再提交——这里补输一个空格让组合上屏，
 # 与真实流程对齐后再验提交+收键盘。
-# v0.68.99：点 Top1 打开应用后输入态已自动退出（焦点释放触发）——重新进输入态再定位
+# 重新进输入态再定位（enter_input_mode；已在输入态时为重复聚焦，无害）
 enter_input_mode "$OUT/suggest_dump1.xml" || true
 if [ -f "$OUT/suggest_dump1.xml" ]; then
   SNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/suggest_dump1.xml" | head -1)

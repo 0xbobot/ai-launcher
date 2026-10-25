@@ -84,8 +84,9 @@ import kotlin.math.roundToInt
 @Composable
 fun PetZone(
     // v0.68.101（Stage 1 热修·单宠物原则，Bob 08:08 拍板）：讲述者七仔
-    // 撤出简报——七仔只留 Dock 上沿坐姿一只（静态）与输入态胶囊旁的反应体
-    // （HomeScreen 的 InputPetCompanion），简报回归纯文字。原 hasUpgrade /
+    // 撤出简报——七仔只留 Dock 上沿坐姿一只（静态）与输入态意图卡片上沿
+    // 的同一只（2026-10-25 意图卡片统一：HybridPet 换 perch），简报回归
+    // 纯文字。原 hasUpgrade /
     // onUpgradeTap / onPetTap 随讲述者退役（hasUpgrade 从未有调用方传入，
     // 升级提醒走更新流的既有通道；进输入的唯一门是 Dock 坐姿七仔）。
     // 输入态标记：驱动简报紧凑（D-1）与横屏 hero 让位。

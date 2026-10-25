@@ -144,13 +144,9 @@ HOME_PAIRS = [
 ]
 FOCUS_PAIRS = [
     ("hero", "capsule"), ("capsule", "nextup"), ("hero", "nextup"),
-    ("pet", "nextup"),
-    # v0.68.101（R-2）：甲板在 hero 与胶囊之间、三者与 NextUp 互不相交
-    # （横屏同样适用——L-7：横屏输入态与竖屏同语义，断言不放水）
-    ("hero", "deck"), ("deck", "capsule"), ("deck", "nextup"),
-    # v6：七仔与甲板互不相交；七仔×胶囊不再查不相交——七仔脚底按规格
-    # 压进胶囊顶缘（ intentional overlap，见 check_deck_focus 压边断言）
-    ("pet", "deck"),
+    # 2026-10-25 意图卡片统一：deck_root（应用推荐行）已删除，甲板三对
+    # 随之退役；pet×nextup 亦退役——宠物改栖卡片上沿、按设计探入简报区
+    # 上方空间（与 Dock 宠物探出面板同理），与会行相交不再是违规。
     # 聚焦态键盘升起，Dock 被 IME 覆盖，dump 中的 Dock bounds 不代表可见几何，不查
 ]
 
@@ -207,22 +203,22 @@ def check_no_pill_wrappers(root, state, label, nodes, panel):
 
 
 def check_deck_focus(root, W, H):
-    """v6 输入态几何（第 25 段 deck_focus.xml）：
-    通用在屏/不相交 + one_pet 之外，加六组 v6 专属断言——
-    ① 七仔可见高：节点高（intentPose 资产撑满盒子，可见 ≈ 盒子高；
-       F 批 0.53 填充比是站姿实测、输入姿态下失效，v6 起退役）与胶囊
-       高之比 ∈ [1.10, 1.50]（规格约 1.3）；
-    ② 压边：七仔底边压进胶囊顶缘 = 底边 - 胶囊顶 ∈ 七仔高 [5%, 20%]
-       （规格约 10%，不是悬空、不是深埋）；
-    ③ 底部对齐：推荐主行底边到胶囊顶 ∈ [4dp, 12dp]（规格 8dp，
-       不顶七仔顶部——v6 原型的顶部对齐作废）；
-    ④ 前面图层：dump 文档序中 pet_qizai 在 intent_capsule 之后（后画）；
-    ⑤ 素行：主行无 pill 容器包裹；猜你想问行已删（v6 后调整，
-       deck_guess_ 节点残留即 FAIL）；
-    ⑥ 左右次序：推荐行左缘在七仔右缘之右；pet_qizai 全屏唯一。
+    """2026-10-25 意图卡片统一版输入态几何（第 25 段 deck_focus.xml）：
+    通用在屏/不相交 + one_pet 之外，加卡片上沿栖坐专属断言——
+    ① 宠物尺寸：宽 ≈108dp（Dock D1 档，∈ [100, 116]），高宽比 ≈1318/1043
+       （玻璃头长宽比，∈ [1.20, 1.33]）；
+    ② 压边：面板顶 - 宠物底 ∈ [-8, -2]dp（规格：脚底压进卡片顶缘 5dp，
+       不是悬空、不是深埋；负号表示宠物底在面板顶之下）；
+    ③ 底部对齐：推荐主行底边到胶囊顶 ∈ [4dp, 12dp]（规格 8dp，不变）；
+    ④ 前面图层：dump 文档序中 pet_qizai 在 intent_panel 之后（后画）；
+    ⑤ 素行：主行无 pill 容器包裹；猜你想问行已删（deck_guess_ 节点
+       残留即 FAIL）；
+    ⑥ 左右次序：推荐行左缘 ≈ 面板左缘 + 16dp 内边距（∈ [12, 24]dp，
+       不再从七仔右缘起）；pet_qizai 全屏唯一。
     dp 换算：CI 模拟器腿统一 1080 宽、420dpi 级（宽约 411dp），密度取 W/411。
-    （F 批的坐沿断言 pet-sits-on-edge 与 v4 的同行同带/紧凑间隙断言
-    随 v6 站位退役。）
+    （v6 的胶囊坐沿断言——高比、胶囊压边、行在七仔右缘之右、整只落在
+    面板内——随宠物移上卡片顶缘退役；宠物探入简报区上方空间按设计，
+    pet×nextup 不相交对亦随之退役，见 FOCUS_PAIRS。）
     """
     state = "deck-focus"
     els = home_elements(root)
@@ -256,39 +252,43 @@ def check_deck_focus(root, W, H):
               f"({len(guess_nodes)} nodes, e.g. {guess_nodes[0][0]}) -- guess row must be deleted")
     else:
         print(f"LAYOUT OK {state}: no deck_guess_ nodes (guess row deleted)")
-    if pet is None or cap is None:
-        print(f"LAYOUT INFO {state}: pet/capsule absent, v6 assertions skipped")
+    if pet is None or panel is None or cap is None:
+        print(f"LAYOUT INFO {state}: pet/panel/capsule absent, perch assertions skipped")
     else:
-        cap_h = cap[3] - cap[1]
+        pet_w = pet[2] - pet[0]
         pet_h = pet[3] - pet[1]
-        ratio = pet_h / float(cap_h) if cap_h > 0 else -1
-        if 1.10 <= ratio <= 1.50:
-            print(f"LAYOUT OK {state}: pet visible-height ratio={ratio:.3f} within [1.10,1.50]")
+        pet_w_dp = dp(pet_w)
+        if 100.0 <= pet_w_dp <= 116.0:
+            print(f"LAYOUT OK {state}: pet width={pet_w_dp:.1f}dp within [100,116]")
         else:
-            print(f"LAYOUT FAIL {state}: pet visible-height ratio={ratio:.3f} outside [1.10,1.50] "
-                  f"pet={pet} capsule={cap}")
-        overlap = pet[3] - cap[1]
-        ov_ratio = overlap / float(pet_h) if pet_h > 0 else -1
-        if 0.05 <= ov_ratio <= 0.20:
-            print(f"LAYOUT OK {state}: pet overlap into capsule={ov_ratio:.3f} within [0.05,0.20]")
+            print(f"LAYOUT FAIL {state}: pet width={pet_w_dp:.1f}dp outside [100,116] pet={pet}")
+        aspect = pet_h / float(pet_w) if pet_w > 0 else -1
+        if 1.20 <= aspect <= 1.33:
+            print(f"LAYOUT OK {state}: pet aspect={aspect:.3f} within [1.20,1.33]")
         else:
-            print(f"LAYOUT FAIL {state}: pet overlap into capsule={ov_ratio:.3f} outside [0.05,0.20] "
-                  f"pet={pet} capsule={cap}")
+            print(f"LAYOUT FAIL {state}: pet aspect={aspect:.3f} outside [1.20,1.33] pet={pet}")
+        press = dp(panel[1] - pet[3])
+        if -8.0 <= press <= -2.0:
+            print(f"LAYOUT OK {state}: pet press into panel top={press:.1f}dp within [-8,-2]")
+        else:
+            print(f"LAYOUT FAIL {state}: pet press into panel top={press:.1f}dp outside [-8,-2] "
+                  f"pet={pet} panel={panel}")
         pet_idx = first_index(root, "pet_qizai")
-        cap_idx = first_index(root, "intent_capsule")
-        if pet_idx is not None and cap_idx is not None and pet_idx > cap_idx:
-            print(f"LAYOUT OK {state}: pet drawn after capsule (front layer) "
-                  f"pet_idx={pet_idx} capsule_idx={cap_idx}")
+        panel_idx = first_index(root, "intent_panel")
+        if pet_idx is not None and panel_idx is not None and pet_idx > panel_idx:
+            print(f"LAYOUT OK {state}: pet drawn after panel (front layer) "
+                  f"pet_idx={pet_idx} panel_idx={panel_idx}")
         else:
-            print(f"LAYOUT FAIL {state}: pet NOT after capsule in document order "
-                  f"(front layer violated) pet_idx={pet_idx} capsule_idx={cap_idx}")
+            print(f"LAYOUT FAIL {state}: pet NOT after panel in document order "
+                  f"(front layer violated) pet_idx={pet_idx} panel_idx={panel_idx}")
         if examples is not None:
-            if examples[0] >= pet[2] - EPS:
-                print(f"LAYOUT OK {state}: examples start right of pet "
-                      f"examples_left={examples[0]} pet_right={pet[2]}")
+            left_gap = dp(examples[0] - panel[0])
+            if 12.0 <= left_gap <= 24.0:
+                print(f"LAYOUT OK {state}: examples left inset={left_gap:.1f}dp within [12,24] "
+                      f"(panel padding 16)")
             else:
-                print(f"LAYOUT FAIL {state}: examples start left of pet right edge "
-                      f"examples={examples} pet={pet}")
+                print(f"LAYOUT FAIL {state}: examples left inset={left_gap:.1f}dp outside [12,24] "
+                      f"examples={examples} panel={panel}")
             gap = dp(cap[1] - examples[3])
             if 4.0 <= gap <= 12.0:
                 print(f"LAYOUT OK {state}: examples bottom to capsule top gap="
@@ -314,15 +314,21 @@ def check_deck_focus(root, W, H):
                 print(f"LAYOUT OK {state}: {name} inside panel {b} in {panel}")
             else:
                 print(f"LAYOUT FAIL {state}: {name} escapes panel {b} not in {panel}")
-        # v6：输入区整体（七仔 + 推荐行）也须落在面板内
-        for name, b in (("pet", pet), ("examples", examples)):
-            if b is None:
-                print(f"LAYOUT INFO {state}/{name}: absent, containment skipped")
-                continue
-            if _inside(b, panel):
-                print(f"LAYOUT OK {state}: {name} inside panel {b} in {panel}")
-            else:
-                print(f"LAYOUT FAIL {state}: {name} escapes panel {b} not in {panel}")
+        # 2026-10-25 意图卡片统一：宠物改栖卡片上沿——按设计探出面板上方，
+        # 不再要求整只落在面板内；改验骑跨：宠物顶在面板顶之上、宠物底在
+        # 面板顶之下（压入量由上文压边断言定量）。推荐行仍须落在面板内。
+        if pet is None:
+            print(f"LAYOUT INFO {state}/pet: absent, perch straddle skipped")
+        elif pet[1] < panel[1] - EPS and pet[3] > panel[1] + EPS:
+            print(f"LAYOUT OK {state}: pet straddles panel top pet={pet} panel_top={panel[1]}")
+        else:
+            print(f"LAYOUT FAIL {state}: pet does not straddle panel top pet={pet} panel={panel}")
+        if examples is None:
+            print(f"LAYOUT INFO {state}/examples: absent, containment skipped")
+        elif _inside(examples, panel):
+            print(f"LAYOUT OK {state}: examples inside panel {examples} in {panel}")
+        else:
+            print(f"LAYOUT FAIL {state}: examples escapes panel {examples} not in {panel}")
 
 
 def check_dock_pet(root, W, H, state):

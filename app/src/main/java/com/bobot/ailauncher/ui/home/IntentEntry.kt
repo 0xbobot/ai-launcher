@@ -8,7 +8,6 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -39,7 +39,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,7 +62,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -90,15 +88,17 @@ import com.bobot.ailauncher.core.intent.IntentCoordinator
 import com.bobot.ailauncher.core.intent.IntentUiState
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
-import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
-import com.bobot.ailauncher.data.PetMood
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
+import com.bobot.ailauncher.ui.glass.DockLightParams
+import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
+import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.data.CapabilityRegistry
+import com.bobot.ailauncher.ui.pet.HybridPet
+import com.bobot.ailauncher.ui.pet.PetActionList
 import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import java.text.SimpleDateFormat
@@ -110,6 +110,15 @@ import kotlinx.coroutines.withContext
 
 /** 结果条槽位高度上限：三种内容（本地结果/回复错误/权限卡）共用，超限不挤压 Dock。 */
 private val RESULT_BAR_MAX_HEIGHT = 180.dp
+
+/**
+ * 意图卡片宠物（2026-10-25 意图卡片统一，Bob 拍板）：与 Dock 宠物同一只、
+ * 同一套组件——Dock D1 档宠物宽（108dp）固定，不跟意图面板高度走（面板高随
+ * 结果槽位伸缩，宠物跟高走会忽大忽小）；压入量 5dp 与 Dock 肩峰压入同值。
+ * 盒高按玻璃头长宽比（1043×1318）算，与 FloatingPet 内部口径一致。
+ */
+private val INTENT_PET_WIDTH = 108.dp
+private val INTENT_PET_PRESS = 5.dp
 
 /**
  * 意图胶囊输入行（2026-10-21 新规格：胶囊与应用中心搜索合二为一的同一组件）。
@@ -434,9 +443,8 @@ fun IntentEntry(
     // 匹配复用 AppSearchIndex.build/search 同一实现，不另写一套。
     // R3-D：懒构建——原实现在首页首帧同步查 PackageManager + 加载拼音字典建索引，
     // 压在启动路径上；改为用户第一次真打字时才在 IO 线程建（建好前本地层暂不出
-    // 结果，意图层提交不受影响），启动路径零索引成本。原始应用列表同时供建议面
-    // 的「此刻常用」复用（launchableApps），避免重复查 PackageManager。
-    var launchableApps by remember { mutableStateOf<List<AppInfo>?>(null) }
+    // 结果，意图层提交不受影响），启动路径零索引成本。2026-10-25 意图卡片统一：
+    // 建议面应用复用（launchableApps）已随应用推荐行删除，索引 effect 只建索引。
     var localIndex by remember { mutableStateOf<List<AppSearchIndex.Entry>?>(null) }
     // v0.68.88·保持更新：索引/应用列表按 InstalledApps.epoch 失效——此前懒建后
     // 永不刷新，新装的应用在首页永远搜不到（卸了的还留在结果里），必须等进程
@@ -446,15 +454,13 @@ fun IntentEntry(
     LaunchedEffect(Unit) { InstalledApps.ensureRegistered(context) }
     LaunchedEffect(committedKeys.literal, installedEpoch) {
         if (committedKeys.literal.isNotBlank() && (localIndex == null || indexEpoch != installedEpoch)) {
-            val built = withContext(Dispatchers.IO) {
+            localIndex = withContext(Dispatchers.IO) {
                 val hidden = HiddenApps.getHidden(context)
                 val apps = listLaunchableApps(context).filter {
                     it.packageName != context.packageName && it.packageName !in hidden
                 }
-                apps to AppSearchIndex.build(context, apps)
+                AppSearchIndex.build(context, apps)
             }
-            launchableApps = built.first
-            localIndex = built.second
             indexEpoch = installedEpoch
         }
     }
@@ -487,67 +493,32 @@ fun IntentEntry(
         }
     }
 
-    // 零打字数据（意图改进一批，R-2 沿用）：甲板常用 Top 应用
-    // （AppUsageTracker.topApps：频次+当前时段亲和）+ 下一会议（经
-    // TodayEventsHolder 从 PetZone 共享）——会议只供甲板示例派生，
-    // 甲板本身不出会议行（简报会行是会议的唯一呈现，.93 去重契约
-    // 由此天然满足，不再需要 eventId 比对）。
+    // 零打字数据（意图改进一批，R-2 沿用；2026-10-25 意图卡片统一后甲板
+    // 不再出应用行）：下一会议只供甲板示例派生（经 TodayEventsHolder 从
+    // PetZone 共享）——会议只供示例派生，甲板本身不出会议行（简报会行是
+    // 会议的唯一呈现，.93 去重契约由此天然满足，不再需要 eventId 比对）。
+    // 应用推荐行已随本批删除：Dock 里已有应用推荐，意图初始状态再推一遍
+    // 大多数情况是重复（Bob 2026-10-25 原话；2026-10-22「同一信息只在一
+    // 处呈现」原则）。原建议管线（AppUsageTracker.topApps + suggestionApps
+    // 状态 + focus 拉取 effect）随之整段删除，不留死代码。
     val nextEvent by TodayEventsHolder.nextEvent.collectAsState()
-    var suggestionApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
-    LaunchedEffect(sessionFocused, installedEpoch) {
-        if (sessionFocused) {
-            // 建议面的应用列表与索引同 epoch 口径：装/卸后别再端已卸载的应用
-            val apps = if (launchableApps == null || indexEpoch != installedEpoch) {
-                withContext(Dispatchers.IO) {
-                    val hidden = HiddenApps.getHidden(context)
-                    listLaunchableApps(context).filter {
-                        it.packageName != context.packageName && it.packageName !in hidden
-                    }
-                }.also { launchableApps = it }
-            } else {
-                launchableApps!!
-            }
-            suggestionApps = withContext(Dispatchers.IO) {
-                AppUsageTracker.topApps(context, apps, 4)
-            }
-        }
-    }
     // 布局防线（Bob 2026-10-21，R-2 沿用并扩展到甲板；F 批口径不变）：
     // 内容先降级自身，绝不挤压胶囊/TODAY/Dock 等其他槽位——示例行是
-    // 第一牺牲位（字体放大 >1.15 时收起，沿旧建议面口径）；应用行在
-    // 最紧配置（字体 1.3 + 矮屏）减到 2 个。短高形态（横屏）不另收示例
-    // （示例行横向滚动自适应）；高度靠流式列自然裁剪末位（会行在列尾
-    // 先让位），甲板/胶囊居列首不被裁，几何网在 landphone 腿对输入态
-    // 实测兜底（v0.68.101 矩阵首跑定案）。
+    // 第一牺牲位（字体放大 >1.15 时收起）；高度靠流式列自然裁剪末位
+    // （会行在列尾先让位），甲板/胶囊居列首不被裁，几何网在 landphone
+    // 腿对输入态实测兜底（v0.68.101 矩阵首跑定案）。应用行已删，最紧配
+    // 置的「应用减到 2 个」降级随之退役。
     val densityNow = LocalDensity.current
-    val configurationNow = LocalConfiguration.current
-    val tightLayout = densityNow.fontScale >= 1.3f &&
-        configurationNow.screenHeightDp <= 800
     val showDeckExamples = densityNow.fontScale <= 1.15f
-    val visibleSuggestionApps = if (tightLayout) suggestionApps.take(2) else suggestionApps
 
-    // R3-C 七仔反应（对话感）：姿态只跟状态走，不说话、不弹气泡，克制优先——
-    // Planning=思考（SORTING+头顶点点）> 本地结果/回复=呈现（HAPPY 原地放大弹跳"找到了"）
-    // > 聚焦编辑=倾听（FETCH 上浮举手"说吧")；错误/权限不给姿态（出错不装开心，
-    // 回落倾听或整理员原姿态）。呈现不用 FILE：FILE 自带 +104dp 右移（归档动线），
-    // 在封面右侧位模板会把七仔推出屏幕（冒烟 intent-present 实拍翻车后改）。
-    // 姿态经 PetRepository 覆盖层下发，IntentEntry 离场时清掉，不污染通知流程。
-    val presenting = localResults.isNotEmpty() || state is IntentUiState.Reply
-    val intentPose = when {
-        planning -> PetMood.SORTING
-        presenting -> PetMood.HAPPY
-        // 追问态（意图改进二批）：七仔在等你补参数——倾听姿态，不装开心也不思考
-        state is IntentUiState.NeedsInput -> PetMood.FETCH
-        // R-2：倾听姿态跟会话焦点走（面板里选值/填字时七仔同样在听）
-        sessionFocused -> PetMood.FETCH
-        else -> null
-    }
-    LaunchedEffect(intentPose, planning) {
-        PetRepository.setIntentReaction(intentPose, thinking = planning)
-    }
-    DisposableEffect(Unit) {
-        onDispose { PetRepository.clearIntentReaction() }
-    }
+    // 2026-10-25 意图卡片统一（Bob 拍板：宠物事件动作全部复用同一套）：
+    // 旧意图宠物（InputPetCompanion → PetView 姿态图）的 R3-C 反应管线
+    // （倾听 FETCH / 思考 SORTING+头顶点点 / 呈现 HAPPY）随旧宠物块整段
+    // 退役——意图卡片上的宠物就是 Dock 宠物本体（HybridPet → FloatingPet
+    // 活感引擎：呼吸、眨眼、转头注视、手动表演动作），行为与 Dock 那只
+    // 完全一致，不另维护一套姿态。会话状态的传达仍由槽位内容本身承担
+    // （PlanningStrip「想想中」/ LocalResultsBar / StatusStrip），不经宠
+    // 物姿态。PetRepository 的 intentPose 覆盖层随之删除（唯一消费者已无）。
 
     // 回复小条短时呈现：5 秒后自动收起（协调器 dismiss 回编辑态，原话不丢）
     LaunchedEffect(state) {
@@ -614,69 +585,75 @@ fun IntentEntry(
     // 不与结果槽位抢呈现。
     val showDeck = idleOrEditing && sessionFocused && text.isEmpty()
 
+    // ---- 意图卡片统一（2026-10-25，Bob 拍板） ----
+    // 面板实测高：只用于宠物/清单的锚定偏移，不参与面板自身布局——
+    // 首帧估 96dp（胶囊 56 + 间距 12 + 内边距 28），实测到即纠正；宠物
+    // 1500ms 延迟挂载在后，纠正不闪。动作清单开关与 Dock 宠物同款语义
+    // （点宠物开关清单）；意图搜索在清单 2 级，意图语境下点它仅收起
+    // （本来就在意图搜索里，不再重进）。
+    var panelHeight by remember { mutableStateOf(96.dp) }
+    var petActionsVisible by remember { mutableStateOf(false) }
+    // 入场削峰（沿用 310 冻结修复口径）：意图宠物本体延迟 1500ms 再挂载，
+    // 延迟窗内以同尺寸同 testTag 占位（布局与「恰一只七仔」计数口径不变）。
+    var intentPetSettled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(1500)
+        intentPetSettled = true
+    }
+    val intentPetHeight = INTENT_PET_WIDTH * (1318f / 1043f)
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-      // ---- F 批·一体化面板：甲板 + 输入区（七仔栖坐胶囊上沿 + 推荐行）+ 结果槽位同处一面 ----
-      // 单一 Card 背景 + 24dp 圆角 + 主题描边，内部三区不再各带卡片底。
-      // 面板是静态容器：无任何尺寸/高度动画（310 冻结教训），进出仍由
-      // HomeScreen 的 fade-only AnimatedVisibility 承担。面板只活在既有
-      // 意图区内，不新开浮层、不另起列。
+      // ---- 外层 Box：面板 + 前面图层宠物 + 动作清单（Dock 外层 Box 同款结构） ----
+      // 外层 Box 高 = 面板高（面板是唯一决定尺寸的孩子）；宠物与清单放在
+      // matchParentSize 覆盖层里、用 BottomCenter + 负偏移锚到面板顶缘上方，
+      // 不占布局、不推面板——面板在流中的位置与改前一致，只短了旧宠物带
+      // （胶囊带高从胶囊+宠物回到胶囊本身）。
+      Box(modifier = Modifier.fillMaxWidth()) {
+      // ---- F 批·一体化面板：输入区（胶囊 + 推荐行）+ 结果槽位同处一面 ----
+      // 样式与 Dock 卡片同一套（2026-10-25 意图卡片统一）：玻璃引擎 STRONG +
+      // 28dp 圆角 + v2 光影（dockLight）+ 无描边——与 Dock 面板逐项对齐（见
+      // 回执对照表）。Dock 的按压显底（dockBgAlpha）是按压反馈、不是卡片
+      // 静止样式，故不复制：意图面板 fallback 用 GlassCard 自然透明度、
+      // tintBoost 恒 0，静止态任何档位下都可读。面板是静态容器：无任何
+      // 尺寸/高度动画（310 冻结教训），进出仍由 HomeScreen 的 fade-only
+      // AnimatedVisibility 承担。面板只活在既有意图区内，不新开浮层、不另起列。
       Column(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("intent_panel")
-            .clip(RoundedCornerShape(24.dp))
-            .background(AILauncherColors.current.Card)
-            .border(1.dp, AILauncherColors.current.Divider, RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(28.dp))
+            .glassSurface(
+                kind = GlassSurfaceKind.STRONG,
+                cornerRadius = 28.dp,
+                tintColor = AILauncherColors.current.Card,
+                fallbackColor = AILauncherColors.current.GlassCard,
+                tintBoost = 0f,
+                shape = RoundedCornerShape(28.dp),
+                dockLight = DockLightParams()
+            )
+            .onGloballyPositioned { coords ->
+                with(densityNow) { panelHeight = coords.size.height.toDp() }
+            }
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
-        // ---- 输入甲板：面板上区（应用推荐；示例素行已移入下方紧凑行） ----
-        if (showDeck) {
-            Column(
-                modifier = Modifier.testTag("deck_root"),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (visibleSuggestionApps.isNotEmpty()) {
-                    DeckAppsBlock(
-                        apps = visibleSuggestionApps,
-                        onOpenApp = { app ->
-                            releaseInputFocus()
-                            // v0.68.101（D-2）：甲板应用即原建议应用，同样显式
-                            // 退出输入态（明确动作，不依赖失焦边沿推断）
-                            onRequestExitInput()
-                            launchLocalApp(context, app)
-                        }
-                    )
-                }
-            }
-        }
+        // ---- 输入甲板已瘦身（2026-10-25）：面板上区应用推荐整段删除 ----
+        // （Dock 里已有应用推荐，意图初始状态再推一遍多为重复）；初始状态
+        // 剩下的只有下方推荐问主行（能力问题，做事型推荐，不是应用推荐，
+        // 不动）+ 胶囊 + 结果槽位。
 
-        // ---- v6 输入区：七仔栖坐胶囊上沿 + 胶囊（Bob 2026-10-24 18:45
-        // 拍板，原型 input-sit-v6，带三处改） ----
-        // 图层顺序即绘制顺序：胶囊 → 接触影 → 七仔（七仔在胶囊前面图层，
-        // 脚底压进胶囊顶缘；父级 Box 不 clip，七仔可探出带外；v4 的紧凑
-        // 行同行居中口径随之退役）。几何（全部按可见高口径，不用盒子
-        // 尺寸换算）：七仔盒子 = 胶囊实测高 ×1.3（intentPose 资产撑满盒子，
-        // 可见 ≈ 盒子）；脚底压边 = 七仔高 ×10%；推荐行底距胶囊顶 8dp
-        // （底部对齐，不顶七仔顶部——v6 原型的顶部对齐作废）；推荐行
-        // 素行（不要 pill，Bob 三处改之 a）。胶囊高/宽实测：
-        // onGloballyPositioned 回写（首帧默认 56dp = 胶囊 min 高，实测到
-        // 即纠正；七仔 1500ms 延迟挂载在后，尺寸纠正不闪）。七仔常驻
-        // （打字后示例让位、七仔仍在场）；胶囊本体行为不动。静态布局，
-        // 无尺寸动画（310 教训）。
+        // ---- 输入区：胶囊 + 推荐问主行（2026-10-25：宠物已移出胶囊） ----
+        // 七仔不再栖坐胶囊上沿（旧 v6 坐法随 InputPetCompanion 退役），改栖
+        // 坐卡片上沿（见面板外覆盖层，与 Dock 上沿同一套坐法）。带高回到胶
+        // 囊本身；推荐行底距胶囊顶 8dp（底部对齐）不变，起横滚位置从七仔右
+        // 缘回到面板内容左缘；胶囊高实测 onGloballyPositioned 回写（首帧
+        // 默认 56dp = 胶囊 min 高，实测到即纠正）。七仔常驻（打字后示例让
+        // 位、七仔仍在场）；胶囊本体行为不动。静态布局，无尺寸动画（310 教训）。
         var capsuleHeight by remember { mutableStateOf(56.dp) }
-        var capsuleWidth by remember { mutableStateOf(320.dp) }
-        val petSize = capsuleHeight * 1.3f
-        val petOverlap = petSize * 0.10f
-        // 七仔中心 = 胶囊左缘起 8% 宽处（参考图实测）；盒子左缘 = 中心 -
-        // 盒子半宽（可为负：盒子略探出胶囊左缘、仍在面板 16dp 内边距内）
-        val petCenterX = capsuleWidth * 0.08f
-        val petOffsetX = petCenterX - petSize / 2f
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("input_pet_band")
-                .height(capsuleHeight + petSize - petOverlap)
+                .height(capsuleHeight)
         ) {
             // 胶囊本体（与应用中心同一组件；面板语境用实心底）
             IntentCapsuleField(
@@ -693,27 +670,10 @@ fun IntentEntry(
                     .onGloballyPositioned { coords ->
                         with(densityNow) {
                             capsuleHeight = coords.size.height.toDp()
-                            capsuleWidth = coords.size.width.toDp()
                         }
                     }
             )
-            // 接触影：落在胶囊面上、七仔脚底正下方（胶囊之后、七仔之前画）
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .offset(x = petCenterX - petSize * 0.36f, y = -(capsuleHeight - 4.dp))
-                    .size(width = petSize * 0.72f, height = 10.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.14f))
-            )
-            // 七仔：前面图层（胶囊之后画），脚底压进胶囊顶缘 petOverlap
-            InputPetCompanion(
-                size = petSize,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .offset(x = petOffsetX, y = -(capsuleHeight - petOverlap))
-            )
-            // 推荐问主行：底部对齐（行底距胶囊顶 8dp），从七仔右缘起横滚；
+            // 推荐问主行：底部对齐（行底距胶囊顶 8dp），从面板内容左缘起横滚；
             // 滤空时整行隐藏（按已装能力过滤后池子可能为空，不留空白占位）
             if (showDeck && showDeckExamples && deckExamples.isNotEmpty()) {
                 DeckExamplesRow(
@@ -722,7 +682,6 @@ fun IntentEntry(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .padding(start = petOffsetX + petSize + 12.dp)
                         .offset(y = -(capsuleHeight + 8.dp))
                 )
             }
@@ -804,6 +763,66 @@ fun IntentEntry(
         }
         } // 结果槽位 Column
       } // 一体化面板 Column
+      // ---- 覆盖层：接触影 + 宠物 + 动作清单（面板之后画、前面图层，不 clip） ----
+      // 图层顺序即绘制顺序：面板 → 接触影 → 宠物 → 动作清单。覆盖层用
+      // matchParentSize，不改变外层 Box 尺寸（= 面板高），宠物与清单只向
+      // 上探出、不推面板。单宠物保证：Dock 宠物由 !intentInputMode 门控
+      // （PullUpDock.kt），意图宠物只活在 IntentEntry 内（仅输入态挂载），
+      // 静止态下屏幕上恰有一只；进出 fade 过渡窗内（HomeScreen 的
+      // AnimatedVisibility）两态短暂交叠，属既有过渡行为、与改前一致。
+      Box(modifier = Modifier.matchParentSize()) {
+        // 接触影：落在面板面上、宠物脚底正下方（面板之后、宠物之前画；
+        // 口径沿用旧胶囊接触影：黑 0.14、宽为宠物宽 72%、高 10dp、落点
+        // 改到卡片顶缘下 4dp）。
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = 4.dp)
+                .size(width = INTENT_PET_WIDTH * 0.72f, height = 10.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.14f))
+        )
+        // 宠物：Dock 宠物本体（HybridPet，同一组件、同一活感引擎、同一动
+        // 作状态机），只是换了个 perch——坐法与 Dock 上沿同一套：前面图
+        // 层、居中、脚底压进卡片顶缘 INTENT_PET_PRESS、接触不断；点按语
+        // 义与 Dock 宠物一致：开关动作清单（327 直进输入已作废）。
+        // 真机待验：卡片顶缘坐姿、压入量、接触影在真实壁纸上的观感。
+        if (!intentPetSettled) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -(panelHeight - INTENT_PET_PRESS))
+                    .requiredSize(INTENT_PET_WIDTH, intentPetHeight)
+                    .testTag("pet_qizai")
+            )
+        } else {
+            HybridPet(
+                petWidth = INTENT_PET_WIDTH,
+                onPetTap = { petActionsVisible = !petActionsVisible },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -(panelHeight - INTENT_PET_PRESS))
+                    .testTag("pet_qizai")
+            )
+        }
+        // 动作清单：与 Dock 宠物上方同款（PetActionList 同一组件、同一清单、
+        // 同一状态机；气泡底距宠物顶 8dp、尾巴朝下指向宠物）。意图语境下
+        // 2 级「意图搜索」仅收起清单（已在意图搜索中）。
+        // 真机待验：意图面板上方空间有限（紧凑简报 + 状态栏），气泡顶部
+        // 在小屏/横屏可能探出屏顶——若实测被裁，另起一单定清单落点；
+        // 关闭除气泡内 ✕ 外，点宠物也可收起。
+        if (petActionsVisible) {
+            PetActionList(
+                onIntentSearch = { petActionsVisible = false },
+                onDismiss = { petActionsVisible = false },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -(panelHeight + intentPetHeight - INTENT_PET_PRESS + 8.dp))
+                    .testTag("pet_action_list")
+            )
+        }
+      }
+      } // 外层 Box（面板 + 前面图层宠物 + 动作清单）
     }
 
     // ---- 唯一弹窗：中/高风险动作确认（安全门，Bob 拍板归类） ----
