@@ -105,6 +105,40 @@ class AppSearchIndexTest {
         assertTrue(AppSearchIndex.keywordPackagesFor("zzzz", emptyMap()).isEmpty())
     }
 
+    // ---------- 能力问题批（Bob 2026-10-25）：英文应用关键词覆盖 ----------
+
+    @Test
+    fun `keyword listening finds english music apps`() {
+        // 「我想听歌」含「听歌」→ music 片段命中 Spotify/Apple Music/
+        // YouTube Music 包名，kuwo 与「音乐」对齐后也不丢中文酷我。
+        val hit = AppSearchIndex.keywordPackagesFor("我想听歌", emptyMap())
+        assertTrue(hit.contains("music"))
+        assertTrue(hit.contains("kuwo"))
+        assertEquals(
+            80,
+            AppSearchIndex.scoreFor("我想听歌", "Spotify", "com.spotify.music", "spotify", "s", setOf("music"))
+        )
+        assertEquals(
+            80,
+            AppSearchIndex.scoreFor("我想听歌", "Apple Music", "com.apple.android.music", "applemusic", "am", setOf("music"))
+        )
+        assertEquals(
+            80,
+            AppSearchIndex.scoreFor("我想听歌", "YouTube Music", "com.google.android.apps.youtube.music", "youtubemusic", "ym", setOf("music"))
+        )
+    }
+
+    @Test
+    fun `keyword video finds youtube`() {
+        // 「我想刷视频」含「刷视频」→ youtube 片段命中 YouTube 包名。
+        val hit = AppSearchIndex.keywordPackagesFor("我想刷视频", emptyMap())
+        assertTrue(hit.contains("youtube"))
+        assertEquals(
+            80,
+            AppSearchIndex.scoreFor("我想刷视频", "YouTube", "com.google.android.youtube", "youtube", "y", setOf("youtube"))
+        )
+    }
+
     // ---------- scoreFor 六档 ----------
 
     @Test

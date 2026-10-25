@@ -111,6 +111,19 @@
           "deeplink": null,
           "fallbackToLauncher": true,
           "note": "需真机验证"
+        },
+        {
+          "id": "liaotian",
+          "label": "聊天",
+          "icon": "chat",
+          "packageNames": [
+            "com.tencent.mm",
+            "com.tencent.mobileqq",
+            "com.ss.android.lark"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
         }
       ]
     },
@@ -378,6 +391,18 @@
           "packageNames": [
             "com.dianping.v1"
           ]
+        },
+        {
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "icon": "restaurant",
+          "id": "waimai",
+          "label": "外卖",
+          "note": "需真机验证",
+          "packageNames": [
+            "com.sankuai.meituan",
+            "me.ele"
+          ]
         }
       ],
       "icon": "home",
@@ -423,6 +448,43 @@
       "icon": "shopping_bag",
       "id": "shop",
       "label": "购物"
+    },
+    {
+      "capabilities": [
+        {
+          "id": "yinyue",
+          "label": "音乐",
+          "icon": "music_note",
+          "packageNames": [
+            "com.tencent.qqmusic",
+            "com.netease.cloudmusic",
+            "com.kugou.android",
+            "com.spotify.music",
+            "com.apple.android.music",
+            "com.google.android.apps.youtube.music"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        },
+        {
+          "id": "shipin",
+          "label": "视频",
+          "icon": "play_circle",
+          "packageNames": [
+            "com.ss.android.ugc.aweme",
+            "com.smile.gifmaker",
+            "tv.danmaku.bili",
+            "com.google.android.youtube"
+          ],
+          "deeplink": null,
+          "fallbackToLauncher": true,
+          "note": "需真机验证"
+        }
+      ],
+      "icon": "movie",
+      "id": "entertainment",
+      "label": "娱乐"
     }
   ]
 }

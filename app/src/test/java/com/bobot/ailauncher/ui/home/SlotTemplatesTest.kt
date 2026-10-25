@@ -168,22 +168,24 @@ class SlotTemplatesTest {
     // ---------- v6 扩展示例池 ----------
 
     @Test
-    fun buildExpandedExamples_coversTravelWorkLifeSocialPay() {
+    fun buildExpandedExamples_coversTravelWorkLifeEntertainmentSocial() {
         val now = 1_700_000_000_000L
         val ex = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
         // 出行（打车/导航/航班/地铁/酒店）+ 办公（日程）+ 生活（外卖）
-        // + 通讯（微信）+ 支付（支付宝），每条都有真实能力 id
+        // + 娱乐（音乐/视频）+ 通讯（聊天），每条都有真实能力 id；
+        // 能力问题批（Bob 2026-10-25）：纯打开（微信/支付宝）退役，
+        // 外卖模板 id 仍叫 meituan，但能力键改指 waimai（美团＋饿了么并集）
         assertEquals(
             listOf(
                 "taxi", "nav", "hangban", "rili", "meituan",
-                "ditie", "wechat", "zhifubao", "jiudian"
+                "ditie", "yinyue", "shipin", "liaotian", "jiudian"
             ),
             ex.map { it.id }
         )
         assertEquals(
             listOf(
-                "dache", "daohang", "hangban", "rili", "meituan",
-                "ditie", "wechat", "zhifubao", "jiudian"
+                "dache", "daohang", "hangban", "rili", "waimai",
+                "ditie", "yinyue", "shipin", "liaotian", "jiudian"
             ),
             ex.map { it.capabilityId }
         )
@@ -201,18 +203,66 @@ class SlotTemplatesTest {
         )
         assertEquals("meeting-reminder", ex[1].id)
         assertNull(ex[1].capabilityId) // 上下文派生，背后无能力 schema
-        assertEquals(10, ex.size)
+        assertEquals(11, ex.size)
     }
 
     @Test
     fun buildExpandedExamples_mainRowUsesFullPool() {
-        // v6 后调整：猜你想问行已删，主行用整池横滚——池子全量 9 条
-        // （无会议时），日程与微信同在主行，不再切分。
+        // v6 后调整：猜你想问行已删，主行用整池横滚——池子全量 10 条
+        // （无会议时），日程与音乐同在主行，不再切分。
         val now = 1_700_000_000_000L
         val ex = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
-        assertEquals(9, ex.size)
+        assertEquals(10, ex.size)
         assertTrue(ex.map { it.id }.contains("rili"))
-        assertTrue(ex.map { it.id }.contains("wechat"))
+        assertTrue(ex.map { it.id }.contains("yinyue"))
+    }
+
+    // ---------- 推荐能力化（Bob 2026-10-25） ----------
+
+    @Test
+    fun buildExpandedExamples_noPureOpenItems() {
+        // 纯打开问题退役：池里不再有「打开微信」「打开支付宝」；
+        // 新三条做事问题文案即填入句，且含本地搜索关键词。
+        val now = 1_700_000_000_000L
+        val ex = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
+        assertTrue(ex.none { it.id == "wechat" || it.id == "zhifubao" })
+        assertTrue(ex.none { it.exampleFillText() == "打开微信" || it.exampleFillText() == "打开支付宝" })
+        val byId = ex.associateBy { it.id }
+        assertEquals("我想听歌", byId["yinyue"]?.exampleFillText())
+        assertEquals("我想刷视频", byId["shipin"]?.exampleFillText())
+        assertEquals("我想和朋友聊天", byId["liaotian"]?.exampleFillText())
+        assertEquals("yinyue", byId["yinyue"]?.capabilityId)
+        assertEquals("shipin", byId["shipin"]?.capabilityId)
+        assertEquals("liaotian", byId["liaotian"]?.capabilityId)
+    }
+
+    @Test
+    fun filterExecutable_dropsYinyueWhenNoMusicAppInstalled() {
+        // 无任何音乐应用时（可执行集无 yinyue），「我想听歌」不得出现；
+        // 有任一音乐应用时照常出现——过滤键就是能力 id 本身。
+        val now = 1_700_000_000_000L
+        val pool = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
+        val withoutMusic = setOf(
+            "dache", "daohang", "hangban", "rili", "waimai",
+            "ditie", "shipin", "liaotian", "jiudian"
+        )
+        val dropped = SlotTemplates.filterExecutable(pool, withoutMusic)
+        assertTrue(dropped.none { it.id == "yinyue" })
+        assertEquals(9, dropped.size)
+        val withMusic = withoutMusic + "yinyue"
+        assertTrue(SlotTemplates.filterExecutable(pool, withMusic).any { it.id == "yinyue" })
+    }
+
+    @Test
+    fun filterExecutable_waimaiKeptWhenOnlyElemeInstalled() {
+        // 外卖并集语义的过滤层表达：模板能力键是 waimai，只要可执行集
+        // 含 waimai（注册表里美团或饿了么任一已装即产生），外卖问题就保留——
+        // 本机只有饿了么时不再像旧 meituan 单键那样被藏起来。
+        val now = 1_700_000_000_000L
+        val pool = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
+        val executable = setOf("waimai")
+        val filtered = SlotTemplates.filterExecutable(pool, executable)
+        assertEquals(listOf("meituan"), filtered.map { it.id })
     }
 
     // ---------- 推荐按本机可执行能力过滤（Bob 2026-10-24 22:06） ----------
@@ -220,18 +270,18 @@ class SlotTemplatesTest {
     @Test
     fun filterExecutable_dropsRiliWhenCalendarNotInstalled() {
         // 321 个案：已装集里没有任何日历包时（即可执行集无 rili），
-        // 「查我明天的日程」不得出现在推荐池里；其余 8 条不受影响。
+        // 「查我明天的日程」不得出现在推荐池里；其余 9 条不受影响。
         val now = 1_700_000_000_000L
         val pool = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
         assertTrue(pool.map { it.id }.contains("rili"))
         val executable = setOf(
-            "dache", "daohang", "hangban", "meituan",
-            "ditie", "wechat", "zhifubao", "jiudian"
+            "dache", "daohang", "hangban", "waimai",
+            "ditie", "yinyue", "shipin", "liaotian", "jiudian"
         )
         val filtered = SlotTemplates.filterExecutable(pool, executable)
         assertTrue(filtered.none { it.id == "rili" })
         assertTrue(filtered.none { it.exampleFillText() == "查我明天的日程" })
-        assertEquals(8, filtered.size)
+        assertEquals(9, filtered.size)
     }
 
     @Test
@@ -240,8 +290,8 @@ class SlotTemplatesTest {
         val now = 1_700_000_000_000L
         val pool = SlotTemplates.buildExpandedExamples(daohang, dacheNoParams, null, now)
         val executable = setOf(
-            "dache", "daohang", "hangban", "rili", "meituan",
-            "ditie", "wechat", "zhifubao", "jiudian"
+            "dache", "daohang", "hangban", "rili", "waimai",
+            "ditie", "yinyue", "shipin", "liaotian", "jiudian"
         )
         val filtered = SlotTemplates.filterExecutable(pool, executable)
         assertEquals(pool.map { it.id }, filtered.map { it.id })
@@ -255,7 +305,7 @@ class SlotTemplatesTest {
         val pool = SlotTemplates.buildExpandedExamples(
             daohang, dacheNoParams, event(now + 7_200_000L, "机场T3"), now
         )
-        assertEquals(10, pool.size)
+        assertEquals(11, pool.size)
         val filtered = SlotTemplates.filterExecutable(pool, emptySet())
         assertEquals(listOf("meeting-reminder"), filtered.map { it.id })
     }
