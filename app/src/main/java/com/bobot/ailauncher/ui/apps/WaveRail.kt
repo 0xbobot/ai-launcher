@@ -218,11 +218,14 @@ internal fun WaveRail(
         val railTopPx = (hPx - railHpx) / 2f
         val rowHpx = railHpx / items.size
         // 应用中心升级（Bob 2026-10-24 定稿）：波浪降推挤——内鼓 36→24dp、
-        // 避让 56→40dp、纵向散开 7→4dp；气泡内移 128→96dp，少压应用名
+        // 避让 56→40dp；气泡内移 128→96dp，少压应用名
         val bulgePx = with(density) { 24.dp.toPx() }
         val shiftPx = with(density) { 40.dp.toPx() }
-        // v0.68.15（Bob）：波浪散开时字母纵向也拉开，更灵动不拥挤
-        val spreadPx = with(density) { 4.dp.toPx() }
+        // 纯波浪（Bob 2026-10-25 定方向）：只留波浪位移、不再原地放大——
+        // 认字母已有侧边金环气泡，原地放大（中心字 2 倍）是重叠根因；
+        // 放大去掉了，纵向散开从 4dp 回到 8dp 补波形轮廓（324 前为 7dp），
+        // 让波浪看得出；最终效果说了算，放大与否不是教条
+        val spreadPx = with(density) { 8.dp.toPx() }
         // 气泡在靠应用的一侧：明显离开波浪区
         val bubbleOutX = with(density) { 96.dp.toPx() }
 
@@ -428,11 +431,13 @@ internal fun WaveRail(
                             // v0.68.96（F-07）：单字母标签形式对齐——超宽字形省略而非硬裁
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.graphicsLayer {
-                                // 高斯波浪：越靠近手指越大；波浪整体再往拇指反方向避让
+                                // 纯波浪（Bob 2026-10-25）：只位移、不放大——横向鼓出＋
+                                // 纵向散开形成波形，波浪整体再往拇指反方向避让；
+                                // pulse（收藏/隐藏闪烁反馈）保留，不属波浪放大
                                 translationX = dirSign * bulgePx * g + waveShiftX * g
                                 // v0.68.14（Bob）：纵向散开，更灵动不拥挤
                                 translationY = d * spreadPx * g
-                                val sc = (1f + g) * pulse
+                                val sc = pulse
                                 scaleX = sc
                                 scaleY = sc
                             }
@@ -443,9 +448,9 @@ internal fun WaveRail(
                             .size(14.dp)
                             .graphicsLayer {
                                 translationX = dirSign * bulgePx * g + waveShiftX * g
-                                // v0.68.14：纵向散开
+                                // 纯波浪：只位移、不放大（pulse 闪烁反馈保留）
                                 translationY = d * spreadPx * g
-                                val sc = (1f + g) * pulse
+                                val sc = pulse
                                 scaleX = sc
                                 scaleY = sc
                             }
