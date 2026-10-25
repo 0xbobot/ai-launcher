@@ -594,9 +594,9 @@ internal fun AppRail(
     letterLineHeight: TextUnit = 14.sp,
     letterAlpha: Float = 0.6f,
     letterFontWeight: FontWeight = FontWeight.Normal,
-    // 应用中心升级：触控列宽可参——默认 44dp（主屏 picker 不动）；
-    // 应用中心竖屏传 48dp 补齐触控线
-    railWidth: Dp = 44.dp,
+    // 字母导航统一样式（Bob 2026-10-25）：触控列宽统一 48dp——
+    // 应用中心竖屏/横屏与首页选择器三处同值，不再各走默认
+    railWidth: Dp = 48.dp,
     modifier: Modifier = Modifier
 ) {
     WaveRail(

@@ -534,14 +534,20 @@ private fun HomeHost(
                 letterLineHeight = 16.sp,
                 letterAlpha = 1f,
                 letterFontWeight = FontWeight.Normal,
+                // 字母导航统一样式（Bob 2026-10-25）：触控列宽与应用中心
+                // 同为 48dp（此前默认 44dp，modifier 上 56dp 被列宽覆盖、
+                // 属于死码，随之删除）；横屏占比跟应用中心横屏同为 0.95，
+                // 竖屏 0.85 不动；竖屏 400dp 写死高度与底距 70dp 保留
+                // （选择器是 Dock 上方的紧凑浮层，不是整屏列表页的通栏）。
                 railHeight = if (isLandscapePicker) null else 400.dp,
+                railFraction = if (isLandscapePicker) 0.95f else 0.85f,
+                railWidth = 48.dp,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(
                         bottom = if (isLandscapePicker) 16.dp else 70.dp,
                         end = if (isLandscapePicker) pickerCutoutRight else 0.dp
                     )
-                    .width(56.dp)
             )
         }
         // v0.26.6：侧边标签栏已删除（Bob：和 Dock/宠物无关的全部清除）
