@@ -326,11 +326,15 @@ fun PetZone(
                     // smoothstep：两端斜率为零，平台↔缓动、缓动↔0 的接头处
                     // 无斜率突变，故无 Mach 带；分段线性直接拼是旧曲线的病根。
                     fun smooth(t: Float): Float = t * t * (3f - 2f * t)
-                    val gradLen = size.height + veilTailPx
+                    // 注意：buildList 的 lambda 接收者是 MutableList，其自带
+                    // size 属性会遮住 DrawScope.size，故列高须先提到外层变量，
+                    // 否则 buildList 内写 size.height 编译失败（CI 实测）。
+                    val columnH = size.height
+                    val gradLen = columnH + veilTailPx
                     fun stopAt(y: Float, alpha: Float) =
                         (y / gradLen).coerceIn(0f, 1f) to
                             scrimColor.copy(alpha = alpha)
-                    val riseEnd = 0.55f * size.height
+                    val riseEnd = 0.55f * columnH
                     val stops = buildList {
                         add(0f to scrimColor.copy(alpha = 0.22f))
                         // 上升段：0.22→0.46，smoothstep 采样（端点与旧值一致）。
@@ -339,7 +343,7 @@ fun PetZone(
                         }
                         // 平台期：盖住全部简报文字＋26dp 尾巴，浓度与旧值一致。
                         add(stopAt(riseEnd, 0.46f))
-                        add(stopAt(size.height, 0.46f))
+                        add(stopAt(columnH, 0.46f))
                         // 收尾段：内容下方空壁纸区，0.46→0，smoothstep 采样、
                         // 精确归零；问候语已不在过渡带内。
                         for (t in listOf(
@@ -348,7 +352,7 @@ fun PetZone(
                         )) {
                             add(
                                 stopAt(
-                                    size.height + t * veilTailPx,
+                                    columnH + t * veilTailPx,
                                     0.46f * (1f - smooth(t))
                                 )
                             )
