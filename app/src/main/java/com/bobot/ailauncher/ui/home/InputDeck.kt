@@ -42,7 +42,7 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
 
 /**
  * 甲板·动态示例素行（F 批）：无背景、无描边、无圆角容器——小琥珀点 +
- * 14sp 主体色文字，横向滚动保留；点 = 把模板整句填进胶囊输入框（不直接
+ * 13sp 弱化文字，横向滚动保留；点 = 把模板整句填进胶囊输入框（不直接
  * 提交、不进任何模板态）。触控高 ≥48dp（heightIn 下限保证，行本身无
  * 视觉容器不等于热区缩小）。
  *
@@ -50,6 +50,11 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * （317 真机反馈），留白后末项可完整滚入视野；v6 后调整（Bob
  * 2026-10-24 20:31：猜你想问行删除），tagPrefix 参数随之退役，主行
  * 固定用 deck_example_*。
+ *
+ * 2026-10-25 示例弱化（Bob 23:18：推荐问法还是需要的、只是弱化一点
+ * 不要抢戏）：行保留原位原功能，只降视觉权重——字号 14sp→13sp、
+ * 文字 Body 降 alpha 至 0.65、琥珀点降 alpha 至 0.6；不删行、不改结构、
+ * 不换文案，应用推荐行（346 已删）不恢复。
  */
 @Composable
 fun DeckExamplesRow(
@@ -77,12 +82,12 @@ fun DeckExamplesRow(
                     modifier = Modifier
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(AILauncherColors.current.Accent)
+                        .background(AILauncherColors.current.Accent.copy(alpha = 0.6f))
                 )
                 Text(
                     text = t.exampleFillText(),
-                    fontSize = 14.sp,
-                    color = AILauncherColors.current.Body,
+                    fontSize = 13.sp,
+                    color = AILauncherColors.current.Body.copy(alpha = 0.65f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

@@ -156,8 +156,12 @@ fun IntentCapsuleField(
     // 进入，用户点一次就应能打字（键盘随聚焦弹起）；应用中心不传，保持点按
     // 聚焦的原行为；「问七仔」自动带起的思考/回复呈现也不传（不弹键盘）。
     requestFocusOnMount: Boolean = false,
-    // F 批：实心背景——首页胶囊坐在一体化面板里，0.88 半透明底在面板上
-    // 显脏；首页传 true 用不透明 Card 色（应用中心不传，保持原半透明观感）。
+    // F 批：面板语境背景——首页胶囊坐在一体化面板里，0.88 半透明底在面板上
+    // 显脏；首页传 true（应用中心不传，保持原半透明观感）。
+    // 2026-10-25 意图胶囊去深色（Bob 23:18 真机反馈）：true 原先用不透明
+    // Card 色——深色模式下 Card 是近黑 0xFF2A2723，实拍（40,39,35）证实
+    // 实心黑 pill 压在半透明玻璃卡片上打架；现改走卡片同一套玻璃
+    // （STRONG + dockLight，与面板逐项对齐），与卡片同材质同色调。
     solidBackground: Boolean = false,
     // 应用中心升级（Bob 2026-10-24 定稿②）：箭头 = 确认本地搜索——
     // 调用方传此回调时，箭头钮走它（仅收键盘 + 定格结果）；不传时箭头
@@ -186,9 +190,22 @@ fun IntentCapsuleField(
             .heightIn(min = 56.dp)
             .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             .clip(RoundedCornerShape(28.dp))
-            .background(
-                if (solidBackground) AILauncherColors.current.Card
-                else AILauncherColors.current.Card.copy(alpha = 0.88f)
+            .then(
+                if (solidBackground) {
+                    // 首页变体：卡片同款玻璃（见 solidBackground 注释），不另套新材质；
+                    // 与面板同一引擎同一参数同一背景源，渲染色调与卡片一致。
+                    Modifier.glassSurface(
+                        kind = GlassSurfaceKind.STRONG,
+                        cornerRadius = 28.dp,
+                        tintColor = AILauncherColors.current.Card,
+                        fallbackColor = AILauncherColors.current.GlassCard,
+                        tintBoost = 0f,
+                        shape = RoundedCornerShape(28.dp),
+                        dockLight = DockLightParams()
+                    )
+                } else {
+                    Modifier.background(AILauncherColors.current.Card.copy(alpha = 0.88f))
+                }
             )
             .clickable { focusRequester.requestFocus() }
             .padding(horizontal = 18.dp),
@@ -235,7 +252,12 @@ fun IntentCapsuleField(
                         Text(
                             text = placeholder,
                             fontSize = 15.sp,
-                            color = AILauncherColors.current.Hint,
+                            // 2026-10-25 胶囊去深色连带：玻璃胶囊是中间调（深色模式
+                            // 下深色 Hint 中灰约 0xFF6B6560 在其上对比度仅约 1.1:1、
+                            // 几乎看不见），占位改 Title 降 alpha——深浅两档在玻璃
+                            // 上都可读；应用中心变体（实心底）沿用 Hint，一字不动。
+                            color = if (solidBackground) AILauncherColors.current.Title.copy(alpha = 0.6f)
+                            else AILauncherColors.current.Hint,
                             // R3-A：大字体下占位文案单行省略，不溢出胶囊
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -658,11 +680,19 @@ fun IntentEntry(
         // 默认 56dp = 胶囊 min 高，实测到即纠正）。七仔常驻（打字后示例让
         // 位、七仔仍在场）；胶囊本体行为不动。静态布局，无尺寸动画（310 教训）。
         var capsuleHeight by remember { mutableStateOf(56.dp) }
+        // 2026-10-25 示例行回槽（346 回归修复，Bob 23:18“推荐问法还是需要”
+        // 的前提）：346 把宠物移上卡片上沿后，带盒高从胶囊+宠物缩回只剩
+        // 胶囊，示例行沿用 -(capsuleHeight+8) 的上偏移后落到面板裁剪区外、
+        // 只剩约 6dp 被裁（与脚本 §25/a11y“示例在场可点”口径不符）。带盒
+        // 在行在场时补回行高+间距（48+8=56dp），行底回到胶囊顶上 8dp、
+        // 完整落在面板内且不与胶囊重叠；行隐藏（打字后）时带盒同步缩回，
+        // 不留空带。行本身位置公式一字不动，胶囊尺寸位置不动。
+        val showExamplesRow = showDeck && showDeckExamples && deckExamples.isNotEmpty()
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("input_pet_band")
-                .height(capsuleHeight)
+                .height(capsuleHeight + if (showExamplesRow) 56.dp else 0.dp)
         ) {
             // 胶囊本体（与应用中心同一组件；面板语境用实心底）
             IntentCapsuleField(
@@ -684,7 +714,7 @@ fun IntentEntry(
             )
             // 推荐问主行：底部对齐（行底距胶囊顶 8dp），从面板内容左缘起横滚；
             // 滤空时整行隐藏（按已装能力过滤后池子可能为空，不留空白占位）
-            if (showDeck && showDeckExamples && deckExamples.isNotEmpty()) {
+            if (showExamplesRow) {
                 DeckExamplesRow(
                     examples = deckExamples,
                     onPick = { pickExample(it) },
