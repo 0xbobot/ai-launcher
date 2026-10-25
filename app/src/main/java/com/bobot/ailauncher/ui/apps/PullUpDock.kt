@@ -92,6 +92,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import com.bobot.ailauncher.ui.pet.HybridPet
+import com.bobot.ailauncher.ui.pet.PetActionList
+import com.bobot.ailauncher.data.PetRepository.PetManualAction
+import kotlinx.coroutines.delay
 import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.GazeTarget
 import com.bobot.ailauncher.data.PetRepository
@@ -322,9 +325,16 @@ fun PullUpDock(
     onOpenSettings: () -> Unit,
     // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页并提交协调器（HomeHost 提供）
     onAskQizai: (String) -> Unit = {},
-    // v0.68.99（主页重构 R-1）：Dock 左端七仔格点按 = 进入输入态；
+    // v0.68.99（主页重构 R-1）：Dock 左端七仔格点按语义——
+    // 2026-10-25 动作清单批起改为开关动作清单（直进输入作废）；
     // 输入态在场时 D1/D2 卡让位（cardVisible 关），胶囊底部原地接管
     onPetCellTap: () -> Unit = {},
+    // 宠物动作清单（2026-10-25，Bob 拍板）：327 点按直进输入作废——
+    // 点宠物改为开关本清单；清单 2 级的意图搜索走 onPetIntentSearch
+    //（调用方 enterIntentInput，与现输入流程同一入口）。
+    petActionsVisible: Boolean = false,
+    onPetActionsVisibleChange: (Boolean) -> Unit = {},
+    onPetIntentSearch: () -> Unit = {},
     intentInputMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -369,6 +379,32 @@ fun PullUpDock(
     val shoulderScope = rememberCoroutineScope()
     val shoulderPeakAnim = remember { Animatable(0f) }
     val shoulderPeakDp by shoulderPeakAnim.asState()
+    // 动作清单协同（2026-10-25）：宠物全身动作里需要肩线跟随的，
+    // 肩线按同事件做对应峰值脉冲（头肩一体、连接不断）；歪头是
+    // 软连接——头先动、肩延迟约 90ms 跟上（stretch-v2 柔性口径）。
+    // 其余动作不碰肩线（点头/害羞是宠物往肩线里压，不抬肩线）。
+    val petActionTick by PetRepository.actionTick.collectAsState()
+    val petActionKind by PetRepository.actionKind.collectAsState()
+    LaunchedEffect(petActionTick) {
+        if (petActionTick == 0) return@LaunchedEffect
+        val peak = when (petActionKind) {
+            PetManualAction.STRETCH, PetManualAction.HAPPY -> 7f
+            PetManualAction.SURPRISED -> 5f
+            PetManualAction.GREET -> 4f
+            PetManualAction.TILT -> {
+                delay(90)
+                3f
+            }
+            else -> return@LaunchedEffect
+        }
+        shoulderPeakAnim.animateTo(peak, tween(250, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)))
+        shoulderPeakAnim.animateTo(-1f, tween(150, easing = FastOutSlowInEasing))
+        shoulderPeakAnim.animateTo(0f, tween(150, easing = FastOutSlowInEasing))
+    }
+    // D3 全屏时清单无锚点（宠物不在场），状态回落、避免回 D1 后无故重现。
+    LaunchedEffect(state) {
+        if (state == DockState.D3) onPetActionsVisibleChange(false)
+    }
     // 涟漪与注视定位：图标窗口中心（包名 → Offset）与面板窗口原点/宽。
     val dockIconCenters = remember { mutableStateMapOf<String, Offset>() }
     var dockPanelOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -710,7 +746,8 @@ fun PullUpDock(
                 }
                 // 圆肩批：连接混合宠物（面板之后画、前面图层；面板底锚
                 // 不变，宠物只向上长；输入态不呈现，横屏面板在场时也让位，
-                // 保证任何时刻恰一只）。点按语义不变（进输入态），testTag
+                // 保证任何时刻恰一只）。点按语义（2026-10-25 动作清单批）：
+                // 点宠物开关动作清单（327 直进输入作废），testTag
                 // 沿用 dock_pet_cell（冒烟入口定位契约不变）；layout_check
                 // 已随之上新为接触/压入几何（压入肩峰 5dp、脸盘完整）。
                 if (!intentInputMode) {
@@ -721,6 +758,22 @@ fun PullUpDock(
                             .align(Alignment.BottomCenter)
                             .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress))
                             .testTag("dock_pet_cell")
+                    )
+                }
+                // 动作清单（非模态气泡，宠物上方、尾巴朝下指向宠物）：
+                // 与宠物同在外层 Box 前面图层（不 clip、不改面板几何），
+                // 静止态默认关闭，layout_check 接触/压入规格不受影响。
+                if (petActionsVisible && !intentInputMode && state != DockState.D3) {
+                    PetActionList(
+                        onIntentSearch = {
+                            onPetActionsVisibleChange(false)
+                            onPetIntentSearch()
+                        },
+                        onDismiss = { onPetActionsVisibleChange(false) },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp))
+                            .testTag("pet_action_list")
                     )
                 }
                 } // v6 外层 Box（面板 + 前面图层七仔）

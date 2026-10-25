@@ -250,6 +250,8 @@ private fun HomeHost(
     // 「问七仔」提交后回首页看结果）。开 D3 抽屉即退出（见 HomeScreen 调用点）。
     var intentInputMode by remember { mutableStateOf(false) }
     var intentFocusWanted by remember { mutableStateOf(false) }
+    // 宠物动作清单（2026-10-25，Bob 拍板）：点宠物开关清单，不再直进输入。
+    var petActionsVisible by remember { mutableStateOf(false) }
     LaunchedEffect(intentState) {
         if (com.bobot.ailauncher.ui.home.intentStateHoldsInput(intentState)) {
             intentInputMode = true
@@ -415,9 +417,13 @@ private fun HomeHost(
             onOpenSettings = onOpenSettings,
             // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页 + 提交协调器
             onAskQizai = onAskQizai,
-            // v0.68.99（R-1）：Dock 七仔格点按进输入态；输入态时 Dock 卡让位
+            // 动作清单批（2026-10-25）：Dock 宠物点按开关动作清单
+            //（327 直进输入作废）；意图搜索收进清单 2 级，走同一入口。
             intentInputMode = intentInputMode,
-            onPetCellTap = { enterIntentInput(focus = true) }
+            onPetCellTap = { petActionsVisible = !petActionsVisible },
+            petActionsVisible = petActionsVisible,
+            onPetActionsVisibleChange = { petActionsVisible = it },
+            onPetIntentSearch = { enterIntentInput(focus = true) }
         )
         // v0.67.13（Bob）：主屏 rail 长按 → 快找；房子/收藏/字母/隐藏一条导航滑动到达。
         // 长按震动后选择器浮现；手指一动就由应用中心接管（D3 淡入）；picker 会话在 D3 打开后

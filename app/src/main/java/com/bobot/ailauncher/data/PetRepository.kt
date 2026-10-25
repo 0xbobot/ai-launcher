@@ -132,6 +132,76 @@ object PetRepository {
         _glanceTick.value += 1
     }
 
+    // ============ 宠物动作清单（2026-10-25，Bob 拍板）：点宠物出清单 ============
+    // 点按语义变更：327「点按当下进输入」作废——点宠物不再直进搜索，改为
+    // 弹出动作清单；意图搜索收进清单 2 级。清单触发的动作走本通道：组合层
+    // （FloatingPet / PullUpDock 肩线）按事件播一次对应全身动作，不改常驻
+    // 行为循环；mood 侧复用已有函数（onPetted / onDragStart / onDragEnd /
+    // setMoodHappyBrief），不另起状态机。
+    enum class PetManualAction {
+        BLINK, PATROL, GLANCE, GAZE_HOLD, DEEP_BREATH, SWAY,
+        TILT, STRETCH, SHAKE, HEAD_SHAKE, NOD, GREET, SHY, SURPRISED,
+        DIZZY, HAPPY, PETTED, DRAG_REACT, TURN
+    }
+
+    private val _actionKind = MutableStateFlow<PetManualAction?>(null)
+    val actionKind: StateFlow<PetManualAction?> get() = _actionKind.asStateFlow()
+    private val _actionTick = MutableStateFlow(0)
+    val actionTick: StateFlow<Int> get() = _actionTick.asStateFlow()
+    private var gazeHoldJob: Job? = null
+
+    /** 注视保持：把注视钉在 target 上 holdMs，到期自动回正前方。 */
+    fun gazeHold(target: GazeTarget, holdMs: Long) {
+        gazeHoldJob?.cancel()
+        gazeHoldJob = scope.launch {
+            _gazeTarget.value = target
+            delay(holdMs)
+            _gazeTarget.value = GazeTarget.CENTER
+        }
+    }
+
+    /** 清单触发一次手动动作：mood 侧复用已有函数，可见运动由组合层按事件播。 */
+    fun requestPetAction(action: PetManualAction) {
+        markInteracted()
+        when (action) {
+            PetManualAction.GLANCE -> glance(GazeTarget.TODAY_CARD)
+            PetManualAction.PETTED, PetManualAction.SHY -> onPetted()
+            PetManualAction.DRAG_REACT -> {
+                onDragStart()
+                scope.launch {
+                    delay(300)
+                    onDragEnd()
+                }
+            }
+            PetManualAction.HAPPY -> setMoodHappyBrief()
+            PetManualAction.SURPRISED -> {
+                _mood.value = PetMood.SURPRISED
+                _mouth.value = PetMouth.O
+                scope.launch {
+                    delay(1200)
+                    if (_mood.value == PetMood.SURPRISED) {
+                        _mood.value = PetMood.IDLE
+                        _mouth.value = PetMouth.IDLE
+                    }
+                }
+            }
+            PetManualAction.DIZZY -> {
+                setUserInteracting(false)
+                _mood.value = PetMood.DIZZY
+                scope.launch {
+                    delay(1000)
+                    if (_mood.value == PetMood.DIZZY) {
+                        _mood.value = PetMood.IDLE
+                        _mouth.value = PetMouth.IDLE
+                    }
+                }
+            }
+            else -> Unit
+        }
+        _actionKind.value = action
+        _actionTick.value += 1
+    }
+
     // ============ R3-C：意图交互反应（对话感，Bob 2026-10-21 拍板） ============
     // 意图层（IntentEntry）按交互状态写入临时姿态，PetZone 渲染时优先于 mood：
     // 聚焦=倾听（FETCH 上浮举手）、Planning=思考（SORTING + 思考点点）、

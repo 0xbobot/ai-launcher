@@ -42,25 +42,39 @@ fun clipForMood(mood: PetMood): HighlightClip? = when (mood) {
  * 眨眼状态体：代码层与视频层共享的唯一眨眼权威。
  * 代码层跑 AliveLogic 的间隔循环；视频层换片前可强制请求一次，
  * 在眨眼闭合期切层，遮住换片跳变；400ms 内未切成则交叉淡化兜底。
+ *
+ * 眨眼新幅度（2026-10-25，随动作清单一并批）：总时长约 240ms——
+ * 闭合约 85ms → 闭合保持约 70ms（closedPhase，组合层画粗弯曲线 +
+ * 2dp 同步点头）→ 睁开约 85ms；旧 140ms 细线一闪而过作废。
  */
 class PetBlinkState {
     var blinking by mutableStateOf(false)
         private set
+
+    /** 闭合保持期：组合层在此期画粗 ∪ 形弯曲线（不用细线压缩条）并点头。 */
+    var closedPhase by mutableStateOf(false)
+        private set
     private var blinkJob: Job? = null
+
+    private suspend fun oneBlink() {
+        blinking = true
+        delay(85) // 闭合
+        closedPhase = true
+        delay(70) // 闭合保持
+        closedPhase = false
+        delay(85) // 睁开
+        blinking = false
+    }
 
     /** 强制眨眼一次（已在眨眼中则不重复触发）。 */
     fun requestBlink(scope: CoroutineScope) {
         if (blinking) return
         blinkJob?.cancel()
         blinkJob = scope.launch {
-            blinking = true
-            delay(140)
-            blinking = false
+            oneBlink()
             if (BlinkPolicy.isDoubleBlink(Random)) {
                 delay(120)
-                blinking = true
-                delay(140)
-                blinking = false
+                oneBlink()
             }
         }
     }
