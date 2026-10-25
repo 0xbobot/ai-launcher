@@ -415,8 +415,8 @@ fun FloatingPet(
                         val bh = bb - bt
                         drawArc(
                             color = Color.Black.copy(alpha = 0.9f),
-                            startAngleDegrees = 0f,
-                            sweepAngleDegrees = 180f,
+                            startAngle = 0f,
+                            sweepAngle = 180f,
                             useCenter = false,
                             topLeft = Offset(bl + bw * 0.1f, bt + bh * 0.2f),
                             size = androidx.compose.ui.geometry.Size(bw * 0.8f, bh * 0.8f),
