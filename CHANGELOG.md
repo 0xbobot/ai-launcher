@@ -10,6 +10,10 @@
 
 ---
 
+## v0.68.130（versionCode 338）— 2026-10-25
+
+七仔活物 P0 程序化运动（视觉活化设计 §5，纯 graphicsLayer、零新美术资产，统一挂 motionActive 低电量/减动效门禁）：呼吸改绕脚底锚点、体积守恒、周期游走；新眨眼三段时序并新增 12% 半眨；注视停留期瞳孔微扫视与两段式 saccade、头部跟随改 spring；重心绕脚底摇摆、周期性重心转移、随呼气下沉；微行为池每 20–45s 随机歪头/伸懒腰/抖毛；姿态切换改为 squash 最低点那一帧换图、删除 Crossfade，落地伴随呼气。另修复 PetView 误用不存在的 FastOutLinearEasing（应为 FastOutLinearInEasing）导致的 CI 编译失败。（本版为七仔活物 P0 的实际发布版。）本版先行测试通道发布。
+
 ## v0.68.129（versionCode 337）— 2026-10-25
 
 七仔活物 P0 程序化运动（视觉活化设计 §5，纯 graphicsLayer、零新美术资产，统一挂 motionActive 低电量/减动效门禁）：呼吸改绕脚底锚点、体积守恒、周期游走；新眨眼三段时序并新增 12% 半眨；注视停留期瞳孔微扫视与两段式 saccade、头部跟随改 spring；重心绕脚底摇摆、周期性重心转移、随呼气下沉；微行为池每 20–45s 随机歪头/伸懒腰/抖毛；姿态切换改为 squash 最低点那一帧换图、删除 Crossfade，落地伴随呼气。另修复 PetView 误用不存在的 FastOutLinearEasing（应为 FastOutLinearInEasing）导致的 CI 编译失败。本版先行测试通道发布。
