@@ -57,11 +57,16 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.bobot.ailauncher.ui.island.IslandToastHost
+import com.bobot.ailauncher.data.AppCatalog
+import com.bobot.ailauncher.data.HiddenApps
+import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.apps.DockState
 import com.bobot.ailauncher.ui.apps.AppRail
+import com.bobot.ailauncher.ui.apps.buildRailItems
+import com.bobot.ailauncher.ui.apps.railLettersFromVisibleApps
 import com.bobot.ailauncher.ui.apps.PullUpDock
 import com.bobot.ailauncher.ui.glass.GlassBackdropState
 import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
@@ -324,10 +329,12 @@ private fun HomeHost(
     CompositionLocalProvider(LocalGlassBackdrop provides glassState) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         // 横屏刘海避让（Bob 2026-10-25，与应用中心横屏 rail 同款）：首页 picker rail
-        // 在右边缘，横屏下挖孔移到右侧边、且 400dp 写死高在横屏屏高不足时顶缘被裁
-        // （房子顶到状态栏带）；横屏改容器跟随高 + 右侧让 cutoutRight + 底距 16dp
-        // （横屏 Dock 居中 344dp 不与右边缘 rail 相交，70dp 底距的竖屏理由不存在）。
-        // 竖屏：400dp 高 + 70dp 底距 + 无 cutout 垫，一律不动。
+        // 在右边缘，横屏下挖孔移到右侧边；横屏改容器跟随高 + 右侧让 cutoutRight +
+        // 底距 0dp（与应用中心横屏同锚点：Row fillMaxSize、rail Box fillMaxHeight、
+        // 无底距，块高严格相等；326 的 16dp 底距本为防底部手势干扰，但应用中心
+        // 横屏 rail 本来就直通屏底边且常驻，选择器只是长按触发、用完即走的瞬时层，
+        // 干扰窗口远小于应用中心，该理由不成立。横屏 Dock 居中 344dp 不与右边缘
+        // rail 相交）。竖屏：等高机制 + 70dp 底距 + 无 cutout 垫。
         val pickerDensity = LocalDensity.current
         val isLandscapePicker = maxWidth > maxHeight
         val pickerCutoutRight = with(pickerDensity) {
@@ -425,17 +432,39 @@ private fun HomeHost(
         var pickerHouseArmed by remember { mutableStateOf(true) }
         var lastPickerHousePull by remember { mutableStateOf(0f) }
         // v0.67.13：房子/收藏/字母/隐藏都在一条导航里（与应用中心 rail 一致）
-        val homeItems = remember {
-            buildList {
-                add(RailItem.House)
-                // v0.68.33（Bob）：房子和星星之间也加分隔线，间距和其他一致
-                add(RailItem.Separator)
-                add(RailItem.Star)
-                add(RailItem.Separator)
-                ('A'..'Z').forEach { add(RailItem.Letter(it)) }
-                add(RailItem.Separator)
-                add(RailItem.Eye)
+        // 字母导航完全统一（Bob 2026-10-25 追问「为什么不改」）：首页选择器不再
+        // 硬编码 31 项，改用与应用中心同一套项目构造逻辑（RailItems.kt 的
+        // buildRailItems＋railLettersFromVisibleApps）：letters 同源
+        // AppCatalog.visibleApps 拼音首字母分组，★/👁 与分隔线同条件出现；
+        // remember 键随应用集变化，装卸应用后选择器同步变化。★/👁 的动作不
+        // 变（★→DOCK 进场、👁→隐藏进场），只是出现条件与应用中心对齐——无
+        // Dock 应用时无 ★ 可进、无隐藏应用时无 👁 可进，这本身就是一致。
+        // 快照未到时 letters 为空、项目表退化为房子＋分隔，与应用中心同口径
+        // （此前旧 31 项静态表作废）；组合期只读快照，同屏 Dock（PullUpDock）
+        // 已在组合期 AppCatalog.ensure，此处再 ensure 一次作保险（同代去重）。
+        val pickerInstalledEpoch by InstalledApps.epoch.collectAsState()
+        val pickerCatalog by AppCatalog.snapshot.collectAsState()
+        val pickerHiddenVersion = HiddenApps.version.intValue
+        val pickerHidden = remember(pickerHiddenVersion) { HiddenApps.getHidden(context) }
+        LaunchedEffect(pickerInstalledEpoch, pickerHiddenVersion) { AppCatalog.ensure(context) }
+        val pickerDockTick by UiPrefs.dockTick.collectAsState()
+        val pickerHasDock = remember(pickerCatalog, pickerDockTick, pickerHidden) {
+            val pinned = UiPrefs.getDockPinned(context)
+            if (pinned.isEmpty()) false
+            else {
+                val all = (pickerCatalog?.apps ?: emptyList()).associateBy { it.packageName }
+                pinned.mapNotNull { all[it] }.any { it.packageName !in pickerHidden }
             }
+        }
+        val pickerHasHidden = remember(pickerCatalog, pickerHidden) {
+            if (pickerHidden.isEmpty()) false
+            else (pickerCatalog?.apps ?: emptyList()).any { it.packageName in pickerHidden }
+        }
+        val pickerLetters = remember(pickerCatalog) {
+            railLettersFromVisibleApps(pickerCatalog?.visibleApps ?: emptyList(), context)
+        }
+        val homeItems = remember(pickerHasDock, pickerLetters, pickerHasHidden) {
+            buildRailItems(pickerHasDock, pickerLetters, pickerHasHidden)
         }
         fun dismissPicker() {
             pickerActive = false
@@ -458,8 +487,9 @@ private fun HomeHost(
         // ＋状态栏。两处共用同一个高度来源：应用中心列表容器实测高（UiPrefs 进程内
         // 状态，应用中心 onSizeChanged 写、键盘弹出时不采）；首页竖屏 railHeight＝
         // 该实测高−70dp，与应用中心竖屏 rail 根高严格相等，rail 块高（占比 0.85×根高）
-        // 随之相等。未测过（首次进应用中心前）回退 null＝跟随容器旧行为；横屏不动
-        // （见下：横屏根高差仅 16dp 底距，且改动会吃掉底部手势留白，暂不强制等高）。
+        // 随之相等。未测过（首次进应用中心前）回退 null＝跟随容器旧行为；横屏亦
+        // 等高（见下：横屏底距改 0dp，与应用中心横屏同锚点——Row fillMaxSize、
+        // rail Box fillMaxHeight、无底距；右侧 cutoutRight 避让不动）。
         val acListHpx by UiPrefs.appCenterListHeightPx.collectAsState()
         val pickerRailHeight = if (!isLandscapePicker) {
             acListHpx?.let { px ->
@@ -510,7 +540,9 @@ private fun HomeHost(
                     pickerHouseArmed = true
                     dismissPicker()
                 },
-                forcedActiveIndex = pickerIndex.takeIf { it >= 0 },
+                // 项目表现随应用集动态变化：装卸发生在 picker 打开期间时旧下标
+                // 可能越界，夹到表内才传（正常流程下标恒有效，此处仅防越界）。
+                forcedActiveIndex = pickerIndex.takeIf { it >= 0 && it < homeItems.size },
                 requireLongPress = true,
                 onLongPressStart = {
                     pickerActive = true
@@ -541,7 +573,7 @@ private fun HomeHost(
                     }
                 },
                 visible = pickerActive,
-                // 横屏刘海避让（见 HomeHost 根部注释）：横屏容器跟随高 + 右侧让位 + 底距 16dp；竖屏底距 70dp、避让不动（高度改跟随容器见下）。
+                // 横屏刘海避让（见 HomeHost 根部注释）：横屏容器跟随高 + 右侧让位 + 底距 0dp（与应用中心横屏同锚点）；竖屏底距 70dp、避让不动。
                 // 字母导航精修（Bob 2026-10-25）：与应用中心同一套字——14sp/16sp 行高/1.0/Normal，
                 // 不再走 12sp/0.6 旧默认值，三条导航观感统一。
                 letterFontSize = 14.sp,
@@ -553,16 +585,16 @@ private fun HomeHost(
                 // 属于死码，随之删除）；横屏占比跟应用中心横屏同为 0.95，
                 // 竖屏 0.85；竖屏高度不再写死 400dp，改等高（见上：railHeight＝
                 // 应用中心列表容器实测高−70dp，与应用中心竖屏 rail 根高相等；
-                // 底距 70dp 不动）。行距仍受项目数影响（首页恒 31 项，应用中心
-                // 随本机应用变化），等高只保证块高相等，不保证行距相等——残差
-                // 见收据，等 Bob 定，不擅自改任一侧字母集合。
+                // 底距 70dp 不动）。行距亦严格一致：首页项目表改用与应用中心
+                // 同一套构造（见上 homeItems），块高与项目数双相等，行高＝块高
+                // ／项目数随之相等；横屏底距 0dp 与应用中心横屏同锚点。
                 railHeight = pickerRailHeight,
                 railFraction = if (isLandscapePicker) 0.95f else 0.85f,
                 railWidth = 48.dp,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(
-                        bottom = if (isLandscapePicker) 16.dp else 70.dp,
+                        bottom = if (isLandscapePicker) 0.dp else 70.dp,
                         end = if (isLandscapePicker) pickerCutoutRight else 0.dp
                     )
             )

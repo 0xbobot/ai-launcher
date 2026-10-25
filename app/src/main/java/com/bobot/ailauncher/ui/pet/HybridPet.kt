@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.pet
 
 import android.graphics.Outline
+import android.view.TextureView
 import android.view.View
 import android.view.ViewOutlineProvider
 import androidx.compose.animation.core.animateFloatAsState
@@ -32,8 +33,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
 import com.bobot.ailauncher.data.BatteryState
 import com.bobot.ailauncher.data.PetRepository
 import kotlinx.coroutines.delay
@@ -59,7 +58,16 @@ import java.io.IOException
  * 门禁：只在主页 RESUMED 时播；切后台或低电量即停回代码层。片源缺失时不切层、不崩溃、
  * 行为与无视频时完全一致。播放器音量恒为 0（高光片全部静音）。
  * 生成片是实色灰底，播放层做圆形裁剪（徽章式），不做抠像。
+ *
+ * —— 应急（2026-10-25，333 发布后闪退）：视频层已彻底关闭，见下 VIDEO_LAYER_EMERGENCY_OFF。
+ * Bob 报 333 后根本进不去应用、疑似宠物视频路径；应用内崩溃日志拿不到、根因未定论。
+ * 在此期间：不 compose AndroidView、不建视频输出面、不调用 setVideoTextureView /
+ * clearVideoTextureView；所有 mood 一律回落代码层（FloatingPet 常驻生命）。
+ * 恢复视频层前必须先拿到崩溃堆栈并修掉根因，再由 Bob 拍板。
  */
+/** 应急总开关：true = 视频层彻底关闭（333 后闪退应急，见文件头注释）。 */
+private const val VIDEO_LAYER_EMERGENCY_OFF = true
+
 @Composable
 fun HybridPet(
     petWidth: Dp,
@@ -122,6 +130,8 @@ fun HybridPet(
     }
 
     fun play(clip: HighlightClip) {
+        // 应急：视频层关闭，全部回落代码层；videoActive 永不为真，代码层永不隐藏。
+        if (VIDEO_LAYER_EMERGENCY_OFF) return
         if (!resumed || lowPower) return
         if (!assetExists(clip)) return
         if (loadedClip == clip && videoActive) return // 已在播同一条
@@ -292,42 +302,54 @@ fun HybridPet(
                 onTap = { hybridTap() },
             )
         }
-        // 视频层：方形 + 圆形裁剪，圆心对准玻璃头球心（盒高约 62% 处）。
+        // 视频层：仅播片/待换片时挂载。PlayerView 默认 SurfaceView 画在
+        // 独立 surface 上，不认 Compose alpha、不认椭圆裁剪、pause 后仍留
+        // surface——327 灰框就是这么来的。故：①不用 PlayerView，直接用
+        // TextureView + setVideoTextureView（Media3 1.3.1 的 PlayerView 没
+        // 有 setSurfaceType 的公开 setter，表面类型只能走 XML 属性）；
+        // ②不播且无待换片时根本不 compose AndroidView，不留 surface；
+        // ③背景显式透明，不加任何底色。
         // clickable 只在播片时启用：播片时接管点按（PlayerView 本身不消费），
-        // 不播时透传给下层代码层（保留果冻回弹）。
-        Box(
-            modifier = Modifier
-                .size(petWidth)
-                .graphicsLayer {
-                    alpha = videoAlpha
-                    translationY = videoOffsetYPx
-                }
-                .clickable(
-                    enabled = videoActive,
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = { hybridTap() },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        this.player = player
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        isClickable = false
-                        isFocusable = false
-                        clipToOutline = true
-                        outlineProvider = object : ViewOutlineProvider() {
-                            override fun getOutline(view: View, outline: Outline) {
-                                outline.setOval(0, 0, view.width, view.height)
-                            }
-                        }
+        // 不播时整层不存在，点按自然透传给下层代码层（保留果冻回弹）。
+        // 应急：视频层关闭时纵使 videoActive/pendingClip 被置位也不挂载 AndroidView，
+        // 绝不建视频输出面、不调用 setVideoTextureView/clearVideoTextureView。
+        if (!VIDEO_LAYER_EMERGENCY_OFF && (videoActive || pendingClip != null)) {
+            Box(
+                modifier = Modifier
+                    .size(petWidth)
+                    .graphicsLayer {
+                        alpha = videoAlpha
+                        translationY = videoOffsetYPx
                     }
-                },
-                modifier = Modifier.size(petWidth),
-            )
+                    .clickable(
+                        enabled = videoActive,
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { hybridTap() },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        TextureView(ctx).apply {
+                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            isClickable = false
+                            isFocusable = false
+                            clipToOutline = true
+                            outlineProvider = object : ViewOutlineProvider() {
+                                override fun getOutline(view: View, outline: Outline) {
+                                    outline.setOval(0, 0, view.width, view.height)
+                                }
+                            }
+                            player.setVideoTextureView(this)
+                        }
+                    },
+                    onRelease = { textureView ->
+                        player.clearVideoTextureView(textureView)
+                    },
+                    modifier = Modifier.size(petWidth),
+                )
+            }
         }
     }
 }

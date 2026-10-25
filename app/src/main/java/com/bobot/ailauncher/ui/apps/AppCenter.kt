@@ -1484,22 +1484,10 @@ fun AppCenterContent(
                 // v0.68.6（Bob）：房子停留确认——滑到房子后停留450ms才回首页，
                 // 给操作反应时间，避免滑过时误触太突然；手指移开或松手即取消
                 // v0.67.13（Bob）：房子/收藏/隐藏做进 rail 滑动项，一条导航滑到哪去哪
+                // 字母导航完全统一（Bob 2026-10-25 追问）：项目表走三处共用的
+                // buildRailItems（RailItems.kt），构造与此前逐字一致，仅换调用。
                 val railItems = remember(dockApps, letters, hiddenApps) {
-                    buildList {
-                        add(RailItem.House)
-                        // v0.68.33（Bob）：房子和星星之间也加分隔线，间距和其他一致
-                        if (dockApps.isNotEmpty()) {
-                            add(RailItem.Separator)
-                            add(RailItem.Star)
-                        }
-                        // v0.68.13（Bob）：图标和字母之间加分隔线，视觉分隔+拉开间距
-                        add(RailItem.Separator)
-                        letters.forEach { add(RailItem.Letter(it)) }
-                        if (hiddenApps.isNotEmpty()) {
-                            add(RailItem.Separator)
-                            add(RailItem.Eye)
-                        }
-                    }
+                    buildRailItems(dockApps.isNotEmpty(), letters, hiddenApps.isNotEmpty())
                 }
                 // 收藏/隐藏时的脉冲目标
                 val pulseItem = when (flashTarget) {
