@@ -317,10 +317,36 @@ object GlassPolicy {
      */
     data class BandLuminance(val mean: Float, val stdDev: Float)
 
-    fun bandLuminance(pixels: IntArray, width: Int, height: Int): List<BandLuminance> {
+    /**
+     * 简报字区横向右界（屏宽比例）：简报文字左对齐，字形只占屏宽左约 40%
+     * （2026-10-25 23:14 实拍量测：标题 4 字＋短副行均不过左 40%）。
+     * 整幅宽带均值会被字区外的深色块（如右上深红）拉暗而误判暗底，
+     * 故简报取样只看该横向范围内的带亮度（见 bandLuminanceRegion）。
+     * 极长标题折行超过 40% 的残差由字级阴影兜底，不由取样再扩。
+     */
+    const val BRIEFING_TEXT_RIGHT_FRAC = 0.4f
+
+    fun bandLuminance(pixels: IntArray, width: Int, height: Int): List<BandLuminance> =
+        bandLuminanceRegion(pixels, width, height, 0f, 1f)
+
+    /**
+     * 按横向范围算带亮度：与 [bandLuminance] 同批缩略图、同带划分，
+     * 只统计 x ∈ [xFromFrac * width, xToFrac * width) 内的像素。
+     * 范围越界自动钳制；范围为空时返回零带（调用方按无数据处理）。
+     */
+    fun bandLuminanceRegion(
+        pixels: IntArray,
+        width: Int,
+        height: Int,
+        xFromFrac: Float,
+        xToFrac: Float,
+    ): List<BandLuminance> {
         if (width < 1 || height < 1 || pixels.size < width * height) {
             return List(BACKDROP_BANDS) { BandLuminance(0f, 0f) }
         }
+        val x0 = (xFromFrac.coerceIn(0f, 1f) * width).toInt().coerceIn(0, width)
+        val x1 = (xToFrac.coerceIn(0f, 1f) * width).toInt().coerceIn(0, width)
+        if (x1 <= x0) return List(BACKDROP_BANDS) { BandLuminance(0f, 0f) }
         return (0 until BACKDROP_BANDS).map { band ->
             val y0 = band * height / BACKDROP_BANDS
             val y1 = (band + 1) * height / BACKDROP_BANDS
@@ -329,7 +355,7 @@ object GlassPolicy {
             var n = 0L
             for (y in y0 until y1) {
                 val rowOff = y * width
-                for (x in 0 until width) {
+                for (x in x0 until x1) {
                     val lum = relativeLuminance(pixels[rowOff + x])
                     sum += lum
                     sumSq += lum * lum

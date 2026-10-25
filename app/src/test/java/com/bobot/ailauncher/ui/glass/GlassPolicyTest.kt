@@ -271,6 +271,21 @@ class GlassPolicyTest {
     }
 
     @Test
+    fun `band luminance region ignores pixels outside the text zone`() {
+        // 宽 10：左 4 列黑、右 6 列白——整幅宽均值 0.6，左 40% 区域均值 0。
+        val px = IntArray(60) { i -> if (i % 10 < 4) argb(0, 0, 0) else argb(255, 255, 255) }
+        val full = GlassPolicy.bandLuminance(px, 10, 6)
+        assertTrue(full.all { it.mean == 0.6f })
+        val left = GlassPolicy.bandLuminanceRegion(px, 10, 6, 0f, 0.4f)
+        assertEquals(GlassPolicy.BACKDROP_BANDS, left.size)
+        assertTrue(left.all { it.mean == 0f && it.stdDev == 0f })
+        assertTrue(
+            GlassPolicy.bandLuminanceRegion(px, 10, 6, 0.4f, 0.4f)
+                .all { it.mean == 0f && it.stdDev == 0f }
+        )
+    }
+
+    @Test
     fun `relative luminance and contrast ratio follow WCAG`() {
         assertEquals(0.0, GlassPolicy.relativeLuminance(argb(0, 0, 0)), 1e-9)
         assertEquals(1.0, GlassPolicy.relativeLuminance(argb(255, 255, 255)), 1e-9)

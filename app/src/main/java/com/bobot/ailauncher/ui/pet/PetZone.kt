@@ -252,47 +252,65 @@ fun PetZone(
     }
 
     // 简报自适应字色（Bob 2026-10-25 21:17 拍板：自适应字色、去纱；
-    // 2026-10-25 22:31 再令：罩纱彻底去掉，包括回退路径）：
-    // 简报区不再靠罩纱保可读性，改靠字色自适应；回退态也不再画纱，
-    // 改选简报区均值下对比度更高的那档字色（不再保证处处过 4.5，
-    // 这是 Bob 接受的如实后果）。无带数据时沿用时间段配色，同样不画纱。
-    // 亮度只看简报区那一带：玻璃层已读的 48×48 缩略图顶部带（与 PetZone
-    // 本身高度对应的带数），不用整张壁纸平均；与时间段配色（CoverPalette）
-    // 的关系：本处只覆盖传给 CoverHero／BriefMeetingRow 的 palette，简报区
-    // 字色以壁纸亮度为准，其他区域的时间段配色不动；intentSlot 与 Dock
-    // 不经过本处，一律不动。
+    // 2026-10-25 22:31 再令：罩纱彻底去掉，包括回退路径；
+    // 2026-10-25 23:27 定 A＋B＋C：取样修根因＋字阴影兜底＋堵无带数据回退）：
+    // 简报区不再靠罩纱保可读性，改靠字色自适应；回退态也不再画纱。
+    // A 取样：只看字实际所在的左 40% 横向范围的顶部带（briefingLuminance，
+    // 与 PetZone 本身高度对应的带数、连续加权），不用整幅宽带均值——
+    // 23:14 白字案就是整幅宽均值被右上深红块拉暗而误判暗底。
+    // 与时间段配色（CoverPalette）的关系：本处只覆盖传给 CoverHero／
+    // BriefMeetingRow 的 palette，简报区字色以壁纸亮度为准，其他区域的
+    // 时间段配色不动；intentSlot 与 Dock 不经过本处，一律不动。
     val glassState = LocalGlassBackdrop.current
     var briefingColumnHPx by remember { mutableIntStateOf(0) }
     val briefingBackdropHPx = glassState?.backdropHeightPx ?: 0
     val briefingZoneFraction =
         if (briefingBackdropHPx > 0 && briefingColumnHPx > 0)
             (briefingColumnHPx.toFloat() / briefingBackdropHPx).coerceIn(0f, 1f) else 0f
-    val briefingZoneBands = remember(glassState?.backdropLuminance, briefingZoneFraction) {
-        BriefingAdaptiveText.bandsForZone(
-            glassState?.backdropLuminance ?: emptyList(), briefingZoneFraction
+    val briefingZoneBands = remember(glassState?.briefingLuminance, briefingZoneFraction) {
+        BriefingAdaptiveText.zoneBandsForZone(
+            glassState?.briefingLuminance ?: emptyList(), briefingZoneFraction
         )
     }
     var briefingPrevDecision by remember { mutableStateOf<BriefingTextMode?>(null) }
+    // C 的锚点：上一次已算出的字色档，只由 DARK/LIGHT 写入，回退态不覆盖。
+    var briefingLastPalette by remember { mutableStateOf<BriefingTextMode?>(null) }
     val briefingDecision = remember(briefingZoneBands, briefingPrevDecision) {
         BriefingAdaptiveText.decide(briefingZoneBands, briefingPrevDecision)
     }
-    LaunchedEffect(briefingDecision) { briefingPrevDecision = briefingDecision }
-    // 回退改选对比度更高档：decide() 本身与单测一字不动（仍返回
-    // FALLBACK_SCRIM），渲染层在此把回退映射到相对更好的字色档；
+    LaunchedEffect(briefingDecision) {
+        briefingPrevDecision = briefingDecision
+        if (briefingDecision == BriefingTextMode.DARK_TEXT ||
+            briefingDecision == BriefingTextMode.LIGHT_TEXT
+        ) briefingLastPalette = briefingDecision
+    }
+    // 回退映射（decide() 仍返回 FALLBACK_SCRIM 信号，渲染层在此映射）：
+    // - 带非空但无档严格达标（双峰带等）：沿用 351 做法，选加权均值下对比度更高的档；
+    // - 无带数据（壁纸读不到／首帧未加载）：C——不再回退时间段调色板，
+    //   改沿用上次档；首帧尚无数据、无历史时默认浅色档，理由：①首帧只是闪现，
+    //   壁纸一旦读到就立即按实测重算；②字级阴影是深色影，浅色档误判在浅底上
+    //   仍有阴影边缘可救，而深色档误判在暗底上无阴影可救，故盲选浅色更安全。
     // 迟滞（briefingPrevDecision）仍按 decide() 原值回写，不受映射影响。
-    val briefingRenderMode = if (
+    val briefingRenderMode = when {
         briefingDecision == BriefingTextMode.FALLBACK_SCRIM &&
-        briefingZoneBands.isNotEmpty()
-    ) {
-        val zoneMean = briefingZoneBands.map { it.mean.toDouble() }.average()
-        val darkLum =
-            GlassPolicy.relativeLuminance(BriefingAdaptiveText.DARK_TITLE_ARGB.toInt())
-        val lightLum =
-            GlassPolicy.relativeLuminance(BriefingAdaptiveText.LIGHT_TITLE_ARGB.toInt())
-        if (GlassPolicy.contrastRatio(darkLum, zoneMean) >=
-            GlassPolicy.contrastRatio(lightLum, zoneMean)
-        ) BriefingTextMode.DARK_TEXT else BriefingTextMode.LIGHT_TEXT
-    } else briefingDecision
+            briefingZoneBands.isNotEmpty() -> {
+            val totalWeight = briefingZoneBands.sumOf { it.weight }
+            val zoneMean = if (totalWeight > 0.0) {
+                briefingZoneBands.sumOf { it.mean * it.weight } / totalWeight
+            } else 0.0
+            val darkLum =
+                GlassPolicy.relativeLuminance(BriefingAdaptiveText.DARK_TITLE_ARGB.toInt())
+            val lightLum =
+                GlassPolicy.relativeLuminance(BriefingAdaptiveText.LIGHT_TITLE_ARGB.toInt())
+            if (GlassPolicy.contrastRatio(darkLum, zoneMean) >=
+                GlassPolicy.contrastRatio(lightLum, zoneMean)
+            ) BriefingTextMode.DARK_TEXT else BriefingTextMode.LIGHT_TEXT
+        }
+        briefingDecision == BriefingTextMode.FALLBACK_SCRIM ->
+            briefingLastPalette ?: BriefingTextMode.LIGHT_TEXT
+        else -> briefingDecision
+    }
+    // FALLBACK_SCRIM 臂为防御性兜底：经上 mapping 后 briefingRenderMode 已无回退态。
     val briefingPalette = when (briefingRenderMode) {
         BriefingTextMode.DARK_TEXT -> coverPalette.copy(
             title = Color(BriefingAdaptiveText.DARK_TITLE_ARGB),

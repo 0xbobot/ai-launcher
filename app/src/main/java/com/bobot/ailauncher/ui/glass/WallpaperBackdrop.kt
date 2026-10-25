@@ -38,6 +38,8 @@ internal data class LoadedWallpaper(
     val bitmap: Bitmap,
     val kinds: List<BackdropKind>,
     val luminance: List<GlassPolicy.BandLuminance>,
+    /** 简报字区（左 40% 横向范围）的带亮度，见 GlassPolicy.BRIEFING_TEXT_RIGHT_FRAC。 */
+    val briefingLuminance: List<GlassPolicy.BandLuminance>,
 )
 
 @Composable
@@ -67,10 +69,12 @@ internal fun SystemWallpaperLayer(state: GlassBackdropState, modifier: Modifier 
             bitmap = loaded.bitmap
             state.backdropBands = loaded.kinds
             state.backdropLuminance = loaded.luminance
+            state.briefingLuminance = loaded.briefingLuminance
         } else {
             // 读不到（动态壁纸 getDrawable 返回 null、个别厂商限制、异常）：
-            // 亮度清空 → 简报回退 347 纱；玻璃旧位图保持既有降级行为（不破相）。
+            // 亮度清空 → 简报沿用上次字色档（见 PetZone，C）；玻璃旧位图保持既有降级行为（不破相）。
             state.backdropLuminance = emptyList()
+            state.briefingLuminance = emptyList()
         }
     }
     val bmp = bitmap ?: return
@@ -109,9 +113,13 @@ private fun loadSystemWallpaper(context: Context): LoadedWallpaper? {
     val pixels = IntArray(thumb * thumb)
     small.getPixels(pixels, 0, thumb, 0, 0, thumb, thumb)
     // 带分类与带亮度同批缩略图、同带划分，两份数据一一对应；简报只取顶部带。
+    // 简报字色另算一份左 40% 横向范围的带亮度（字区外深色块不许带偏均值）。
     return LoadedWallpaper(
         bitmap = bmp,
         kinds = GlassPolicy.classifyBands(pixels, thumb, thumb),
         luminance = GlassPolicy.bandLuminance(pixels, thumb, thumb),
+        briefingLuminance = GlassPolicy.bandLuminanceRegion(
+            pixels, thumb, thumb, 0f, GlassPolicy.BRIEFING_TEXT_RIGHT_FRAC
+        ),
     )
 }

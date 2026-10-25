@@ -26,6 +26,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.theme.CoverPalette
+import com.bobot.ailauncher.ui.theme.GlassTextShadow
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -55,6 +57,14 @@ import java.util.Locale
  * 下一场会不再是独立卡：会行长在简报内（见 [BriefMeetingRow]），
  * 信息只在简报出现一处（讲述句不复述会议，会议细节只在会行）。
  */
+/**
+ * 简报文字字级阴影（Bob 2026-10-25 23:27 定 A＋B＋C 之 B）：复用 GlassTextShadow
+ * token（offset 0,3、blur 12、黑 0.4），不另发明一套；阴影只跟字形走、
+ * 不铺满区域，不是纱。深墨字下深色影近乎不可见（无害），浅色字误判在
+ * 浅底上时靠影边恢复可读——深字误判在暗底上的残差由取样 A 负责。
+ */
+private val briefingTextShadowStyle = TextStyle(shadow = GlassTextShadow)
+
 @Composable
 fun CoverHero(
     summary: String,
@@ -170,7 +180,7 @@ fun CoverHeroGiantTime(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val parts = timeText.split(":")
-                    Text(
+                    Text(style = briefingTextShadowStyle,
                         text = parts.getOrElse(0) { "--" },
                         fontSize = timeSize,
                         fontWeight = FontWeight.Bold,
@@ -178,14 +188,14 @@ fun CoverHeroGiantTime(
                         color = palette.title,
                         lineHeight = timeSize
                     )
-                    Text(
+                    Text(style = briefingTextShadowStyle,
                         text = ":",
                         fontSize = timeSize,
                         fontWeight = FontWeight.Bold,
                         color = accent,
                         lineHeight = timeSize
                     )
-                    Text(
+                    Text(style = briefingTextShadowStyle,
                         text = parts.getOrElse(1) { "--" },
                         fontSize = timeSize,
                         fontWeight = FontWeight.Bold,
@@ -212,7 +222,7 @@ fun CoverHeroGiantTime(
                     animationSpec = androidx.compose.animation.core.tween(mt.Medium, easing = mt.Easing)
                 )
             ) {
-                Text(
+                Text(style = briefingTextShadowStyle,
                     text = summary,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
@@ -233,7 +243,7 @@ fun CoverHeroGiantTime(
                     animationSpec = androidx.compose.animation.core.tween(mt.Medium, easing = mt.Easing)
                 )
             ) {
-                Text(
+                Text(style = briefingTextShadowStyle,
                     text = listOf(weatherDesc, daypartLine).filter { it.isNotBlank() }.joinToString(" · "),
                     fontSize = 16.sp,
                     lineHeight = 28.sp,
@@ -256,7 +266,7 @@ fun TrackedText(
 ) {
     Row(modifier = modifier) {
         text.forEach { ch ->
-            Text(
+            Text(style = briefingTextShadowStyle,
                 text = ch.toString(),
                 fontSize = fontSize,
                 color = color
@@ -337,14 +347,14 @@ fun CoverHeroHeadline(
                     TrackedText(text = "TODAY · 今日简报", fontSize = 12.sp, tracking = 4.dp,
                         color = accent)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
+                    Text(style = briefingTextShadowStyle, text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
                         color = palette.title, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(text = "$timeText · $weatherDesc", fontSize = 16.sp,
+                    Text(style = briefingTextShadowStyle, text = "$timeText · $weatherDesc", fontSize = 16.sp,
                         color = palette.title.copy(alpha = 0.6f))
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = narration, fontSize = 15.sp,
+                    Text(style = briefingTextShadowStyle, text = narration, fontSize = 15.sp,
                         color = palette.title.copy(alpha = 0.7f))
                 }
             }
@@ -357,18 +367,18 @@ fun CoverHeroHeadline(
                     Box(modifier = Modifier.width(44.dp).height(3.dp)
                         .background(accent))
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
+                    Text(style = briefingTextShadowStyle, text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
                         letterSpacing = 2.sp, color = palette.title, maxLines = 4, overflow = TextOverflow.Ellipsis)
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(text = "$timeText · $weatherDesc", fontSize = 16.sp,
+                    Text(style = briefingTextShadowStyle, text = "$timeText · $weatherDesc", fontSize = 16.sp,
                         color = palette.title.copy(alpha = 0.6f))
                     Spacer(modifier = Modifier.height(8.dp))
                     TrackedText(text = dateText, fontSize = 12.sp, tracking = 4.dp,
                         color = palette.title.copy(alpha = 0.45f))
                     Spacer(modifier = Modifier.height(10.dp))
                     // v0.68.99：讲述句——简报的一句话（时段句，不复述会议）
-                    Text(text = narration, fontSize = 15.sp,
+                    Text(style = briefingTextShadowStyle, text = narration, fontSize = 15.sp,
                         color = palette.title.copy(alpha = 0.7f))
                 }
             }
@@ -410,12 +420,12 @@ fun CoverHeroMinimal(
             // 居中时钟行
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val parts = timeText.split(":")
-                Text(text = parts.getOrElse(0) { "--" }, fontSize = timeSize,
+                Text(style = briefingTextShadowStyle, text = parts.getOrElse(0) { "--" }, fontSize = timeSize,
                     fontWeight = FontWeight.Bold, letterSpacing = (-2).sp,
                     color = palette.title, lineHeight = timeSize)
-                Text(text = ":", fontSize = timeSize, fontWeight = FontWeight.Bold,
+                Text(style = briefingTextShadowStyle, text = ":", fontSize = timeSize, fontWeight = FontWeight.Bold,
                     color = accent, lineHeight = timeSize)
-                Text(text = parts.getOrElse(1) { "--" }, fontSize = timeSize,
+                Text(style = briefingTextShadowStyle, text = parts.getOrElse(1) { "--" }, fontSize = timeSize,
                     fontWeight = FontWeight.Bold, letterSpacing = (-2).sp,
                     color = palette.title, lineHeight = timeSize)
             }
@@ -425,12 +435,12 @@ fun CoverHeroMinimal(
                 .background(accent))
             Spacer(modifier = Modifier.height(20.dp))
             // 一行简报（单行省略——MINIMAL 只给锚点，不展开）
-            Text(text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
+            Text(style = briefingTextShadowStyle, text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                 fontSize = 18.sp, color = palette.title,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(modifier = Modifier.height(8.dp))
             // 日期 · 天气副行
-            Text(text = "$dateText · $weatherDesc", fontSize = 14.sp,
+            Text(style = briefingTextShadowStyle, text = "$dateText · $weatherDesc", fontSize = 14.sp,
                 color = palette.title.copy(alpha = 0.6f))
             // v0.68.101：讲述者七仔撤出——MINIMAL 以日期副行收尾（纯文字）
         }
@@ -469,7 +479,7 @@ fun CoverHeroLandscape(
             Spacer(modifier = Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val parts = timeText.split(":")
-                Text(
+                Text(style = briefingTextShadowStyle,
                     text = "${parts.getOrElse(0) { "--" }}:${parts.getOrElse(1) { "--" }}",
                     fontSize = 64.sp,
                     fontWeight = FontWeight.Bold,
@@ -478,7 +488,7 @@ fun CoverHeroLandscape(
                     lineHeight = 64.sp
                 )
                 Spacer(modifier = Modifier.width(16.dp))
-                Text(
+                Text(style = briefingTextShadowStyle,
                     text = summary,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
@@ -489,7 +499,7 @@ fun CoverHeroLandscape(
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
+            Text(style = briefingTextShadowStyle,
                 text = weatherDesc,
                 fontSize = 14.sp,
                 color = palette.title.copy(alpha = 0.6f)
@@ -552,7 +562,7 @@ fun BriefMeetingRow(
                     color = accent
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(
+                Text(style = briefingTextShadowStyle,
                     text = title,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
@@ -570,7 +580,7 @@ fun BriefMeetingRow(
                     .background(accent.copy(alpha = 0.16f))
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Text(
+                Text(style = briefingTextShadowStyle,
                     text = "加入",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,

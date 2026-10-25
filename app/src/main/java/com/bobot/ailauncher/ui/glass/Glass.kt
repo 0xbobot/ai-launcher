@@ -83,10 +83,18 @@ class GlassBackdropState internal constructor() {
 
     /**
      * 背景的水平带亮度（线性光 0..1，与 backdropBands 同批缩略图、同带划分，
-     * 见 GlassPolicy.bandLuminance）：简报自适应字色只看顶部若干带。
-     * 空 = 尚未加载成功（动态壁纸／读取失败），调用方一律回退 347 纱。
+     * 见 GlassPolicy.bandLuminance）：整幅宽带，简报已不再消费（字区外深色块
+     * 会带偏均值），保留供其他调用方／兼容；简报取样见 briefingLuminance。
+     * 空 = 尚未加载成功（动态壁纸／读取失败）。
      */
     var backdropLuminance by mutableStateOf<List<GlassPolicy.BandLuminance>>(emptyList())
+
+    /**
+     * 简报字区（左 40% 横向范围，见 GlassPolicy.BRIEFING_TEXT_RIGHT_FRAC）
+     * 的水平带亮度：简报自适应字色只看它顶部若干带。
+     * 空 = 尚未加载成功（动态壁纸／读取失败），简报调用方沿用上次字色档（见 PetZone）。
+     */
+    var briefingLuminance by mutableStateOf<List<GlassPolicy.BandLuminance>>(emptyList())
 
     /** 壁纸重采样 tick：壁纸变化监听回调时 +1，SystemWallpaperLayer 据此重载。 */
     var wallpaperTick by mutableIntStateOf(0)
