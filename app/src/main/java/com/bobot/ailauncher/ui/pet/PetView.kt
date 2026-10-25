@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.pet
 
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -16,7 +17,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,9 +27,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -45,8 +49,6 @@ import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.GazeTarget
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -62,11 +64,27 @@ import kotlin.math.sqrt
  * - 随移动倾斜：rotationZ 跟随 offX（±8°），弹簧跟随，静止精确回 0
  * - 各 mood 小循环（sin 曲线 + Restart，头尾都是 0，重复播放不突兀）：
  *   IDLE 轻摆 ±2.5°，HAPPY 小跳 8dp，FILE 轻摆 ±3°，SORTING/FETCH 挥手摆 ±5°，周期 2.4s
- * - 切图 Crossfade 加快到 150ms；低电量时循环动作全停（省电）
+ * - 低电量时循环动作全停（省电）
  * mouth/blinking 为 Canvas 手绘时代遗留参数，保留签名兼容，内部不再使用。
  * alive-p1（七仔活物一期）：眨眼改眼部纵向压缩（复用 QizaiScene 眼盒，
  * 不再切图闪烁）；注视由注视导演统一调度（倾听 > 说话目标 > 瞥视 > 巡看）；
  * 浮动/呼吸/小循环去周期化（三路独立游走，周期与幅度 ±20% 重抽）。
+ * alive-p2（七仔活物 P0 程序化运动变换，《七仔视觉活化设计》§5）：
+ * - L0 呼吸绕脚底 pivot（transformOrigin 0.5,1.0），体积守恒
+ *   （scaleY 1.025 / scaleX 0.993），吸 40% 呼 60% 非对称波形
+ * - L0 眨眼三段时序：闭 55ms → 停 25ms → 开 110ms；新增 12% 半眨
+ * - L0 微扫视：注视停留期间瞳孔 ±1.5px 每 1.5–3s 轻跳
+ * - L1 重心摆动 ±1.2°（5.5–8s 游走，第 4 路 wander）+ 重心转移
+ *   ±2.5°（25–50s 一次，hold 2–4s，spring d0.6 回）；浮动 -8dp → ±2dp
+ *   且挂呼气相位（呼气时身体下沉）
+ * - L2 瞳孔 saccade 两段式：120ms 冲到 106%、90ms 回落；30% 扫视伴眨；
+ *   头部跟随改 spring d0.7（自带 ~3% overshoot）
+ * - L3 微行为池：每 20–45s 抽歪头/伸懒腰/抖毛，AttentionBudget 管上限，
+ *   idle 越久越安静（FidgetPool.quietedIntervalMs）
+ * - 切图藏在 squash 最低点那一帧，删除 Crossfade（活物不换图，活物做动作）；
+ *   落地伴随呼气（bob 相位重置到呼气段）；squash 深度随情绪
+ * - 全部常驻层参数变化，不引入 AnimatedVisibility，不与 IME 首秀同窗；
+ *   新通道统一挂 motionActive（低电量/减动效）门禁
  */
 @Composable
 fun PetView(
@@ -102,74 +120,90 @@ fun PetView(
     val effectiveSleepy = sleepy || lowPower
     // v0.56.0 M4 深夜：动作减速 30%（幅度 × 0.7）
     val nightSlow = if (PetRepository.isNight()) 0.7f else 1f
-    // alive-p1 去周期化：浮动/呼吸/小循环各走一路独立游走相位（32ms tick），
-    // 每周期末周期与幅度在 ±20% 内重抽——严格正弦是机器最强的自白。
-    // 旧口径：浮动 3.2s 周期 -8dp、呼吸 4s 周期 1.03、小循环 2.4s 周期。
-    var bobPhase by remember { mutableFloatStateOf(0f) }
-    var bobPeriod by remember { mutableFloatStateOf(3200f) }
-    var bobAmp by remember { mutableFloatStateOf(1f) }
+    // alive-p2：新生命通道统一门禁——低电量/减动效时静止（FloatingPet 同款口径）
+    val motionActive = !lowPower && !reduceMotion
+    // alive-p1 去周期化 + alive-p2 第 4 路：呼吸/小循环/重心摆动各走一路
+    // 独立游走相位（32ms tick），每周期末周期与幅度在 ±20% 内重抽——
+    // 严格正弦是机器最强的自白。各通道相位互相独立（不同相是活物）。
     var breathePhase by remember { mutableFloatStateOf(0f) }
-    var breathePeriod by remember { mutableFloatStateOf(4000f) }
+    var breathePeriod by remember { mutableFloatStateOf(BREATHE_PERIOD_BASE_MS) }
     var breatheAmp by remember { mutableFloatStateOf(1f) }
     var loopPhase by remember { mutableFloatStateOf(0f) }
     var loopPeriod by remember { mutableFloatStateOf(2400f) }
     var loopAmp by remember { mutableFloatStateOf(1f) }
+    var swayPhase by remember { mutableFloatStateOf(0f) }
+    var swayPeriod by remember { mutableFloatStateOf(SWAY_PERIOD_BASE_MS) }
+    var swayAmp by remember { mutableFloatStateOf(1f) }
     LaunchedEffect(Unit) {
         while (true) {
             delay(32)
             val r = kotlin.random.Random
-            bobPhase += (2 * PI * 32 / bobPeriod).toFloat()
-            if (bobPhase >= 2 * PI) {
-                bobPhase -= (2 * PI).toFloat()
-                bobPeriod = wanderPeriodMs(3200f, r); bobAmp = wanderAmp(r)
-            }
             breathePhase += (2 * PI * 32 / breathePeriod).toFloat()
             if (breathePhase >= 2 * PI) {
                 breathePhase -= (2 * PI).toFloat()
-                breathePeriod = wanderPeriodMs(4000f, r); breatheAmp = wanderAmp(r)
+                breathePeriod = wanderPeriodMs(BREATHE_PERIOD_BASE_MS, r)
+                breatheAmp = wanderAmp(r)
             }
             loopPhase += (2 * PI * 32 / loopPeriod).toFloat()
             if (loopPhase >= 2 * PI) {
                 loopPhase -= (2 * PI).toFloat()
                 loopPeriod = wanderPeriodMs(2400f, r); loopAmp = wanderAmp(r)
             }
-        }
-    }
-    // idle 轻微浮动（余弦缓动近似原 FastOutSlowIn 往返）
-    val bob = -8f * bobAmp * (0.5f - 0.5f * cos(bobPhase))
-    // P0：呼吸——细微缩放，比浮动更"活"
-    // v0.28.1：低电量时停止呼吸（静态，省电）
-    val breathe: Float = if (lowPower) {
-        1f
-    } else {
-        1f + 0.03f * breatheAmp * (0.5f - 0.5f * cos(breathePhase))
-    }
-    // alive-p1 眨眼：眼部纵向压缩（复用 QizaiScene 做法，废弃切图快闪）。
-    // 间隔 2–6 秒随机，约 10% 连眨；低电量 12 秒（沿用现有口径）。
-    var blinkTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(lowPower) {
-        while (true) {
-            delay(BlinkPolicy.intervalMs(lowPower, kotlin.random.Random))
-            blinkTick++
-            delay(140)
-            blinkTick++
-            if (BlinkPolicy.isDoubleBlink(kotlin.random.Random)) {
-                delay(120)
-                blinkTick++
-                delay(140)
-                blinkTick++
+            swayPhase += (2 * PI * 32 / swayPeriod).toFloat()
+            if (swayPhase >= 2 * PI) {
+                swayPhase -= (2 * PI).toFloat()
+                swayPeriod = wanderPeriodMs(SWAY_PERIOD_BASE_MS, r)
+                swayAmp = wanderAmp(r)
             }
         }
     }
-    val isBlinking = blinkTick % 2 == 1
-    // 压缩动画：70ms 闭合 + 70ms 睁开（≈原 140ms 快闪），绕眼带中心缩放。
-    val blinkScale by animateFloatAsState(
-        targetValue = if (isBlinking) 0.08f else 1f,
-        animationSpec = tween(70, easing = FastOutSlowInEasing),
-        label = "blinkScale"
-    )
+    // alive-p2 L0 呼吸：非对称波形（吸 40% 呼 60%），体积守恒
+    // （scaleY 1.025 / scaleX 0.993），绕脚底 pivot（graphicsLayer 处设定）。
+    // L1 浮动：-8dp → ±2dp，挂呼吸相位——呼气（breathW 回落）时身体下沉。
+    val breathW = breatheWave(breathePhase) * breatheAmp
+    val bob = -BOB_AMP_DP * breathW
+    val breatheScaleY = if (motionActive) 1f + (BREATHE_SCALE_Y - 1f) * breathW else 1f
+    val breatheScaleX = if (motionActive) 1f + (BREATHE_SCALE_X - 1f) * breathW else 1f
+    // alive-p2 L1 重心摆动：±1.2° 绕脚底，与呼吸刻意不同相（独立 wander 通道）
+    val swayRot = if (motionActive) {
+        sin(swayPhase) * SWAY_AMP_DEG * swayAmp * nightSlow
+    } else 0f
+
+    // alive-p2 L0 眨眼：三段时序（闭 55 / 停 25 / 开 110）+ 12% 半眨。
+    // 眼盒纵向压缩（沿用 alive-p1 画法），Animatable 顺序驱动，Mutex 保证
+    // 间隔眨眼与扫视伴眨不打架（串行执行，不做半路取消——半路取消会把
+    // 眼盒卡在半闭）。
+    val blinkScale = remember { Animatable(1f) }
+    val blinkMutex = remember { Mutex() }
+    val doBlink: suspend (Boolean) -> Unit = { half ->
+        blinkMutex.withLock {
+            blinkScale.animateTo(
+                if (half) BLINK_HALF_TARGET else BLINK_FULL_TARGET,
+                tween(BLINK_CLOSE_MS, easing = FastOutLinearEasing)
+            )
+            delay(BLINK_HOLD_MS.toLong())
+            blinkScale.animateTo(
+                1f,
+                tween(BLINK_OPEN_MS, easing = FastOutSlowInEasing)
+            )
+        }
+    }
+    LaunchedEffect(lowPower, effectiveSleepy) {
+        val r = kotlin.random.Random
+        while (true) {
+            delay(BlinkPolicy.intervalMs(lowPower, r))
+            if (effectiveSleepy) continue // 本来就闭眼待机，不眨
+            doBlink(BlinkPolicy.isHalfBlink(r))
+            if (BlinkPolicy.isDoubleBlink(r)) {
+                delay(120)
+                doBlink(false)
+            }
+        }
+    }
+
     // alive-p1 注视导演：倾听 > 说话目标 > 瞥视 > 巡看（优先级即因果链）。
-    // 瞳孔（快，200ms）→ 头部（慢，延迟 80ms 后 280ms 跟上），与原巡看同款时序。
+    // alive-p2 L2：瞳孔 saccade 两段式（120ms 冲 106% → 90ms 回落）+
+    // 30% 扫视伴眨 + 微扫视；头部延迟 80ms 跟随，spring d0.7 自带回弹。
     val repoGazeTarget by PetRepository.gazeTarget.collectAsState()
     val repoGlanceTarget by PetRepository.glanceTarget.collectAsState()
     val repoGlanceTick by PetRepository.glanceTick.collectAsState()
@@ -199,18 +233,61 @@ fun PetView(
         else -> patrolTarget
     }
     val gazeOff = gazeOffsetFor(effectiveGazeTarget)
-    // 瞳孔先行：快速 200ms 到位（x ±6px，y ±4px）
-    val pupilX by animateFloatAsState(
-        targetValue = gazeOff.x * 6f,
-        animationSpec = tween(200, easing = FastOutSlowInEasing),
-        label = "pupilX"
+    // 瞳孔 saccade（x ±6px，y ±4px）：生物眼球是跳跃式的，匀速是云台。
+    // 出发瞬间 30% 概率伴眨；中途改目标时从当前位置重新起跳（不回落再跳）。
+    val pupilX = remember { Animatable(0f) }
+    val pupilY = remember { Animatable(0f) }
+    LaunchedEffect(gazeOff) {
+        val tx = gazeOff.x * 6f
+        val ty = gazeOff.y * 4f
+        if (pupilX.value == tx && pupilY.value == ty) return@LaunchedEffect
+        if (!effectiveSleepy && BlinkPolicy.isSaccadeBlink(kotlin.random.Random)) {
+            launch { doBlink(false) }
+        }
+        launch {
+            pupilX.animateTo(
+                pupilX.value + (tx - pupilX.value) * SACCADE_OVERSHOOT,
+                tween(SACCADE_OUT_MS, easing = FastOutLinearEasing)
+            )
+            pupilX.animateTo(
+                tx,
+                tween(SACCADE_SETTLE_MS, easing = FastOutSlowInEasing)
+            )
+        }
+        launch {
+            pupilY.animateTo(
+                pupilY.value + (ty - pupilY.value) * SACCADE_OVERSHOOT,
+                tween(SACCADE_OUT_MS, easing = FastOutLinearEasing)
+            )
+            pupilY.animateTo(
+                ty,
+                tween(SACCADE_SETTLE_MS, easing = FastOutSlowInEasing)
+            )
+        }
+    }
+    // 微扫视：注视停留期间瞳孔在目标点 ±1.5px 内每 1.5–3s 轻跳（死眼 = 图片）。
+    var jitterX by remember { mutableFloatStateOf(0f) }
+    var jitterY by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(motionActive) {
+        if (!motionActive) return@LaunchedEffect
+        val r = kotlin.random.Random
+        while (true) {
+            delay(MicroSaccade.intervalMs(r))
+            jitterX = MicroSaccade.offsetPx(r)
+            jitterY = MicroSaccade.offsetPx(r)
+        }
+    }
+    val jitterXAnim by animateFloatAsState(
+        targetValue = jitterX,
+        animationSpec = tween(MICRO_SACCADE_STEP_MS, easing = FastOutLinearEasing),
+        label = "jitterX"
     )
-    val pupilY by animateFloatAsState(
-        targetValue = gazeOff.y * 4f,
-        animationSpec = tween(200, easing = FastOutSlowInEasing),
-        label = "pupilY"
+    val jitterYAnim by animateFloatAsState(
+        targetValue = jitterY,
+        animationSpec = tween(MICRO_SACCADE_STEP_MS, easing = FastOutLinearEasing),
+        label = "jitterY"
     )
-    // 头部延迟 80ms 跟随：280ms 到位（x ±10px，y ±6px）
+    // 头部延迟 80ms 跟随：spring d0.7 自带 ~3% overshoot（x ±10px，y ±6px）
     var headGaze by remember { mutableStateOf(GazeOffset(0f, 0f)) }
     LaunchedEffect(effectiveGazeTarget) {
         delay(80)
@@ -218,14 +295,95 @@ fun PetView(
     }
     val headX by animateFloatAsState(
         targetValue = headGaze.x * 10f,
-        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium),
         label = "headX"
     )
     val headY by animateFloatAsState(
         targetValue = headGaze.y * 6f,
-        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium),
         label = "headY"
     )
+
+    // alive-p2 L1 重心转移：每 25–50s 偏 ±2.5°，hold 2–4s，spring d0.6 回——
+    // 像换了一只脚承重。
+    var weightShiftTarget by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(motionActive) {
+        if (!motionActive) return@LaunchedEffect
+        val r = kotlin.random.Random
+        while (true) {
+            delay(WeightShift.intervalMs(r))
+            weightShiftTarget = WeightShift.angleDeg(r)
+            delay(WeightShift.holdMs(r))
+            weightShiftTarget = 0f
+        }
+    }
+    val weightShift by animateFloatAsState(
+        targetValue = weightShiftTarget,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
+        label = "weightShift"
+    )
+
+    // alive-p2 L3 微行为池：每 20–45s（idle 越久越安静）抽 1 个，
+    // AttentionBudget 管上限；每个行为完整播完再清零，transformOrigin
+    // 切换只发生在参数归零的间隙，不会跳变。
+    var fidget by remember { mutableStateOf<Fidget?>(null) }
+    val headTiltDeg = remember { Animatable(0f) }
+    val stretchT = remember { Animatable(0f) }
+    val shakeDeg = remember { Animatable(0f) }
+    LaunchedEffect(motionActive, inScene) {
+        if (!motionActive || inScene) return@LaunchedEffect
+        val r = kotlin.random.Random
+        while (true) {
+            val base = FidgetPool.intervalMs(r)
+            delay(FidgetPool.quietedIntervalMs(base, PetRepository.minutesIdleNow()))
+            if (!PetRepository.attentionBudget.tryConsume()) continue
+            when (FidgetPool.pick(r)) {
+                Fidget.HEAD_TILT -> {
+                    fidget = Fidget.HEAD_TILT
+                    headTiltDeg.animateTo(
+                        FidgetPool.headTiltAngleDeg(r),
+                        spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium)
+                    )
+                    delay(FidgetPool.headTiltHoldMs(r))
+                    headTiltDeg.animateTo(
+                        0f,
+                        spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium)
+                    )
+                }
+                Fidget.STRETCH -> {
+                    fidget = Fidget.STRETCH
+                    stretchT.animateTo(
+                        1f,
+                        tween(FidgetPool.STRETCH_UP_MS, easing = FastOutSlowInEasing)
+                    )
+                    delay(FidgetPool.STRETCH_HOLD_MS)
+                    stretchT.animateTo(
+                        0f,
+                        spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium)
+                    )
+                }
+                Fidget.SHAKE -> {
+                    fidget = Fidget.SHAKE
+                    repeat(FidgetPool.SHAKE_REPS) {
+                        shakeDeg.animateTo(
+                            FidgetPool.SHAKE_AMP_DEG,
+                            tween(FidgetPool.SHAKE_STEP_MS, easing = LinearEasing)
+                        )
+                        shakeDeg.animateTo(
+                            -FidgetPool.SHAKE_AMP_DEG,
+                            tween(FidgetPool.SHAKE_STEP_MS, easing = LinearEasing)
+                        )
+                    }
+                    shakeDeg.animateTo(
+                        0f,
+                        tween(FidgetPool.SHAKE_STEP_MS, easing = LinearEasing)
+                    )
+                }
+            }
+            fidget = null
+        }
+    }
+
     // P0：点按果冻——按压 120ms 后 spring 回弹（纯视觉反馈）
     // v0.56.0 M2：非对称果冻 scaleX 1.2 / scaleY 0.8，0.3 秒回弹 + 开心表情，不说话
     var jellyPress by remember { mutableStateOf(false) }
@@ -291,16 +449,21 @@ fun PetView(
     // 低电量/睡眠时本来就待机态，不眨（覆盖层同样受 effectiveSleepy 门禁）。
     val resId = baseResId
 
-    // v0.29.1：姿势切换"顿一下"——切图时先挤到 0.88（90ms），再弹簧回弹（轻微 overshoot），
-    // 落点精确回到 1.0，遮掉切图的生硬感；比慢溶接更像活物在动
+    // alive-p2 转场：活物不换图，活物做动作——先挤到 squash 最低点那一帧
+    // 再换图（删除 Crossfade，幻灯片感消失）；squash 深度随情绪
+    // （HAPPY 0.85 跳得高，困时 0.95 没力气）；落地伴随呼气：
+    // 回弹瞬间把呼吸相位重置到呼气段起点，生物落地时呼气。
+    var displayedResId by remember { mutableIntStateOf(resId) }
     var poseSquash by remember { mutableStateOf(false) }
     LaunchedEffect(resId) {
         poseSquash = true
         delay(90)
+        displayedResId = resId
+        breathePhase = BREATHE_EXHALE_START_RAD
         poseSquash = false
     }
     val posePop by animateFloatAsState(
-        targetValue = if (poseSquash) 0.88f else 1f,
+        targetValue = if (poseSquash) squashDepth(mood, effectiveSleepy) else 1f,
         animationSpec = spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessMedium),
         label = "posePop"
     )
@@ -407,108 +570,135 @@ fun PetView(
             }
             .then(modifier)
             .graphicsLayer {
-                // alive-p1 注视：瞳孔（x ±6px / y ±4px）先行 + 头部（x ±10px /
-                // y ±6px）延迟跟随；倾听/说话/瞥视/巡看由注视导演统一排优先级
+                // alive-p2 L0/L1：呼吸/摆动/重心转移绕脚底 pivot——绕中心
+                // 缩放是贴纸放大，绕脚底才是胸腔起伏。
+                transformOrigin = TransformOrigin(0.5f, 1f)
+                // alive-p2 注视合成：瞳孔 saccade + 微扫视 jitter + 头部延迟跟随；
+                // 倾听/说话/瞥视/巡看由注视导演统一排优先级
                 // v0.56.0 M2 害羞轻颤
                 // R3-D：减动效时浮动（bob）与轻颤归零，宠物静止在原位
                 val tremble = if (mood == PetMood.SHY && !reduceMotion) shyTremble else 0f
                 val bobEff = if (reduceMotion) 0f else bob
-                translationX = with(density) { offX.dp.toPx() } + dragX + pupilX + headX + tremble
-                translationY = with(density) { (offY + bobEff * moodM + loopYdp * moodM).dp.toPx() } + dragY + pupilY + headY
-                // v0.56.0 M2 晕眩旋转
-                rotationZ = (tilt + loopRot) * moodM + dizzyRot
-                // v0.56.0 M2：非对称果冻
                 val jx = if (inScene) 1f else jellyX
                 val jy = if (inScene) 1f else jellyY
-                val breatheEff = if (reduceMotion) 1f else breathe // R3-D：减动效停呼吸缩放
-                val s = scale * breatheEff * posePop
-                scaleX = s * jx
-                scaleY = s * jy
+                translationX = with(density) { offX.dp.toPx() } + dragX +
+                    pupilX.value + headX + tremble + jitterXAnim
+                translationY = with(density) { (offY + bobEff * moodM + loopYdp * moodM).dp.toPx() } +
+                    dragY + pupilY.value + headY + jitterYAnim
+                // v0.56.0 M2 晕眩旋转；alive-p2：摆动/重心转移进 moodM 组
+                rotationZ = (tilt + loopRot + swayRot + weightShift) * moodM + dizzyRot
+                // alive-p2：呼吸非对称体积守恒（scaleX 微收 / scaleY 鼓起）
+                val s = scale * posePop
+                scaleX = s * breatheScaleX * jx
+                scaleY = s * breatheScaleY * jy
             }
     ) {
         if (!inScene) {
-            // v0.26.0：图片切换 Crossfade；v0.29.1：150ms 快溶（慢溶接像幻灯片）+ 姿势顿一下，不再拖沓
-            Crossfade(
-                targetState = resId,
-                animationSpec = tween(150),
-                label = "petImage"
-            ) { id ->
+            // alive-p2 L3 微行为层：歪头绕头部 pivot、伸懒腰绕底、抖毛绕中心。
+            // 同一时刻至多一个 fidget，且 transformOrigin 只在参数归零时切换。
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        when (fidget) {
+                            Fidget.HEAD_TILT -> {
+                                transformOrigin = TransformOrigin(0.5f, FidgetPool.HEAD_PIVOT_Y)
+                                rotationZ = headTiltDeg.value
+                            }
+                            Fidget.STRETCH -> {
+                                transformOrigin = TransformOrigin(0.5f, 1f)
+                                scaleY = 1f + (FidgetPool.STRETCH_SCALE_Y - 1f) * stretchT.value
+                                scaleX = 1f + (FidgetPool.STRETCH_SCALE_X - 1f) * stretchT.value
+                            }
+                            Fidget.SHAKE -> {
+                                transformOrigin = TransformOrigin(0.5f, 1f)
+                                rotationZ = shakeDeg.value
+                            }
+                            null -> {}
+                        }
+                    }
+            ) {
+                // alive-p2：切图藏在 squash 最低点那一帧（displayedResId 滞后
+                // resId 90ms），删除 Crossfade——慢溶接是幻灯片，squash 换图
+                // 是活物在动。
                 Image(
-                    painter = painterResource(id),
+                    painter = painterResource(displayedResId),
                     contentDescription = "七仔",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize()
                 )
-            }
-            // alive-p1 眨眼：眼带纵向压缩覆盖层（QizaiScene 同款做法的
-            // Image 版）。只在压缩进行中绘制：scale=1 时与底图像素完全重合，
-            // 平时不画，避免双重绘制的接缝。眼盒复用 QizaiScene.EYE_BOXES
-            // （jump 姿态无专属眼盒，落 main 的眼盒近似）。
-            if (blinkScale < 0.999f && !effectiveSleepy) {
-                // 与 QizaiScene 一致：直接取 ImageBitmap，不走 BitmapPainter
-                val blinkBmp = ImageBitmap.imageResource(resId)
-                run {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        // 与底图 ContentScale.Fit 完全一致的放置数学
-                        val fit = minOf(
-                            size.width / blinkBmp.width,
-                            size.height / blinkBmp.height
-                        )
-                        val dw = blinkBmp.width * fit
-                        val dh = blinkBmp.height * fit
-                        val left = (size.width - dw) / 2f
-                        val top = (size.height - dh) / 2f
-                        val eyeKey = when (resId) {
-                            R.drawable.meteor_wave -> "wave"
-                            R.drawable.meteor_hold -> "hold"
-                            else -> "main"
-                        }
-                        for (b in EYE_BOXES.getValue(eyeKey)) {
-                            val sbl = (b.l * blinkBmp.width).toInt()
-                            val sbt = (b.t * blinkBmp.height).toInt()
-                            val sbw = ((b.r - b.l) * blinkBmp.width).toInt()
-                                .coerceAtLeast(2)
-                            val sbh = ((b.b - b.t) * blinkBmp.height).toInt()
-                                .coerceAtLeast(4)
-                            val dbl = left + b.l * dw
-                            val dbt = top + b.t * dh
-                            val dbr = left + b.r * dw
-                            val dbb = top + b.b * dh
-                            val dbw = (dbr - dbl).toInt().coerceAtLeast(2)
-                            val dbh = ((dbb - dbt) * blinkScale).toInt()
-                                .coerceAtLeast(2)
-                            val cy = (dbt + dbb) / 2f
-                            drawImage(
-                                image = blinkBmp,
-                                srcOffset = IntOffset(sbl, sbt),
-                                srcSize = IntSize(sbw, sbh),
-                                dstOffset = IntOffset(
-                                    dbl.toInt(),
-                                    (cy - dbh / 2f).toInt()
-                                ),
-                                dstSize = IntSize(dbw, dbh)
+                // alive-p1 眨眼：眼带纵向压缩覆盖层（QizaiScene 同款做法的
+                // Image 版）。只在压缩进行中绘制：scale=1 时与底图像素完全重合，
+                // 平时不画，避免双重绘制的接缝。眼盒复用 QizaiScene.EYE_BOXES
+                // （jump 姿态无专属眼盒，落 main 的眼盒近似）。
+                // alive-p2：三段时序由 blinkScale Animatable 驱动；半眨同一通道。
+                if (blinkScale.value < 0.999f && !effectiveSleepy) {
+                    // 与 QizaiScene 一致：直接取 ImageBitmap，不走 BitmapPainter
+                    val blinkBmp = ImageBitmap.imageResource(displayedResId)
+                    run {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            // 与底图 ContentScale.Fit 完全一致的放置数学
+                            val fit = minOf(
+                                size.width / blinkBmp.width,
+                                size.height / blinkBmp.height
                             )
+                            val dw = blinkBmp.width * fit
+                            val dh = blinkBmp.height * fit
+                            val left = (size.width - dw) / 2f
+                            val top = (size.height - dh) / 2f
+                            val eyeKey = when (displayedResId) {
+                                R.drawable.meteor_wave -> "wave"
+                                R.drawable.meteor_hold -> "hold"
+                                else -> "main"
+                            }
+                            val eyeScale = blinkScale.value
+                            for (b in EYE_BOXES.getValue(eyeKey)) {
+                                val sbl = (b.l * blinkBmp.width).toInt()
+                                val sbt = (b.t * blinkBmp.height).toInt()
+                                val sbw = ((b.r - b.l) * blinkBmp.width).toInt()
+                                    .coerceAtLeast(2)
+                                val sbh = ((b.b - b.t) * blinkBmp.height).toInt()
+                                    .coerceAtLeast(4)
+                                val dbl = left + b.l * dw
+                                val dbt = top + b.t * dh
+                                val dbr = left + b.r * dw
+                                val dbb = top + b.b * dh
+                                val dbw = (dbr - dbl).toInt().coerceAtLeast(2)
+                                val dbh = ((dbb - dbt) * eyeScale).toInt()
+                                    .coerceAtLeast(2)
+                                val cy = (dbt + dbb) / 2f
+                                drawImage(
+                                    image = blinkBmp,
+                                    srcOffset = IntOffset(sbl, sbt),
+                                    srcSize = IntSize(sbw, sbh),
+                                    dstOffset = IntOffset(
+                                        dbl.toInt(),
+                                        (cy - dbh / 2f).toInt()
+                                    ),
+                                    dstSize = IntSize(dbw, dbh)
+                                )
+                            }
                         }
                     }
                 }
-            }
-            // v0.56.0 M2 害羞腮红：两坨粉色椭圆
-            if (mood == PetMood.SHY) {
-                androidx.compose.foundation.Canvas(
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    val w = size.width
-                    val h = size.height
-                    drawOval(
-                        color = androidx.compose.ui.graphics.Color(255, 150, 150, 180),
-                        topLeft = androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.42f),
-                        size = androidx.compose.ui.geometry.Size(w * 0.12f, h * 0.07f)
-                    )
-                    drawOval(
-                        color = androidx.compose.ui.graphics.Color(255, 150, 150, 180),
-                        topLeft = androidx.compose.ui.geometry.Offset(w * 0.70f, h * 0.42f),
-                        size = androidx.compose.ui.geometry.Size(w * 0.12f, h * 0.07f)
-                    )
+                // v0.56.0 M2 害羞腮红：两坨粉色椭圆
+                if (mood == PetMood.SHY) {
+                    androidx.compose.foundation.Canvas(
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        val w = size.width
+                        val h = size.height
+                        drawOval(
+                            color = androidx.compose.ui.graphics.Color(255, 150, 150, 180),
+                            topLeft = androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.42f),
+                            size = androidx.compose.ui.geometry.Size(w * 0.12f, h * 0.07f)
+                        )
+                        drawOval(
+                            color = androidx.compose.ui.graphics.Color(255, 150, 150, 180),
+                            topLeft = androidx.compose.ui.geometry.Offset(w * 0.70f, h * 0.42f),
+                            size = androidx.compose.ui.geometry.Size(w * 0.12f, h * 0.07f)
+                        )
+                    }
                 }
             }
         } else {

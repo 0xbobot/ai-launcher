@@ -338,6 +338,10 @@ object PetRepository {
         lastInteractMs = System.currentTimeMillis()
     }
 
+    /** 距上次互动分钟数——活物微行为池（alive-p2 FidgetPool）的"idle 越久越安静"输入 */
+    fun minutesIdleNow(): Long =
+        (System.currentTimeMillis() - lastInteractMs) / 60_000
+
     fun addAffection(n: Int) {
         val v = (_affection.value + n).coerceAtMost(100)
         _affection.value = v
