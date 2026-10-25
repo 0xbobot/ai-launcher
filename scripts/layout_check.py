@@ -326,16 +326,22 @@ def check_deck_focus(root, W, H):
 
 
 def check_dock_pet(root, W, H, state):
-    """pet-hybrid-float 漂浮几何（首页 dumps，dock_pet_cell 在场时）：
-    ① 悬浮间隙：（面板顶 - 宠物底）∈ [6, 18]dp（规格 12dp，呼吸
-       起伏 ±4–6px ≈ ±2dp，余量放宽）；
-    ② 完全露出：（面板顶 - 宠物顶）/ 宠物高 ∈ [1.00, 1.20]（整只
-       在面板之上；旧坐姿 0.65–0.85 已作废）；
-    ③ 无压边：（宠物底 - 面板顶）/ 宠物高 ≤ 0.02（漂浮不压面板；
-       旧 0.15–0.35 已作废）；
-    ④ 高比：宠物高 / 面板高 ∈ [0.80, 1.10]（头宽取旧坐姿盒 1.8 倍：
-       D1 约 127dp / 面板约 136dp、D2 约 172dp / 面板约 184dp，
-       均约 0.93；两排面板均适用，旧 160dp 门槛已作废）；
+    """Dock 圆肩连接几何（首页 dumps，dock_pet_cell 在场时；2026-10-25
+    圆肩批，漂浮规格已作废）：
+    面板布局顶 = 平顶线；肩峰在其上 12dp（rise），宠物底部压入
+    肩峰 5dp（press），故 dump 可见量：面板布局顶 - 宠物底 = rise
+    − press = 7dp（肩峰本身不是布局 bound，压入以此间隙代理）。
+    ① 接触/压入：（面板布局顶 - 宠物底）∈ [3, 11]dp（规格 7dp；
+       注视 headY 上下 ±2.3dp + 取整余量）；
+    ② 完全露出：（面板布局顶 - 宠物顶）/ 宠物高 ∈ [1.00, 1.20]
+       （整只在面板布局顶之上，底部压入肩峰不影响脸盘）；
+    ③ 不压过平顶线：（宠物底 - 面板布局顶）/ 宠物高 ≤ 0.01
+       （压入量不得超过 rise，否则宠物会被肩峰吞没；0.01 为
+       取整容差）；
+    ④ 高比：宠物高 / 面板高 ∈ [0.80, 1.10]（头宽取旧坐姿盒 1.53 倍
+       即 1.8 × 0.85：D1 宽约 108dp / 高约 137dp、面板约 136dp，
+       D2 宽约 146dp / 高约 185dp、面板约 184dp，均约 1.01；
+       两排面板均适用，旧 160dp 门槛已作废）；
     ⑤ 前面图层：dump 文档序中 dock_pet_cell 在 dock_panel 之后（后画）；
     ⑥ 居中：宠物中心 x 与面板中心 x 之差 ≤12dp。
     """
@@ -352,10 +358,11 @@ def check_dock_pet(root, W, H, state):
     pet_h = pet[3] - pet[1]
     dock_h = dock[3] - dock[1]
     gap = dp(dock[1] - pet[3])
-    if 6.0 <= gap <= 18.0:
-        print(f"LAYOUT OK {state}: dockpet float gap={gap:.1f}dp within [6,18]")
+    if 3.0 <= gap <= 11.0:
+        print(f"LAYOUT OK {state}: dockpet shoulder gap={gap:.1f}dp within [3,11] "
+              f"(rise-press spec 7dp)")
     else:
-        print(f"LAYOUT FAIL {state}: dockpet float gap={gap:.1f}dp outside [6,18] "
+        print(f"LAYOUT FAIL {state}: dockpet shoulder gap={gap:.1f}dp outside [3,11] "
               f"pet={pet} dock={dock}")
     exposure = (dock[1] - pet[1]) / float(pet_h) if pet_h > 0 else -1
     if 1.00 <= exposure <= 1.20:
@@ -364,11 +371,12 @@ def check_dock_pet(root, W, H, state):
         print(f"LAYOUT FAIL {state}: dockpet exposure={exposure:.3f} outside [1.00,1.20] "
               f"pet={pet} dock={dock}")
     ov = (pet[3] - dock[1]) / float(pet_h) if pet_h > 0 else -1
-    if ov <= 0.02:
-        print(f"LAYOUT OK {state}: dockpet overlap into panel={ov:.3f} <= 0.02 (floating)")
+    if ov <= 0.01:
+        print(f"LAYOUT OK {state}: dockpet overlap past flat top={ov:.3f} <= 0.01 "
+              f"(press must not exceed rise)")
     else:
-        print(f"LAYOUT FAIL {state}: dockpet overlap into panel={ov:.3f} exceeds 0.02 "
-              f"(floating pet must not press into panel) pet={pet} dock={dock}")
+        print(f"LAYOUT FAIL {state}: dockpet overlap past flat top={ov:.3f} exceeds 0.01 "
+              f"(pet swallowed past shoulder peak) pet={pet} dock={dock}")
     ratio = pet_h / float(dock_h) if dock_h > 0 else -1
     if 0.80 <= ratio <= 1.10:
         print(f"LAYOUT OK {state}: dockpet height ratio={ratio:.3f} within [0.80,1.10]")

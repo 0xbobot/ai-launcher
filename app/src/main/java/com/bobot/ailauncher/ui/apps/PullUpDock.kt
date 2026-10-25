@@ -66,6 +66,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -107,6 +118,127 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * - 下滑：D3→D2→D1（逐级收回）；点按卡片外部 → D2 收回 D1
  */
 enum class DockState { Hidden, D1, D2, D3 }
+
+/**
+ * Dock 圆肩轮廓（2026-10-25，Bob 拍板“材质 + 连接 + 圆肩”）：
+ * 圆角矩形（28dp 角）+ 顶部肩线——中央一段向上兜起的平滑拱，
+ * 托住宠物底部。两段 cubicTo，弦端与峰顶处切线水平（控制点
+ * 取半弦长 50% 处），与平顶缘相切、无折点；弧度与宠物底部
+ * 圆弧同向。轮廓可超出布局上沿 rise（肩峰在 y=-rise 处），
+ * 布局高本身不动（外层 Box 用 rise−press 公式留出空间）。
+ */
+private class DockShoulderShape(
+    private val chordDp: Dp,
+    private val riseDp: Dp,
+    private val cornerDp: Dp,
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density,
+    ): Outline {
+        val chord = with(density) { chordDp.toPx() }
+        val rise = with(density) { riseDp.toPx() }
+        val corner = with(density) { cornerDp.toPx() }
+        return Outline.Generic(dockShoulderPath(size, chord, rise, corner))
+    }
+}
+
+/** 圆肩轮廓 Path（布局坐标：原点在布局左上，y 向下；肩峰在 y=-rise）。 */
+private fun dockShoulderPath(
+    size: Size,
+    chordPx: Float,
+    risePx: Float,
+    cornerPx: Float,
+): Path {
+    val w = size.width
+    val h = size.height
+    val cx = w / 2f
+    val half = (chordPx / 2f).coerceAtMost((w / 2f - cornerPx).coerceAtLeast(0f))
+    val x0 = cx - half
+    val x1 = cx + half
+    // cubic 控制点取半弦长 50% 处，弦端与峰顶切线水平。
+    val k = half * 0.5f
+    return Path().apply {
+        moveTo(0f, h - cornerPx)
+        lineTo(0f, cornerPx)
+        quadraticTo(0f, 0f, cornerPx, 0f)
+        lineTo(x0, 0f)
+        cubicTo(x0 + k, 0f, cx - k, -risePx, cx, -risePx)
+        cubicTo(cx + k, -risePx, x1 - k, 0f, x1, 0f)
+        lineTo(w - cornerPx, 0f)
+        quadraticTo(w, 0f, w, cornerPx)
+        lineTo(w, h - cornerPx)
+        quadraticTo(w, h, w - cornerPx, h)
+        lineTo(cornerPx, h)
+        quadraticTo(0f, h, 0f, h - cornerPx)
+        close()
+    }
+}
+
+/**
+ * Dock 圆肩材质 dressing（玻璃之上、图标之下，链上游 clip 已把
+ * 绘制截在圆肩轮廓内）：
+ * ① 沿肩线内侧 3dp 的弧形高光：宽 14dp 淡 + 窄 5dp 亮两道描边
+ *    叠出柔边，水平渐变左上最亮向右渐隐；
+ * ② 暖白径向内晕：中心在面板顶部偏上（宠物正下方），呼应宠物
+ *    球体的内发光暖核。
+ */
+private fun Modifier.dockShoulderDressing(
+    chordDp: Dp,
+    riseDp: Dp,
+    cornerDp: Dp,
+): Modifier = drawBehind {
+    val chord = chordDp.toPx()
+    val rise = riseDp.toPx()
+    val corner = cornerDp.toPx()
+    val cx = size.width / 2f
+    val half = (chord / 2f).coerceAtMost((size.width / 2f - corner).coerceAtLeast(0f))
+    val x0 = cx - half
+    val x1 = cx + half
+    val k = half * 0.5f
+    // 肩线内侧 3dp 的拱（与轮廓肩线同形、下移 3dp）。
+    val yBase = 3.dp.toPx()
+    val arch = Path().apply {
+        moveTo(x0, yBase)
+        cubicTo(x0 + k, yBase, cx - k, yBase - rise, cx, yBase - rise)
+        cubicTo(cx + k, yBase - rise, x1 - k, yBase, x1, yBase)
+    }
+    drawPath(
+        path = arch,
+        brush = Brush.horizontalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.10f),
+                Color.White.copy(alpha = 0.0f),
+            ),
+            startX = x0,
+            endX = x1,
+        ),
+        style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round),
+    )
+    drawPath(
+        path = arch,
+        brush = Brush.horizontalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.32f),
+                Color.White.copy(alpha = 0.0f),
+            ),
+            startX = x0,
+            endX = x1,
+        ),
+        style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round),
+    )
+    drawRect(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                Color(0xFFFFF6E8).copy(alpha = 0.38f),
+                Color(0xFFFFF6E8).copy(alpha = 0.0f),
+            ),
+            center = Offset(cx, 0f),
+            radius = size.width * 0.5f,
+        ),
+    )
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -271,21 +403,35 @@ fun PullUpDock(
                 // 面板高实测回写（首帧按档位估 D2 184dp / D1 136dp，实测到
                 // 即纠正）。紧配置（字体 1.3 / 可用高 <400dp）宠物 ×0.8，
                 // 先缩它、不挤其他槽位（布局防线）。
-                // pet-hybrid-float：漂浮玻璃头（曜仔）取代坐姿七仔——头宽取
-                // 旧坐姿盒 1.8 倍（D1 约 127dp / D2 约 172dp），盒高按玻璃头
-                // 长宽比 1043:1318，底部留 12dp 气隙漂在面板上方（不再压边、
-                // 不再画脚下阴影）；外层 Box 只向上长，面板几何与锚点不动。
+                // 圆肩批（2026-10-25，Bob 拍板“材质 + 连接 + 圆肩”）：
+                // 玻璃头（曜仔）不再漂浮——头宽取旧坐姿盒 1.53 倍（即
+                // 1.8 × 0.85：D1 约 108dp / D2 约 146dp），盒高按玻璃头
+                // 长宽比 1043:1318；气隙取消，改圆肩连接：面板顶缘中央
+                // 兜起 rise 12dp 的肩线、宠物底部压入肩峰 5dp（前面图层，
+                // 面板先画、宠物后画），不画脚下阴影；外层 Box 只向上长，
+                // 面板几何与锚点不动（容器高 = 面板高 + 宠物高 + rise − press）。
                 val seatCompact = density.fontScale >= 1.3f ||
                     dockAvailableHeight < 400.dp
                 var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
                 val dockPetSize = dockPanelHeight * 0.52f * (if (seatCompact) 0.8f else 1f)
-                val floatPetWidth = dockPetSize * 1.8f
+                val floatPetWidth = dockPetSize * 1.53f
                 val floatPetHeight = floatPetWidth * (1318f / 1043f)
-                val floatPetGap = 12.dp
+                val shoulderRise = 12.dp
+                val petPress = 5.dp
+                // 圆肩轮廓（弦长 = 宠物宽 + 两侧各 25dp）；shape 只影响
+                // 绘制（clip / 玻璃 / 高光 / 内晕），不改变布局尺寸，故
+                // dockPanelHeight 回写不会引起布局循环。
+                val shoulderShape = remember(dockPanelHeight, seatCompact) {
+                    DockShoulderShape(
+                        chordDp = floatPetWidth + 50.dp,
+                        riseDp = shoulderRise,
+                        cornerDp = 28.dp,
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                        .height(dockPanelHeight + floatPetHeight + floatPetGap)
+                        .height(dockPanelHeight + floatPetHeight + shoulderRise - petPress)
                 ) {
                 Column(
                     modifier = Modifier
@@ -303,16 +449,24 @@ fun PullUpDock(
                         .onGloballyPositioned { coords ->
                             with(density) { dockPanelHeight = coords.size.height.toDp() }
                         }
-                        .clip(RoundedCornerShape(28.dp))
+                        .clip(shoulderShape)
                         // 玻璃试点批：Dock 强玻璃（AGSL 折射+模糊增色，只换材质不改尺寸/位置）。
                         // 模拟档（老设备/省电/桌面不可见）逐像素回原行为：默认全透明、
                         // 按压时 GlassCard 55%——fallback 与 boost 沿用 dockBgAlpha。
+                        // 圆肩批：玻璃裁剪沿圆肩轮廓走（shape 参数，共享玻璃参数不动）。
                         .glassSurface(
                             kind = com.bobot.ailauncher.ui.glass.GlassSurfaceKind.STRONG,
                             cornerRadius = 28.dp,
                             tintColor = AILauncherColors.current.Card,
                             fallbackColor = AILauncherColors.current.GlassCard.copy(alpha = 0.55f * dockBgAlpha),
-                            tintBoost = dockBgAlpha
+                            tintBoost = dockBgAlpha,
+                            shape = shoulderShape
+                        )
+                        // 圆肩批：弧形高光 + 暖白内晕（玻璃之上、图标之下）。
+                        .dockShoulderDressing(
+                            chordDp = floatPetWidth + 50.dp,
+                            riseDp = shoulderRise,
+                            cornerDp = 28.dp
                         )
                         .combinedClickable(
                             interactionSource = dockPressSource,
@@ -429,18 +583,18 @@ fun PullUpDock(
                         }
                     }
                 }
-                // pet-hybrid-float 漂浮混合宠物（面板之后画；面板底锚不变，
-                // 宠物只向上长；输入态不呈现，横屏面板在场时也让位，
+                // 圆肩批：连接混合宠物（面板之后画、前面图层；面板底锚
+                // 不变，宠物只向上长；输入态不呈现，横屏面板在场时也让位，
                 // 保证任何时刻恰一只）。点按语义不变（进输入态），testTag
                 // 沿用 dock_pet_cell（冒烟入口定位契约不变）；layout_check
-                // 已随之上新为漂浮几何（间隙/完全露出/无压边/高比）。
+                // 已随之上新为接触/压入几何（压入肩峰 5dp、脸盘完整）。
                 if (!intentInputMode) {
                     HybridPet(
                         petWidth = floatPetWidth,
                         onPetTap = onPetCellTap,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .offset(y = -(dockPanelHeight + floatPetGap))
+                            .offset(y = -(dockPanelHeight + shoulderRise - petPress))
                             .testTag("dock_pet_cell")
                     )
                 }

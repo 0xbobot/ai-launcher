@@ -26,7 +26,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -139,6 +141,9 @@ internal fun refreshGlassSignals(context: Context, state: GlassBackdropState) {
  * 不改变任何尺寸/位置/层级，只换材质渲染（布局纪律）。
  *
  * @param tintBoost 0..1 的临时提亮（如 Dock 按压反馈），只调叠色/高光强度。
+ * @param shape 非圆角矩形轮廓（如 Dock 圆肩）时传自定义 Shape；默认 null
+ *   即原圆角矩形口径，其他玻璃面行为一字不动。轮廓可超出布局上沿
+ *   （肩线 rise），玻璃裁剪/叠色/亮边一律沿该轮廓走。
  */
 @Composable
 fun Modifier.glassSurface(
@@ -147,9 +152,11 @@ fun Modifier.glassSurface(
     tintColor: Color,
     fallbackColor: Color,
     tintBoost: Float = 0f,
+    shape: Shape? = null,
 ): Modifier {
+    val fallbackShape = shape ?: RoundedCornerShape(cornerRadius)
     val state = LocalGlassBackdrop.current
-        ?: return this.background(fallbackColor, RoundedCornerShape(cornerRadius))
+        ?: return this.background(fallbackColor, fallbackShape)
     val tier = GlassPolicy.resolveTier(
         sdkInt = state.sdkInt,
         kind = kind,
@@ -159,10 +166,10 @@ fun Modifier.glassSurface(
         lowRam = state.lowRam,
     )
     if (tier == GlassTier.SIMULATED) {
-        return this.background(fallbackColor, RoundedCornerShape(cornerRadius))
+        return this.background(fallbackColor, fallbackShape)
     }
     return this.then(
-        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost)
+        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost, shape)
     )
 }
 
@@ -199,6 +206,7 @@ private fun glassDraw(
     tintColor: Color,
     fallbackColor: Color,
     tintBoost: Float,
+    shape: Shape? = null,
 ): Modifier {
     val composeDensity = LocalDensity.current.density
     val patchBlur = rememberGraphicsLayer()
@@ -257,8 +265,20 @@ private fun glassDraw(
             val backdrop = state.layer
             val tick = state.recordTick // 订阅背景重录
             val radiusPx = cornerRadius.toPx()
+            // 自定义轮廓（如 Dock 圆肩）：Shape 在绘制期展开为 Path；非
+            // Generic 轮廓退回圆角矩形。null 时下面所有分支走原口径。
+            val outlinePath: Path? = shape?.let {
+                when (val o = it.createOutline(size, layoutDirection, this)) {
+                    is Outline.Generic -> o.path
+                    else -> null
+                }
+            }
             if (backdrop == null) {
-                drawRoundRect(fallbackColor, cornerRadius = CornerRadius(radiusPx))
+                if (outlinePath != null) {
+                    drawPath(path = outlinePath, color = fallbackColor)
+                } else {
+                    drawRoundRect(fallbackColor, cornerRadius = CornerRadius(radiusPx))
+                }
                 drawContent()
                 return@drawWithContent
             }
@@ -296,23 +316,33 @@ private fun glassDraw(
             // v0.68.96：外侧暗描边——线心压在几何边缘上，外半线落在玻璃之外，
             // 在亮背景上衬出切面轮廓（亮边在浅色场景里单独不够辨认）。
             if (params.rimAlpha > 0f) {
-                val rimHalf = 0.5.dp.toPx()
-                val rimPath = Path().apply {
-                    addRoundRect(
-                        RoundRect(
-                            -rimHalf, -rimHalf,
-                            size.width + rimHalf, size.height + rimHalf,
-                            CornerRadius(radiusPx + rimHalf),
+                if (outlinePath != null) {
+                    // 自定义轮廓：描边直接压在轮廓线上（线心在边上，与原
+                    // 外扩圆角矩形同一口径：外半线落在玻璃之外）。
+                    drawPath(
+                        path = outlinePath,
+                        color = Color.Black.copy(alpha = params.rimAlpha),
+                        style = Stroke(width = 1.dp.toPx()),
+                    )
+                } else {
+                    val rimHalf = 0.5.dp.toPx()
+                    val rimPath = Path().apply {
+                        addRoundRect(
+                            RoundRect(
+                                -rimHalf, -rimHalf,
+                                size.width + rimHalf, size.height + rimHalf,
+                                CornerRadius(radiusPx + rimHalf),
+                            )
                         )
+                    }
+                    drawPath(
+                        path = rimPath,
+                        color = Color.Black.copy(alpha = params.rimAlpha),
+                        style = Stroke(width = 1.dp.toPx()),
                     )
                 }
-                drawPath(
-                    path = rimPath,
-                    color = Color.Black.copy(alpha = params.rimAlpha),
-                    style = Stroke(width = 1.dp.toPx()),
-                )
             }
-            val shapePath = Path().apply {
+            val shapePath = outlinePath ?: Path().apply {
                 addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radiusPx)))
             }
             clipPath(shapePath) {
@@ -332,33 +362,58 @@ private fun glassDraw(
                 }
                 // 叠色（纸面轻霜档自动加重，见参数表）
                 val tintAlpha = (params.tintAlpha + boost * 0.08f).coerceIn(0f, 0.9f)
-                drawRoundRect(
-                    color = tintColor.copy(alpha = tintAlpha),
-                    cornerRadius = CornerRadius(radiusPx),
-                )
-                // 1dp 亮边：顶部最亮、向下渐隐（内缩半线宽整线落在面内）
-                val halfStroke = 0.5.dp.toPx()
-                val edgePath = Path().apply {
-                    addRoundRect(
-                        RoundRect(
-                            halfStroke, halfStroke,
-                            size.width - halfStroke, size.height - halfStroke,
-                            CornerRadius((radiusPx - halfStroke).coerceAtLeast(0f)),
-                        )
+                if (outlinePath != null) {
+                    drawPath(
+                        path = outlinePath,
+                        color = tintColor.copy(alpha = tintAlpha),
+                    )
+                } else {
+                    drawRoundRect(
+                        color = tintColor.copy(alpha = tintAlpha),
+                        cornerRadius = CornerRadius(radiusPx),
                     )
                 }
-                drawPath(
-                    path = edgePath,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = params.edgeTopAlpha),
-                            Color.White.copy(alpha = 0.05f),
+                // 1dp 亮边：顶部最亮、向下渐隐（内缩半线宽整线落在面内）
+                if (outlinePath != null) {
+                    // 自定义轮廓：描边压在轮廓线上，渐变起止取轮廓包围盒
+                    // （肩线峰顶即最亮处，与平顶缘口径一致）。
+                    val top = outlinePath.getBounds().top
+                    drawPath(
+                        path = outlinePath,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = params.edgeTopAlpha),
+                                Color.White.copy(alpha = 0.05f),
+                            ),
+                            startY = top,
+                            endY = size.height,
                         ),
-                        startY = 0f,
-                        endY = size.height,
-                    ),
-                    style = Stroke(width = 1.dp.toPx()),
-                )
+                        style = Stroke(width = 1.dp.toPx()),
+                    )
+                } else {
+                    val halfStroke = 0.5.dp.toPx()
+                    val edgePath = Path().apply {
+                        addRoundRect(
+                            RoundRect(
+                                halfStroke, halfStroke,
+                                size.width - halfStroke, size.height - halfStroke,
+                                CornerRadius((radiusPx - halfStroke).coerceAtLeast(0f)),
+                            )
+                        )
+                    }
+                    drawPath(
+                        path = edgePath,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = params.edgeTopAlpha),
+                                Color.White.copy(alpha = 0.05f),
+                            ),
+                            startY = 0f,
+                            endY = size.height,
+                        ),
+                        style = Stroke(width = 1.dp.toPx()),
+                    )
+                }
             }
             drawContent()
         }

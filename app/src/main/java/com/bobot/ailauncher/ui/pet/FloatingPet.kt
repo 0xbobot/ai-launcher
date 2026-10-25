@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.imageResource
@@ -44,9 +45,11 @@ import kotlin.random.Random
 /**
  * 漂浮玻璃头（曜仔）代码层：混合路线的常驻生命层。
  *
- * - 位置由调用方定（Dock 上方居中、留 12dp 气隙）；本体等比例不变形。
- * - 呼吸起伏：AliveLogic 游走（bob 基线 3500ms ±20%、幅度 5px ±20%
- *   = ±4–6px、约 3–4 秒周期）；光晕随呼吸明暗。
+ * - 位置由调用方定（Dock 圆肩上方居中、压入肩峰 5dp）；本体等比例不变形。
+ * - 原地呼吸（圆肩批）：AliveLogic 游走相位（基线 3500ms ±20%）
+ *   + breatheWave 非对称波形，纵向 +1.5% / 横向 -0.7% 微缩放
+ *   （绕底缩放，底部钉在肩峰上不脱离）；光晕随呼吸明暗。
+ *   上下浮动已随圆肩连接取消——浮动等于每呼吸一次就脱离身体一次。
  * - 眨眼：与视频层共享 [PetBlinkState]（140ms，眼部纵向压缩，同 alive-p1）。
  * - 注视：PetView 同款导演（repo 目标 ＞ 瞥视 ＞ 巡看），瞳孔先行、
  *   头部延迟跟上；低电量/后台时循环停、画面静止。
@@ -78,10 +81,10 @@ fun FloatingPet(
     // 玻璃头长宽比（1043×1318），盒子按此定高，不拉伸。
     val petHeight = petWidth * (1318f / 1043f)
 
-    // —— 呼吸起伏（AliveLogic 游走，32ms tick）——
+    // —— 原地呼吸（AliveLogic 游走相位 + breatheWave 非对称波形，
+    // 32ms tick；上下浮动已取消，见文件头）——
     var bobPhase by remember { mutableFloatStateOf(0f) }
     var bobPeriodMs by remember { mutableFloatStateOf(3500f) }
-    var bobAmpPx by remember { mutableFloatStateOf(5f) }
     LaunchedEffect(motionActive) {
         if (!motionActive) return@LaunchedEffect
         var last = System.currentTimeMillis()
@@ -94,11 +97,14 @@ fun FloatingPet(
             if (bobPhase > 2f * Math.PI.toFloat()) {
                 bobPhase -= 2f * Math.PI.toFloat()
                 bobPeriodMs = 3500f * (1f + (Random.nextFloat() * 2f - 1f) * 0.2f)
-                bobAmpPx = 5f * (1f + (Random.nextFloat() * 2f - 1f) * 0.2f)
             }
         }
     }
-    val bobPx = if (motionActive) -kotlin.math.sin(bobPhase) * bobAmpPx else 0f
+    // 纵向 +1.5% / 横向 -0.7%（体积守恒方向，与 P0 的 2.5%/0.7% 同形、
+    // 幅度收进圆肩批 ±1–2% 口径）；绕底缩放，底部钉在肩峰上。
+    val breathe = if (motionActive) breatheWave(bobPhase) else 0f
+    val breatheScaleY = 1f + 0.015f * breathe
+    val breatheScaleX = 1f - 0.007f * breathe
 
     // —— 眨眼间隔循环（BlinkPolicy，低电量/后台停）——
     LaunchedEffect(active, lowPower) {
@@ -229,10 +235,13 @@ fun FloatingPet(
                 .graphicsLayer {
                     // PetView 同款两段式：瞳孔先行（±6px/±4px，200ms）
                     // + 头部延迟跟上（±10px/±6px，80ms 延迟 280ms）。
+                    // 注视位移不碰底部锚点：headY 上移至多约 2.3dp，
+                    // 小于 5dp 压入量，连接不断；呼吸只缩放不位移。
                     translationX = headX + pupilX
-                    translationY = headY + pupilY + bobPx
-                    scaleX = popScale
-                    scaleY = popScale
+                    translationY = headY + pupilY
+                    scaleX = popScale * breatheScaleX
+                    scaleY = popScale * breatheScaleY
+                    transformOrigin = TransformOrigin(0.5f, 1f)
                 },
             contentAlignment = Alignment.Center,
         ) {
