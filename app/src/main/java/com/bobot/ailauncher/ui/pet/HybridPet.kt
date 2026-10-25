@@ -58,7 +58,16 @@ import java.io.IOException
  * 门禁：只在主页 RESUMED 时播；切后台或低电量即停回代码层。片源缺失时不切层、不崩溃、
  * 行为与无视频时完全一致。播放器音量恒为 0（高光片全部静音）。
  * 生成片是实色灰底，播放层做圆形裁剪（徽章式），不做抠像。
+ *
+ * —— 应急（2026-10-25，333 发布后闪退）：视频层已彻底关闭，见下 VIDEO_LAYER_EMERGENCY_OFF。
+ * Bob 报 333 后根本进不去应用、疑似宠物视频路径；应用内崩溃日志拿不到、根因未定论。
+ * 在此期间：不 compose AndroidView、不建视频输出面、不调用 setVideoTextureView /
+ * clearVideoTextureView；所有 mood 一律回落代码层（FloatingPet 常驻生命）。
+ * 恢复视频层前必须先拿到崩溃堆栈并修掉根因，再由 Bob 拍板。
  */
+/** 应急总开关：true = 视频层彻底关闭（333 后闪退应急，见文件头注释）。 */
+private const val VIDEO_LAYER_EMERGENCY_OFF = true
+
 @Composable
 fun HybridPet(
     petWidth: Dp,
@@ -121,6 +130,8 @@ fun HybridPet(
     }
 
     fun play(clip: HighlightClip) {
+        // 应急：视频层关闭，全部回落代码层；videoActive 永不为真，代码层永不隐藏。
+        if (VIDEO_LAYER_EMERGENCY_OFF) return
         if (!resumed || lowPower) return
         if (!assetExists(clip)) return
         if (loadedClip == clip && videoActive) return // 已在播同一条
@@ -300,7 +311,9 @@ fun HybridPet(
         // ③背景显式透明，不加任何底色。
         // clickable 只在播片时启用：播片时接管点按（PlayerView 本身不消费），
         // 不播时整层不存在，点按自然透传给下层代码层（保留果冻回弹）。
-        if (videoActive || pendingClip != null) {
+        // 应急：视频层关闭时纵使 videoActive/pendingClip 被置位也不挂载 AndroidView，
+        // 绝不建视频输出面、不调用 setVideoTextureView/clearVideoTextureView。
+        if (!VIDEO_LAYER_EMERGENCY_OFF && (videoActive || pendingClip != null)) {
             Box(
                 modifier = Modifier
                     .size(petWidth)
