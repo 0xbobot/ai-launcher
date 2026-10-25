@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.pet
 
 import android.graphics.Outline
+import android.view.TextureView
 import android.view.View
 import android.view.ViewOutlineProvider
 import androidx.compose.animation.core.animateFloatAsState
@@ -32,8 +33,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
 import com.bobot.ailauncher.data.BatteryState
 import com.bobot.ailauncher.data.PetRepository
 import kotlinx.coroutines.delay
@@ -294,9 +293,11 @@ fun HybridPet(
         }
         // 视频层：仅播片/待换片时挂载。PlayerView 默认 SurfaceView 画在
         // 独立 surface 上，不认 Compose alpha、不认椭圆裁剪、pause 后仍留
-        // surface——327 灰框就是这么来的。故：①改 TextureView 渲染（认
-        // alpha、认裁剪）；②不播且无待换片时根本不 compose AndroidView，
-        // 不留 surface；③背景显式透明，不加任何底色。
+        // surface——327 灰框就是这么来的。故：①不用 PlayerView，直接用
+        // TextureView + setVideoTextureView（Media3 1.3.1 的 PlayerView 没
+        // 有 setSurfaceType 的公开 setter，表面类型只能走 XML 属性）；
+        // ②不播且无待换片时根本不 compose AndroidView，不留 surface；
+        // ③背景显式透明，不加任何底色。
         // clickable 只在播片时启用：播片时接管点按（PlayerView 本身不消费），
         // 不播时整层不存在，点按自然透传给下层代码层（保留果冻回弹）。
         if (videoActive || pendingClip != null) {
@@ -317,12 +318,8 @@ fun HybridPet(
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            useController = false
-                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                            setSurfaceType(PlayerView.SURFACE_TYPE_TEXTURE_VIEW)
+                        TextureView(ctx).apply {
                             setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                            this.player = player
                             isClickable = false
                             isFocusable = false
                             clipToOutline = true
@@ -331,7 +328,11 @@ fun HybridPet(
                                     outline.setOval(0, 0, view.width, view.height)
                                 }
                             }
+                            player.setVideoTextureView(this)
                         }
+                    },
+                    onRelease = { textureView ->
+                        player.clearVideoTextureView(textureView)
                     },
                     modifier = Modifier.size(petWidth),
                 )
