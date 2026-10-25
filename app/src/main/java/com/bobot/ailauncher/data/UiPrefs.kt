@@ -32,6 +32,11 @@ object UiPrefs {
     val homeRailLetter = MutableStateFlow<Char?>(null)
     // v0.67.10：从主屏 picker 打开 D3 时，D3 用淡入（不滑入），过渡无缝
     val d3EnterFromPicker = MutableStateFlow(false)
+    // 字母导航等高（Bob 2026-10-25 追问）：应用中心竖屏列表容器实测高度（px），
+    // 由应用中心列表容器 onSizeChanged 写入（键盘弹出时不采，见 AppCenter 侧），
+    // 首页选择器读它做等高；首次进应用中心前为 null，首页回退跟随容器。
+    // 进程内状态，不持久化；转屏/字号变化后下次进应用中心重测即自愈。
+    val appCenterListHeightPx = MutableStateFlow<Int?>(null)
     fun bumpDock() {
         dockTick.value++
     }

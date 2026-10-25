@@ -452,6 +452,20 @@ private fun HomeHost(
         }
         // v0.68.23（Bob）：统一用共享 AppRail，长按后拖拽，与应用中心同一套滑动体验
         // v0.68.6：盲操选择中时隐藏，避免重叠区（右边缘 24dp × 底部 400dp）
+        // 字母导航等高（Bob 2026-10-25 追问）：330「跟随容器」不等于同高——
+        // 首页 rail 根在整屏容器里（根高＝屏高−70dp），应用中心 rail 根在列表容器里
+        // （根高＝列表容器高−70dp，列表容器＝屏高−状态栏−刊头），两者差的正是刊头
+        // ＋状态栏。两处共用同一个高度来源：应用中心列表容器实测高（UiPrefs 进程内
+        // 状态，应用中心 onSizeChanged 写、键盘弹出时不采）；首页竖屏 railHeight＝
+        // 该实测高−70dp，与应用中心竖屏 rail 根高严格相等，rail 块高（占比 0.85×根高）
+        // 随之相等。未测过（首次进应用中心前）回退 null＝跟随容器旧行为；横屏不动
+        // （见下：横屏根高差仅 16dp 底距，且改动会吃掉底部手势留白，暂不强制等高）。
+        val acListHpx by UiPrefs.appCenterListHeightPx.collectAsState()
+        val pickerRailHeight = if (!isLandscapePicker) {
+            acListHpx?.let { px ->
+                with(pickerDensity) { (px - 70.dp.toPx()).toDp().coerceAtLeast(0.dp) }
+            }
+        } else null
         if ((dockState != DockState.D3 || pickerActive) && !blindActive) {
             AppRail(
                 items = homeItems,
@@ -537,12 +551,12 @@ private fun HomeHost(
                 // 字母导航统一样式（Bob 2026-10-25）：触控列宽与应用中心
                 // 同为 48dp（此前默认 44dp，modifier 上 56dp 被列宽覆盖、
                 // 属于死码，随之删除）；横屏占比跟应用中心横屏同为 0.95，
-                // 竖屏 0.85；竖屏高度不再写死 400dp，改跟随容器（与应用中心
-                // 竖屏同口径：railHeight null、占比 0.85、底距 70dp 不动）——
-                // Bob 原则：用户看来首页选择器与应用中心就是同一个东西，
-                // 体验必须一致，浮层 vs 整屏的布局身份差异不能成为视觉
-                // 不一致的理由，行距随之与应用中心一致。
-                railHeight = null,
+                // 竖屏 0.85；竖屏高度不再写死 400dp，改等高（见上：railHeight＝
+                // 应用中心列表容器实测高−70dp，与应用中心竖屏 rail 根高相等；
+                // 底距 70dp 不动）。行距仍受项目数影响（首页恒 31 项，应用中心
+                // 随本机应用变化），等高只保证块高相等，不保证行距相等——残差
+                // 见收据，等 Bob 定，不擅自改任一侧字母集合。
+                railHeight = pickerRailHeight,
                 railFraction = if (isLandscapePicker) 0.95f else 0.85f,
                 railWidth = 48.dp,
                 modifier = Modifier

@@ -884,6 +884,9 @@ fun AppCenterContent(
                 .fillMaxWidth()
                 .weight(1f)
                 .clipToBounds()
+                // 字母导航等高（Bob 2026-10-25 追问）：列表容器实测高写给首页选择器
+                // 做等高来源；键盘弹出时刊头标题区隐藏、容器高会变，只在键盘收起时采。
+                .onSizeChanged { if (!imeVisible) UiPrefs.appCenterListHeightPx.value = it.height }
                 // D-6：底部上滑回桌面观察者挂列表容器（行的祖先，不覆盖行；
                 // 原 88dp 覆盖条已删，见 observeBottomSwipeUp 注）
                 .observeBottomSwipeUp { onBottomSwipeUpState.value() }
