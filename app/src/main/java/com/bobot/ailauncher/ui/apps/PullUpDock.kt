@@ -66,6 +66,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -275,13 +278,17 @@ fun PullUpDock(
                 // 旧坐姿盒 1.8 倍（D1 约 127dp / D2 约 172dp），盒高按玻璃头
                 // 长宽比 1043:1318，底部留 12dp 气隙漂在面板上方（不再压边、
                 // 不再画脚下阴影）；外层 Box 只向上长，面板几何与锚点不动。
+                // dock-pet-unify：宠物缩小 ×0.85（D1 约 108dp / D2 约 146dp，
+                // 紧配置 ×0.8 照旧），气隙随宠物同比缩到 10dp（12 × 0.85 ≈
+                // 10.2），与 Dock 玻璃一体后不再靠体量抢视觉；高比回落到
+                // 约 1.01（旧 1.8 倍时约 1.18，超 layout_check 上限 1.10）。
                 val seatCompact = density.fontScale >= 1.3f ||
                     dockAvailableHeight < 400.dp
                 var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
                 val dockPetSize = dockPanelHeight * 0.52f * (if (seatCompact) 0.8f else 1f)
-                val floatPetWidth = dockPetSize * 1.8f
+                val floatPetWidth = dockPetSize * 1.8f * 0.85f
                 val floatPetHeight = floatPetWidth * (1318f / 1043f)
-                val floatPetGap = 12.dp
+                val floatPetGap = 10.dp
                 Box(
                     modifier = Modifier
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
@@ -310,10 +317,36 @@ fun PullUpDock(
                         .glassSurface(
                             kind = com.bobot.ailauncher.ui.glass.GlassSurfaceKind.STRONG,
                             cornerRadius = 28.dp,
-                            tintColor = AILauncherColors.current.Card,
-                            fallbackColor = AILauncherColors.current.GlassCard.copy(alpha = 0.55f * dockBgAlpha),
+                            // dock-pet-unify：叠色改暖白（深色沿用 Card 不动），
+                            // 与宠物球体暖白色温统一；fallback 压色 0.55→0.48
+                            // 更透一档（STRONG 真玻璃透度由共享 shader 参数管，
+                            // Dock 单点不动它，免得波及气泡/扇形等玻璃面）。
+                            tintColor = if (AILauncherColors.current.isDark) AILauncherColors.current.Card else Color(0xFFFFF6E8),
+                            fallbackColor = AILauncherColors.current.GlassCard.copy(alpha = 0.48f * dockBgAlpha),
                             tintBoost = dockBgAlpha
                         )
+                        // dock-pet-unify：顶部暖白微金高光带（呼应宠物球体
+                        // 边缘光）：drawBehind 在 glassSurface 内侧，落在
+                        // 玻璃与图标之间——只露 2dp、中间亮两侧隐，不压
+                        // 图标、不改面板几何；外层 clip 已做圆角裁剪。
+                        .drawBehind {
+                            val stripH = 2.dp.toPx()
+                            drawRect(
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color(0xFFFFF6E8).copy(alpha = 0.40f),
+                                        Color(0xFFFFEDBE).copy(alpha = 0.55f),
+                                        Color(0xFFFFF6E8).copy(alpha = 0.40f),
+                                        Color.Transparent,
+                                    ),
+                                    startX = 0f,
+                                    endX = size.width,
+                                ),
+                                topLeft = androidx.compose.ui.geometry.Offset.Zero,
+                                size = Size(size.width, stripH),
+                            )
+                        }
                         .combinedClickable(
                             interactionSource = dockPressSource,
                             indication = null,  // 用背景显隐做反馈，不要水波纹
