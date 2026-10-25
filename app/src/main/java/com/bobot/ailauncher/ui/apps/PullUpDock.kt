@@ -549,23 +549,31 @@ fun PullUpDock(
                 // 玻璃头（曜仔）不再漂浮——头宽取旧坐姿盒 1.53 倍（即
                 // 1.8 × 0.85：D1 约 108dp / D2 约 146dp），盒高按玻璃头
                 // 长宽比 1043:1318；气隙取消，改圆肩连接：面板顶缘中央
-                // 兜起 rise 12dp 的肩线、宠物底部压入肩峰 5dp（前面图层，
+                // 兜起肩线、宠物底部压入肩峰 5dp（前面图层，
                 // 面板先画、宠物后画），不画脚下阴影；外层 Box 只向上长，
                 // 面板几何与锚点不动（容器高 = 面板高 + 宠物高 + rise − press）。
+                // 圆肩 D1/D2 比例批（2026-10-25，Bob：两档宠物大小变了，
+                // 圆肩角度也要相应变）：rise 跟弦长成比例走，rise/chord
+                // 恒等于 D1 基准 12/158——拱的两段 cubic 控制点本就与弦长
+                // 成比例（k = half × 0.5 = chord/4），故 rise/chord 不变即
+                // 拱形是 D1 拱的精确缩放，三档（D1/D2/紧配置）是同一个肩
+                // 在缩放，不是被拉扁/拉陡。D1 仍为 12dp，D2 约 14.9dp，
+                // 紧配置随宠物 ×0.8 同步回落（D1 约 10.4dp、D2 约 12.7dp）。
                 val seatCompact = density.fontScale >= 1.3f ||
                     dockAvailableHeight < 400.dp
                 var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
                 val dockPetSize = dockPanelHeight * 0.52f * (if (seatCompact) 0.8f else 1f)
                 val floatPetWidth = dockPetSize * 1.53f
                 val floatPetHeight = floatPetWidth * (1318f / 1043f)
-                val shoulderRise = 12.dp
+                val shoulderChord = floatPetWidth + 50.dp
+                val shoulderRise = shoulderChord * (12f / 158f)
                 val petPress = 5.dp
                 // 圆肩轮廓（弦长 = 宠物宽 + 两侧各 25dp）；shape 只影响
                 // 绘制（clip / 玻璃 / 高光 / 内晕），不改变布局尺寸，故
                 // dockPanelHeight 回写不会引起布局循环。
                 val shoulderShape = remember(dockPanelHeight, seatCompact, shoulderPeakDp) {
                     DockShoulderShape(
-                        chordDp = floatPetWidth + 50.dp,
+                        chordDp = shoulderChord,
                         riseDp = shoulderRise,
                         cornerDp = 28.dp,
                         peakDp = shoulderPeakDp.dp,
@@ -613,7 +621,7 @@ fun PullUpDock(
                         )
                         // 圆肩批：弧形高光 + 暖白内晕（玻璃之上、图标之下）。
                         .dockShoulderDressing(
-                            chordDp = floatPetWidth + 50.dp,
+                            chordDp = shoulderChord,
                             riseDp = shoulderRise,
                             cornerDp = 28.dp,
                             peakDp = shoulderPeakDp.dp
