@@ -2247,9 +2247,11 @@ fresh_find_label() {
     # 后续滑动命中其「应用信息」图标、跳进系统设置应用信息页——此后所有
     # dump 都是设置页，标签永远找不到（卸载判空也因此假过；工件截图
     # appcenter-fresh-installed.png 实证停在 App info / Camera 页）。
-    # 检出该页（有 App info 标题且无 AC 的 INDEX 标志）即 BACK 退回重拉，
+    # 检出该页（有 App info 标题且无 AC 的款数标志）即 BACK 退回重拉，
     # 本轮继续找——是断言过程自愈，不改判据本身。
-    if [ -f "$OUT/fresh_dump.xml" ] && grep -q 'text="App info"' "$OUT/fresh_dump.xml" && ! grep -q 'INDEX' "$OUT/fresh_dump.xml"; then
+    # （原判据用 INDEX 标志；刊头 kicker 删除后改用两屏共有的款数标志，
+    # 系统应用信息页无款数，区分作用不变。）
+    if [ -f "$OUT/fresh_dump.xml" ] && grep -q 'text="App info"' "$OUT/fresh_dump.xml" && ! grep -q '款' "$OUT/fresh_dump.xml"; then
       log "fresh-find: app-info detour detected, backing out and re-dumping"
       adb shell input keyevent KEYCODE_BACK || true
       sleep 1
