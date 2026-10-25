@@ -299,7 +299,8 @@ object LlmRouter {
         wechat(微信), qq(QQ), weibo(微博), xiaohongshu(小红书), douyin(抖音),
         feishu(飞书), calendar(日历), mail(邮箱),
         meituan(美团), eleme(饿了么), dianping(大众点评),
-        jd(京东), taobao(淘宝), pdd(拼多多)。
+        jd(京东), taobao(淘宝), pdd(拼多多),
+        yinyue(音乐), shipin(视频), liaotian(聊天)。
         无法对应任何能力时，capability_id 填 "none"。
         只返回 JSON，不要任何其他文字，格式如下：
         {"capability_id":"dache","params":{"from":"","to":""},"reply":"一句话回复"}
