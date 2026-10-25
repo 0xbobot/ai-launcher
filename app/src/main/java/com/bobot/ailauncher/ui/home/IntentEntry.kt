@@ -116,11 +116,14 @@ private val RESULT_BAR_MAX_HEIGHT = 180.dp
 
 /**
  * 意图卡片宠物（2026-10-25 意图卡片统一，Bob 拍板）：与 Dock 宠物同一只、
- * 同一套组件——Dock D1 档宠物宽（108dp）固定，不跟意图面板高度走（面板高随
+ * 同一套组件——Dock D1 档宠物宽固定，不跟意图面板高度走（面板高随
  * 结果槽位伸缩，宠物跟高走会忽大忽小）；压入量 5dp 与 Dock 肩峰压入同值。
  * 盒高按玻璃头长宽比（1043×1318）算，与 FloatingPet 内部口径一致。
+ * B2+A 定稿（2026-10-26，Bob 点选 B2+A mock 档）：与 Dock D1 同步 ×0.8
+ * （原 108dp → 86.4dp，与 Dock D1 的 86.6dp 仅面板估算舍入差）；接触影
+ * （宽 ×0.72）与盒高均由此常量派生，自动跟随。
  */
-private val INTENT_PET_WIDTH = 108.dp
+private val INTENT_PET_WIDTH = 108.dp * 0.8f
 private val INTENT_PET_PRESS = 5.dp
 
 /**
