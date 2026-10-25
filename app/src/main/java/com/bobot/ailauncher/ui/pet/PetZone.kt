@@ -293,9 +293,6 @@ fun PetZone(
         // 渐变映射不变（startY=0/endY=Column 高，出界区按首色平铺），内容
         // 上的浓度与之前一字不动；drawBehind 不引入布局节点，v0.68.102 的
         // 冻结修复口径不受影响；字号、间距、布局、手势一字不动。
-        // 2026-10-25（Bob 试一版）：壁纸太蒙，简报罩纱同步改 100% 透明
-        // （各止点 alpha 0.0），出界绘制结构不动、只改 alpha 值；回退只需
-        // 把三行数字改回 0.22/0.46/0.46。简报文字可读性改由真机验后定取舍。
         val scrimColor = AILauncherColors.current.Background
         val veilDensity = LocalDensity.current
         val veilLayoutDirection = LocalLayoutDirection.current
@@ -314,9 +311,9 @@ fun PetZone(
                 .drawBehind {
                     val brush = androidx.compose.ui.graphics.Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.0f to scrimColor.copy(alpha = 0.0f),
-                            0.55f to scrimColor.copy(alpha = 0.0f),
-                            0.86f to scrimColor.copy(alpha = 0.0f),
+                            0.0f to scrimColor.copy(alpha = 0.22f),
+                            0.55f to scrimColor.copy(alpha = 0.46f),
+                            0.86f to scrimColor.copy(alpha = 0.46f),
                             1.0f to scrimColor.copy(alpha = 0.0f)
                         ),
                         startY = 0f,
