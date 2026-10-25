@@ -527,7 +527,7 @@ private fun HomeHost(
                     }
                 },
                 visible = pickerActive,
-                // 横屏刘海避让（见 HomeHost 根部注释）：横屏容器跟随高 + 右侧让位 + 底距 16dp；竖屏不动。
+                // 横屏刘海避让（见 HomeHost 根部注释）：横屏容器跟随高 + 右侧让位 + 底距 16dp；竖屏底距 70dp、避让不动（高度改跟随容器见下）。
                 // 字母导航精修（Bob 2026-10-25）：与应用中心同一套字——14sp/16sp 行高/1.0/Normal，
                 // 不再走 12sp/0.6 旧默认值，三条导航观感统一。
                 letterFontSize = 14.sp,
@@ -537,9 +537,12 @@ private fun HomeHost(
                 // 字母导航统一样式（Bob 2026-10-25）：触控列宽与应用中心
                 // 同为 48dp（此前默认 44dp，modifier 上 56dp 被列宽覆盖、
                 // 属于死码，随之删除）；横屏占比跟应用中心横屏同为 0.95，
-                // 竖屏 0.85 不动；竖屏 400dp 写死高度与底距 70dp 保留
-                // （选择器是 Dock 上方的紧凑浮层，不是整屏列表页的通栏）。
-                railHeight = if (isLandscapePicker) null else 400.dp,
+                // 竖屏 0.85；竖屏高度不再写死 400dp，改跟随容器（与应用中心
+                // 竖屏同口径：railHeight null、占比 0.85、底距 70dp 不动）——
+                // Bob 原则：用户看来首页选择器与应用中心就是同一个东西，
+                // 体验必须一致，浮层 vs 整屏的布局身份差异不能成为视觉
+                // 不一致的理由，行距随之与应用中心一致。
+                railHeight = null,
                 railFraction = if (isLandscapePicker) 0.95f else 0.85f,
                 railWidth = 48.dp,
                 modifier = Modifier
