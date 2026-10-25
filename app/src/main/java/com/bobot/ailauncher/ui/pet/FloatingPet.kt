@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.pet
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
@@ -25,9 +26,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -42,11 +45,13 @@ import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.BatteryState
 import com.bobot.ailauncher.data.GazeTarget
+import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.PetRepository.PetManualAction
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.random.Random
 
 /**
@@ -57,26 +62,53 @@ import kotlin.random.Random
  *   + breatheWave 非对称波形，纵向 +1.5% / 横向 -0.7% 微缩放
  *   （绕底缩放，底部钉在肩峰上不脱离）；光晕随呼吸明暗。
  *   上下浮动已随圆肩连接取消——浮动等于每呼吸一次就脱离身体一次。
- * - 眨眼：与视频层共享 [PetBlinkState]（新幅度 240ms：闭合 85ms →
- *   保持 70ms 画粗 ∪ 形弯曲线 + 2dp 点头 → 睁开 85ms；旧 140ms 细线作废）。
- * - 注视：PetView 同款导演（repo 目标 ＞ 瞥视 ＞ 巡看），瞳孔先行、
- *   头部延迟跟上；新幅度：瞳孔 ±10px、头 ±8px、向视线方向倾斜 4°、
- *   转向 300ms；低电量/后台时循环停、画面静止。
+ * - 眨眼：与视频层共享 [PetBlinkState]（240ms：闭合 85ms → 保持 70ms
+ *   + 2dp 点头 → 睁开 85ms；旧 140ms 细线作废）；eyes-alive 起改盖法——
+ *   上眼睑从开孔上缘落下来盖住不变形的瞳孔，不再纵向压扁瞳孔、
+ *   不再画 ∪ 形弯曲线；眨眼节律随状态变（专注 4–8s、闲时 2–6s）。
+ * - 注视：PetView 同款导演（repo 目标 ＞ 瞥视 ＞ 巡看），眼睛先行、
+ *   头部延迟跟上；eyes-alive 起瞳孔独立层：注视只动瞳孔层（开孔内
+ *   ±5px/±3px，两段式扫视 120ms 冲 106% → 90ms 回落），头 ±8px/±5px
+ *   延迟 80ms 跟上 + 向视线方向倾斜 4°；反光点层钉在右上光源方向，
+ *   瞳孔动它不动（只随头动，不随瞳孔偏移）；低电量/后台时循环停、画面静止。
+ * - 扫视：8–15 秒语义巡看锚点保留（看向房间），但过渡不再平滑漂移——
+ *   全部改成扫视跳动；另加高频小扫视（0.3–1.2s 一次、±2–5px、120ms 到位、
+ *   30% 伴眨），注视停留期间眼睛也不死。
+ * - 瞳孔大小与眼睑：惊讶/开心/反应警觉瞳孔 ×1.15、专注/思考 ×0.92，
+ *   200ms 平滑过渡；闲时上睑半阖 0.15（盖住珠体上缘 15%，不吞反光点），
+ *   专注/惊讶/警觉全开，害羞深阖 0.30。
+ * - 反应链：点按/瞥视/打招呼/惊讶时眼睛先反应（200ms 内睁大 + 瞳孔
+ *   放大 + 注视过去，约 700ms 后衰减），头和身体后跟。
  * - 手动动作（动作清单触发）：[PetRepository.actionTick] 事件驱动的
  *   全身动作引擎——所有动作都走平移 / 旋转 / 绕底缩放 / 眼带 / 肩线
  *   峰值（PullUpDock 侧协同），头与面板始终是一个身体，不许部件分离。
  * - 全程无脚下阴影：光晕是头周围的径向晕，不画在 Dock 面上的投影。
  *
- * 玻璃头眼盒（相对位图坐标，Python 离线检测 glass-cut.png 1043×1318）：
- * 左眼 l=0.207 t=0.650 r=0.343 b=0.785；右眼 l=0.660 t=0.650 r=0.793 b=0.770。
- * 眨眼画法与 PetView 同款（眼盒区域纵向压缩到 8%），区别是底图是
- * 玻璃头而非七仔毛绒，调用方不再需要传 bitmap——资源 ID 固定。
+ * 眼睛分层（相对位图坐标，Python 离线检测 glass-cut.png 1043×1318，
+ * 全部从原图派生、无 AI 重画）：
+ * - 常驻底图 glass_head_nopupil：眼内框以面部米色修复（去瞳孔），
+ *   棕圈完整保留；静止态三层合成与原图一致（仅羽化边缘 1–2px 差异）。
+ * - 瞳孔层 glass_pupils：眼内框整颗珠体（暗核 + 下部玻璃渐变 + 反射弧，
+ *   扣掉反光点），相对原图分毫不差；注视时在开孔椭圆内滑动、
+ *   被开孔裁剪（滑出侧露底图米色、读作眼白，滑入侧压进圈下）。
+ * - 反光点层 glass_catchlights：左 1 点、右 2 点（主点 + 卫星点），
+ *   从原瞳孔干净分离；绘制时不跟瞳孔偏移。
+ * 眼内框（去 6px 棕圈后的珠体开孔）：左 l=0.2119 t=0.6548 r=0.3356
+ * b=0.7792；右 l=0.6654 t=0.6548 r=0.7862 b=0.7640。旧眼盒
+ * （0.207/0.650/0.343/0.785、0.660/0.650/0.793/0.770）随压扁眨眼作废。
  */
-/** 玻璃头眼盒（相对位图坐标，Python 离线检测 glass-cut.png 1043×1318）。 */
-internal val GLASS_EYE_BOXES = listOf(
-    FRect(0.207f, 0.650f, 0.343f, 0.785f),
-    FRect(0.660f, 0.650f, 0.793f, 0.770f),
+/** 眼内框（相对位图坐标，Python 离线检测 glass-cut.png 1043×1318）。 */
+internal val GLASS_EYE_OPENINGS = listOf(
+    FRect(0.2119f, 0.6548f, 0.3356f, 0.7792f),
+    FRect(0.6654f, 0.6548f, 0.7862f, 0.7640f),
 )
+/** 眼睑填充色：眼框上方取样的面部米色（左/右眼各一档，随右上光方向右眼更亮）。 */
+internal val GLASS_FACE_TONES = listOf(
+    Color(214, 194, 179),
+    Color(223, 212, 205),
+)
+/** 眼睑边缘缝线色：棕圈代表色（扫描线实测 lum≈63、R−B≈30）。 */
+internal val GLASS_RIM_BROWN = Color(79, 57, 49)
 
 @Composable
 fun FloatingPet(
@@ -121,15 +153,29 @@ fun FloatingPet(
     val breatheScaleY = 1f + 0.015f * breathe * (1f + breathBoost.value)
     val breatheScaleX = 1f - 0.007f * breathe * (1f + breathBoost.value)
 
-    // —— 眨眼间隔循环（BlinkPolicy，低电量/后台停）——
-    LaunchedEffect(active, lowPower) {
+    // —— 眼睛状态源（瞳孔大小 / 眼睑 / 眨眼节律共用）：mood 与思考态 ——
+    val mood by PetRepository.mood.collectAsState()
+    val intentThinking by PetRepository.intentThinking.collectAsState()
+    val eyeFocused = mood == PetMood.FETCH || intentThinking
+
+    // —— 反应警觉：点按/瞥视/打招呼/惊讶时眼睛先反应（约 700ms 后衰减）——
+    var eyeAlert by remember { mutableStateOf(false) }
+    LaunchedEffect(eyeAlert) {
+        if (eyeAlert) {
+            delay(700)
+            eyeAlert = false
+        }
+    }
+
+    // —— 眨眼间隔循环（BlinkPolicy，低电量/后台停；专注态少眨 4–8s）——
+    LaunchedEffect(active, lowPower, eyeFocused) {
         if (!active || lowPower) return@LaunchedEffect
-        var next = BlinkPolicy.intervalMs(lowPower, Random)
+        var next = BlinkPolicy.intervalMsForState(eyeFocused, Random)
         while (isActive) {
             delay(next)
             if (lowPower) break
             blinkState.requestBlink(this)
-            next = BlinkPolicy.intervalMs(lowPower, Random)
+            next = BlinkPolicy.intervalMsForState(eyeFocused, Random)
         }
     }
 
@@ -142,10 +188,12 @@ fun FloatingPet(
     LaunchedEffect(repoGlanceTick) {
         if (repoGlanceTick > 0) {
             glanceTarget = repoGlanceTarget
+            eyeAlert = true // 瞥视也是反应链：眼睛先睁大注视过去
             delay(600) // 瞥视至多 600ms，到期释放（新瞥视重启本 effect 刷新窗口）
             glanceTarget = null
         }
     }
+    // 语义巡看锚点保留（看向房间），过渡不再平滑漂移——瞳孔以扫视跳动到位（见下）。
     var patrolTarget by remember { mutableStateOf(GazeTarget.CENTER) }
     LaunchedEffect(motionActive) {
         if (!motionActive) return@LaunchedEffect
@@ -168,18 +216,60 @@ fun FloatingPet(
         else -> patrolTarget
     }
     val gazeOff = gazeOffsetFor(effectiveGazeTarget)
-    // 瞳孔先行：快速 200ms 到位（新幅度 x ±10px，y ±6px）
-    val pupilX by animateFloatAsState(
-        targetValue = gazeOff.x * 10f,
-        animationSpec = tween(200, easing = FastOutSlowInEasing),
-        label = "floatPupilX",
+    // 瞳孔独立层：只动瞳孔层（开孔内 x ±5px、y ±3px），两段式扫视——
+    // 120ms 冲到 106% → 90ms 回落到目标（PetView 同款扫视口径）；
+    // 中途改目标从当前位置重新起跳，不回落再跳。
+    val pupilBaseX = remember { Animatable(0f) }
+    val pupilBaseY = remember { Animatable(0f) }
+    LaunchedEffect(effectiveGazeTarget) {
+        val tx = gazeOff.x * 5f
+        val ty = gazeOff.y * 3f
+        if (pupilBaseX.value == tx && pupilBaseY.value == ty) return@LaunchedEffect
+        launch {
+            pupilBaseX.animateTo(
+                pupilBaseX.value + (tx - pupilBaseX.value) * SACCADE_OVERSHOOT,
+                tween(SACCADE_OUT_MS, easing = FastOutLinearInEasing)
+            )
+            pupilBaseX.animateTo(tx, tween(SACCADE_SETTLE_MS, easing = FastOutSlowInEasing))
+        }
+        launch {
+            pupilBaseY.animateTo(
+                pupilBaseY.value + (ty - pupilBaseY.value) * SACCADE_OVERSHOOT,
+                tween(SACCADE_OUT_MS, easing = FastOutLinearInEasing)
+            )
+            pupilBaseY.animateTo(ty, tween(SACCADE_SETTLE_MS, easing = FastOutSlowInEasing))
+        }
+    }
+    // 高频小扫视：0.3–1.2s 一次快速小跳（120ms 到位）+ 随机停顿，
+    // 叠加在注视基点上；30% 概率伴眨；低电量/后台停、画面静止。
+    var jitterX by remember { mutableFloatStateOf(0f) }
+    var jitterY by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(motionActive) {
+        if (!motionActive) {
+            jitterX = 0f
+            jitterY = 0f
+            return@LaunchedEffect
+        }
+        val r = Random
+        while (isActive) {
+            delay(SaccadePolicy.intervalMs(r))
+            jitterX = SaccadePolicy.offsetX(r)
+            jitterY = SaccadePolicy.offsetY(r)
+            if (BlinkPolicy.isSaccadeBlink(r)) blinkState.requestBlink(this)
+        }
+    }
+    val jitterXAnim by animateFloatAsState(
+        targetValue = jitterX,
+        animationSpec = tween(120, easing = FastOutSlowInEasing),
+        label = "floatJitterX",
     )
-    val pupilY by animateFloatAsState(
-        targetValue = gazeOff.y * 6f,
-        animationSpec = tween(200, easing = FastOutSlowInEasing),
-        label = "floatPupilY",
+    val jitterYAnim by animateFloatAsState(
+        targetValue = jitterY,
+        animationSpec = tween(120, easing = FastOutSlowInEasing),
+        label = "floatJitterY",
     )
-    // 头部延迟 80ms 跟随：300ms 到位（新幅度 x ±8px，y ±5px）+ 向视线方向倾斜 4°
+    // 头部延迟 80ms 跟随：300ms 到位（x ±8px，y ±5px）+ 向视线方向倾斜 4°；
+    // 头只跟注视目标，不跟小扫视抖动——眼睛先行、头延迟跟上。
     var headGaze by remember { mutableStateOf(GazeOffset(0f, 0f)) }
     LaunchedEffect(effectiveGazeTarget) {
         delay(80)
@@ -201,12 +291,26 @@ fun FloatingPet(
         label = "floatTurnTilt",
     )
 
-    // —— 眨眼：闭合期眼盒压成扁椭圆（半闭过渡），保持期画粗 ∪ 形弯曲线 ——
-    val eyeScale by animateFloatAsState(
-        targetValue = if (blinkState.blinking) 0.35f else 1f,
-        animationSpec = tween(85),
-        label = "floatEyeScale",
+    // —— 眼睛状态：瞳孔大小与眼睑开合（200ms 平滑过渡，不跳变）——
+    val pupilScale by animateFloatAsState(
+        targetValue = eyePupilScale(mood, intentThinking, eyeAlert),
+        animationSpec = tween(200, easing = FastOutSlowInEasing),
+        label = "floatPupilScale",
     )
+    val baseLid by animateFloatAsState(
+        targetValue = eyeLidFraction(mood, intentThinking, eyeAlert),
+        animationSpec = tween(200, easing = FastOutSlowInEasing),
+        label = "floatBaseLid",
+    )
+    // —— 眨眼改盖法：上睑 85ms 落下 → 保持 70ms → 85ms 抬起；
+    // blinkLid 与 PetBlinkState 全程同步（blinking 覆盖闭合+保持+睁开），
+    // 最终眼睑取最大值——眨眼全闭压过闲时半阖，睁开后回到状态眼睑。
+    val blinkLid by animateFloatAsState(
+        targetValue = if (blinkState.blinking) 1f else 0f,
+        animationSpec = tween(85),
+        label = "floatBlinkLid",
+    )
+    val lidFraction = maxOf(baseLid, blinkLid)
     // 闭合保持期同步点头 2dp（与 PetBlinkState.closedPhase 同步）。
     val density = LocalDensity.current
     val blinkNodPx by animateFloatAsState(
@@ -272,6 +376,7 @@ fun FloatingPet(
                 stretchAnim.animateTo(0f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium))
             }
             PetManualAction.GREET, PetManualAction.SURPRISED -> {
+                eyeAlert = true // 反应链：眼睛先睁大注视，身体拉伸后跟
                 stretchAnim.animateTo(0.6f, tween(260, easing = FastOutSlowInEasing))
                 delay(400)
                 stretchAnim.animateTo(0f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium))
@@ -342,6 +447,7 @@ fun FloatingPet(
                 indication = null,
                 onClick = {
                     pressed = true
+                    eyeAlert = true // 反应链：点按当下眼睛先睁大，清单/输入后跟
                     onTap()
                 },
             ),
@@ -364,12 +470,12 @@ fun FloatingPet(
                 center = Offset(size.width / 2f, size.height * 0.45f),
             )
         }
-        // 玻璃头本体：底层整图 + 眨眼覆盖层（闭合保持期画粗 ∪ 形弯曲线，
-        // 半闭过渡期画眼带压缩条；scale=1 时与底图像素完全重合，平时不画，
-        // 避免双重绘制的接缝）。
+        // 玻璃头本体：去瞳孔底图 + 眼睛三层（瞳孔 / 反光点 / 眼睑）。
+        // 静止态三层合成与原图一致（仅羽化边缘 1–2px 差异，显示约亚像素）。
         // 全身动作合成（绕底原点，底部钉在肩峰上不脱离）：
         // 旋转 = 转头倾斜 + 歪头 + 抖动 + 重心微移；纵向 = 呼吸 × 拉伸 × 下压；
-        // 横向 = 呼吸 × 拉伸收束 × 下压外扩；位移 = 注视 + 眨眼点头 + 点头/下压。
+        // 横向 = 呼吸 × 拉伸收束 × 下压外扩；位移 = 头部跟随 + 眨眼点头 + 点头/下压
+        // （瞳孔偏移只发生在眼睛 Canvas 内，不动整头）。
         val motionScaleY = (1f + 0.05f * stretchAnim.value) *
             (1f - 0.03f * dipAnim.value) * (1f - 0.02f * nodAnim.value)
         val motionScaleX = (1f - 0.03f * stretchAnim.value) *
@@ -379,12 +485,11 @@ fun FloatingPet(
             modifier = Modifier
                 .size(width = petWidth, height = petHeight)
                 .graphicsLayer {
-                    // 两段式：瞳孔先行（±10px/±6px，200ms）
-                    // + 头部延迟跟上（±8px/±5px，80ms 延迟 300ms）+ 倾斜 4°。
+                    // 头部延迟跟上（±8px/±5px，80ms 延迟 300ms）+ 倾斜 4°。
                     // 注视位移不碰底部锚点：headY 上移至多约 2.3dp，
                     // 小于 5dp 压入量，连接不断；呼吸只缩放不位移。
-                    translationX = headX + pupilX
-                    translationY = headY + pupilY + blinkNodPx + motionDipPx
+                    translationX = headX
+                    translationY = headY + blinkNodPx + motionDipPx
                     rotationZ = turnTilt + tiltAnim.value + shakeAnim.value + swayAnim.value
                     scaleX = popScale * breatheScaleX * motionScaleX
                     scaleY = popScale * breatheScaleY * motionScaleY
@@ -393,78 +498,94 @@ fun FloatingPet(
             contentAlignment = Alignment.Center,
         ) {
             Image(
-                painter = painterResource(R.drawable.glass_head),
+                painter = painterResource(R.drawable.glass_head_nopupil),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
             )
-            if (blinkState.closedPhase) {
-                // 闭合保持期：两条粗 ∪ 形弯曲线（5px 线宽量级），不用细线压缩条。
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val fit = minOf(size.width / 1043f, size.height / 1318f)
-                    val dw = 1043f * fit
-                    val dh = 1318f * fit
-                    val left = (size.width - dw) / 2f
-                    val top = (size.height - dh) / 2f
-                    for (b in GLASS_EYE_BOXES) {
-                        val bl = left + b.l * dw
-                        val bt = top + b.t * dh
-                        val br = left + b.r * dw
-                        val bb = top + b.b * dh
-                        val bw = br - bl
-                        val bh = bb - bt
-                        drawArc(
-                            color = Color.Black.copy(alpha = 0.9f),
-                            startAngle = 0f,
-                            sweepAngle = 180f,
-                            useCenter = false,
-                            topLeft = Offset(bl + bw * 0.1f, bt + bh * 0.2f),
-                            size = androidx.compose.ui.geometry.Size(bw * 0.8f, bh * 0.8f),
-                            style = Stroke(width = with(density) { 2.5.dp.toPx() }),
-                        )
+            // 眼睛三层：与底图同盒同 Fit 放置数学，相对坐标严格对齐。
+            // 瞳孔层（开孔裁剪 + 注视偏移 + 绕珠心缩放）→ 反光点层
+            // （整图不偏移，钉在右上光源方向）→ 眼睑层（最后画，落下时
+            // 盖住瞳孔与反光点；全开时不画）。
+            val pupilsBmp = ImageBitmap.imageResource(R.drawable.glass_pupils)
+            val catchBmp = ImageBitmap.imageResource(R.drawable.glass_catchlights)
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                // 盒子与位图同比，实际无留白；仍显式算 Fit 以防盒子比例漂移。
+                val fit = minOf(size.width / 1043f, size.height / 1318f)
+                val dw = 1043f * fit
+                val dh = 1318f * fit
+                val left = (size.width - dw) / 2f
+                val top = (size.height - dh) / 2f
+                val pupilDx = pupilBaseX.value + jitterXAnim
+                val pupilDy = pupilBaseY.value + jitterYAnim
+                for ((index, b) in GLASS_EYE_OPENINGS.withIndex()) {
+                    val bl = left + b.l * dw
+                    val bt = top + b.t * dh
+                    val br = left + b.r * dw
+                    val bb = top + b.b * dh
+                    val bw = br - bl
+                    val bh = bb - bt
+                    val cx = (bl + br) / 2f
+                    val cy = (bt + bb) / 2f
+                    // 瞳孔：绕珠心缩放 + 注视偏移，输出被开孔椭圆裁剪——
+                    // 滑出侧露底图米色（读作眼白），滑入侧压进圈下。
+                    val eyeClip = Path().apply {
+                        addOval(Rect(bl, bt, br, bb))
                     }
-                }
-            } else if (eyeScale < 0.999f) {
-                // 与 PetView 一致：直接取 ImageBitmap，不走 BitmapPainter。
-                val blinkBmp = ImageBitmap.imageResource(R.drawable.glass_head)
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    // 与底图 ContentScale.Fit 完全一致的放置数学
-                    // （盒子与位图同比，实际无留白）。
-                    val fit = minOf(
-                        size.width / blinkBmp.width,
-                        size.height / blinkBmp.height,
-                    )
-                    val dw = blinkBmp.width * fit
-                    val dh = blinkBmp.height * fit
-                    val left = (size.width - dw) / 2f
-                    val top = (size.height - dh) / 2f
-                    for (b in GLASS_EYE_BOXES) {
-                        val sbl = (b.l * blinkBmp.width).toInt()
-                        val sbt = (b.t * blinkBmp.height).toInt()
-                        val sbw = ((b.r - b.l) * blinkBmp.width).toInt()
-                            .coerceAtLeast(2)
-                        val sbh = ((b.b - b.t) * blinkBmp.height).toInt()
-                            .coerceAtLeast(4)
-                        val dbl = left + b.l * dw
-                        val dbt = top + b.t * dh
-                        val dbr = left + b.r * dw
-                        val dbb = top + b.b * dh
-                        val dbw = (dbr - dbl).toInt().coerceAtLeast(2)
-                        val dbh = ((dbb - dbt) * eyeScale).toInt()
-                            .coerceAtLeast(2)
-                        val cy = (dbt + dbb) / 2f
+                    clipPath(eyeClip) {
+                        val sw = bw * pupilScale
+                        val sh = bh * pupilScale
                         drawImage(
-                            image = blinkBmp,
-                            srcOffset = androidx.compose.ui.unit.IntOffset(sbl, sbt),
-                            srcSize = androidx.compose.ui.unit.IntSize(sbw, sbh),
-                            dstOffset = androidx.compose.ui.unit.IntOffset(
-                                dbl.toInt(),
-                                (cy - dbh / 2f).toInt(),
+                            image = pupilsBmp,
+                            srcOffset = androidx.compose.ui.unit.IntOffset(
+                                (b.l * pupilsBmp.width).toInt(),
+                                (b.t * pupilsBmp.height).toInt(),
                             ),
-                            dstSize = androidx.compose.ui.unit.IntSize(dbw, dbh),
+                            srcSize = androidx.compose.ui.unit.IntSize(
+                                ((b.r - b.l) * pupilsBmp.width).toInt().coerceAtLeast(2),
+                                ((b.b - b.t) * pupilsBmp.height).toInt().coerceAtLeast(2),
+                            ),
+                            dstOffset = androidx.compose.ui.unit.IntOffset(
+                                (cx - sw / 2f + pupilDx).toInt(),
+                                (cy - sh / 2f + pupilDy).toInt(),
+                            ),
+                            dstSize = androidx.compose.ui.unit.IntSize(
+                                sw.toInt().coerceAtLeast(2),
+                                sh.toInt().coerceAtLeast(2),
+                            ),
+                        )
+                    }
+                    // 眼睑：从开孔上缘落下的拱形盖（中央最深、两侧收起），
+                    // 面部米色实心填充 + 棕圈色睑缘缝线。
+                    if (lidFraction > 0.001f) {
+                        val lidH = bh * lidFraction
+                        val lidPath = Path().apply {
+                            moveTo(bl, bt)
+                            lineTo(br, bt)
+                            lineTo(br, bt + lidH * 0.55f)
+                            quadraticTo(cx, bt + lidH * 1.3f, bl, bt + lidH * 0.55f)
+                            close()
+                        }
+                        drawPath(lidPath, color = GLASS_FACE_TONES[index])
+                        val seamPath = Path().apply {
+                            moveTo(br, bt + lidH * 0.55f)
+                            quadraticTo(cx, bt + lidH * 1.3f, bl, bt + lidH * 0.55f)
+                        }
+                        drawPath(
+                            seamPath,
+                            color = GLASS_RIM_BROWN.copy(alpha = 0.6f),
+                            style = Stroke(width = with(density) { 1.2.dp.toPx() }),
                         )
                     }
                 }
+                // 反光点：整图不偏移绘制——瞳孔动它不动，只随头动。
+                drawImage(
+                    image = catchBmp,
+                    srcOffset = androidx.compose.ui.unit.IntOffset(0, 0),
+                    srcSize = androidx.compose.ui.unit.IntSize(catchBmp.width, catchBmp.height),
+                    dstOffset = androidx.compose.ui.unit.IntOffset(left.toInt(), top.toInt()),
+                    dstSize = androidx.compose.ui.unit.IntSize(dw.toInt(), dh.toInt()),
+                )
             }
         }
         // 回弹复位：点击后 120ms 松开。

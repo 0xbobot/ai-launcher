@@ -53,6 +53,14 @@ object BlinkPolicy {
     /** alive-p2：扫视出发瞬间约 30% 概率伴眨。 */
     fun isSaccadeBlink(random: Random): Boolean =
         random.nextFloat() < SACCADE_BLINK_PROB
+
+    /**
+     * eyes-alive：眨眼节律随状态变——专注态（FETCH/思考）少眨 4–8s，
+     * 闲时沿用 2–6s；思考时可双眨沿用 requestBlink 的 10% 口径，不另开通道。
+     */
+    fun intervalMsForState(focused: Boolean, random: Random): Long =
+        if (focused) 4_000L + (random.nextFloat() * 4_000L).toLong()
+        else intervalMs(false, random)
 }
 
 /**
@@ -205,4 +213,51 @@ fun squashDepth(mood: PetMood, sleepy: Boolean): Float = when {
     mood == PetMood.HAPPY -> 0.85f
     sleepy -> 0.95f
     else -> 0.88f
+}
+
+// ------------------------------------------------------------------
+// eyes-alive（2026-10-25）：瞳孔独立层 + 扫视节律 + 瞳孔大小 + 眼睑状态。
+// 几何依据 glass-cut.png 离线测量（1043×1318）：眼内框 = 去 6px 棕圈后
+// 的珠体开孔，左 l=0.2119 t=0.6548 r=0.3356 b=0.7792，
+// 右 l=0.6654 t=0.6548 r=0.7862 b=0.7640；反光点上缘相对开孔高：
+// 左 0.176、右主点 0.193——故闲时半阖取 0.15，既盖住珠体上缘 15%，
+// 又不吞反光点（组合层 GLASS_EYE_OPENINGS 即此口径）。
+// ------------------------------------------------------------------
+
+/** 扫视节律：每 0.3–1.2s 一次快速小跳（120ms 到位）+ 随机停顿。 */
+object SaccadePolicy {
+    fun intervalMs(random: Random): Long =
+        300L + (random.nextFloat() * 900f).toLong()
+
+    /** 横向小跳：幅度 2–5px，方向随机。 */
+    fun offsetX(random: Random): Float =
+        (2f + random.nextFloat() * 3f) * if (random.nextBoolean()) 1f else -1f
+
+    /** 纵向小跳：幅度 2–3px，方向随机（眼眶纵向更窄）。 */
+    fun offsetY(random: Random): Float =
+        (2f + random.nextFloat() * 1f) * if (random.nextBoolean()) 1f else -1f
+}
+
+/**
+ * 瞳孔缩放：反应警觉 / 惊讶 / 开心放大 15%，专注 / 思考缩小 8%，闲时 1.0。
+ * 组合层以 200ms tween 平滑过渡，不许跳变。
+ */
+fun eyePupilScale(mood: PetMood, thinking: Boolean, alert: Boolean): Float = when {
+    alert -> 1.15f
+    mood == PetMood.SURPRISED || mood == PetMood.HAPPY -> 1.15f
+    mood == PetMood.FETCH || thinking -> 0.92f
+    else -> 1.0f
+}
+
+/**
+ * 眼睑开合（上睑盖住开孔高度的比例）：闲时半阖 0.15，
+ * 专注 / 思考 / 惊讶 / 反应警觉全开，害羞深阖 0.30。
+ * 眨眼时组合层另以 blinkLid 压到 1.0（全闭），取两者最大值。
+ */
+fun eyeLidFraction(mood: PetMood, thinking: Boolean, alert: Boolean): Float = when {
+    alert -> 0f
+    mood == PetMood.SURPRISED -> 0f
+    mood == PetMood.FETCH || thinking -> 0f
+    mood == PetMood.SHY -> 0.30f
+    else -> 0.15f
 }

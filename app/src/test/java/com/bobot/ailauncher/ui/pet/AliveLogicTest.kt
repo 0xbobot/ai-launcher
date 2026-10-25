@@ -249,4 +249,55 @@ class AliveLogicTest {
         assertEquals(0.88f, squashDepth(PetMood.IDLE, false), 1e-6f)
         assertEquals(0.88f, squashDepth(PetMood.FETCH, false), 1e-6f)
     }
+
+    // eyes-alive：扫视节律、瞳孔大小、眼睑状态、眨眼节律随状态变。
+
+    @Test
+    fun `saccade interval 300 to 1200ms`() {
+        val r = Random(11)
+        repeat(500) {
+            assertTrue(SaccadePolicy.intervalMs(r) in 300L..1_200L)
+        }
+    }
+
+    @Test
+    fun `saccade offsets within socket range`() {
+        val r = Random(13)
+        repeat(500) {
+            val x = SaccadePolicy.offsetX(r)
+            val y = SaccadePolicy.offsetY(r)
+            assertTrue(kotlin.math.abs(x) in 2f..5f)
+            assertTrue(kotlin.math.abs(y) in 2f..3f)
+        }
+    }
+
+    @Test
+    fun `pupil scale follows state`() {
+        assertEquals(1.15f, eyePupilScale(PetMood.IDLE, false, true), 1e-6f)
+        assertEquals(1.15f, eyePupilScale(PetMood.SURPRISED, false, false), 1e-6f)
+        assertEquals(1.15f, eyePupilScale(PetMood.HAPPY, false, false), 1e-6f)
+        assertEquals(0.92f, eyePupilScale(PetMood.FETCH, false, false), 1e-6f)
+        assertEquals(0.92f, eyePupilScale(PetMood.IDLE, true, false), 1e-6f)
+        assertEquals(1.0f, eyePupilScale(PetMood.IDLE, false, false), 1e-6f)
+    }
+
+    @Test
+    fun `lid fraction follows state`() {
+        assertEquals(0f, eyeLidFraction(PetMood.IDLE, false, true), 1e-6f)
+        assertEquals(0f, eyeLidFraction(PetMood.SURPRISED, false, false), 1e-6f)
+        assertEquals(0f, eyeLidFraction(PetMood.FETCH, false, false), 1e-6f)
+        assertEquals(0f, eyeLidFraction(PetMood.IDLE, true, false), 1e-6f)
+        assertEquals(0.30f, eyeLidFraction(PetMood.SHY, false, false), 1e-6f)
+        // 闲时半阖 0.15：盖住珠体上缘 15%，又不吞反光点（上缘左 0.176/右 0.193）
+        assertEquals(0.15f, eyeLidFraction(PetMood.IDLE, false, false), 1e-6f)
+    }
+
+    @Test
+    fun `blink interval focused 4 to 8s idle 2 to 6s`() {
+        val r = Random(17)
+        repeat(500) {
+            assertTrue(BlinkPolicy.intervalMsForState(true, r) in 4_000L..8_000L)
+            assertTrue(BlinkPolicy.intervalMsForState(false, r) in 2_000L..6_000L)
+        }
+    }
 }
