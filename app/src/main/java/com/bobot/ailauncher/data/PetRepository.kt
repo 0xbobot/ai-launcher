@@ -202,11 +202,19 @@ object PetRepository {
         _actionTick.value += 1
     }
 
-    // 2026-10-25 意图卡片统一：R3-C 意图交互反应覆盖层（intentPose /
-    // intentThinking / setIntentReaction / clearIntentReaction）整段删除——
-    // 唯一消费者（InputPetCompanion → PetView 姿态图）已随旧意图宠物块退役；
-    // 意图卡片上的宠物就是 Dock 宠物本体（HybridPet 活感引擎），不再经过
-    // 覆盖层。会话状态传达由意图槽位内容本身承担。
+    // 2026-10-25 意图卡片统一：R3-C 意图姿态覆盖层（intentPose /
+    // setIntentReaction / clearIntentReaction）整段删除——唯一消费者
+    // （InputPetCompanion → PetView 姿态图）已随旧意图宠物块退役。
+    // 但 intentThinking 不删：眼睛批（344）已把它接为共享眼睛引擎的
+    // 输入（FloatingPet 以思考态驱动专注眼形：瞳孔大小/眼睑/眨眼节律），
+    // 由 IntentEntry 按 Planning 态写入、离场时清零；姿态退役不得连
+    // 带砍掉眼睛引擎的输入（rebase 后 CI 实证：删掉即编译失败）。
+    private val _intentThinking = MutableStateFlow(false)
+    val intentThinking: StateFlow<Boolean> get() = _intentThinking.asStateFlow()
+
+    fun setIntentThinking(thinking: Boolean) {
+        _intentThinking.value = thinking
+    }
 
     // ============ v0.56.0 M2/M3/M4：播报链与时段 ============
 

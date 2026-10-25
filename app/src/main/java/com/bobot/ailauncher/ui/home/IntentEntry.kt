@@ -39,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -91,6 +92,7 @@ import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
+import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.DockLightParams
@@ -520,6 +522,12 @@ fun IntentEntry(
     // 完全一致，不另维护一套姿态。会话状态的传达仍由槽位内容本身承担
     // （PlanningStrip「想想中」/ LocalResultsBar / StatusStrip），不经宠
     // 物姿态。PetRepository 的 intentPose 覆盖层随之删除（唯一消费者已无）。
+    // 但思考标志保留：眼睛批（344）以 intentThinking 驱动专注眼形，故
+    // Planning 态仍写入、离场清零——姿态退役不得砍掉眼睛引擎的输入。
+    LaunchedEffect(planning) { PetRepository.setIntentThinking(planning) }
+    DisposableEffect(Unit) {
+        onDispose { PetRepository.setIntentThinking(false) }
+    }
 
     // 回复小条短时呈现：5 秒后自动收起（协调器 dismiss 回编辑态，原话不丢）
     LaunchedEffect(state) {
