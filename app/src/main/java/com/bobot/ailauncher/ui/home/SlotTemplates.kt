@@ -175,10 +175,13 @@ object SlotTemplates {
     /**
      * v6 扩展示例池（Bob 2026-10-24 18:45：推荐问要结合能力发散一点，
      * 不要只换文案不换覆盖面）：出行（打车/导航/航班/地铁/酒店）+
-     * 办公（日程）+ 生活（外卖）+ 通讯（微信）+ 支付（支付宝）——每条
-     * 都对应注册表里的真实能力；会议提醒仍是上下文派生（有地点且未
-     * 开始时插在第 2 位）。IntentEntry 用整池：胶囊上方主行横滚全量
-     * 呈现（v6 后调整：猜你想问行已删，切分口径退役）。
+     * 办公（日程）+ 生活（外卖）+ 娱乐（音乐/视频）+ 通讯（聊天）——
+     * 每条都对应注册表里的真实能力；会议提醒仍是上下文派生（有地点
+     * 且未开始时插在第 2 位）。IntentEntry 用整池：胶囊上方主行横滚
+     * 全量呈现（v6 后调整：猜你想问行已删，切分口径退役）。
+     * 能力问题批（Bob 2026-10-25）：纯打开问题（打开微信/打开支付宝）
+     * 退役；推荐只许诺当前可执行能力——过滤口径见 filterExecutable，
+     * 无本地支撑的问题不出现（履行路径以后扩展时再接新路径）。
      * 注意缺口（v6 回执待 Bob 定夺）：注册表里没有系统操作类能力
      * （闹钟/手电/亮度等），故本池没有系统操作代表——没编不存在的能力。
      */
@@ -194,10 +197,18 @@ object SlotTemplates {
         out += navTemplate(daohang)
         out += fixedTemplate("hangban", "hangban", "查明天飞上海的航班")
         out += fixedTemplate("rili", "rili", "查我明天的日程")
-        out += fixedTemplate("meituan", "meituan", "帮我点一份午饭外卖")
+        // 外卖绑 waimai（美团＋饿了么并集）：只绑 meituan 时，
+        // 本机只有饿了么的用户会丢掉外卖问题——本地支撑应按履行
+        // 方式算，不按单个应用算。
+        out += fixedTemplate("meituan", "waimai", "帮我点一份午饭外卖")
         out += fixedTemplate("ditie", "ditie", "查去机场的地铁")
-        out += fixedTemplate("wechat", "wechat", "打开微信")
-        out += fixedTemplate("zhifubao", "zhifubao", "打开支付宝")
+        // 能力问题批（Bob 2026-10-25）：推荐问题只做事、不做纯打开——
+        // 「打开微信」「打开支付宝」退役，换成音乐/视频/聊天三条
+        // 做事问题；每条 capabilityId 指向注册表真实能力，由
+        // filterExecutable 按本机已装情况过滤（无支撑不许诺）。
+        out += fixedTemplate("yinyue", "yinyue", "我想听歌")
+        out += fixedTemplate("shipin", "shipin", "我想刷视频")
+        out += fixedTemplate("liaotian", "liaotian", "我想和朋友聊天")
         out += fixedTemplate("jiudian", "jiudian", "帮我订一间上海的酒店")
         return out
     }

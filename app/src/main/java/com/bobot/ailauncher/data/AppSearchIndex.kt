@@ -51,9 +51,12 @@ object AppSearchIndex {
         "支付" to listOf("alipay", "unionpay", "tencent.mm"),
         "付款" to listOf("alipay", "unionpay"),
         "银行" to listOf("icbc", "ccb.start", "cmbchina", "bank"),
-        "音乐" to listOf("cloudmusic", "qqmusic", "kugou", "kuwo"),
-        "听歌" to listOf("cloudmusic", "qqmusic", "kugou"),
-        "视频" to listOf("qiyi.video", "qqlive", "youku", "mgtv.tv", "bili"),
+        // 能力问题批（Bob 2026-10-25）：英文音乐应用包名里都有 music，
+        // 不补这一片段时「听歌」永远搜不到 Spotify/Apple Music/
+        // YouTube Music；「听歌」再补 kuwo 与「音乐」对齐。
+        "音乐" to listOf("cloudmusic", "qqmusic", "kugou", "kuwo", "music"),
+        "听歌" to listOf("cloudmusic", "qqmusic", "kugou", "kuwo", "music"),
+        "视频" to listOf("qiyi.video", "qqlive", "youku", "mgtv.tv", "bili", "youtube"),
         "看剧" to listOf("qiyi.video", "qqlive", "youku", "mgtv.tv"),
         "拍照" to listOf("mtxx", "lemon", "camera"),
         "修图" to listOf("mtxx", "lemon"),
@@ -70,7 +73,7 @@ object AppSearchIndex {
         "开会" to listOf("rimet", "lark", "tencentmeeting", "zoom"),
         "聊天" to listOf("tencent.mm", "mobileqq", "lark"),
         "社交" to listOf("tencent.mm", "xiaohongshu", "weibo", "douyin", "zhihu"),
-        "刷视频" to listOf("aweme", "gifmaker", "bili"),
+        "刷视频" to listOf("aweme", "gifmaker", "bili", "youtube"),
         "短视频" to listOf("aweme", "gifmaker"),
         "看书" to listOf("weread", "dragon.read", "qidian", "zhihu"),
         "阅读" to listOf("weread", "dragon.read", "kindle"),
