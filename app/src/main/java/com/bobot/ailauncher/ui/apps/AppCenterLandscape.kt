@@ -590,26 +590,11 @@ fun AppCenterLandscape(
                     .padding(end = cutoutRight)
             ) {
             AppRail(
+                // 字母导航完全统一（Bob 2026-10-25 追问）：项目表走三处共用的
+                // buildRailItems（RailItems.kt），构造与此前逐字一致，仅换调用；
+                // letters 即调用点按 azGroups 派生的有应用字母集（与竖屏同源）。
                 items = remember(favApps, hiddenApps, letters) {
-                    // 与竖屏一致（Bob 2026-10-24）：房子、分隔、★、分隔、
-                    // 字母、分隔、👁；此前横屏缺房子项。
-                    // 字母 B 方案（Bob 2026-10-24）：rail 只显示有应用的字
-                    // 母——letters 即调用点按 azGroups 派生的有应用字母集
-                    // （与竖屏 rail 同源），不再硬编码完整 A-Z；过滤后每个
-                    // 字母都有列，最近字母兜底仅作保险。
-                    buildList {
-                        add(RailItem.House)
-                        if (favApps.isNotEmpty()) {
-                            add(RailItem.Separator)
-                            add(RailItem.Star)
-                        }
-                        add(RailItem.Separator)
-                        letters.forEach { add(RailItem.Letter(it)) }
-                        if (hiddenApps.isNotEmpty()) {
-                            add(RailItem.Separator)
-                            add(RailItem.Eye)
-                        }
-                    }
+                    buildRailItems(favApps.isNotEmpty(), letters, hiddenApps.isNotEmpty())
                 },
                 onActiveItem = { item ->
                     when (item) {
