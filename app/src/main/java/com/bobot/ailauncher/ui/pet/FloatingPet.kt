@@ -519,7 +519,8 @@ fun FloatingPet(
                 val top = (size.height - dh) / 2f
                 val pupilDx = pupilBaseX.value + jitterXAnim
                 val pupilDy = pupilBaseY.value + jitterYAnim
-                for ((index, b) in GLASS_EYE_OPENINGS.withIndex()) {
+                // 第一遍：瞳孔层（开孔裁剪 + 注视偏移 + 绕珠心缩放）。
+                for (b in GLASS_EYE_OPENINGS) {
                     val bl = left + b.l * dw
                     val bt = top + b.t * dh
                     val br = left + b.r * dw
@@ -556,8 +557,29 @@ fun FloatingPet(
                             ),
                         )
                     }
-                    // 眼睑：从开孔上缘落下的拱形盖（中央最深、两侧收起），
-                    // 面部米色实心填充 + 棕圈色睑缘缝线。
+                }
+                // 反光点：整图不偏移绘制——瞳孔动它不动，只随头动。
+                // 必须画在瞳孔之后、眼睑之前：眼睑层最后画，落下时
+                // 盖住瞳孔与反光点（G2；原来反光点画在眼睑之后，
+                // 闭眼时亮点浮在眼皮上）。反光点仍画在瞳孔之后——
+                // 瞳孔贴片扣掉了反光点位置，顺序反了会错位遮挡。
+                drawImage(
+                    image = catchBmp,
+                    srcOffset = androidx.compose.ui.unit.IntOffset(0, 0),
+                    srcSize = androidx.compose.ui.unit.IntSize(catchBmp.width, catchBmp.height),
+                    dstOffset = androidx.compose.ui.unit.IntOffset(left.toInt(), top.toInt()),
+                    dstSize = androidx.compose.ui.unit.IntSize(dw.toInt(), dh.toInt()),
+                )
+                // 眼睑：从开孔上缘落下的拱形盖（中央最深、两侧收起），
+                // 面部米色实心填充 + 棕圈色睑缘缝线；最后画。
+                // 几何与瞳孔遍完全一致（开孔坐标系同一套）。
+                for ((index, b) in GLASS_EYE_OPENINGS.withIndex()) {
+                    val bl = left + b.l * dw
+                    val bt = top + b.t * dh
+                    val br = left + b.r * dw
+                    val bb = top + b.b * dh
+                    val bh = bb - bt
+                    val cx = (bl + br) / 2f
                     if (lidFraction > 0.001f) {
                         val lidH = bh * lidFraction
                         val lidPath = Path().apply {
@@ -579,14 +601,6 @@ fun FloatingPet(
                         )
                     }
                 }
-                // 反光点：整图不偏移绘制——瞳孔动它不动，只随头动。
-                drawImage(
-                    image = catchBmp,
-                    srcOffset = androidx.compose.ui.unit.IntOffset(0, 0),
-                    srcSize = androidx.compose.ui.unit.IntSize(catchBmp.width, catchBmp.height),
-                    dstOffset = androidx.compose.ui.unit.IntOffset(left.toInt(), top.toInt()),
-                    dstSize = androidx.compose.ui.unit.IntSize(dw.toInt(), dh.toInt()),
-                )
             }
         }
         // 回弹复位：点击后 120ms 松开。

@@ -57,13 +57,20 @@ class PetBlinkState {
     private var blinkJob: Job? = null
 
     private suspend fun oneBlink() {
-        blinking = true
-        delay(85) // 闭合
-        closedPhase = true
-        delay(70) // 闭合保持
-        closedPhase = false
-        delay(85) // 睁开
-        blinking = false
+        try {
+            blinking = true
+            delay(85) // 闭合
+            closedPhase = true
+            delay(70) // 闭合保持
+            closedPhase = false
+            delay(85) // 睁开
+        } finally {
+            // G1：取消（effect 重启等）时必复位。原来无 finally，
+            // 取消会跳过末尾复位、blinking 永久为真，此后一切
+            // requestBlink 被丢弃、眼睛永久闭合。
+            blinking = false
+            closedPhase = false
+        }
     }
 
     /** 强制眨眼一次（已在眨眼中则不重复触发）。 */
@@ -77,5 +84,15 @@ class PetBlinkState {
                 oneBlink()
             }
         }
+    }
+
+    /**
+     * 外部复位：取消在途眨眼。实际复位由 oneBlink 的 finally 执行
+     * （取消投递后、协程恢复时清掉 blinking／closedPhase）；
+     * 不从外部直接写状态，避免与在途协程的 finally 竞写。
+     * 调用后需让出一次调度（runCurrent／下一帧），复位即生效。
+     */
+    fun reset() {
+        blinkJob?.cancel()
     }
 }
