@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,8 +33,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.IntOffset
@@ -276,20 +281,55 @@ fun PetZone(
         // 该覆层与 inputCompact 同在时，进输入态 UI 确定性冻结（摘其一即
         // 活）；渐变作为内容容器自身背景，视觉口径不变（同色标、同范围：
         // 容器高度本就由内容决定），动画路径上少一个跟随测量的节点。
+        // 简报罩纱框线修复（Bob 2026-10-25 真机截图）：PetZone 是 HomeScreen
+        // 根 Column 的第一个孩子，根 Column 的顶距（竖屏 16dp、横屏
+        // max(16dp, 状态栏高)）与两侧 displayCutout inset 把罩纱 Column 框在
+        // 内侧；原 background 只画到 Column 边界，边界外侧只有 MainScreen
+        // 罩纱，边界处 alpha 台阶约 0.22——真机上就是顶部与左侧的两道框线
+        // （横屏挖孔在侧边故左右都有线，竖屏侧边 inset 为 0 故只见顶线）。
+        // 修法：罩纱改 drawBehind 出界绘制——上 bleed 根 Column 顶距、左右
+        // bleed 两侧 cutout inset，罩纱铺满到屏边，边界处不再有台阶；纵向
+        // 渐变映射不变（startY=0/endY=Column 高，出界区按首色平铺），内容
+        // 上的浓度与之前一字不动；drawBehind 不引入布局节点，v0.68.102 的
+        // 冻结修复口径不受影响；字号、间距、布局、手势一字不动。
         val scrimColor = AILauncherColors.current.Background
+        val veilDensity = LocalDensity.current
+        val veilLayoutDirection = LocalLayoutDirection.current
+        val veilStatusBarTopDp =
+            with(veilDensity) { WindowInsets.statusBars.getTop(veilDensity).toDp() }
+        val veilTopBleedPx = with(veilDensity) {
+            (if (isLandscapeCover) maxOf(16.dp, veilStatusBarTopDp) else 16.dp).toPx()
+        }
+        val veilStartBleedPx =
+            WindowInsets.displayCutout.getLeft(veilDensity, veilLayoutDirection).toFloat()
+        val veilEndBleedPx =
+            WindowInsets.displayCutout.getRight(veilDensity, veilLayoutDirection).toFloat()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                .drawBehind {
+                    val brush = androidx.compose.ui.graphics.Brush.verticalGradient(
                         colorStops = arrayOf(
                             0.0f to scrimColor.copy(alpha = 0.22f),
                             0.55f to scrimColor.copy(alpha = 0.46f),
                             0.86f to scrimColor.copy(alpha = 0.46f),
                             1.0f to scrimColor.copy(alpha = 0.0f)
+                        ),
+                        startY = 0f,
+                        endY = size.height
+                    )
+                    drawRect(
+                        brush = brush,
+                        topLeft = androidx.compose.ui.geometry.Offset(
+                            -veilStartBleedPx,
+                            -veilTopBleedPx
+                        ),
+                        size = androidx.compose.ui.geometry.Size(
+                            size.width + veilStartBleedPx + veilEndBleedPx,
+                            size.height + veilTopBleedPx
                         )
                     )
-                )
+                }
         ) {
         // v0.68.101（D-1）：横屏输入态 hero 整体让位——横屏 IME 抬升后
         // 可用高度只剩约四成，左区只装胶囊堆栈；竖屏走各模板 inputCompact。
