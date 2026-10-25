@@ -292,42 +292,50 @@ fun HybridPet(
                 onTap = { hybridTap() },
             )
         }
-        // 视频层：方形 + 圆形裁剪，圆心对准玻璃头球心（盒高约 62% 处）。
+        // 视频层：仅播片/待换片时挂载。PlayerView 默认 SurfaceView 画在
+        // 独立 surface 上，不认 Compose alpha、不认椭圆裁剪、pause 后仍留
+        // surface——327 灰框就是这么来的。故：①改 TextureView 渲染（认
+        // alpha、认裁剪）；②不播且无待换片时根本不 compose AndroidView，
+        // 不留 surface；③背景显式透明，不加任何底色。
         // clickable 只在播片时启用：播片时接管点按（PlayerView 本身不消费），
-        // 不播时透传给下层代码层（保留果冻回弹）。
-        Box(
-            modifier = Modifier
-                .size(petWidth)
-                .graphicsLayer {
-                    alpha = videoAlpha
-                    translationY = videoOffsetYPx
-                }
-                .clickable(
-                    enabled = videoActive,
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = { hybridTap() },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        this.player = player
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        isClickable = false
-                        isFocusable = false
-                        clipToOutline = true
-                        outlineProvider = object : ViewOutlineProvider() {
-                            override fun getOutline(view: View, outline: Outline) {
-                                outline.setOval(0, 0, view.width, view.height)
+        // 不播时整层不存在，点按自然透传给下层代码层（保留果冻回弹）。
+        if (videoActive || pendingClip != null) {
+            Box(
+                modifier = Modifier
+                    .size(petWidth)
+                    .graphicsLayer {
+                        alpha = videoAlpha
+                        translationY = videoOffsetYPx
+                    }
+                    .clickable(
+                        enabled = videoActive,
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { hybridTap() },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            useController = false
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            setSurfaceType(PlayerView.SURFACE_TYPE_TEXTURE_VIEW)
+                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            this.player = player
+                            isClickable = false
+                            isFocusable = false
+                            clipToOutline = true
+                            outlineProvider = object : ViewOutlineProvider() {
+                                override fun getOutline(view: View, outline: Outline) {
+                                    outline.setOval(0, 0, view.width, view.height)
+                                }
                             }
                         }
-                    }
-                },
-                modifier = Modifier.size(petWidth),
-            )
+                    },
+                    modifier = Modifier.size(petWidth),
+                )
+            }
         }
     }
 }
