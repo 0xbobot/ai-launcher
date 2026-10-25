@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.pet
 
 import com.bobot.ailauncher.data.GazeTarget
+import com.bobot.ailauncher.data.PetMood
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -88,5 +89,161 @@ class AliveLogicTest {
             val a = wanderAmp(r)
             assertTrue(a in 0.8f..1.2f)
         }
+    }
+
+    // ---------------- alive-p2（P0 程序化运动变换） ----------------
+
+    @Test
+    fun `breathe wave is bounded and hits exhale peak at 40 percent`() {
+        val twoPi = (2 * Math.PI).toFloat()
+        org.junit.Assert.assertEquals(0f, breatheWave(0f), 1e-4f)
+        org.junit.Assert.assertEquals(1f, breatheWave(twoPi * BREATHE_INHALE_FRAC), 1e-4f)
+        assertEquals(0.4f, BREATHE_INHALE_FRAC, 1e-6f)
+        var i = 0
+        while (i <= 100) {
+            val w = breatheWave(twoPi * i / 100f)
+            assertTrue(w in -1e-4f..1.0001f)
+            i++
+        }
+    }
+
+    @Test
+    fun `breathe wave rises on inhale and falls on exhale`() {
+        val twoPi = (2 * Math.PI).toFloat()
+        var prev = breatheWave(0f)
+        var i = 1
+        while (i <= 40) { // 吸气段单调上升
+            val w = breatheWave(twoPi * i / 100f)
+            assertTrue("inhale monotone at $i", w >= prev - 1e-4f)
+            prev = w
+            i++
+        }
+        while (i < 100) { // 呼气段单调下降
+            val w = breatheWave(twoPi * i / 100f)
+            assertTrue("exhale monotone at $i", w <= prev + 1e-4f)
+            prev = w
+            i++
+        }
+    }
+
+    @Test
+    fun `breathe volume conservation constants`() {
+        assertEquals(1.025f, BREATHE_SCALE_Y, 1e-6f)
+        assertEquals(0.993f, BREATHE_SCALE_X, 1e-6f)
+        assertEquals(2f, BOB_AMP_DP, 1e-6f) // 浮动从 -8dp 砍到 ±2dp
+    }
+
+    @Test
+    fun `blink three phase timing totals 190ms`() {
+        assertEquals(55, BLINK_CLOSE_MS)
+        assertEquals(25, BLINK_HOLD_MS)
+        assertEquals(110, BLINK_OPEN_MS)
+        assertEquals(190, BLINK_CLOSE_MS + BLINK_HOLD_MS + BLINK_OPEN_MS)
+        assertTrue(BLINK_HALF_TARGET > BLINK_FULL_TARGET)
+    }
+
+    @Test
+    fun `half blink rate near twelve percent`() {
+        val r = Random(4321)
+        var halves = 0
+        repeat(10_000) { if (BlinkPolicy.isHalfBlink(r)) halves++ }
+        assertTrue("half blinks=$halves", halves in 900..1500)
+    }
+
+    @Test
+    fun `saccade blink rate near thirty percent`() {
+        val r = Random(999)
+        var paired = 0
+        repeat(10_000) { if (BlinkPolicy.isSaccadeBlink(r)) paired++ }
+        assertTrue("saccade blinks=$paired", paired in 2700..3300)
+    }
+
+    @Test
+    fun `saccade two phase spec`() {
+        assertEquals(120, SACCADE_OUT_MS)
+        assertEquals(90, SACCADE_SETTLE_MS)
+        assertTrue(SACCADE_OVERSHOOT > 1f)
+        assertTrue(SACCADE_OVERSHOOT <= 1.1f)
+    }
+
+    @Test
+    fun `micro saccade interval 1_5 to 3s and offset within 1_5px`() {
+        val r = Random(11)
+        repeat(500) {
+            val ms = MicroSaccade.intervalMs(r)
+            assertTrue(ms in 1_500L..3_000L)
+            val px = MicroSaccade.offsetPx(r)
+            assertTrue(kotlin.math.abs(px) <= MICRO_SACCADE_RANGE_PX)
+        }
+    }
+
+    @Test
+    fun `sway spec matches design`() {
+        assertEquals(1.2f, SWAY_AMP_DEG, 1e-6f)
+        // 基线 6.75s 游走 ±20% → 5.4–8.1s（覆盖设计 5.5–8s）
+        val r = Random(5)
+        repeat(500) {
+            val p = wanderPeriodMs(SWAY_PERIOD_BASE_MS, r)
+            assertTrue(p in 5400f..8100f)
+        }
+    }
+
+    @Test
+    fun `weight shift ranges`() {
+        val r = Random(31)
+        repeat(500) {
+            assertTrue(WeightShift.intervalMs(r) in 25_000L..50_000L)
+            assertTrue(WeightShift.holdMs(r) in 2_000L..4_000L)
+            assertTrue(kotlin.math.abs(WeightShift.angleDeg(r)) == 2.5f)
+        }
+    }
+
+    @Test
+    fun `fidget interval 20 to 45s`() {
+        val r = Random(17)
+        repeat(500) {
+            val ms = FidgetPool.intervalMs(r)
+            assertTrue(ms in 20_000L..45_000L)
+        }
+    }
+
+    @Test
+    fun `fidget pool quiets down the longer idle`() {
+        val base = 30_000L
+        assertEquals(base, FidgetPool.quietedIntervalMs(base, 0))
+        assertTrue(FidgetPool.quietedIntervalMs(base, 20) > base)
+        assertTrue(
+            FidgetPool.quietedIntervalMs(base, 40) >
+                FidgetPool.quietedIntervalMs(base, 20)
+        )
+        // 封顶 ×4
+        assertEquals(base * 4, FidgetPool.quietedIntervalMs(base, 60))
+        assertEquals(base * 4, FidgetPool.quietedIntervalMs(base, 600))
+    }
+
+    @Test
+    fun `fidget pick covers all three kinds`() {
+        val r = Random(23)
+        val seen = mutableSetOf<Fidget>()
+        repeat(300) { seen += FidgetPool.pick(r) }
+        assertEquals(Fidget.values().toSet(), seen)
+    }
+
+    @Test
+    fun `head tilt within 7 to 10 degrees and hold 0_7 to 1_2s`() {
+        val r = Random(3)
+        repeat(500) {
+            val a = FidgetPool.headTiltAngleDeg(r)
+            assertTrue(kotlin.math.abs(a) in 7f..10f)
+            assertTrue(FidgetPool.headTiltHoldMs(r) in 700L..1_200L)
+        }
+    }
+
+    @Test
+    fun `squash depth follows mood`() {
+        assertEquals(0.85f, squashDepth(PetMood.HAPPY, false), 1e-6f)
+        assertEquals(0.95f, squashDepth(PetMood.IDLE, true), 1e-6f)
+        assertEquals(0.88f, squashDepth(PetMood.IDLE, false), 1e-6f)
+        assertEquals(0.88f, squashDepth(PetMood.FETCH, false), 1e-6f)
     }
 }
