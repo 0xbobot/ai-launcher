@@ -104,6 +104,7 @@ import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
+import com.bobot.ailauncher.ui.glass.DockLightParams
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.systemGestureBottomPx
@@ -604,7 +605,11 @@ fun PullUpDock(
                             tintColor = AILauncherColors.current.Card,
                             fallbackColor = AILauncherColors.current.GlassCard.copy(alpha = 0.55f * dockBgAlpha),
                             tintBoost = dockBgAlpha,
-                            shape = shoulderShape
+                            shape = shoulderShape,
+                            // 玻璃质感 v2：Dock 专用光影（对角明暗 + 高光面 +
+                            // 左下出口 + 沉底暖核 + 方向性亮带）；其他玻璃面
+                            // 不传此参数、一字不动。
+                            dockLight = DockLightParams()
                         )
                         // 圆肩批：弧形高光 + 暖白内晕（玻璃之上、图标之下）。
                         .dockShoulderDressing(
