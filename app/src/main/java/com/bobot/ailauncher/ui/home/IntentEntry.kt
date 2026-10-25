@@ -88,6 +88,7 @@ import com.bobot.ailauncher.core.intent.IntentCoordinator
 import com.bobot.ailauncher.core.intent.IntentUiState
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
+import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.listLaunchableApps
