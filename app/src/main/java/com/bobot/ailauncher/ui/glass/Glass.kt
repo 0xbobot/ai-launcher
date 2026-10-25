@@ -135,6 +135,45 @@ internal fun refreshGlassSignals(context: Context, state: GlassBackdropState) {
 }
 
 /**
+ * Dock 专用光影参数（玻璃质感 v2，2026-10-25）：只给 Dock 面板用。
+ * 默认值即 v2 mock 定值按引擎等效幅度翻译的结果（非硬抄 PIL 像素值）：
+ *  mock 对角跨度 28 级 → diagonalSpan 28/255 ≈ 0.11（白/黑各半）；
+ *  mock 高光峰值 +58 → 58/255 ≈ 0.23；出口峰值 +60 → 0.235；
+ *  mock 暖核峰值 80 → 80/255 ≈ 0.31；亮带 alpha 30/60/95 → 0.12/0.235/0.37。
+ * 基底（模糊/叠色）不在此改、沿用 GlassPolicy：任务明确透明度不再是杠杆，
+ * mock 的 8px PIL 半径无法等效换算为引擎 dp 模糊，硬搬等于为“更透”降模糊。
+ * 深色模式暂无单独参数（mock 未覆盖），两档共用同一套值。
+ */
+data class DockLightParams(
+    /** 对角曲面明暗总跨度（右上亮→左下暗，白/黑各占一半）。 */
+    val diagonalSpan: Float = 0.11f,
+    /** 高光面中心（相对宽/高）与峰值 alpha、半径（相对宽）。 */
+    val highlightCenterX: Float = 0.72f,
+    val highlightCenterY: Float = 0.30f,
+    val highlightPeakAlpha: Float = 0.23f,
+    val highlightRadiusFraction: Float = 0.35f,
+    /** 左下出口中心（相对宽/高）、峰值 alpha、半径（相对宽）、椭圆拉伸。 */
+    val exitCenterX: Float = 0.13f,
+    val exitCenterY: Float = 0.90f,
+    val exitPeakAlpha: Float = 0.235f,
+    val exitRadiusFraction: Float = 0.30f,
+    val exitStretchX: Float = 1.6f,
+    val exitStretchY: Float = 0.55f,
+    /** 沉底暖核中心（相对宽/高）、峰值 alpha、半径（相对宽）、暖色。 */
+    val coreCenterX: Float = 0.57f,
+    val coreCenterY: Float = 0.20f,
+    val corePeakAlpha: Float = 0.31f,
+    val coreRadiusFraction: Float = 0.35f,
+    val coreColor: Color = Color(0xFFFFE1B4),
+    /** 方向性亮带：窄环全周 alpha 范围与线宽、宽环 alpha 与线宽。 */
+    val rimNarrowMinAlpha: Float = 0.12f,
+    val rimNarrowMaxAlpha: Float = 0.235f,
+    val rimNarrowWidth: Dp = 2.dp,
+    val rimWideAlpha: Float = 0.37f,
+    val rimWideWidth: Dp = 11.dp,
+)
+
+/**
  * 玻璃面修饰（放在原 `.background(...)` 的位置调用，链的其余部分不动）：
  * SIMULATED 档或无玻璃环境时就地退化为原半透明色背景，像素级等同现状；
  * 玻璃档绘制：模糊+增色补丁（中/强共用）→（强玻璃）AGSL 折射层 → 叠色 → 顶部亮边。
@@ -144,6 +183,8 @@ internal fun refreshGlassSignals(context: Context, state: GlassBackdropState) {
  * @param shape 非圆角矩形轮廓（如 Dock 圆肩）时传自定义 Shape；默认 null
  *   即原圆角矩形口径，其他玻璃面行为一字不动。轮廓可超出布局上沿
  *   （肩线 rise），玻璃裁剪/叠色/亮边一律沿该轮廓走。
+ * @param dockLight Dock 专用光影（玻璃质感 v2）；默认 null 时 glassDraw
+ *   一字不动，其他玻璃面不受影响。SIMULATED 档不进 glassDraw，故该档无 v2 光影。
  */
 @Composable
 fun Modifier.glassSurface(
@@ -153,6 +194,7 @@ fun Modifier.glassSurface(
     fallbackColor: Color,
     tintBoost: Float = 0f,
     shape: Shape? = null,
+    dockLight: DockLightParams? = null,
 ): Modifier {
     val fallbackShape = shape ?: RoundedCornerShape(cornerRadius)
     val state = LocalGlassBackdrop.current
@@ -169,7 +211,7 @@ fun Modifier.glassSurface(
         return this.background(fallbackColor, fallbackShape)
     }
     return this.then(
-        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost, shape)
+        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost, shape, dockLight)
     )
 }
 
@@ -207,6 +249,7 @@ private fun glassDraw(
     fallbackColor: Color,
     tintBoost: Float,
     shape: Shape? = null,
+    dockLight: DockLightParams? = null,
 ): Modifier {
     val composeDensity = LocalDensity.current.density
     val patchBlur = rememberGraphicsLayer()
@@ -290,6 +333,9 @@ private fun glassDraw(
             val ph = (size.height.roundToInt() + 2 * margin).coerceAtLeast(1)
             val relX = (posInWindow.x - state.originInWindow.x).roundToInt()
             val relY = (posInWindow.y - state.originInWindow.y).roundToInt()
+            // 元素自身尺寸：record 块内 size 是补丁尺寸，此处先 capture 供暖核定位用。
+            val elemW = size.width
+            val elemH = size.height
             val key = ((pw.toLong() * 31 + ph) * 31 + relX) * 31 + relY xor
                 (tick.toLong() * 1_000_003L) xor params.hashCode().toLong()
             if (cache.key != key) {
@@ -301,6 +347,24 @@ private fun glassDraw(
                 patchBlur.record(recordSize) {
                     withTransform({ translate(margin - relX.toFloat(), margin - relY.toFloat()) }) {
                         drawLayer(backdrop)
+                    }
+                    // 玻璃质感 v2 暖核沉底：画进模糊补丁、随补丁一起被模糊 =
+                    // 透过毛玻璃看的体内暖光（mock：中心 57% 宽、20% 高处、暖色、
+                    // 峰值 80、强模糊后合成到模糊壁纸上）。只进模糊补丁，不进锐利补丁。
+                    if (dockLight != null) {
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    dockLight.coreColor.copy(alpha = dockLight.corePeakAlpha),
+                                    dockLight.coreColor.copy(alpha = 0f),
+                                ),
+                                center = Offset(
+                                    margin + dockLight.coreCenterX * elemW,
+                                    margin + dockLight.coreCenterY * elemH,
+                                ),
+                                radius = dockLight.coreRadiusFraction * elemW,
+                            ),
+                        )
                     }
                 }
                 if (strong) {
@@ -371,6 +435,84 @@ private fun glassDraw(
                     drawRoundRect(
                         color = tintColor.copy(alpha = tintAlpha),
                         cornerRadius = CornerRadius(radiusPx),
+                    )
+                }
+                // 玻璃质感 v2（Dock 专用光影，dockLight 非空时）：叠色之上、
+                // 图标之下。339 dressing 在链下游继续画（肩线描边线、内晕一字不动）。
+                if (dockLight != null) {
+                    // ① 对角曲面明暗：右上亮→左下暗，总跨度 diagonalSpan（白/黑各半）。
+                    val halfSpan = dockLight.diagonalSpan / 2f
+                    drawRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = halfSpan),
+                                Color.Transparent,
+                                Color.White.copy(alpha = halfSpan),
+                            ),
+                            start = Offset(0f, size.height),
+                            end = Offset(size.width, 0f),
+                        ),
+                    )
+                    // ② 高光面：右上区域一块柔和光面（肩线描边线保留，见 339 dressing）。
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = dockLight.highlightPeakAlpha),
+                                Color.White.copy(alpha = 0f),
+                            ),
+                            center = Offset(
+                                dockLight.highlightCenterX * size.width,
+                                dockLight.highlightCenterY * size.height,
+                            ),
+                            radius = dockLight.highlightRadiusFraction * size.width,
+                        ),
+                    )
+                    // ③ 左下出口：沿底边横向拉长的暖白亮边（各向异性缩放
+                    // 把圆形光斑压成沿底边的椭圆）。
+                    val exitCenter = Offset(
+                        dockLight.exitCenterX * size.width,
+                        dockLight.exitCenterY * size.height,
+                    )
+                    withTransform({
+                        scale(dockLight.exitStretchX, dockLight.exitStretchY, pivot = exitCenter)
+                    }) {
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFFFFF6E8).copy(alpha = dockLight.exitPeakAlpha),
+                                    Color(0xFFFFF6E8).copy(alpha = 0f),
+                                ),
+                                center = exitCenter,
+                                radius = dockLight.exitRadiusFraction * size.width,
+                            ),
+                        )
+                    }
+                    // ⑤ 方向性亮带：窄环全周（对角线向右上递增）+ 宽环只在右上
+                    //（对角线向左下衰减到 0）。描边线心压在轮廓线上，外半线被
+                    // clip 截掉，与引擎暗描边同一口径；宽环 11dp 描边约 5.5dp 落在面内。
+                    drawPath(
+                        path = shapePath,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = dockLight.rimNarrowMinAlpha),
+                                Color.White.copy(alpha = dockLight.rimNarrowMaxAlpha),
+                            ),
+                            start = Offset(0f, size.height),
+                            end = Offset(size.width, 0f),
+                        ),
+                        style = Stroke(width = dockLight.rimNarrowWidth.toPx()),
+                    )
+                    drawPath(
+                        path = shapePath,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0f),
+                                Color.White.copy(alpha = dockLight.rimWideAlpha),
+                            ),
+                            start = Offset(0f, size.height),
+                            end = Offset(size.width, 0f),
+                        ),
+                        style = Stroke(width = dockLight.rimWideWidth.toPx()),
                     )
                 }
                 // 1dp 亮边：顶部最亮、向下渐隐（内缩半线宽整线落在面内）
