@@ -347,6 +347,10 @@ private fun HomeHost(
         // v0.32.0 的"全透明"作废：杂志风需要纸面统一
         // 玻璃试点批：这一层（内绘系统壁纸 + 罩纱）整体录为玻璃背景源；绘制内容
         // 与顺序不变，壁纸读不到时内绘层不画、系统壁纸照常透出。
+        // 2026-10-25（Bob 试一版）：壁纸太蒙、感觉不精致，全屏罩纱改 100% 透明
+        // （两止点 alpha 0.0），壁纸原样透出；Box 结构与玻璃背景源录制保留，
+        // 回退只需把两行数字改回 0.75/0.45。罩纱原本保 hero 文字可读性，
+        // 繁忙／浅色壁纸下的可读性须真机验后定取舍。
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -359,8 +363,8 @@ private fun HomeHost(
                     .background(
                         androidx.compose.ui.graphics.Brush.verticalGradient(
                             colors = listOf(
-                                com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.75f),
-                                com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.45f)
+                                com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.0f),
+                                com.bobot.ailauncher.ui.theme.AILauncherColors.current.Background.copy(alpha = 0.0f)
                             )
                         )
                     )
