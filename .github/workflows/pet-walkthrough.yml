@@ -11,6 +11,10 @@ on:
         description: "Matrix item id prefix filter (comma-separated, empty = full P0)"
         required: false
         default: ""
+      test_filter:
+        description: "DIAGNOSTIC ONLY (revert before merge): Gradle --tests patterns, comma-separated, empty = full task"
+        required: false
+        default: ""
   push:
     branches:
       - "pet-walkthrough-*"
@@ -38,11 +42,20 @@ jobs:
       - name: Run walkthrough numeric tests (enforce on, report only)
         # 报告目录用测试默认值 build/pet-walkthrough（相对模块目录 app/，
         # 即 app/build/pet-walkthrough），不在此改向，避免路径错位。
-        continue-on-error: true
+        # DIAGNOSTIC ONLY：为定位主 CI 单测失败，临时去掉 continue-on-error，
+        # 使 job 结论真实反映测试结果；诊断完 revert。
         env:
           PETWALKTHROUGH_ENFORCE: "true"
           PETWALKTHROUGH_SUBSET: ${{ inputs.subset }}
-        run: gradle :app:testDebugUnitTest --no-daemon
+        run: |
+          FILTER="${{ inputs.test_filter }}"
+          if [ -n "$FILTER" ]; then
+            ARGS=()
+            for t in ${FILTER//,/ }; do ARGS+=(--tests "$t"); done
+            gradle :app:testDebugUnitTest --no-daemon "${ARGS[@]}"
+          else
+            gradle :app:testDebugUnitTest --no-daemon
+          fi
 
       - name: Record Paparazzi snapshots
         continue-on-error: true
