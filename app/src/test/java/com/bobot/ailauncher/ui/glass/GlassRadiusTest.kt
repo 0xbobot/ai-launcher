@@ -23,8 +23,10 @@ class GlassRadiusTest {
 
     @Test
     fun `normal widths unchanged`() {
-        assertEquals(35f, glassRadialRadius(0.35f, 100f), 0f)
-        assertEquals(30f, glassRadialRadius(0.30f, 100f), 0f)
+        // 0.30f × 100f 二进制浮点为 30.000002，非精确 30f，容差 0.001f
+        // 只排除浮点噪声，不掩盖钳制逻辑（钳制分支返回值恒为精确 1f）。
+        assertEquals(35f, glassRadialRadius(0.35f, 100f), 0.001f)
+        assertEquals(30f, glassRadialRadius(0.30f, 100f), 0.001f)
     }
 
     @Test
