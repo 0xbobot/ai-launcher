@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
@@ -530,6 +532,15 @@ fun HomeScreen(
         // 顶部横屏取 max(16dp, 状态栏高)，竖屏保持 16dp 不动。
         val isLandscapeHome = maxWidth > maxHeight
         val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+        // 输入态专注·集成：专注组底边锚定——adjustResize 下窗口底边 =
+        // 键盘顶边（键盘升起）或屏底（键盘收起）；结果态导航栏 clearance
+        // 取栏高与 16dp 地板的大值（与 Dock 底垫同口径）。
+        val navClearanceDp = with(density) {
+            maxOf(16.dp, WindowInsets.navigationBars.getBottom(density).toDp())
+        }
+        // 专注组在场：进专注态起、退态完成止（isExiting 期间槽位仍挂载，
+        // 锚定须保留，否则翻转瞬间卡片跳回顶部、反向位移无从渲染）。
+        val focusGroupVisible = intentInputMode || perchTransition.isExiting
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -542,6 +553,13 @@ fun HomeScreen(
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // 输入态专注·集成：权重 Spacer 把专注态的 PetZone（可见内容
+            // 只剩意图卡片）推到窗口底边——adjustResize 下窗口底边即键盘
+            // 顶边，组随键盘同进同退；进态冻结位移量在布局后实测锚点，
+            // 故卡片落底不影响宠物起步落点。
+            if (focusGroupVisible) {
+                Spacer(modifier = Modifier.weight(1f))
+            }
             // v0.68.44（Bob）：杂志封面模式
             // v0.68.96（F-01 退役）：PetZone 的非封面分支已删除，todayCardAlpha
             // 参数随之移除——该淡出原本只作用于已退役的 TODAY 卡，封面形态从未吃到。
@@ -614,6 +632,7 @@ fun HomeScreen(
                                 // onExitFocusRequest，不再直通 onExitIntentInput。
                                 perchTransition = perchTransition,
                                 onExitFocusRequest = onExitFocusRequest,
+                                focusBubbleActive = intentInputMode,
                                 onRequestExitInput = onExitFocusRequest,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -621,6 +640,12 @@ fun HomeScreen(
                     }
                 }
             )
+            // 输入态专注·集成：结果态（键盘已收）组底边钉导航栏上方——
+            // 键盘升起时窗口底边即键盘顶边，不加垫（0dp 贴合）；键盘收起
+            // 时窗口底边 = 屏底，垫起导航栏高（见 navClearanceDp）。
+            if (focusGroupVisible && imeBottomPx == 0) {
+                Spacer(modifier = Modifier.height(navClearanceDp))
+            }
         }
         // v0.68.99：返回退出输入态——IME 在场时不启用（那一按归输入法收键盘，
         // 与既有「BACK 先收键盘」口径一致，冒烟 §9/§10 依赖此序）；有在场状态

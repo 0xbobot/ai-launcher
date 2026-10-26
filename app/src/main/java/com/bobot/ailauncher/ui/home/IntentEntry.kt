@@ -119,6 +119,7 @@ import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.ui.pet.HybridPet
 import com.bobot.ailauncher.ui.pet.PetActionList
+import com.bobot.ailauncher.ui.pet.PetSpeechBubbleHost
 import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
@@ -554,6 +555,10 @@ fun IntentEntry(
     // onRequestExitInput。
     perchTransition: PetPerchTransitionState? = null,
     onExitFocusRequest: () -> Unit = onRequestExitInput,
+    // 输入态专注·集成：专注态气泡挂载开关——PetZone 列尾宿主在专注态
+    // 不挂载时，气泡改挂本卡片覆盖层（卡片宠物上方）；退态翻转后由
+    // HomeScreen 关掉（列尾宿主接回），全程单挂载点。
+    focusBubbleActive: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1109,6 +1114,19 @@ fun IntentEntry(
                     .align(Alignment.BottomCenter)
                     .offset(y = -(panelHeight + INTENT_SHOULDER_RISE + intentPetHeight - INTENT_PET_PRESS + 8.dp))
                     .testTag("pet_action_list")
+            )
+        }
+        // ---- 输入态专注·集成：专注态气泡（覆盖层，不推卡片） ----
+        // 与动作清单同位（卡片宠物上方 8dp、尾巴朝下指宠物），本体 +
+        // 动作钮与列尾宿主同款；清单打开时气泡让位（关闭后宿主重挂即
+        // 复现，speech 状态在仓储里不丢），避免两气泡在宠物上方重叠。
+        if (focusBubbleActive && !petActionsVisible) {
+            PetSpeechBubbleHost(
+                tailDown = true,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .offset(y = -(panelHeight + INTENT_SHOULDER_RISE + intentPetHeight - INTENT_PET_PRESS + 8.dp))
             )
         }
         // ---- 输入态专注 D·✕ 一键退出（卡片角，48dp 热区） ----

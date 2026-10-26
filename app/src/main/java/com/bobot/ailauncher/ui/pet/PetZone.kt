@@ -460,13 +460,20 @@ fun PetZone(
                 )
             }
         }
-        // 末尾留白 26dp（原罩纱尾巴间距保留，纱已删，布局不动）
-        Spacer(modifier = Modifier.height(26.dp))
-        // 气泡子项·单挂载点：宠物的嘴挂在 PetZone 列尾（无 say / 无瞥视
-        // 落点时零高度，不占布局；有话时出现在简报下方、Dock 宠物上方，
-        // 尾巴朝下指向宠物）。入口手势子项把宿主移到 Dock 宠物旁时须删
-        // 本处，禁止两处同挂（见 PetCards.PetSpeechBubbleHost 契约）。
-        PetSpeechBubbleHost(modifier = Modifier.fillMaxWidth())
+        // 输入态专注·集成：专注态下末尾留白与列尾气泡宿主均不挂载——
+        // 留白会顶起卡片、破坏卡片与键盘的 0dp 贴合；气泡改挂意图卡片
+        // 覆盖层（卡片宠物上方，见 IntentEntry），单挂载点契约不变。
+        // 退态翻转点（mode 回落、槽位仍挂载）两者短暂复现，随槽位淡出
+        // 一并消失，属翻转交叉淡化的一部分。
+        if (!inputActive) {
+            // 末尾留白 26dp（原罩纱尾巴间距保留，纱已删，布局不动）
+            Spacer(modifier = Modifier.height(26.dp))
+            // 气泡子项·单挂载点：宠物的嘴挂在 PetZone 列尾（无 say / 无瞥视
+            // 落点时零高度，不占布局；有话时出现在简报下方、Dock 宠物上方，
+            // 尾巴朝下指向宠物）。入口手势子项把宿主移到 Dock 宠物旁时须删
+            // 本处，禁止两处同挂（见 PetCards.PetSpeechBubbleHost 契约）。
+            PetSpeechBubbleHost(modifier = Modifier.fillMaxWidth())
+        }
         }  // Column 结束
     }  // v0.68.74：BoxWithConstraints 结束
     // 数据源：只跑 effect、上报，不渲染（TodaySection 数据管线）
