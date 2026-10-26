@@ -72,10 +72,15 @@ private const val VIDEO_LAYER_EMERGENCY_OFF = true
 fun HybridPet(
     petWidth: Dp,
     onPetTap: () -> Unit,
+    // 2026-10-26 入口子项转发胶水（仅此一处超出原定文件范围，见回报说明）：
+    // FloatingPet 的长按回调必须经本层转发到 PullUpDock，否则长按清单
+    // 无法接线；本层不含任何长按逻辑，只透传。
+    onPetLongPress: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val latestOnPetTap by rememberUpdatedState(onPetTap)
+    val latestOnPetLongPress by rememberUpdatedState(onPetLongPress)
     val blinkState = remember { PetBlinkState() }
     val lowPower by BatteryState.isLowPower.collectAsState()
     val mood by PetRepository.mood.collectAsState()
@@ -272,6 +277,10 @@ fun HybridPet(
         latestOnPetTap()
     }
 
+    fun hybridLongPress() {
+        latestOnPetLongPress()
+    }
+
     // —— 两层交叉：代码层 + 视频层（圆形徽章）——
     val videoAlpha by animateFloatAsState(
         targetValue = if (videoActive) 1f else 0f,
@@ -300,6 +309,7 @@ fun HybridPet(
                 blinkState = blinkState,
                 active = resumed,
                 onTap = { hybridTap() },
+                onLongPress = { hybridLongPress() },
             )
         }
         // 视频层：仅播片/待换片时挂载。PlayerView 默认 SurfaceView 画在
