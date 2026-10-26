@@ -726,9 +726,12 @@ fun IntentEntry(
       // 锚点回写（供 perch 位移起点估算）：面板在根坐标的顶缘与中心 X，
       // 取整 dp、变化才写，避免布局抖动引发重组风暴。
       Box(modifier = Modifier.fillMaxWidth().onGloballyPositioned { coords ->
+          // 本仓 Compose 版本无 positionInRoot（编译已证实），用 HomeScreen
+          // 同款 boundsInRoot：top = 面板顶缘，center.x = 面板中心 X。
+          val bounds = coords.boundsInRoot()
           with(densityNow) {
-              val top = coords.positionInRoot().y.toDp().value.toInt()
-              val centerX = (coords.positionInRoot().x + coords.size.width / 2f).toDp().value.toInt()
+              val top = bounds.top.toDp().value.toInt()
+              val centerX = bounds.center.x.toDp().value.toInt()
               if (petAnchorTop != top) petAnchorTop = top
               if (petAnchorCenterX != centerX) petAnchorCenterX = centerX
           }
@@ -913,7 +916,7 @@ fun IntentEntry(
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = 4.dp + (1f - shadowTravel.value) * 8.dp)
+                .offset(y = 4.dp + 8.dp * (1f - shadowTravel.value))
                 .size(width = INTENT_PET_WIDTH * 0.72f, height = 10.dp)
                 .clip(RoundedCornerShape(50))
                 .background(Color.Black.copy(alpha = 0.14f * shadowTravel.value))
