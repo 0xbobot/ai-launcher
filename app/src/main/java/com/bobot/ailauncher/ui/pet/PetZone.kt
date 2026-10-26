@@ -149,11 +149,22 @@ fun PetZone(
         // 开口提醒保留（语音状态机，其他呈现面可消费）。
         when {
             old != null && !wasBad && isBad -> {
-                PetRepository.say("下雨啦，出门记得带伞！")
+                // 气泡子项：天气突变配下一步动作“忽略”（点后只关闭气泡）。
+                PetRepository.say(
+                    "下雨啦，出门记得带伞！",
+                    action = PetRepository.SpeechAction(
+                        PetRepository.SpeechActionKind.DISMISS, "忽略"
+                    )
+                )
                 weatherTriggersToday++
             }
             old != null && wasBad && isGood -> {
-                PetRepository.say("雨停啦，太阳出来了！")
+                PetRepository.say(
+                    "雨停啦，太阳出来了！",
+                    action = PetRepository.SpeechAction(
+                        PetRepository.SpeechActionKind.DISMISS, "忽略"
+                    )
+                )
                 weatherTriggersToday++
             }
         }
@@ -188,7 +199,13 @@ fun PetZone(
                 lastWeatherFetchMs = System.currentTimeMillis() // v0.67.6：计入 TTL，避免重复请求
                 weatherInitDone = true
                 WeatherState.updateFull(w)
-                PetRepository.say("早上好！今天${w.desc}，${w.temp}°")
+                // 气泡子项：早晨简报配“知道了”关闭动作（纯播报，无跳转）。
+                PetRepository.say(
+                    "早上好！今天${w.desc}，${w.temp}°",
+                    action = PetRepository.SpeechAction(
+                        PetRepository.SpeechActionKind.DISMISS, "知道了"
+                    )
+                )
             }
         }
     }
@@ -208,8 +225,17 @@ fun PetZone(
         val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
             .format(Date(e.begin))
         val title = e.title.ifBlank { "（无标题）" }
-        // 七仔开口（v0.68.101：看日程场景随讲述者七仔退役）
-        PetRepository.say("$timeStr 有日程：$title")
+        // 七仔开口（v0.68.101：看日程场景随讲述者七仔退役）。
+        // 气泡子项：会议提醒配下一步动作“加入会议”，复用简报会行同一条
+        // joinCalendarEvent 路径（链接直开 → 日历 App → 事件详情 → 失败说
+        // 话兜底），不另起入会通道；注视目标沿用 say 默认（不改既有行为）。
+        PetRepository.say(
+            "$timeStr 有日程：$title",
+            action = PetRepository.SpeechAction(
+                PetRepository.SpeechActionKind.JOIN_MEETING, "加入会议",
+                meetingEvent = e
+            )
+        )
         // v0.51.2：日历只走 TODAY，不再走整理员（避免多重重复）
     }
     // 封面紧凑条点按（文案承诺"点一下加入"，必须真入会/打开日程，不能只提醒）：
@@ -398,6 +424,11 @@ fun PetZone(
         }
         // 末尾留白 26dp（原罩纱尾巴间距保留，纱已删，布局不动）
         Spacer(modifier = Modifier.height(26.dp))
+        // 气泡子项·单挂载点：宠物的嘴挂在 PetZone 列尾（无 say / 无瞥视
+        // 落点时零高度，不占布局；有话时出现在简报下方、Dock 宠物上方，
+        // 尾巴朝下指向宠物）。入口手势子项把宿主移到 Dock 宠物旁时须删
+        // 本处，禁止两处同挂（见 PetCards.PetSpeechBubbleHost 契约）。
+        PetSpeechBubbleHost(modifier = Modifier.fillMaxWidth())
         }  // Column 结束
     }  // v0.68.74：BoxWithConstraints 结束
     // 数据源：只跑 effect、上报，不渲染（TodaySection 数据管线）

@@ -116,10 +116,20 @@ internal fun TodaySection(
     val replyMsgs = remember(recentMsgs) {
         recentMsgs.filter { AiInsight.analyzeReplyNeed(it.title, it.text).needsReply }
     }
-    // v0.64.5：首次出现 P0 需回复消息 → 七仔引导（只一次）
+    // v0.64.5：首次出现 P0 需回复消息 → 七仔引导（只一次）。
+    // 气泡子项：P0 回复配下一步动作“打开会话”（contentIntent 直达会话，
+    // 兜底按包名开应用），点后气泡关闭；文案本身不改。
     LaunchedEffect(replyMsgs.isNotEmpty()) {
         if (replyMsgs.isNotEmpty() && GuideManager.tryShow(context, GuideManager.Id.P0_REPLY)) {
-            PetRepository.say("红色的是要回复的，点进去看看")
+            val first = replyMsgs.first()
+            PetRepository.say(
+                "红色的是要回复的，点进去看看",
+                action = PetRepository.SpeechAction(
+                    PetRepository.SpeechActionKind.OPEN_SESSION, "打开会话",
+                    sessionPendingIntent = first.pendingIntent,
+                    appPackage = first.packageName
+                )
+            )
         }
     }
     // v0.67.5：已结束的会议不计入（无结束时间默认按1小时算），避免 stale "1 个会要开"
