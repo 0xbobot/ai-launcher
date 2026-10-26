@@ -6,6 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,7 +23,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -52,6 +55,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -63,6 +67,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -104,11 +109,13 @@ import com.bobot.ailauncher.ui.pet.HybridPet
 import com.bobot.ailauncher.ui.pet.PetActionList
 import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** 结果条槽位高度上限：三种内容（本地结果/回复错误/权限卡）共用，超限不挤压 Dock。 */
@@ -125,6 +132,24 @@ private val RESULT_BAR_MAX_HEIGHT = 180.dp
  */
 private val INTENT_PET_WIDTH = 108.dp * 0.8f
 private val INTENT_PET_PRESS = 5.dp
+
+/**
+ * perch 位移起点估算（只读引用 PullUpDock 的 D1 静态几何，不改动它）：
+ * Dock 宠物脚底距屏底 = 面板高 136dp + 肩 rise 18.1dp（弦 156.6dp × 18/156，
+ * B2+A 定稿）− 压入 5dp ≈ 149.1dp。横屏 Dock 卡宽 344dp、右留边 12dp，
+ * 故横屏 Dock 宠物中心 X = 屏宽 − 12dp − 172dp。
+ * 估算只决定位移起点的落点，不决定终态：终态恒为面板顶缘 + 5dp 压入；
+ * D2（面板 184dp / rise 21.6dp）时起点估高约 48dp——Dock 卡正在退场、
+ * 宠物本体已随卡片滑出淡出，48dp 的起点偏差只影响起步那一帧的落点，
+ * 不影响“从 Dock 方向连续滑上来”的读感；要像素级精确须把 DockState
+ * 经 HomeScreen 透传进来（HomeScreen / PullUpDock 不在本批文件范围，
+ * 故此处不做，见集成注意点）。
+ * 兜底：首帧未量到面板位置时起点取面板下方 320dp（典型竖屏下与
+ * 实测起点差一个面板高以内），宠物仍从 Dock 方向滑入，不留空窗。
+ */
+private val PERCH_TRAVEL_DOCK_FOOT_FROM_BOTTOM = 149.1.dp
+private val PERCH_TRAVEL_DOCK_CENTER_END_LANDSCAPE = 184.dp
+private val PERCH_TRAVEL_FALLBACK_Y = 320.dp
 
 /**
  * 意图胶囊输入行（2026-10-21 新规格：胶囊与应用中心搜索合二为一的同一组件）。
@@ -621,18 +646,75 @@ fun IntentEntry(
 
     // ---- 意图卡片统一（2026-10-25，Bob 拍板） ----
     // 面板实测高：只用于宠物/清单的锚定偏移，不参与面板自身布局——
-    // 首帧估 96dp（胶囊 56 + 间距 12 + 内边距 28），实测到即纠正；宠物
-    // 1500ms 延迟挂载在后，纠正不闪。动作清单开关与 Dock 宠物同款语义
-    // （点宠物开关清单）；意图搜索在清单 2 级，意图语境下点它仅收起
-    // （本来就在意图搜索里，不再重进）。
+    // 首帧估 96dp（胶囊 56 + 间距 12 + 内边距 28），实测到即纠正；动作
+    // 清单开关与 Dock 宠物同款语义（点宠物开关清单）；意图搜索在清单
+    // 2 级，意图语境下点它仅收起（本来就在意图搜索里，不再重进）。
     var panelHeight by remember { mutableStateOf(96.dp) }
     var petActionsVisible by remember { mutableStateOf(false) }
-    // 入场削峰（沿用 310 冻结修复口径）：意图宠物本体延迟 1500ms 再挂载，
-    // 延迟窗内以同尺寸同 testTag 占位（布局与「恰一只七仔」计数口径不变）。
-    var intentPetSettled by remember { mutableStateOf(false) }
+    // ---- 同一只宠物走过去（宠物交互重构 P0-3，2026-10-26） ----
+    // 1500ms 延迟挂载 + 占位盒已删除：意图宠物随 IntentEntry 挂载即在场，
+    // 不再有 1.5 秒空窗。进态位移在本函数内完成，不碰 PullUpDock 的
+    // Dock 宠物门禁与 HomeScreen 的 fade-only 槽位过渡：
+    //  - 宠物本体：挂载即从 Dock perch 方向（下方）连续滑到面板顶缘，
+    //    全程同一 HybridPet / 同一活感引擎，途中不停留、不消失；
+    //    位移量 = 起点估算（Dock 脚底）− 终点（面板顶缘 + 压入），
+    //    以附加 offset 叠加在终态锚定偏移之上，面板高变化（结果槽位
+    //    伸缩）时终态锚定照常跟随，位移向量冻结在进态那一刻不重算；
+    //  - 落回带回弹过冲：宠物位移走弹簧（damping 0.75，终点附近轻微
+    //    越过再回落），不是线性滑到位；头先动、跟随延迟：接触影
+    //    晚 90ms 才淡入归位（影子跟在身体后面，不是焊在脚底同步走）；
+    //  - 交接淡入：宠物 alpha 在 180ms 内 0→1，与 Dock 卡片退场
+    //    fadeOut（150ms）交叠为一次交接，不出现两只实体的静止并存；
+    //  - 尺寸：位移全程保持 INTENT_PET_WIDTH 不变（Dock D1 86.6dp →
+    //    意图 86.4dp 差 0.2dp，插值无意义；D2 117.1dp → 86.4dp 的台阶
+    //    不猜 DockState 做假插值，见文件头常量注释与集成注意点）；
+    //  - 减动效：位移直接 snap 到终态，不播弹簧；
+    //  - 退态（退出输入态）无反向位移：退场由 HomeScreen fadeOut +
+    //    Dock 卡片重进承担，反向走过去须经 HomeScreen / PullUpDock
+    //    协调，不在本批文件范围（见集成注意点）。
+    // 面板在根坐标的位置（外层 Box 回写，取整 dp 防抖动重组）。
+    var petAnchorTop by remember { mutableStateOf<Int?>(null) }
+    var petAnchorCenterX by remember { mutableStateOf<Int?>(null) }
+    // 位移向量（dp）：进态那一刻冻结，之后面板位置变化不再重算。
+    var travelDeltaX by remember { mutableStateOf(0.dp) }
+    var travelDeltaY by remember { mutableStateOf(PERCH_TRAVEL_FALLBACK_Y) }
+    val petTravel = remember { Animatable(0f) }
+    val petTravelAlpha = remember { Animatable(0f) }
+    val shadowTravel = remember { Animatable(0f) }
+    val reduceMotion = rememberReduceMotion()
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
     LaunchedEffect(Unit) {
-        delay(1500)
-        intentPetSettled = true
+        // 等一小段让外层 Box 的 onGloballyPositioned 先回写锚点
+        // （布局回调在首帧内到达；等不到则用兜底起点，不阻塞挂载）。
+        var waited = 0
+        while (petAnchorTop == null && waited < 6) {
+            delay(16)
+            waited++
+        }
+        val anchorTop = petAnchorTop?.dp
+        val anchorCenterX = petAnchorCenterX?.dp
+        if (anchorTop != null) {
+            val dockFootY = screenHeightDp - PERCH_TRAVEL_DOCK_FOOT_FROM_BOTTOM
+            val intentFootY = anchorTop + INTENT_PET_PRESS
+            travelDeltaY = (dockFootY - intentFootY)
+                .coerceIn(0.dp, screenHeightDp)
+            travelDeltaX = if (screenWidthDp > screenHeightDp && anchorCenterX != null) {
+                (screenWidthDp - PERCH_TRAVEL_DOCK_CENTER_END_LANDSCAPE - anchorCenterX)
+                    .coerceIn(-screenWidthDp / 2, screenWidthDp / 2)
+            } else {
+                0.dp
+            }
+        }
+        if (reduceMotion) {
+            petTravel.snapTo(1f)
+            petTravelAlpha.snapTo(1f)
+            shadowTravel.snapTo(1f)
+        } else {
+            launch { petTravel.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) }
+            launch { petTravelAlpha.animateTo(1f, tween(180)) }
+            launch { shadowTravel.animateTo(1f, tween(550, delayMillis = 90)) }
+        }
     }
     val intentPetHeight = INTENT_PET_WIDTH * (1318f / 1043f)
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
@@ -641,7 +723,16 @@ fun IntentEntry(
       // matchParentSize 覆盖层里、用 BottomCenter + 负偏移锚到面板顶缘上方，
       // 不占布局、不推面板——面板在流中的位置与改前一致，只短了旧宠物带
       // （胶囊带高从胶囊+宠物回到胶囊本身）。
-      Box(modifier = Modifier.fillMaxWidth()) {
+      // 锚点回写（供 perch 位移起点估算）：面板在根坐标的顶缘与中心 X，
+      // 取整 dp、变化才写，避免布局抖动引发重组风暴。
+      Box(modifier = Modifier.fillMaxWidth().onGloballyPositioned { coords ->
+          with(densityNow) {
+              val top = coords.positionInRoot().y.toDp().value.toInt()
+              val centerX = (coords.positionInRoot().x + coords.size.width / 2f).toDp().value.toInt()
+              if (petAnchorTop != top) petAnchorTop = top
+              if (petAnchorCenterX != centerX) petAnchorCenterX = centerX
+          }
+      }) {
       // ---- F 批·一体化面板：输入区（胶囊 + 推荐行）+ 结果槽位同处一面 ----
       // 样式与 Dock 卡片同一套（2026-10-25 意图卡片统一）：玻璃引擎 STRONG +
       // 28dp 圆角 + v2 光影（dockLight）+ 无描边——与 Dock 面板逐项对齐（见
@@ -810,43 +901,46 @@ fun IntentEntry(
       // matchParentSize，不改变外层 Box 尺寸（= 面板高），宠物与清单只向
       // 上探出、不推面板。单宠物保证：Dock 宠物由 !intentInputMode 门控
       // （PullUpDock.kt），意图宠物只活在 IntentEntry 内（仅输入态挂载），
-      // 静止态下屏幕上恰有一只；进出 fade 过渡窗内（HomeScreen 的
-      // AnimatedVisibility）两态短暂交叠，属既有过渡行为、与改前一致。
+      // 静止态下屏幕上恰有一只；进态交接窗内（HomeScreen 的
+      // AnimatedVisibility fade + Dock 卡片退场 fadeOut）意图宠物以
+      // 180ms alpha 交接滑入，属一次交接、不出现两只实体的静止并存。
       Box(modifier = Modifier.matchParentSize()) {
         // 接触影：落在面板面上、宠物脚底正下方（面板之后、宠物之前画；
         // 口径沿用旧胶囊接触影：黑 0.14、宽为宠物宽 72%、高 10dp、落点
-        // 改到卡片顶缘下 4dp）。
+        // 改到卡片顶缘下 4dp）。位移跟随：影子不跟宠物同步走全程——
+        // 晚 90ms 才淡入归位（travel 0→1），落点带 8dp 上滑收束，
+        // 读作“身体先到、影子后跟上”，连接处不焊死。
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = 4.dp)
+                .offset(y = 4.dp + (1f - shadowTravel.value) * 8.dp)
                 .size(width = INTENT_PET_WIDTH * 0.72f, height = 10.dp)
                 .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.14f))
+                .background(Color.Black.copy(alpha = 0.14f * shadowTravel.value))
         )
         // 宠物：Dock 宠物本体（HybridPet，同一组件、同一活感引擎、同一动
         // 作状态机），只是换了个 perch——坐法与 Dock 上沿同一套：前面图
         // 层、居中、脚底压进卡片顶缘 INTENT_PET_PRESS、接触不断；点按语
-        // 义与 Dock 宠物一致：开关动作清单（327 直进输入已作废）。
-        // 真机待验：卡片顶缘坐姿、压入量、接触影在真实壁纸上的观感。
-        if (!intentPetSettled) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .offset(y = -(panelHeight - INTENT_PET_PRESS))
-                    .requiredSize(INTENT_PET_WIDTH, intentPetHeight)
-                    .testTag("pet_qizai")
-            )
-        } else {
-            HybridPet(
-                petWidth = INTENT_PET_WIDTH,
-                onPetTap = { petActionsVisible = !petActionsVisible },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .offset(y = -(panelHeight - INTENT_PET_PRESS))
-                    .testTag("pet_qizai")
-            )
-        }
+        // 义与 Dock 宠物一致：开关动作清单（327 直进输入已作废；点按
+        // 语义本身属入口手势子项地盘，本批原样保留、不改）。
+        // 位移：终态锚定偏移（面板高 − 压入）之上叠加位移附加量
+        // travelDelta × (1 − travel)，travel 弹簧到 1（轻微过冲回落
+        // 即落回回弹）；减动效时 travel 已 snap 到 1，附加量为零。
+        // 真机待验：卡片顶缘坐姿、压入量、接触影在真实壁纸上的观感，
+        // 以及位移全程（起步落点、弹簧过冲、影子跟随）是否自然。
+        HybridPet(
+            petWidth = INTENT_PET_WIDTH,
+            onPetTap = { petActionsVisible = !petActionsVisible },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .offset(y = -(panelHeight - INTENT_PET_PRESS))
+                .offset(
+                    x = travelDeltaX * (1f - petTravel.value),
+                    y = travelDeltaY * (1f - petTravel.value)
+                )
+                .graphicsLayer { alpha = petTravelAlpha.value }
+                .testTag("pet_qizai")
+        )
         // 动作清单：与 Dock 宠物上方同款（PetActionList 同一组件、同一清单、
         // 同一状态机；气泡底距宠物顶 8dp、尾巴朝下指向宠物）。意图语境下
         // 2 级「意图搜索」仅收起清单（已在意图搜索中）。
