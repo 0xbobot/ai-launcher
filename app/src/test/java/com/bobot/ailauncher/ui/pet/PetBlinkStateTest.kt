@@ -5,6 +5,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -41,6 +42,34 @@ class PetBlinkStateTest {
         advanceUntilIdle()
         assertFalse(state.blinking)
         assertFalse(state.closedPhase)
+    }
+
+    @Test
+    fun blinkDepthResetsAfterFullRun() = runTest {
+        val state = PetBlinkState()
+        val effectJob = Job()
+        state.requestBlink(CoroutineScope(coroutineContext + effectJob))
+        runCurrent()
+        assertTrue(state.blinking)
+        // 多样化：深度只可能是全闭 1.0 或半闭 0.45。
+        assertTrue(state.blinkDepth == 1f || state.blinkDepth == 0.45f)
+        advanceUntilIdle()
+        assertFalse(state.blinking)
+        assertFalse(state.closedPhase)
+        assertEquals(0f, state.blinkDepth, 0f)
+    }
+
+    @Test
+    fun cancelledBlinkResetsDepth() = runTest {
+        val state = PetBlinkState()
+        val effectJob = Job()
+        state.requestBlink(CoroutineScope(coroutineContext + effectJob))
+        runCurrent()
+        assertTrue(state.blinking)
+        effectJob.cancel()
+        runCurrent()
+        assertFalse(state.blinking)
+        assertEquals(0f, state.blinkDepth, 0f)
     }
 
     @Test

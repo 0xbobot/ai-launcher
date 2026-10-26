@@ -15,6 +15,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -59,7 +60,9 @@ import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.PetRepository.PetManualAction
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -94,7 +97,17 @@ import kotlin.random.Random
  * - 手动动作（动作清单触发）：[PetRepository.actionTick] 事件驱动的
  *   全身动作引擎——所有动作都走平移 / 旋转 / 绕底缩放 / 眼带 / 肩线
  *   峰值（PullUpDock 侧协同），头与面板始终是一个身体，不许部件分离。
- * - 全程无脚下阴影：光晕是头周围的径向晕，不画在 Dock 面上的投影。
+ * - 接触影（活感第一批新增，取代旧“无脚下阴影”口径）：头下方一枚
+ *   62.2×10dp、黑 14% 的柔边椭圆（按宠物宽相对 86.4dp 参考宽缩放），
+ *   由头状态驱动——x 跟头走，头抬高变小变淡、头压低变宽变深、
+ *   下压过冲再加宽加深一档；光晕仍是头周围的径向晕（不是脚下阴影）。
+ * - 活感第一批（2026-10-26，Bob 全部接受）：头弹簧（整颗头作颈上弹簧
+ *   质量，k≈25/s²、阻尼比 0.3、可见 2–3 次过冲，复用头 offset／倾角通道）；
+ *   注视跟随触点（头转强度＝触点位移 × 0.35，瞳孔复用眼睛引擎、
+ *   瞳孔 clamp、注视停顿门、眨眼中不新起扫视）；眨眼多样化（正常／双眨／
+ *   半眨／慢半眨）；待机小行为（20–60s 随机歪头 4°／环顾，交互立即取消）；
+ *   自主重心转移（25–50s 换一只脚承重 ±2.5°，复用 WeightShift 口径）；
+ *   不做纯缩放呼吸。注视优先级：repo ＞ 瞥视 ＞ 手动 ＞ 触点 ＞ 待机 ＞ 巡看。
  *
  * 眼睛分层（相对位图坐标，Python 离线检测 glass-cut.png 1043×1318，
  * 全部从原图派生、无 AI 重画）：
@@ -202,8 +215,13 @@ fun FloatingPet(
         }
     }
 
+    // 触点交互源（活感第一批）：combinedClickable 的按压位置由此取，
+    // 供注视跟随触点；源体提前声明，收集 effect 在后（拖拽段之后）。
+    val petInteractionSource = remember { MutableInteractionSource() }
+
     // —— 注视导演（PetView 同款优先级，Dock 宠物不呈现输入态故无倾听层）：
     // repo 目标 ＞ 瞥视（600ms 持有）＞ 巡看（8–15 秒一次，停留 1.2 秒）——
+    // 活感第一批在其下加两层：触点（按压／拖拽位置）＞ 待机（偶发环顾）。
     val repoGazeTarget by PetRepository.gazeTarget.collectAsState()
     val repoGlanceTarget by PetRepository.glanceTarget.collectAsState()
     val repoGlanceTick by PetRepository.glanceTick.collectAsState()
@@ -231,6 +249,10 @@ fun FloatingPet(
     var manualPatrol by remember { mutableStateOf<GazeTarget?>(null) }
     var manualTurn by remember { mutableStateOf<GazeTarget?>(null) }
     var nextTurnLeft by remember { mutableStateOf(true) }
+    // 活感第一批注视层：触点（按压／拖拽位置，收集 effect 在拖拽段之后）与
+    // 待机环顾（待机循环在拖拽段之后）；两者只在无更高目标时生效。
+    var touchGaze by remember { mutableStateOf<GazeOffset?>(null) }
+    var idleGazeTarget by remember { mutableStateOf<GazeTarget?>(null) }
     val effectiveGazeTarget = when {
         repoGazeTarget != GazeTarget.CENTER -> repoGazeTarget
         glanceTarget != null -> glanceTarget!!
@@ -238,16 +260,26 @@ fun FloatingPet(
         manualPatrol != null -> manualPatrol!!
         else -> patrolTarget
     }
-    val gazeOff = gazeOffsetFor(effectiveGazeTarget)
+    val higherGazeActive = repoGazeTarget != GazeTarget.CENTER ||
+        glanceTarget != null || manualTurn != null || manualPatrol != null
+    val gazeOff = when {
+        higherGazeActive -> gazeOffsetFor(effectiveGazeTarget)
+        touchGaze != null -> touchGaze!!
+        idleGazeTarget != null -> gazeOffsetFor(idleGazeTarget!!)
+        else -> gazeOffsetFor(effectiveGazeTarget)
+    }
     // 瞳孔独立层：只动瞳孔层（开孔内 x ±5px、y ±3px），两段式扫视——
     // 120ms 冲到 106% → 90ms 回落到目标（PetView 同款扫视口径）；
     // 中途改目标从当前位置重新起跳，不回落再跳。
+    // 活感第一批：眨眼互斥——眨眼中不新起扫视，待闭眼结束再跳
+    // （扫视藏在眨眼后是真眼行为；眨眼中途改目标，effect 重启后仍等眨眼结束）。
     val pupilBaseX = remember { Animatable(0f) }
     val pupilBaseY = remember { Animatable(0f) }
-    LaunchedEffect(effectiveGazeTarget) {
+    LaunchedEffect(gazeOff) {
         val tx = gazeOff.x * 5f
         val ty = gazeOff.y * 3f
         if (pupilBaseX.value == tx && pupilBaseY.value == ty) return@LaunchedEffect
+        while (blinkState.blinking) delay(16)
         launch {
             pupilBaseX.animateTo(
                 pupilBaseX.value + (tx - pupilBaseX.value) * SACCADE_OVERSHOOT,
@@ -291,26 +323,37 @@ fun FloatingPet(
         animationSpec = tween(120, easing = FastOutSlowInEasing),
         label = "floatJitterY",
     )
-    // 头部延迟 80ms 跟随：300ms 到位（x ±8px，y ±5px）+ 向视线方向倾斜 4°；
+    // 头部延迟 80ms 跟随（x ±8px，y ±5px）+ 向视线方向倾斜 4°；
     // 头只跟注视目标，不跟小扫视抖动——眼睛先行、头延迟跟上。
+    // 活感第一批头弹簧：跟随不再 300ms tween 到位，改走颈上弹簧
+    // （k≈25/s²、阻尼比 0.3，可见 2–3 次过冲；倾角同弹簧，稳态仍为 4°）。
     var headGaze by remember { mutableStateOf(GazeOffset(0f, 0f)) }
-    LaunchedEffect(effectiveGazeTarget) {
+    LaunchedEffect(gazeOff) {
         delay(80)
         headGaze = gazeOff
     }
     val headX by animateFloatAsState(
         targetValue = headGaze.x * 8f,
-        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        animationSpec = spring(
+            dampingRatio = HeadSpring.DAMPING_RATIO,
+            stiffness = HeadSpring.STIFFNESS,
+        ),
         label = "floatHeadX",
     )
     val headY by animateFloatAsState(
         targetValue = headGaze.y * 5f,
-        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        animationSpec = spring(
+            dampingRatio = HeadSpring.DAMPING_RATIO,
+            stiffness = HeadSpring.STIFFNESS,
+        ),
         label = "floatHeadY",
     )
     val turnTilt by animateFloatAsState(
         targetValue = headGaze.x * 4f,
-        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        animationSpec = spring(
+            dampingRatio = HeadSpring.DAMPING_RATIO,
+            stiffness = HeadSpring.STIFFNESS,
+        ),
         label = "floatTurnTilt",
     )
 
@@ -328,8 +371,9 @@ fun FloatingPet(
     // —— 眨眼改盖法：上睑 85ms 落下 → 保持 70ms → 85ms 抬起；
     // blinkLid 与 PetBlinkState 全程同步（blinking 覆盖闭合+保持+睁开），
     // 最终眼睑取最大值——眨眼全闭压过闲时半阖，睁开后回到状态眼睑。
+    // 活感第一批多样化：半眨时 blinkDepth 为 0.45（眼睑只落一半，不点头）。
     val blinkLid by animateFloatAsState(
-        targetValue = if (blinkState.blinking) 1f else 0f,
+        targetValue = if (blinkState.blinking) blinkState.blinkDepth else 0f,
         animationSpec = tween(85),
         label = "floatBlinkLid",
     )
@@ -353,8 +397,13 @@ fun FloatingPet(
     val swayAnim = remember { Animatable(0f) }
     val actionTick by PetRepository.actionTick.collectAsState()
     val actionKind by PetRepository.actionKind.collectAsState()
+    // 活感第一批门：手动动作进行中时不新起待机小行为／自主重心转移
+    // （finally 复位：effect 被新动作取消时也不粘住）。
+    var manualBusy by remember { mutableStateOf(false) }
     LaunchedEffect(actionTick) {
         if (actionTick == 0) return@LaunchedEffect
+        manualBusy = true
+        try {
         // 新动作打断旧动作：手动注视目标先清零，避免旧 delay 把新目标冲掉。
         manualPatrol = null
         manualTurn = null
@@ -446,6 +495,9 @@ fun FloatingPet(
             }
             else -> Unit
         }
+        } finally {
+            manualBusy = false
+        }
     }
 
     // —— 点击回弹（果冻式，120ms）——
@@ -507,6 +559,130 @@ fun FloatingPet(
                     animationSpec = dragShoulderLagSpring(),
                 ) { v, _ -> dragBody.shoulderXPx = v }
             }
+        }
+    }
+    // —— 活感第一批：待机小行为／自主重心转移／触点注视（状态驱动层）——
+    // 全部状态驱动（animateFloatAsState／目标状态），不直接操作 Animatable：
+    // 交互取消时只需复位目标，动画弹簧回正，不存在协程取消杀死循环的问题。
+    var idleTiltTarget by remember { mutableFloatStateOf(0f) }
+    var weightShiftTarget by remember { mutableFloatStateOf(0f) }
+    var idleGen by remember { mutableStateOf(0) }
+    val idleTilt by animateFloatAsState(
+        targetValue = idleTiltTarget,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium),
+        label = "idleTilt",
+    )
+    val weightShift by animateFloatAsState(
+        targetValue = weightShiftTarget,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
+        label = "weightShift",
+    )
+    // 互斥：任何交互开始（点按按下／拖拽／新手动动作）立即取消待机与重心转移。
+    LaunchedEffect(pressed, dragOffset, actionTick) {
+        if (pressed || dragOffset != Offset.Zero || actionTick > 0) {
+            idleGen++
+            idleTiltTarget = 0f
+            idleGazeTarget = null
+            weightShiftTarget = 0f
+        }
+    }
+    // 低电量／后台／减动效时循环退出：进行中的待机／重心／触点目标一律复位，
+    // 不许循环在 delay 中被取消后把目标粘在半路上（与高频抖动的复位同款）。
+    LaunchedEffect(motionActive) {
+        if (!motionActive) {
+            idleTiltTarget = 0f
+            idleGazeTarget = null
+            weightShiftTarget = 0f
+            touchGaze = null
+        }
+    }
+    // ④ 待机小行为：20–60s 随机，歪头 4° 或环顾；与重心转移互斥；
+    // 交互中途开始由上 effect 复位，行为后 delay 的复位凭代次校验（已取消则不复写）。
+    LaunchedEffect(motionActive) {
+        if (!motionActive) return@LaunchedEffect
+        while (isActive) {
+            delay(IdleBehavior.intervalMs(Random))
+            if (!motionActive) break
+            if (pressed || dragOffset != Offset.Zero || manualBusy) continue
+            if (weightShiftTarget != 0f) continue
+            val gen = idleGen
+            when (IdleBehavior.pick(Random)) {
+                IdleKind.TILT -> {
+                    idleTiltTarget = if (Random.nextBoolean()) IdleBehavior.TILT_ANGLE_DEG else -IdleBehavior.TILT_ANGLE_DEG
+                    delay(IdleBehavior.tiltHoldMs(Random))
+                    if (idleGen == gen) idleTiltTarget = 0f
+                }
+                IdleKind.LOOK -> {
+                    idleGazeTarget = patrolTargetPool().random()
+                    delay(IdleBehavior.LOOK_HOLD_MS)
+                    if (idleGen == gen) idleGazeTarget = null
+                }
+            }
+        }
+    }
+    // ⑤ 自主重心转移：复用 WeightShift 口径（25–50s、±2.5°、持有 2–4s）；
+    // 与待机小行为互斥；交互取消由上 effect 复位。
+    LaunchedEffect(motionActive) {
+        if (!motionActive) return@LaunchedEffect
+        while (isActive) {
+            delay(WeightShift.intervalMs(Random))
+            if (!motionActive) break
+            if (pressed || dragOffset != Offset.Zero || manualBusy) continue
+            if (idleTiltTarget != 0f || idleGazeTarget != null) continue
+            weightShiftTarget = WeightShift.angleDeg(Random)
+            delay(WeightShift.holdMs(Random))
+            weightShiftTarget = 0f
+        }
+    }
+    // ③ 注视跟随触点：按压位置（PressInteraction）与拖拽位移经停顿门后
+    // 写入 touchGaze；松手／取消后 600ms dwell 再释放回底层目标。
+    // 释放 dwell 由收集 effect 内的 releaseJob 拥有：新按压先取消旧 dwell，
+    // 拖拽结束的 Cancel 事件同样走释放 dwell（双保险，不另起 effect）。
+    var touchAcceptedDx by remember { mutableFloatStateOf(0f) }
+    var touchAcceptedDy by remember { mutableFloatStateOf(0f) }
+    var touchAcceptedMs by remember { mutableStateOf(0L) }
+    // 头心（外层触摸盒坐标）：头盒底对齐、横向居中。
+    val boxWPx = with(density) { touch.toPx() }
+    val boxHPx = with(density) { maxOf(petHeight, 48.dp).toPx() }
+    val headCenterXpx = boxWPx / 2f
+    val headCenterYpx = boxHPx - with(density) { petHeight.toPx() } / 2f
+    LaunchedEffect(petInteractionSource) {
+        var releaseJob: Job? = null
+        petInteractionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is PressInteraction.Press -> {
+                    releaseJob?.cancel()
+                    releaseJob = null
+                    val dx = interaction.pressPosition.x - headCenterXpx
+                    val dy = interaction.pressPosition.y - headCenterYpx
+                    val now = System.currentTimeMillis()
+                    if (TouchGaze.shouldUpdate(touchAcceptedDx, touchAcceptedDy, dx, dy, touchAcceptedMs, now)) {
+                        touchGaze = TouchGaze.offsetFor(dx, dy)
+                        touchAcceptedDx = dx
+                        touchAcceptedDy = dy
+                        touchAcceptedMs = now
+                    }
+                }
+                is PressInteraction.Release, is PressInteraction.Cancel -> {
+                    releaseJob?.cancel()
+                    releaseJob = launch {
+                        delay(TouchGaze.RELEASE_HOLD_MS)
+                        touchGaze = null
+                    }
+                }
+            }
+        }
+    }
+    // 拖拽位移同样喂给触点注视（方向即手指方向；停顿门防连续小位移抽搐）。
+    // dragOffset 归零即松手：释放 dwell 由交互源的 Cancel 事件接管，此处不另起。
+    LaunchedEffect(dragOffset) {
+        if (dragOffset == Offset.Zero) return@LaunchedEffect
+        val now = System.currentTimeMillis()
+        if (TouchGaze.shouldUpdate(touchAcceptedDx, touchAcceptedDy, dragOffset.x, dragOffset.y, touchAcceptedMs, now)) {
+            touchGaze = TouchGaze.offsetFor(dragOffset.x, dragOffset.y)
+            touchAcceptedDx = dragOffset.x
+            touchAcceptedDy = dragOffset.y
+            touchAcceptedMs = now
         }
     }
 
@@ -594,7 +770,7 @@ fun FloatingPet(
                 contentDescription = "问曜仔"
             }
             .combinedClickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = petInteractionSource,
                 indication = null,
                 onLongClickLabel = "长按看动作",
                 onClick = {
@@ -690,26 +866,68 @@ fun FloatingPet(
         // 玻璃头本体：去瞳孔底图 + 眼睛三层（瞳孔 / 反光点 / 眼睑）。
         // 静止态三层合成与原图一致（仅羽化边缘 1–2px 差异，显示约亚像素）。
         // 全身动作合成（绕底原点，底部钉在肩峰上不脱离）：
-        // 旋转 = 转头倾斜 + 歪头 + 抖动 + 重心微移；纵向 = 呼吸 × 拉伸 × 下压；
-        // 横向 = 呼吸 × 拉伸收束 × 下压外扩；位移 = 头部跟随 + 眨眼点头 + 点头/下压
+        // 旋转 = 转头倾斜 + 歪头 + 抖动 + 重心微移 + 待机歪头 + 自主重心转移；
+        // 纵向 = 呼吸 × 拉伸 × 下压；横向 = 呼吸 × 拉伸收束 × 下压外扩；
+        // 位移 = 头部跟随 + 眨眼点头 + 点头/下压
         // （瞳孔偏移只发生在眼睛 Canvas 内，不动整头）。
         val motionScaleY = (1f + 0.05f * stretchAnim.value) *
             (1f - 0.03f * dipAnim.value) * (1f - 0.02f * nodAnim.value)
         val motionScaleX = (1f - 0.03f * stretchAnim.value) *
             (1f + 0.02f * dipAnim.value)
         val motionDipPx = with(density) { 2.dp.toPx() } * (dipAnim.value + nodAnim.value)
+        // ② 接触影（活感第一批新增；生产此前并无此层，评估称“已存在”
+        // 实为 mock 影）：头下方柔边椭圆，由头状态驱动——x 跟头走，
+        // 头抬高变小变淡、头压低变宽变深、下压过冲再加宽加深一档。
+        // 画在头盒之前（头压住影上沿），影心在盒底之下约 1/4 影高处：
+        // 宠物底压入肩峰 5dp，影落点仍在面板面上；纵使上层 clip 盒底，
+        // 盒内 3/4 仍可见为下巴下的一抹软影，不穿帮。
+        // 头盒位移（与下方 graphicsLayer 同一套）：Dock 路径取 DragBodyState，
+        // 意图路径取旧 dragX/dragY；接触影 x 跟头走，故此处与头盒共用同一量，
+        // Dock 拖拽时 dragOffset 恒为零、不可沿用 dragX/dragY。
+        val dragHeadX = dragBody?.headXPx ?: dragX
+        val dragHeadY = dragBody?.let { -it.headRisePx + it.headSinkPx } ?: dragY
+        val shadowHeadTxPx = headX + dragHeadX
+        val shadowHeadTyPx = headY + blinkNodPx + motionDipPx + dragHeadY
+        val shadowParams = ContactShadow.params(
+            liftPx = -shadowHeadTyPx,
+            squash01 = dipAnim.value,
+        )
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val baseW = petWidth.toPx() * (ContactShadow.BASE_WIDTH_DP / ContactShadow.REF_PET_WIDTH_DP)
+            val baseH = petWidth.toPx() * (ContactShadow.BASE_HEIGHT_DP / ContactShadow.REF_PET_WIDTH_DP)
+            val w = baseW * shadowParams.widthScale
+            val h = baseH * shadowParams.widthScale
+            drawOval(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.Black.copy(alpha = shadowParams.alpha),
+                        Color.Black.copy(alpha = 0f),
+                    ),
+                    center = Offset(
+                        size.width / 2f + shadowHeadTxPx,
+                        size.height + h * 0.25f,
+                    ),
+                    radius = w / 2f,
+                ),
+                topLeft = Offset(
+                    size.width / 2f + shadowHeadTxPx - w / 2f,
+                    size.height + h * 0.25f - h / 2f,
+                ),
+                size = androidx.compose.ui.geometry.Size(w, h),
+            )
+        }
         Box(
             modifier = Modifier
                 .size(width = petWidth, height = petHeight)
                 .graphicsLayer {
-                    // 头部延迟跟上（±8px/±5px，80ms 延迟 300ms）+ 倾斜 4°。
+                    // 头部延迟跟上（±8px/±5px，80ms 延迟 + 颈上弹簧）+ 倾斜 4°。
                     // 注视位移不碰底部锚点：headY 上移至多约 2.3dp，
                     // 小于 5dp 压入量，连接不断；呼吸只缩放不位移。
                     // 拖拽位移叠加其上：Dock 路径走一体拉伸（头升/横移/下沉
                     // 来自 DragBodyState，倾角取肩横移，形变取头升），松手
                     // 弹簧回零且带过冲压扁；意图路径走旧 dragX/dragY 一字不动。
-                    val dragHeadX = dragBody?.headXPx ?: dragX
-                    val dragHeadY = dragBody?.let { -it.headRisePx + it.headSinkPx } ?: dragY
+                    // 活感第一批叠加其上：待机歪头与自主重心转移同为绕底旋转。
+                    // dragHeadX/dragHeadY 已在接触影处与头盒共用定义，此处不重定义。
                     val dragTilt = dragBody?.let {
                         dragTiltDeg(with(density) { it.shoulderXPx.toDp().value })
                     } ?: 0f
@@ -721,7 +939,7 @@ fun FloatingPet(
                     } ?: (1f to 1f)
                     translationX = headX + dragHeadX
                     translationY = headY + blinkNodPx + motionDipPx + dragHeadY
-                    rotationZ = turnTilt + tiltAnim.value + shakeAnim.value + swayAnim.value + dragTilt
+                    rotationZ = turnTilt + tiltAnim.value + shakeAnim.value + swayAnim.value + dragTilt + idleTilt + weightShift
                     scaleX = popScale * breatheScaleX * motionScaleX * dragScale.first
                     scaleY = popScale * breatheScaleY * motionScaleY * dragScale.second
                     transformOrigin = TransformOrigin(0.5f, 1f)
@@ -747,8 +965,14 @@ fun FloatingPet(
                 val dh = 1318f * fit
                 val left = (size.width - dw) / 2f
                 val top = (size.height - dh) / 2f
-                val pupilDx = pupilBaseX.value + jitterXAnim
-                val pupilDy = pupilBaseY.value + jitterYAnim
+                // 活感第一批瞳孔 clamp：基点扫视＋高频抖动叠加后仍钳制在
+                // 开孔名义范围（x ±5px、y ±3px），不许整颗滑出露全白。
+                val pupilClamped = clampPupilOffset(
+                    pupilBaseX.value + jitterXAnim,
+                    pupilBaseY.value + jitterYAnim,
+                )
+                val pupilDx = pupilClamped.x
+                val pupilDy = pupilClamped.y
                 // 第一遍：瞳孔层（开孔裁剪 + 注视偏移 + 绕珠心缩放）。
                 for (b in GLASS_EYE_OPENINGS) {
                     val bl = left + b.l * dw
