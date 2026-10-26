@@ -57,7 +57,7 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * 点行后不关清单，可连试；关闭走 ✕、点外关闭层（PullUpDock 侧）、
  * 进 D3 或进输入态（状态回落）。
  *
- * 注意：onIntentSearch 参数已无任何 UI 行调用（2 级意图搜索行已删除），
+ * 注意：2 级意图搜索行已删除，意图入口改走点宠物直进输入；
  * 仅以默认值保留——意图侧 IntentEntry.kt 仍以旧签名调用本组件（意图语境
  * 下点宠物开关清单是 perch 子项的地盘，本子项不碰 IntentEntry.kt），
  * 待意图侧清单用法统一后由合入方删除该参数；Dock 侧已不再传它。
@@ -66,9 +66,6 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
 fun PetActionList(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
-    // 无 @Deprecated：意图侧仍以命名参数调用，注解会在 CI 产生警告；
-    // 待意图侧统一后直接删除本参数（公开函数参数未使用不产生警告）。
-    onIntentSearch: () -> Unit = {},
 ) {
     // ≤8 个不重复表演（评审 §6 口径，Bob 定稿的 8 行）：
     // 去重落点：摸头与害羞是同一套下压动画，只留害羞；打招呼 / 惊讶

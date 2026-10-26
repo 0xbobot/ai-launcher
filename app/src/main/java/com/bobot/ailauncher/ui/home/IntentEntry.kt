@@ -924,9 +924,10 @@ fun IntentEntry(
         )
         // 宠物：Dock 宠物本体（HybridPet，同一组件、同一活感引擎、同一动
         // 作状态机），只是换了个 perch——坐法与 Dock 上沿同一套：前面图
-        // 层、居中、脚底压进卡片顶缘 INTENT_PET_PRESS、接触不断；点按语
-        // 义与 Dock 宠物一致：开关动作清单（327 直进输入已作废；点按
-        // 语义本身属入口手势子项地盘，本批原样保留、不改）。
+        // 层、居中、脚底压进卡片顶缘 INTENT_PET_PRESS、接触不断；手势
+        // 语义与 Dock 宠物同一套（集成时统一，协调方决策）：点按在意
+        // 图态已无“问”可进，故为空操作（不与胶囊聚焦、点外退出打
+        // 架）；动作清单只挂长按，与 Dock 侧一致，不许点按再开清单。
         // 位移：终态锚定偏移（面板高 − 压入）之上叠加位移附加量
         // travelDelta × (1 − travel)，travel 弹簧到 1（轻微过冲回落
         // 即落回回弹）；减动效时 travel 已 snap 到 1，附加量为零。
@@ -934,7 +935,8 @@ fun IntentEntry(
         // 以及位移全程（起步落点、弹簧过冲、影子跟随）是否自然。
         HybridPet(
             petWidth = INTENT_PET_WIDTH,
-            onPetTap = { petActionsVisible = !petActionsVisible },
+            onPetTap = { /* 意图态已在问，点按空操作；清单只挂长按 */ },
+            onPetLongPress = { petActionsVisible = true },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .offset(y = -(panelHeight - INTENT_PET_PRESS))
@@ -946,14 +948,12 @@ fun IntentEntry(
                 .testTag("pet_qizai")
         )
         // 动作清单：与 Dock 宠物上方同款（PetActionList 同一组件、同一清单、
-        // 同一状态机；气泡底距宠物顶 8dp、尾巴朝下指向宠物）。意图语境下
-        // 2 级「意图搜索」仅收起清单（已在意图搜索中）。
+        // 同一状态机；气泡底距宠物顶 8dp、尾巴朝下指向宠物）。单层 8 行，
+        // 无 2 级；关闭靠气泡内 ✕，退出输入态时随面板一并消失。
         // 真机待验：意图面板上方空间有限（紧凑简报 + 状态栏），气泡顶部
-        // 在小屏/横屏可能探出屏顶——若实测被裁，另起一单定清单落点；
-        // 关闭除气泡内 ✕ 外，点宠物也可收起。
+        // 在小屏/横屏可能探出屏顶——若实测被裁，另起一单定清单落点。
         if (petActionsVisible) {
             PetActionList(
-                onIntentSearch = { petActionsVisible = false },
                 onDismiss = { petActionsVisible = false },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
