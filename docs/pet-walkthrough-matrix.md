@@ -4,6 +4,14 @@
 > P0 只实现“已实现”列标 P0 的项；其余列入 P1 扩展，不提前做。
 > 报告语义：通过／失败（相对黄金基线漂移）／新增 diff（无基线）三栏；
 > P0 阶段报告不阻塞发布（发布门禁是 P1）。
+>
+> Paparazzi 阻塞（P0 末实测，见收据）：Paparazzi 1.3.5 插件一经接入，
+> `:app:testDebugUnitTest` 整任务失败——二分证据：插件在、无走查测试类时
+> 构建仍红（run 40355734784）；插件撤下后构建即绿（run 40356621157），
+> 与走查测试类本身无关。P0 因此不含 Paparazzi 插件与快照测试类；
+> 下表“快照”项全部延后到 P1（P1 首选恢复路线：换 Paparazzi 版本重测，
+> 或把快照测试隔离进独立模块，或评估 Roborazzi 等替代路线——任一路线
+> 落地前必须先在分支上跑通主 CI，否则不合入）。
 
 ## 轴（全量空间）
 
@@ -23,11 +31,11 @@
 
 | id | 断言 | 量测口径 | 状态 |
 |---|---|---|---|
-| shoulder-d1/d2-chord/rise | 肩线弦长／rise | 生产公式：宽＝面板高×0.52×1.224，弦＝宽+70dp，rise＝弦×18/156；D1 面板 136dp、D2 184dp | 数值＋快照 |
+| shoulder-d1/d2-chord/rise | 肩线弦长／rise | 生产公式：宽＝面板高×0.52×1.224，弦＝宽+70dp，rise＝弦×18/156；D1 面板 136dp、D2 184dp | 数值 |
 | shoulder-compact-d1/d2-chord/rise | 紧配置肩线 | 同上，宠物 ×0.8 | 数值 |
-| shoulder-arch-d1/d2/compact-d1/d1-peak | 肩线拱渲染 | Paparazzi 快照：生产 DockShoulderShape 轮廓＋appendShoulderArch 拱高光描边；peak 档 7dp | 快照 |
+| shoulder-arch-d1/d2/compact-d1/d1-peak | 肩线拱渲染 | P1：JVM 渲染路线恢复后快照生产 DockShoulderShape 轮廓＋appendShoulderArch 拱高光描边；peak 档 7dp | P1 快照 |
 | petbox-d1/d2/compact-d1/compact-d2/intent-height | 宠物盒高 | 盒高＝宽×1318/1043；意图宽 108×0.8＝86.4dp | 数值 |
-| head-visible-height/width-frac | 玻璃头可见比 | 真资产 glass_head.png 的 alpha 包围盒（alpha>16），盒子尺寸 ≠ 可见尺寸的实测 | 数值＋快照 head-asset-box-d1 |
+| head-visible-height/width-frac | 玻璃头可见比 | P1：真资产 glass_head.png 的 alpha 包围盒（alpha>16），盒子尺寸 ≠ 可见尺寸的实测；需 JVM 渲染运行时（普通单测里 BitmapFactory 是桩） | P1 数值＋快照 head-asset-box-d1 |
 | bubble-height | 气泡高 | 52（标题行）＋340（内容区上限，恒绑定）＋8（底垫）＋10（尾巴）＝410dp | 数值 |
 | dock-clearance-700/800/900dp | Dock perch 气泡净空 | 气泡顶 y＝屏高−（面板 136＋rise 18.06−压入 5＋盒高 109.38）−8−410；净空＝气泡顶 y−状态栏 24dp（假设值）；为负＝探出屏顶，记 attention 不判 fail | 数值 |
 | blink-*-timing / double-gap / settles | 眨眼时序 | BlinkVariety 纯函数值（全 85/70/85、半 70/50/70、慢半 120/100/120、双眨间隔 120ms）＋任意种类 2000ms 内复位不变量 | 数值 |
@@ -36,6 +44,11 @@
 
 ## P1 扩展（未做，清单）
 
+- JVM 渲染路线恢复（阻塞项，先做）：Paparazzi 1.3.5 插件使主 CI 单测整任务
+  失败（证据见文档头“Paparazzi 阻塞”）；依次试：① 换 Paparazzi 版本重测、
+  ② 快照测试隔离进独立模块（不污染 :app 测试任务）、③ Roborazzi 等替代
+  路线。恢复后 shoulder-arch-*、head-asset-box-d1、head-visible-*-frac
+  三组按原快照测试口径重新产图入黄金。
 - 意图 perch 气泡净空：卡片容器底 y 需渲染树实测（Paparazzi 语义／布局量测
   或 onGloballyPositioned），再算气泡顶 y＝容器底−（面板高＋18＋109.18−5＋8＋410）。
 - 触控渲染树实测：同上，量关闭钮／✕／示例行／图标的实测触控高。
@@ -55,4 +68,5 @@
   如 `shoulder-`，空＝全量 P0）。
 - 分支：推到 `pet-walkthrough-*` 分支自动跑全量 P0。
 - 主干：推到 main 自动跑全量 P0（报告任务，不阻塞）。
-- 产物：报告 Markdown＋渲染图＋diff 图＋JUnit XML（Artifacts，见工作流）。
+- 产物：报告 Markdown＋JUnit XML（Artifacts，见工作流）；渲染图与 diff 图
+  在 P1 渲染路线恢复后才有内容（P0 报告的图像栏为空是预期状态）。

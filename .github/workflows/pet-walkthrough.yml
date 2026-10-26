@@ -1,6 +1,9 @@
 name: Pet Walkthrough P0
 
 # P0 语义：非阻塞报告任务（发布门禁是 P1）。
+# 注意：快照采图已随 Paparazzi 插件延后到 P1（见 docs/pet-walkthrough-matrix.md
+# “Paparazzi 阻塞”一节：插件会使 :app:testDebugUnitTest 整任务失败），
+# 故本工作流暂无 record 步骤；报告的图像栏在 P1 恢复后自动回填。
 # 触发：手动（可填 subset，id 前缀，空＝全量 P0）、推 pet-walkthrough-* 分支、
 # 推 main（每批一报）。失败只写进报告，不使工作流变红（步骤均 continue-on-error，
 # 报告步骤恒跑），P1 再决定是否升级为 required check。
@@ -9,10 +12,6 @@ on:
     inputs:
       subset:
         description: "Matrix item id prefix filter (comma-separated, empty = full P0)"
-        required: false
-        default: ""
-      test_filter:
-        description: "DIAGNOSTIC ONLY (revert before merge): Gradle --tests patterns, comma-separated, empty = full task"
         required: false
         default: ""
   push:
@@ -42,24 +41,11 @@ jobs:
       - name: Run walkthrough numeric tests (enforce on, report only)
         # 报告目录用测试默认值 build/pet-walkthrough（相对模块目录 app/，
         # 即 app/build/pet-walkthrough），不在此改向，避免路径错位。
-        # DIAGNOSTIC ONLY：为定位主 CI 单测失败，临时去掉 continue-on-error，
-        # 使 job 结论真实反映测试结果；诊断完 revert。
+        continue-on-error: true
         env:
           PETWALKTHROUGH_ENFORCE: "true"
           PETWALKTHROUGH_SUBSET: ${{ inputs.subset }}
-        run: |
-          FILTER="${{ inputs.test_filter }}"
-          if [ -n "$FILTER" ]; then
-            ARGS=()
-            for t in ${FILTER//,/ }; do ARGS+=(--tests "$t"); done
-            gradle :app:testDebugUnitTest --no-daemon "${ARGS[@]}"
-          else
-            gradle :app:testDebugUnitTest --no-daemon
-          fi
-
-      - name: Record Paparazzi snapshots
-        continue-on-error: true
-        run: gradle :app:recordPaparazziDebug --no-daemon
+        run: gradle :app:testDebugUnitTest --no-daemon
 
       - name: Build walkthrough report
         if: always()

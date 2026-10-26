@@ -48,8 +48,12 @@ object PetWalkthroughMatrix {
         "blink-half-depth",
     )
 
-    /** P0 快照项 id（Paparazzi record 产物名与之对应，见快照测试类）。 */
-    val P0_SNAPSHOT_IDS = listOf(
+    /**
+     * P1 快照项 id（原 P0 快照项，P0 末因 Paparazzi 阻塞延后，见矩阵文档
+     * “Paparazzi 阻塞”一节；P1 恢复 JVM 渲染路线后，快照测试类按此 id
+     * 重新产图，record 产物名与之对应）。
+     */
+    val P1_SNAPSHOT_IDS = listOf(
         "shoulder-arch-d1",
         "shoulder-arch-d2",
         "shoulder-arch-compact-d1",
