@@ -33,6 +33,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,12 +57,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.PanelAccessibilityService
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.island.IslandToasts
 
@@ -154,13 +157,89 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(intentInputMode) {
         if (intentInputMode) intentHasFocused = false
     }
+    // ---- 输入态专注·进出过渡 C（PetPerchTransition，2026-10-26） ----
+    // 过渡状态由本宿主持有，进出两路共用（见 PetPerchTransition.kt 的
+    // 四步时序与责任边界）。onExitFocusRequest 是本宿主向下暴露的单一
+    // 退出入口：所有退出路径只调它，它跑完四步退态才调真正的
+    // onExitIntentInput（即 MainScreen 的 mode 翻转）；D 的 ✕ 一键退出
+    // 集成时也只调这个入口（协调方须把它透传给专注卡片的 ✕ 按钮）。
+    // 槽位挂载条件因此是 intentInputMode || isExiting：退态进行中 mode
+    // 尚未翻转、翻转后槽位仍挂到宠物落地才松开，意图宠物才有机会沿
+    // 镜像路径走回去，而不是随 mode 翻转瞬间消失。
+    val perchTransition = remember { PetPerchTransitionState() }
+    val perchScope = rememberCoroutineScope()
+    val reduceMotionHome = rememberReduceMotion()
+    val exitIntentInputLatest by rememberUpdatedState(onExitIntentInput)
+    // IME 底部高度提前到此处（下方 BackHandler 复用同一值）：退态第①步
+    // 等它归零才起步行程，WindowInsets.ime 变化会触发重组、值随之更新。
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
+    val imeBottomLatest by rememberUpdatedState(imeBottomPx)
+    // 点外退出走 pointerInput(Unit)（首帧闭包常驻）：护栏不能读参数原值
+    // （首帧 intentInputMode 恒 false，退出永不触发），必须读最新态。
+    val intentInputModeLatest by rememberUpdatedState(intentInputMode)
+    fun requestExitFocus() {
+        if (perchTransition.isExiting || !intentInputModeLatest) return
+        perchScope.launch {
+            perchTransition.beginExit()
+            // ① 键盘落下：清焦点＋收 IME（各路调用方多半已做过，幂等重做
+            // 无害）；最多等 350ms 让 IME 底部归零，等不到也继续、不阻塞退态。
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            var waited = 0
+            while (imeBottomLatest > 0 && waited < 22) {
+                delay(16)
+                waited++
+            }
+            // ② 宠物沿镜像路径走回 Dock 肩峰：同一弹簧、进态冻结位移量取负。
+            val travelJob = launch {
+                perchTransition.animateExitTravel(reduceMotionHome)
+            }
+            var dockFadeStarted = false
+            // suspend：减动效分支里直接 snapTo（suspend），故本函数也须 suspend。
+            suspend fun startDockFade() {
+                if (dockFadeStarted) return
+                dockFadeStarted = true
+                perchTransition.markDockFade()
+                // ③ Dock 卡片淡入＋④ 首页淡入：两者都由 intentInputMode 翻转
+                // 驱动（PullUpDock cardVisible 门禁、PetZone inputActive 回落），
+                // 故翻转点即两者的起步点；意图宠物 alpha 在此另起 180ms 交接
+                // 淡出，与 Dock 卡片 enter fadeIn（实测 180ms）交叠，见状态文件。
+                exitIntentInputLatest()
+                if (reduceMotionHome) {
+                    perchTransition.travelAlpha.snapTo(0f)
+                } else {
+                    perchScope.launch {
+                        perchTransition.travelAlpha.animateTo(
+                            0f,
+                            androidx.compose.animation.core.tween(180)
+                        )
+                    }
+                }
+            }
+            if (!reduceMotionHome) {
+                // 行程过 70%（travel ≤ 0.30）时触发 Dock 淡入＋首页淡入。
+                while (travelJob.isActive && perchTransition.travel.value > 0.30f) {
+                    delay(8)
+                }
+                if (travelJob.isActive) startDockFade()
+            }
+            travelJob.join()
+            // 兜底：极小位移等情况下行程起步已 ≤ 0.30、循环未触发时，落地后补翻转。
+            if (!dockFadeStarted) startDockFade()
+            // 宠物已落地、Dock 已淡入、首页已回场：松开槽位挂载，槽位按原
+            // fadeOut（Fast 150ms）收尾——面板淡出发生在宠物离场之后，不抢交接。
+            perchTransition.finishExit()
+        }
+    }
+    val onExitFocusRequest: () -> Unit = { requestExitFocus() }
     val intentStateLatest by rememberUpdatedState(intentState)
     // ③ 状态落定退出（纯函数 intentSettleShouldExit，单测锁死矩阵）
     var intentPrevHolds by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(intentState, intentFocused, intentInputMode) {
         val holdsNow = intentStateHoldsInput(intentState)
         if (intentSettleShouldExit(intentInputMode, intentPrevHolds, holdsNow, intentFocused)) {
-            onExitIntentInput()
+            // 落定退出同样走过渡 funnel（反向位移），不直接翻转 mode。
+            onExitFocusRequest()
         }
         intentPrevHolds = holdsNow
     }
@@ -195,7 +274,8 @@ fun HomeScreen(
                     intentStateHoldsInput(intentStateLatest)
                 )
             ) {
-                onExitIntentInput()
+                // 滞留兜底同样走过渡 funnel（反向位移），不直接翻转 mode。
+                onExitFocusRequest()
             }
         }
     }
@@ -351,7 +431,8 @@ fun HomeScreen(
                 keyboardController = keyboardController,
                 onOutsideTap = {
                     if (!intentStateHoldsInput(intentStateLatest)) {
-                        onExitIntentInput()
+                        // 点外退出走过渡 funnel（反向位移），不直接翻转 mode。
+                        onExitFocusRequest()
                     }
                 }
             )
@@ -482,7 +563,9 @@ fun HomeScreen(
                     // 死亡/楔死、screencap 与层级读取全失效）。fade 不改变
                     // 尺寸，槽位一帧到位，语义与呈现内容不变。
                     androidx.compose.animation.AnimatedVisibility(
-                        visible = intentInputMode,
+                        // 退态进行中仍挂载（mode 已翻转、宠物未落地前不卸载），
+                        // 否则意图宠物随翻转瞬间消失、反向位移无从渲染。
+                        visible = intentInputMode || perchTransition.isExiting,
                         enter = androidx.compose.animation.fadeIn(
                             animationSpec = androidx.compose.animation.core.tween(
                                 com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
@@ -526,7 +609,12 @@ fun HomeScreen(
                                 fieldValue = intentFieldValue,
                                 onFieldValueChange = { intentFieldValue = it },
                                 requestFocusOnMount = intentRequestFocus && intentFocusGateOpen,
-                                onRequestExitInput = onExitIntentInput,
+                                // 退出 funnel：IntentEntry 的显式退出（含 D 的 ✕
+                                // 集成时透传的入口）与旧 onRequestExitInput 同走
+                                // onExitFocusRequest，不再直通 onExitIntentInput。
+                                perchTransition = perchTransition,
+                                onExitFocusRequest = onExitFocusRequest,
+                                onRequestExitInput = onExitFocusRequest,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -537,12 +625,13 @@ fun HomeScreen(
         // v0.68.99：返回退出输入态——IME 在场时不启用（那一按归输入法收键盘，
         // 与既有「BACK 先收键盘」口径一致，冒烟 §9/§10 依赖此序）；有在场状态
         // 时也不启用（思考/回复不被 Back 打断，走各自收起路径）。
-        val imeBottomPx = androidx.compose.foundation.layout.WindowInsets.ime
-            .getBottom(density)
+        // imeBottomPx 复用顶部已提升的值（退态第①步的 IME 归零等待同源）。
+        // Back 进行中重复按下由 requestExitFocus 的 isExiting 护栏挡下，
+        // 故此处不另加 isExiting 到 enabled（禁用会把 Back 交给系统，危险）。
         androidx.activity.compose.BackHandler(
             enabled = intentInputMode && imeBottomPx == 0 &&
                 !intentStateHoldsInput(intentState)
-        ) { onExitIntentInput() }
+        ) { onExitFocusRequest() }
         // v0.36.0：无障碍权限引导卡
         panelGuideMode?.let { mode ->
             PanelPermissionGuide(

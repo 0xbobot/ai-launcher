@@ -540,6 +540,14 @@ fun IntentEntry(
     // 是「事办完了」的明确动作，由宿主收起输入态（文本保留）。原先靠
     // 「失焦→退出」的边沿推断，IME 抖动会误伤，现已拆除（见 HomeScreen）。
     onRequestExitInput: () -> Unit = {},
+    // 输入态专注·进出过渡 C（2026-10-26，见 PetPerchTransition.kt）：
+    // HomeScreen 持有的同一过渡状态与单一退出入口。传 perchTransition
+    // 时宠物位移／alpha／影子走共享 Animatable（进出同一弹簧、退态复用
+    // 进态冻结位移量）；不传时走本函数内旧的本地 Animatable（独立使用
+    // 时行为与 355 一致）。onExitFocusRequest 是 D 的 ✕ 一键退出也要调
+    // 的唯一入口：✕ 只调它，不自写退出动画；默认回落到 onRequestExitInput。
+    perchTransition: PetPerchTransitionState? = null,
+    onExitFocusRequest: () -> Unit = onRequestExitInput,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -763,18 +771,26 @@ fun IntentEntry(
     //    意图 86.4dp 差 0.2dp，插值无意义；D2 117.1dp → 86.4dp 的台阶
     //    不猜 DockState 做假插值，见文件头常量注释与集成注意点）；
     //  - 减动效：位移直接 snap 到终态，不播弹簧；
-    //  - 退态（退出输入态）无反向位移：退场由 HomeScreen fadeOut +
-    //    Dock 卡片重进承担，反向走过去须经 HomeScreen / PullUpDock
-    //    协调，不在本批文件范围（见集成注意点）。
+    //  - 退态（退出输入态）反向位移：由 HomeScreen 的 PetPerchTransition
+    //    funnel 承担（本函数传 perchTransition 时位移／alpha／影子走共享
+    //    Animatable；退态 = travel 1→0、同一弹簧、进态冻结位移量取负，
+    //    四步时序见 PetPerchTransition.kt）。旧口径“退场由 HomeScreen
+    //    fadeOut＋Dock 卡片重进承担、无交接”就此废掉，不许再各自保留一套 fade。
     // 面板在根坐标的位置（外层 Box 回写，取整 dp 防抖动重组）。
     var petAnchorTop by remember { mutableStateOf<Int?>(null) }
     var petAnchorCenterX by remember { mutableStateOf<Int?>(null) }
     // 位移向量（dp）：进态那一刻冻结，之后面板位置变化不再重算。
     var travelDeltaX by remember { mutableStateOf(0.dp) }
     var travelDeltaY by remember { mutableStateOf(PERCH_TRAVEL_FALLBACK_Y) }
-    val petTravel = remember { Animatable(0f) }
-    val petTravelAlpha = remember { Animatable(0f) }
-    val shadowTravel = remember { Animatable(0f) }
+    // 过渡 C：共享状态在场时位移／alpha／影子走 HomeScreen 持有的同一组
+    // Animatable（退态由 HomeScreen 的 funnel 反向驱动同一组）；否则走
+    // 本地组（355 行为）。本地组恒创建（廉价），只在无共享状态时使用。
+    val legacyTravel = remember { Animatable(0f) }
+    val legacyTravelAlpha = remember { Animatable(0f) }
+    val legacyShadowTravel = remember { Animatable(0f) }
+    val petTravel = perchTransition?.travel ?: legacyTravel
+    val petTravelAlpha = perchTransition?.travelAlpha ?: legacyTravelAlpha
+    val shadowTravel = perchTransition?.shadowTravel ?: legacyShadowTravel
     val reduceMotion = rememberReduceMotion()
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
@@ -801,7 +817,18 @@ fun IntentEntry(
                 0.dp
             }
         }
-        if (reduceMotion) {
+        if (perchTransition != null) {
+            // 过渡 C：上一轮退态未收尾时先等它收尾（封顶 ~1s），再冻结本轮
+            // 位移量——避免新冻结值中途改写在途退态的附加 offset（退态渲染
+            // 仍在读同一份冻结量）。随后进态走共享状态（同一弹簧／时序）。
+            var waitedExit = 0
+            while (perchTransition.isExiting && waitedExit < 60) {
+                delay(16)
+                waitedExit++
+            }
+            perchTransition.freezeDelta(travelDeltaX, travelDeltaY)
+            perchTransition.animateEnter(reduceMotion)
+        } else if (reduceMotion) {
             petTravel.snapTo(1f)
             petTravelAlpha.snapTo(1f)
             shadowTravel.snapTo(1f)
@@ -982,7 +1009,8 @@ fun IntentEntry(
                             // v0.68.101（D-2）：同时显式退出输入态（明确动作，不再
                             // 依赖失焦边沿推断）
                             releaseInputFocus()
-                            onRequestExitInput()
+                            // 过渡 C：显式退出走单一入口（反向位移 funnel）。
+                            onExitFocusRequest()
                             launchLocalApp(context, app)
                         }
                     )

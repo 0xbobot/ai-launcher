@@ -100,6 +100,31 @@ class IntentInputModeTest {
         )
     }
 
+    // ---- PetPerchTransition（输入态专注·进出过渡 C，2026-10-26） ----
+    // 退态 = 进态位移取负：travel 1→0 对应行程进度 0→1；Dock 淡入／首页
+    // 淡入触发点 = 行程过 70%（travel ≤ 0.30），与宠物落地交叠。
+
+    @Test
+    fun `退态进度 - travel 从 1 到 0 对应进度 0 到 1`() {
+        org.junit.Assert.assertEquals(0f, exitTravelProgress(1f), 0.001f)
+        org.junit.Assert.assertEquals(0.70f, exitTravelProgress(0.30f), 0.001f)
+        org.junit.Assert.assertEquals(1f, exitTravelProgress(0f), 0.001f)
+    }
+
+    @Test
+    fun `退态进度 - 越界值钳制在 0 到 1`() {
+        org.junit.Assert.assertEquals(0f, exitTravelProgress(1.2f), 0.001f)
+        org.junit.Assert.assertEquals(1f, exitTravelProgress(-0.2f), 0.001f)
+    }
+
+    @Test
+    fun `Dock 淡入触发 - 行程过 70 才触发`() {
+        assertFalse(exitDockFadeShouldStart(1f))
+        assertFalse(exitDockFadeShouldStart(0.31f))
+        assertTrue(exitDockFadeShouldStart(0.30f))
+        assertTrue(exitDockFadeShouldStart(0f))
+    }
+
     @Test
     fun `滞留不收 - 聚焦过、有文本、有在场任一成立`() {
         // 聚焦过（真实会话开始过——D-2 两幕场景的锁存状态）
