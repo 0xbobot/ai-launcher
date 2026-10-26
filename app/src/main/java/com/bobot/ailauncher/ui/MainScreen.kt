@@ -83,6 +83,7 @@ import com.bobot.ailauncher.ui.home.FanSegment
 import com.bobot.ailauncher.ui.home.MAX_QUICK_SEGS
 import com.bobot.ailauncher.ui.pet.QuickActionAddFlow
 import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
+import com.bobot.ailauncher.ui.pet.GuideManager
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -327,6 +328,27 @@ private fun HomeHost(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     glassState.active = homeResumed && dockState != DockState.D3
+
+    // 宠物重构 D（首次发现引导，评审 P1-8 / §9 第 10 题）：
+    // Dock 宠物首次在场（主页 RESUMED、D1/D2、非输入态——与 PullUpDock 的
+    // cardVisible + !intentInputMode 门禁同口径；D3 与输入态下宠物不在场，
+    // 故不在此触发）时说一次“点我可以直接问，长按可以看我表演”。
+    // 语义是“首次长按前提示一次”：门禁与长按引导共用 PET_LONGPRESS，每用户
+    // 仅一次（GuideManager.tryShowFirstDiscovery）；长按手势落地后，不要在
+    // 长按回调里再调一次，否则门禁已被本处消费、文案也重复。
+    // 非模态：只走 PetRepository.say()，不新开任何弹窗；渲染依赖：say 文本
+    // 在首页的渲染面由气泡子项复活（SpeechBubble 在 354 基线里仍零调用方），
+    // 本处只负责触发、文案与仅一次门禁。
+    // 时序注意：本引导文案以“点宠物 = 问”（P0-1）已落地为前提；若合入时
+    // P0-1 尚未落地，文案会先于行为承诺，合入顺序上 P0-1 应先于或同于本引导。
+    LaunchedEffect(homeResumed, dockState, intentInputMode) {
+        if (homeResumed && (dockState == DockState.D1 || dockState == DockState.D2) &&
+            !intentInputMode &&
+            GuideManager.tryShowFirstDiscovery(context)
+        ) {
+            PetRepository.say(GuideManager.FIRST_DISCOVERY_TEXT)
+        }
+    }
 
     CompositionLocalProvider(LocalGlassBackdrop provides glassState) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
