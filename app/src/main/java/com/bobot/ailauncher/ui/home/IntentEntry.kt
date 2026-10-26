@@ -634,6 +634,10 @@ fun IntentEntry(
     // funnel 一路）；HomeScreen 传入 C 的 funnel 实现，默认回落到
     // onRequestExitInput。
     perchTransition: PetPerchTransitionState? = null,
+    // 竖屏切换闪烁修复（2026-10-27）：进态会话号——宿主 mode 一变真
+    // 即递增；进态 effect 改以它为 key，退出进行中重进（槽位不卸载）
+    // 也能重跑进态动画（旧 LaunchedEffect(Unit) 永不重跑是缺口）。
+    enterSession: Int = 0,
     onExitFocusRequest: () -> Unit = onRequestExitInput,
     // 输入态专注·集成：专注态气泡挂载开关——PetZone 列尾宿主在专注态
     // 不挂载时，气泡改挂本卡片覆盖层（卡片宠物上方）；退态翻转后由
@@ -901,7 +905,7 @@ fun IntentEntry(
     // 横屏判定（卡片形状、外延 shader 共用同一值；进态位移横屏恒为零，
     // 见上方 resolveEnterTravelDelta 横屏分支）。
     val isLandscapeCard = screenWidthDp > screenHeightDp
-    LaunchedEffect(Unit) {
+    LaunchedEffect(enterSession) {
         // 竖屏一拍（本批）：宠物 alpha 不另等锚点——在锚点等待之前立即
         // 起步（FadeHandoff，与面板同门），随后锚点等待＋退态等待＋冻结
         // delta＋animateEnter 接续（animateTo 从当前值到 1，不冲突；
