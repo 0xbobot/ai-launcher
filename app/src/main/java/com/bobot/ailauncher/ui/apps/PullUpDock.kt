@@ -141,7 +141,7 @@ enum class DockState { Hidden, D1, D2, D3 }
  * 圆弧同向。轮廓可超出布局上沿 rise（肩峰在 y=-rise 处），
  * 布局高本身不动（外层 Box 用 rise−press 公式留出空间）。
  */
-private class DockShoulderShape(
+internal class DockShoulderShape(
     private val chordDp: Dp,
     private val riseDp: Dp,
     private val cornerDp: Dp,
@@ -176,7 +176,7 @@ private class DockShoulderShape(
  * close() 只是回到起点，不再有对角线；填充区域与之前两 contour
  * 并集一字不动（对角线本就是两 contour 共边），clip／叠色不受影响。
  */
-private fun Path.appendShoulderArch(
+internal fun Path.appendShoulderArch(
     x0: Float,
     x1: Float,
     cx: Float,

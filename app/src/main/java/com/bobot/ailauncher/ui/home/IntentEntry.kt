@@ -61,7 +61,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -88,6 +92,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.core.action.ActionRequest
@@ -100,6 +107,7 @@ import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
+import com.bobot.ailauncher.ui.apps.appendShoulderArch
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.DockLightParams
 import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
@@ -135,11 +143,96 @@ private val INTENT_PET_WIDTH = 108.dp * 0.8f
 private val INTENT_PET_PRESS = 5.dp
 
 /**
+ * 意图卡片肩线（输入态专注，2026-10-26 设计 §2）：弦 156.4dp、rise 18.0dp、
+ * 压入 5dp——与 Dock B2+A 同一套语言，数值按设计定稿字面取，不从 Dock
+ * 公式二次推导（156.4 × 18/156 = 18.05 ≈ 18.0，舍入差不可见）。
+ */
+private val INTENT_SHOULDER_CHORD = 156.4.dp
+private val INTENT_SHOULDER_RISE = 18.0.dp
+
+/** 意图卡片底部圆角外延区高度（2026-10-26 Bob 点选圆角外延，设计附录）。 */
+private val INTENT_FLARE_HEIGHT = 24.dp
+
+/**
+ * 意图卡片轮廓（输入态专注·圆角外延，2026-10-26 Bob 点选）：
+ * 顶缘 = Dock 肩线——直接复用 PullUpDock 的 [appendShoulderArch]（两段
+ * cubicTo，k = 弦长/4，弦端与峰顶切线水平），不为意图卡片另写肩线；
+ * 底部 = [flareDp] 高的外延区内两侧贝塞尔外扩 [flareExtentDp] 到全宽；
+ * 全程单一 contour：拱与外延都在同一 Path 里续画，不 addPath、不另起
+ * contour（351 对角线教训：addPath 另起 contour 会让 close() 从轮廓末点
+ * 向拱起点拉对角线）。
+ *
+ * 局部坐标：原点在布局左上，y 向下；布局宽 = 卡片主体宽（竖屏 320dp、
+ * 横屏封顶 520dp），主体两侧边在 x=0 / x=w；外延到底边时各向外扩
+ * [flareExtentDp]（竖屏 20dp = 外边距，底边恰为屏宽；横屏同理外扩 20dp，
+ * 底边 560dp 居中——横屏外扩到屏边须 140dp/side，曲线比例全毁，不取）。
+ * 肩峰在 y=-rise 处（同 Dock：轮廓可超出布局上沿，布局高本身不动，
+ * 外层 Box 不 clip，探出部分由宠物覆盖层空间容纳）；底边 y=h 全宽直线。
+ *
+ * 外延贝塞尔口径（设计附录，屏坐标左档 P0=(20,kb−24)→C1=(20,kb−10.8)→
+ * C2=(11,kb)→P1=(0,kb)，右镜像；此处换算到布局坐标，主体左边缘为 x=0）：
+ * 左（自下而上画）：P1=(-ext,h)→C1=(-ext+11,h)→C2=(0,h−10.8)→P0=(0,h−24)；
+ * 右（自上而下画）：P0=(w,h−24)→C1=(w,h−10.8)→C2=(w+ext−11,h)→P1=(w+ext,h)。
+ * 切线核对：外延上端控制点与主体侧边共线（竖直相切）、下端控制点与底边
+ * 共线（水平相切），G1 连续无 kink；底角不再是 28dp 圆角——外延曲线本身
+ * 就是底角处理（设计附录底边档口径；顶部两角仍走 Dock 同款 28dp 圆角）。
+ */
+internal class IntentCardShape(
+    private val chordDp: Dp,
+    private val riseDp: Dp,
+    private val cornerDp: Dp,
+    private val flareDp: Dp,
+    private val flareExtentDp: Dp,
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density,
+    ): Outline {
+        val chord = with(density) { chordDp.toPx() }
+        val rise = with(density) { riseDp.toPx() }
+        val corner = with(density) { cornerDp.toPx() }
+        val flare = with(density) { flareDp.toPx() }
+        val ext = with(density) { flareExtentDp.toPx() }
+        val c1Drop = with(density) { 10.8.dp.toPx() }
+        val c2Run = with(density) { 11.dp.toPx() }
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+        // 与 Dock 同款弦长钳制：窄布局下弦不超出圆角内侧。
+        val half = (chord / 2f).coerceAtMost((w / 2f - corner).coerceAtLeast(0f))
+        val x0 = cx - half
+        val x1 = cx + half
+        val k = half * 0.5f
+        val yFlare = h - flare
+        return Outline.Generic(Path().apply {
+            moveTo(0f, corner)
+            quadraticTo(0f, 0f, corner, 0f)
+            lineTo(x0, 0f)
+            // 单 contour 续画肩线拱（moveToStart=false，不另起 contour）。
+            appendShoulderArch(x0, x1, cx, k, rise, 0f, 0f, moveToStart = false)
+            lineTo(w - corner, 0f)
+            quadraticTo(w, 0f, w, corner)
+            lineTo(w, yFlare)
+            // 右侧外延：上端竖直相切、下端水平相切。
+            cubicTo(w, h - c1Drop, w + ext - c2Run, h, w + ext, h)
+            // 底边：全宽直线，贴键盘顶边（0dp 缝由宿主锚定保证）。
+            lineTo(-ext, h)
+            // 左侧外延（反向画）：下端水平相切、上端竖直相切。
+            cubicTo(-ext + c2Run, h, 0f, h - c1Drop, 0f, yFlare)
+            // close() 只回到起点 (0, corner)，即左侧边竖直线，无对角线。
+            close()
+        })
+    }
+}
+
+/**
  * perch 位移起点估算（只读引用 PullUpDock 的 D1 静态几何，不改动它）：
  * Dock 宠物脚底距屏底 = 面板高 136dp + 肩 rise 18.1dp（弦 156.6dp × 18/156，
  * B2+A 定稿）− 压入 5dp ≈ 149.1dp。横屏 Dock 卡宽 344dp、右留边 12dp，
  * 故横屏 Dock 宠物中心 X = 屏宽 − 12dp − 172dp。
- * 估算只决定位移起点的落点，不决定终态：终态恒为面板顶缘 + 5dp 压入；
+ * 估算只决定位移起点的落点，不决定终态：终态恒为面板肩峰压入 5dp
+ * （峰顶 = 面板顶缘 − 18dp rise，见 IntentCardShape）；
  * D2（面板 184dp / rise 21.6dp）时起点估高约 48dp——Dock 卡正在退场、
  * 宠物本体已随卡片滑出淡出，48dp 的起点偏差只影响起步那一帧的落点，
  * 不影响“从 Dock 方向连续滑上来”的读感；要像素级精确须把 DockState
@@ -697,7 +790,8 @@ fun IntentEntry(
         val anchorCenterX = petAnchorCenterX?.dp
         if (anchorTop != null) {
             val dockFootY = screenHeightDp - PERCH_TRAVEL_DOCK_FOOT_FROM_BOTTOM
-            val intentFootY = anchorTop + INTENT_PET_PRESS
+            // 脚底在肩峰上：峰顶 = 面板顶缘 − rise，脚底压进峰顶 5dp。
+            val intentFootY = anchorTop - INTENT_SHOULDER_RISE + INTENT_PET_PRESS
             travelDeltaY = (dockFootY - intentFootY)
                 .coerceIn(0.dp, screenHeightDp)
             travelDeltaX = if (screenWidthDp > screenHeightDp && anchorCenterX != null) {
@@ -718,7 +812,20 @@ fun IntentEntry(
         }
     }
     val intentPetHeight = INTENT_PET_WIDTH * (1318f / 1043f)
-    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    // 意图卡片轮廓（输入态专注·圆角外延）：顶缘复用 Dock 肩线、底部外延，
+    // 参数常量见文件头；remember 无 key——参数全是常量，不随状态变。
+    val intentCardShape = remember {
+        IntentCardShape(
+            chordDp = INTENT_SHOULDER_CHORD,
+            riseDp = INTENT_SHOULDER_RISE,
+            cornerDp = 28.dp,
+            flareDp = INTENT_FLARE_HEIGHT,
+            flareExtentDp = 20.dp,
+        )
+    }
+    // 卡片宽：竖屏 320dp（两侧各 20dp）、横屏封顶 520dp 居中——外边距取
+    // 20dp 与 (屏宽 − 520dp)/2 的大值，屏宽 ≤ 560dp 时恒为 20dp。
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = maxOf(20.dp, (screenWidthDp - 520.dp) / 2))) {
       // ---- 外层 Box：面板 + 前面图层宠物 + 动作清单（Dock 外层 Box 同款结构） ----
       // 外层 Box 高 = 面板高（面板是唯一决定尺寸的孩子）；宠物与清单放在
       // matchParentSize 覆盖层里、用 BottomCenter + 负偏移锚到面板顶缘上方，
@@ -739,9 +846,10 @@ fun IntentEntry(
       }) {
       // ---- F 批·一体化面板：输入区（胶囊 + 推荐行）+ 结果槽位同处一面 ----
       // 样式与 Dock 卡片同一套（2026-10-25 意图卡片统一）：玻璃引擎 STRONG +
-      // 28dp 圆角 + v2 光影（dockLight）+ 无描边——与 Dock 面板逐项对齐（见
-      // 回执对照表）。Dock 的按压显底（dockBgAlpha）是按压反馈、不是卡片
-      // 静止样式，故不复制：意图面板 fallback 用 GlassCard 自然透明度、
+      // 肩线＋圆角外延轮廓（IntentCardShape：顶缘复用 Dock 肩线、底部 24dp
+      // 外延，2026-10-26 输入态专注定稿）+ v2 光影（dockLight）+ 无描边——与
+      // Dock 面板逐项对齐（见回执对照表）。Dock 的按压显底（dockBgAlpha）是
+      // 按压反馈、不是卡片静止样式，故不复制：意图面板 fallback 用 GlassCard 自然透明度、
       // tintBoost 恒 0，静止态任何档位下都可读。面板是静态容器：无任何
       // 尺寸/高度动画（310 冻结教训），进出仍由 HomeScreen 的 fade-only
       // AnimatedVisibility 承担。面板只活在既有意图区内，不新开浮层、不另起列。
@@ -749,20 +857,22 @@ fun IntentEntry(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("intent_panel")
-            .clip(RoundedCornerShape(28.dp))
+            .clip(intentCardShape)
             .glassSurface(
                 kind = GlassSurfaceKind.STRONG,
                 cornerRadius = 28.dp,
                 tintColor = AILauncherColors.current.Card,
                 fallbackColor = AILauncherColors.current.GlassCard,
                 tintBoost = 0f,
-                shape = RoundedCornerShape(28.dp),
+                shape = intentCardShape,
                 dockLight = DockLightParams()
             )
             .onGloballyPositioned { coords ->
                 with(densityNow) { panelHeight = coords.size.height.toDp() }
             }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            // 底垫 14dp 在外延区之上：总底垫 = 14dp + 24dp 外延区，全部内容
+            // （示例行、输入框、结果槽位）收在外延区之上，不压外延曲线。
+            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp + INTENT_FLARE_HEIGHT),
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
         // ---- 输入甲板已瘦身（2026-10-25）：面板上区应用推荐整段删除 ----
@@ -831,7 +941,11 @@ fun IntentEntry(
         // ---- 结果条槽位（非模态）：本地结果 / 回复 / 错误 / 权限说明共用 ----
         // 各 Strip 在面板内已去自身卡片底（透明，保留内边距与排版）。
         // 优先序：权限说明（需用户处理）> 本地结果（用户已改文本继续打字）> 回复/错误（对应已提交文本）
-        Column(modifier = Modifier.testTag("intent_result_slot")) {
+        // 槽位上限与条内滚动（输入态专注·卡片侧）：全部结果条共用 180dp 上限
+        // （RESULT_BAR_MAX_HEIGHT 原注释即“三者共用”），超限槽位内滚动、
+        // 不把卡片顶出可用高；卡片总高上限（键盘顶边到状态栏避让区）由宿主
+        // 锚定保证（见集成注意点，HomeScreen 不在本批文件范围）。
+        Column(modifier = Modifier.testTag("intent_result_slot").heightIn(max = RESULT_BAR_MAX_HEIGHT).verticalScroll(rememberScrollState())) {
         when (val s = state) {
             is IntentUiState.NeedsPermission -> {
                 PermissionExplainCard(
@@ -909,26 +1023,26 @@ fun IntentEntry(
       // AnimatedVisibility fade + Dock 卡片退场 fadeOut）意图宠物以
       // 180ms alpha 交接滑入，属一次交接、不出现两只实体的静止并存。
       Box(modifier = Modifier.matchParentSize()) {
-        // 接触影：落在面板面上、宠物脚底正下方（面板之后、宠物之前画；
+        // 接触影：落在肩峰面上、宠物脚底正下方（面板之后、宠物之前画；
         // 口径沿用旧胶囊接触影：黑 0.14、宽为宠物宽 72%、高 10dp、落点
-        // 改到卡片顶缘下 4dp）。位移跟随：影子不跟宠物同步走全程——
+        // 改到肩峰面下 4dp，即面板顶缘上 rise−4dp 处）。位移跟随：影子不跟宠物同步走全程——
         // 晚 90ms 才淡入归位（travel 0→1），落点带 8dp 上滑收束，
         // 读作“身体先到、影子后跟上”，连接处不焊死。
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = 4.dp + 8.dp * (1f - shadowTravel.value))
+                .offset(y = 4.dp - INTENT_SHOULDER_RISE + 8.dp * (1f - shadowTravel.value))
                 .size(width = INTENT_PET_WIDTH * 0.72f, height = 10.dp)
                 .clip(RoundedCornerShape(50))
                 .background(Color.Black.copy(alpha = 0.14f * shadowTravel.value))
         )
         // 宠物：Dock 宠物本体（HybridPet，同一组件、同一活感引擎、同一动
         // 作状态机），只是换了个 perch——坐法与 Dock 上沿同一套：前面图
-        // 层、居中、脚底压进卡片顶缘 INTENT_PET_PRESS、接触不断；手势
+        // 层、居中、脚底压进卡片肩峰 INTENT_PET_PRESS（峰顶 = 面板顶缘 − rise）、接触不断；手势
         // 语义与 Dock 宠物同一套（集成时统一，协调方决策）：点按在意
         // 图态已无“问”可进，故为空操作（不与胶囊聚焦、点外退出打
         // 架）；动作清单只挂长按，与 Dock 侧一致，不许点按再开清单。
-        // 位移：终态锚定偏移（面板高 − 压入）之上叠加位移附加量
+        // 位移：终态锚定偏移（面板高 ＋ rise − 压入，脚底压进肩峰 5dp）之上叠加位移附加量
         // travelDelta × (1 − travel)，travel 弹簧到 1（轻微过冲回落
         // 即落回回弹）；减动效时 travel 已 snap 到 1，附加量为零。
         // 真机待验：卡片顶缘坐姿、压入量、接触影在真实壁纸上的观感，
@@ -939,7 +1053,7 @@ fun IntentEntry(
             onPetLongPress = { petActionsVisible = true },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .offset(y = -(panelHeight - INTENT_PET_PRESS))
+                .offset(y = -(panelHeight + INTENT_SHOULDER_RISE - INTENT_PET_PRESS))
                 .offset(
                     x = travelDeltaX * (1f - petTravel.value),
                     y = travelDeltaY * (1f - petTravel.value)
@@ -957,7 +1071,7 @@ fun IntentEntry(
                 onDismiss = { petActionsVisible = false },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .offset(y = -(panelHeight + intentPetHeight - INTENT_PET_PRESS + 8.dp))
+                    .offset(y = -(panelHeight + INTENT_SHOULDER_RISE + intentPetHeight - INTENT_PET_PRESS + 8.dp))
                     .testTag("pet_action_list")
             )
         }
