@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -116,6 +117,9 @@ internal val GLASS_FACE_TONES = listOf(
 /** 眼睑边缘缝线色：棕圈代表色（扫描线实测 lum≈63、R−B≈30）。 */
 internal val GLASS_RIM_BROWN = Color(79, 57, 49)
 
+// combinedClickable 在本仓 Compose BOM（2024.10.01）下仍是实验 API，
+// 调用方 PullUpDock / AppRow 同款做法：函数级 OptIn。
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FloatingPet(
     petWidth: Dp,
