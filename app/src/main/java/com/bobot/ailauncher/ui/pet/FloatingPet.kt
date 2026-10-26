@@ -9,8 +9,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,8 +37,11 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -53,6 +58,7 @@ import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
@@ -111,15 +117,22 @@ internal val GLASS_FACE_TONES = listOf(
 /** 眼睑边缘缝线色：棕圈代表色（扫描线实测 lum≈63、R−B≈30）。 */
 internal val GLASS_RIM_BROWN = Color(79, 57, 49)
 
+// combinedClickable 在本仓 Compose BOM（2024.10.01）下仍是实验 API，
+// 调用方 PullUpDock / AppRow 同款做法：函数级 OptIn。
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FloatingPet(
     petWidth: Dp,
     blinkState: PetBlinkState,
     active: Boolean,
     onTap: () -> Unit,
+    // 2026-10-26 入口子项：长按 = 表演清单（点按已还给“问”，见调用方）。
+    // 默认空实现，HybridPet 转发 PullUpDock 的 onPetCellLongPress。
+    onLongPress: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val reduceMotion = rememberReduceMotion()
+    val haptic = LocalHapticFeedback.current
     val lowPower by BatteryState.isLowPower.collectAsState()
     val motionActive = active && !lowPower && !reduceMotion
 
@@ -435,21 +448,87 @@ fun FloatingPet(
     )
     val touch = maxOf(petWidth, 48.dp)
 
+    // —— Dock 宠物拖拽（2026-10-26 入口子项，与输入态 PetView 同口径）：
+    // 40dp 半径内跟手；提起时 SURPRISED + say("借过借过~")（走现有 say()
+    // 路径；文本可见性依赖气泡子项复活 SpeechBubble 渲染面，本子项不新建
+    // 渲染面）；松手弹簧弹回 + onDragEnd 给 DIZZY 1s。拖拽不走 actionTick，
+    // 故不触发 PullUpDock 的肩线脉冲（与输入态拖拽一致）；拖拽是整只提起，
+    // 松手回到底锚，不破坏头 + 面板 = 一个身体（提起期间底锚临时脱离
+    // 是拖拽本身的语义，弹回即复位）。
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    // 长按已触发的同一手势内不再跟手（长按消费了按下，拖拽本应被取消，
+    // 此旗标是第二道保险；新一手势的 onDragStart 会复位它）。
+    var longPressFired by remember { mutableStateOf(false) }
+    val dragMaxPx = with(density) { 40.dp.toPx() }
+    val dragX by animateFloatAsState(
+        targetValue = dragOffset.x,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
+        label = "floatDragX",
+    )
+    val dragY by animateFloatAsState(
+        targetValue = dragOffset.y,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
+        label = "floatDragY",
+    )
+
     Box(
         modifier = modifier
             .size(width = touch, height = maxOf(petHeight, 48.dp))
+            // 拖拽放外层（先于 combinedClickable，PetView 同款写法）：
+            // 未超 slop 前不消费，点按 / 长按仍能触发；超 slop 后消费位移，
+            // 点按 / 长按即取消——三手势同一节点不打架。
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = {
+                        longPressFired = false
+                        PetRepository.onDragStart()
+                        PetRepository.say("借过借过~")
+                    },
+                    onDrag = { change, dragAmount ->
+                        if (longPressFired) return@detectDragGestures
+                        change.consume()
+                        val newX = dragOffset.x + dragAmount.x
+                        val newY = dragOffset.y + dragAmount.y
+                        val dist = sqrt(newX * newX + newY * newY)
+                        dragOffset = if (dist > dragMaxPx) {
+                            Offset(
+                                newX / dist * dragMaxPx,
+                                newY / dist * dragMaxPx
+                            )
+                        } else {
+                            Offset(newX, newY)
+                        }
+                    },
+                    onDragEnd = {
+                        dragOffset = Offset.Zero
+                        PetRepository.onDragEnd()
+                    },
+                    onDragCancel = {
+                        dragOffset = Offset.Zero
+                        PetRepository.onDragEnd()
+                    }
+                )
+            }
             .semantics {
-                // 与旧 DockPetPerch 一致：contentDescription + clickable，
-                // TalkBack 即识别为可点按钮（本 BOM 无 Semantics role 属性）。
+                // 与旧 DockPetPerch 一致：contentDescription + 可点语义，
+                // TalkBack 即识别为可点按钮。点按 = 问（2026-10-26 起说真话，
+                // 不再是开清单）；长按动作经 onLongClickLabel 提示。
                 contentDescription = "问曜仔"
             }
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                onLongClickLabel = "长按看动作",
                 onClick = {
                     pressed = true
-                    eyeAlert = true // 反应链：点按当下眼睛先睁大，清单/输入后跟
+                    eyeAlert = true // 反应链：点按当下眼睛先睁大，输入后跟
                     onTap()
+                },
+                onLongClick = {
+                    longPressFired = true
+                    eyeAlert = true
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongPress()
                 },
             ),
         contentAlignment = Alignment.BottomCenter,
@@ -489,8 +568,9 @@ fun FloatingPet(
                     // 头部延迟跟上（±8px/±5px，80ms 延迟 300ms）+ 倾斜 4°。
                     // 注视位移不碰底部锚点：headY 上移至多约 2.3dp，
                     // 小于 5dp 压入量，连接不断；呼吸只缩放不位移。
-                    translationX = headX
-                    translationY = headY + blinkNodPx + motionDipPx
+                    // 拖拽位移叠加其上：整只跟手（提起语义），松手弹簧回零。
+                    translationX = headX + dragX
+                    translationY = headY + blinkNodPx + motionDipPx + dragY
                     rotationZ = turnTilt + tiltAnim.value + shakeAnim.value + swayAnim.value
                     scaleX = popScale * breatheScaleX * motionScaleX
                     scaleY = popScale * breatheScaleY * motionScaleY

@@ -250,7 +250,10 @@ private fun HomeHost(
     // 「问七仔」提交后回首页看结果）。开 D3 抽屉即退出（见 HomeScreen 调用点）。
     var intentInputMode by remember { mutableStateOf(false) }
     var intentFocusWanted by remember { mutableStateOf(false) }
-    // 宠物动作清单（2026-10-25，Bob 拍板）：点宠物开关清单，不再直进输入。
+    // 宠物表演清单（2026-10-26 宠物交互重构，入口子项）：长按宠物打开
+    // 的单层 8 行表演清单；点宠物已恢复 327 语义（问，直进意图输入），
+    // 不再开关清单。进输入态时清单状态一并清零（见 onPetCellTap），
+    // 避免退出输入态后清单无故重现。
     var petActionsVisible by remember { mutableStateOf(false) }
     LaunchedEffect(intentState) {
         if (com.bobot.ailauncher.ui.home.intentStateHoldsInput(intentState)) {
@@ -408,13 +411,18 @@ private fun HomeHost(
             onOpenSettings = onOpenSettings,
             // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页 + 提交协调器
             onAskQizai = onAskQizai,
-            // 动作清单批（2026-10-25）：Dock 宠物点按开关动作清单
-            //（327 直进输入作废）；意图搜索收进清单 2 级，走同一入口。
+            // 宠物入口（2026-10-26 宠物交互重构，入口子项）：点宠物 = 问
+            // （恢复 327 语义：直进意图输入并聚焦，TalkBack“问曜仔”说真话；
+            // 先关清单再进输入，避免退出输入态后清单重现）；长按宠物 =
+            // 表演清单（单层 8 行）。清单 2 级与意图搜索行已随 2 级移除。
             intentInputMode = intentInputMode,
-            onPetCellTap = { petActionsVisible = !petActionsVisible },
+            onPetCellTap = {
+                petActionsVisible = false
+                enterIntentInput(focus = true)
+            },
+            onPetCellLongPress = { petActionsVisible = true },
             petActionsVisible = petActionsVisible,
-            onPetActionsVisibleChange = { petActionsVisible = it },
-            onPetIntentSearch = { enterIntentInput(focus = true) }
+            onPetActionsVisibleChange = { petActionsVisible = it }
         )
         // v0.67.13（Bob）：主屏 rail 长按 → 快找；房子/收藏/字母/隐藏一条导航滑动到达。
         // 长按震动后选择器浮现；手指一动就由应用中心接管（D3 淡入）；picker 会话在 D3 打开后

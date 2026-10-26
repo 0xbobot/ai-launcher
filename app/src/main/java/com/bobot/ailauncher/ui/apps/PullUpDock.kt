@@ -335,16 +335,19 @@ fun PullUpDock(
     onOpenSettings: () -> Unit,
     // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页并提交协调器（HomeHost 提供）
     onAskQizai: (String) -> Unit = {},
-    // v0.68.99（主页重构 R-1）：Dock 左端七仔格点按语义——
-    // 2026-10-25 动作清单批起改为开关动作清单（直进输入作废）；
+    // v0.68.99（主页重构 R-1）：Dock 宠物点按语义——
+    // 2026-10-26 宠物交互重构（入口子项）：恢复 327 语义，点宠物 =
+    // 问（直进意图输入并聚焦，调用方 enterIntentInput）；长按 =
+    // 表演清单（onPetCellLongPress）；动作清单不再挂点按。
     // 输入态在场时 D1/D2 卡让位（cardVisible 关），胶囊底部原地接管
     onPetCellTap: () -> Unit = {},
-    // 宠物动作清单（2026-10-25，Bob 拍板）：327 点按直进输入作废——
-    // 点宠物改为开关本清单；清单 2 级的意图搜索走 onPetIntentSearch
-    //（调用方 enterIntentInput，与现输入流程同一入口）。
+    // 长按 Dock 宠物：打开修剪后的单层表演清单（PetActionList）。
+    onPetCellLongPress: () -> Unit = {},
+    // 宠物表演清单（2026-10-26，长按打开、单层 8 行、无 2 级）：
+    // 可见性由调用方 MainScreen 持有；点外关闭见本文件点外关闭层
+    // 与面板空白点按，D3 / 进输入态时状态回落。
     petActionsVisible: Boolean = false,
     onPetActionsVisibleChange: (Boolean) -> Unit = {},
-    onPetIntentSearch: () -> Unit = {},
     intentInputMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -389,27 +392,43 @@ fun PullUpDock(
     val shoulderScope = rememberCoroutineScope()
     val shoulderPeakAnim = remember { Animatable(0f) }
     val shoulderPeakDp by shoulderPeakAnim.asState()
-    // 动作清单协同（2026-10-25）：宠物全身动作里需要肩线跟随的，
-    // 肩线按同事件做对应峰值脉冲（头肩一体、连接不断）；歪头是
-    // 软连接——头先动、肩延迟约 90ms 跟上（stretch-v2 柔性口径）。
-    // 其余动作不碰肩线（点头/害羞是宠物往肩线里压，不抬肩线）。
+    // 肩线协同（2026-10-26 入口子项，评审 P1-6 口径统一）：
+    // 全带——每一个 actionTick 动作都带肩线脉冲，不许再出现 4/19
+    // （此前仅 STRETCH / HAPPY / SURPRISED / GREET / TILT 带协同，
+    // 其余动作不碰肩线，同一清单内反馈口径不统一）。
+    // 幅度按身体参与度分档：拉伸类 7 / 惊讶 5 / 打招呼 4 / 歪头 3、
+    // 其余（害羞的挤压、晕眩的摇摆、深呼吸的吸气隆起，及未来由交互
+    // 事件自动触发的新动作）一律 2dp 小峰值——自动触发的动作无需
+    // 另配肩线，默认就有身体跟随。歪头仍是软连接：头先动、肩延迟
+    // 约 90ms 跟上（stretch-v2 柔性口径）。图标启动的 7dp 峰值不动
+    // （见 launchApp），点宠物的小峰值见 petTapPeak（3dp）。
     val petActionTick by PetRepository.actionTick.collectAsState()
     val petActionKind by PetRepository.actionKind.collectAsState()
     LaunchedEffect(petActionTick) {
         if (petActionTick == 0) return@LaunchedEffect
+        if (petActionKind == PetManualAction.TILT) delay(90)
         val peak = when (petActionKind) {
             PetManualAction.STRETCH, PetManualAction.HAPPY -> 7f
             PetManualAction.SURPRISED -> 5f
             PetManualAction.GREET -> 4f
-            PetManualAction.TILT -> {
-                delay(90)
-                3f
-            }
-            else -> return@LaunchedEffect
+            PetManualAction.TILT -> 3f
+            else -> 2f
         }
         shoulderPeakAnim.animateTo(peak, tween(250, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)))
         shoulderPeakAnim.animateTo(-1f, tween(150, easing = FastOutSlowInEasing))
         shoulderPeakAnim.animateTo(0f, tween(150, easing = FastOutSlowInEasing))
+    }
+    // 点宠物的小峰值（2026-10-26 入口子项，评审 P1-6）：身体反馈归因
+    // 到宠物——点宠物不再只有果冻回弹，肩线也给 3dp 小脉冲（图标启动
+    // 的 7dp 不动）。注意：竖屏点按随即进输入态、Dock 卡片退出动画
+    // 约 150ms，峰值（250ms 到峰）只能部分可见；横屏 Dock 在场时
+    // 完整可见；峰值本身仍按口径触发，不为竖屏可见度延迟进输入。
+    fun petTapPeak() {
+        shoulderScope.launch {
+            shoulderPeakAnim.animateTo(3f, tween(250, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)))
+            shoulderPeakAnim.animateTo(-1f, tween(150, easing = FastOutSlowInEasing))
+            shoulderPeakAnim.animateTo(0f, tween(150, easing = FastOutSlowInEasing))
+        }
     }
     // D3 全屏时清单无锚点（宠物不在场），状态回落、避免回 D1 后无故重现。
     LaunchedEffect(state) {
@@ -475,6 +494,25 @@ fun PullUpDock(
             (!intentInputMode || isLandscapeDock)
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
         // D2→D1 改由下滑/右滑手势触发
+        // 点外关闭层（2026-10-26 入口子项，仅清单打开时存在，与 v0.27.4
+        // 删除的常驻层不同）：透明全屏 Box，画在 D1/D2 盒之下、简报之上——
+        // 简报 / 背景区的点按落到它身上即关闭清单；Dock 面板与宠物在其
+        // 上层，Dock 自身手势（面板滑动、图标点按、宠物点按）不受影响；
+        // 面板空白点按另见面板 combinedClickable 的 onClick。清单打开期间
+        // 背景手势（上滑开 D3、盲操扇形）需先点外关闭再操作——清单是瞬时
+        // 态，关闭成本为一次点按，与意图区点外退出同一语法。
+        // 注意：本层不透传——点外只关闭清单，不同时触发下层动作。
+        if (petActionsVisible && !intentInputMode && state != DockState.D3) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("pet_action_dismiss_scrim")
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() }
+                    ) { onPetActionsVisibleChange(false) }
+            )
+        }
 
         // ---- D1/D2 悬浮图标（无卡片，v0.27.1 去底） ----
         // v0.68.75（Bob）：横屏时 Dock 放右侧（分栏布局），不再放底部
@@ -661,7 +699,10 @@ fun PullUpDock(
                         .combinedClickable(
                             interactionSource = dockPressSource,
                             indication = null,  // 用背景显隐做反馈，不要水波纹
-                            onClick = {},
+                            // 面板空白点按：平时无动作；表演清单打开时点空白
+                            // 即关闭清单（点外关闭的 Dock 侧一半，另一半是
+                            // 外层透明层；图标点按是子节点 clickable，不走这里）。
+                            onClick = { if (petActionsVisible) onPetActionsVisibleChange(false) },
                             onLongClick = { onHideDockRequestState.value() }
                         )
                         .pointerInput(state, sysGestureBottomPx, dockBottomPadPx) {
@@ -777,29 +818,33 @@ fun PullUpDock(
                 }
                 // 圆肩批：连接混合宠物（面板之后画、前面图层；面板底锚
                 // 不变，宠物只向上长；输入态不呈现，横屏面板在场时也让位，
-                // 保证任何时刻恰一只）。点按语义（2026-10-25 动作清单批）：
-                // 点宠物开关动作清单（327 直进输入作废），testTag
-                // 沿用 dock_pet_cell（冒烟入口定位契约不变）；layout_check
-                // 已随之上新为接触/压入几何（压入肩峰 5dp、脸盘完整）。
+                // 保证任何时刻恰一只）。手势语义（2026-10-26 入口子项）：
+                // 点宠物 = 问（直进意图输入，327 语义恢复，另带 3dp 小峰值），
+                // 长按 = 表演清单；testTag 沿用 dock_pet_cell（冒烟入口
+                // 定位契约不变）；layout_check 已随之上新为接触/压入几何
+                // （压入肩峰 5dp、脸盘完整）。B2+A 几何一字不动（宠物系数
+                // 1.224、弦 +70dp、rise 18/156、压入 5dp）。
                 if (!intentInputMode) {
                     HybridPet(
                         petWidth = floatPetWidth,
-                        onPetTap = onPetCellTap,
+                        onPetTap = {
+                            petTapPeak()
+                            onPetCellTap()
+                        },
+                        onPetLongPress = onPetCellLongPress,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress))
                             .testTag("dock_pet_cell")
                     )
                 }
-                // 动作清单（非模态气泡，宠物上方、尾巴朝下指向宠物）：
+                // 表演清单（非模态气泡，宠物上方、尾巴朝下指向宠物）：
                 // 与宠物同在外层 Box 前面图层（不 clip、不改面板几何），
                 // 静止态默认关闭，layout_check 接触/压入规格不受影响。
+                // 单层 8 行、无 2 级（2026-10-26 入口子项）；点外关闭走
+                // 外层透明层 + 面板空白点按，本处只留 ✕ 与状态回落。
                 if (petActionsVisible && !intentInputMode && state != DockState.D3) {
                     PetActionList(
-                        onIntentSearch = {
-                            onPetActionsVisibleChange(false)
-                            onPetIntentSearch()
-                        },
                         onDismiss = { onPetActionsVisibleChange(false) },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
