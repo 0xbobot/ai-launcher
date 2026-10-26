@@ -404,6 +404,40 @@ fun HomeScreen(
                 )
             }
     ) {
+        // 输入态专注壳·A：专注态实色底——只在 intentInputMode 时出现，
+        // 放在根容器最底层（Column 之前），壁纸完全不透，不做压暗/模糊纱
+        // （351 教训）。fade-only 150ms（MotionTokens.Fast），不改尺寸、
+        // 不触发布局；无点击处理，不挡卡片/宠物/键盘/触控；状态栏是系统
+        // chrome，不受影响；顶部避让仍走 Column 既有规则。
+        // 浅色 #E8E2D9（设计 §1）；深色用深色主题同系暖灰 token
+        // AILauncherColors.current.Background（深色值 0xFF1A1815），不另发明色值。
+        // 注意：本层在内容之下，只负责底色；简报/会议行的淡出在 PetZone.kt
+        // （节点宿主，见另一次提交），HomeScreen 内无此节点可改。
+        androidx.compose.animation.AnimatedVisibility(
+            visible = intentInputMode,
+            enter = androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
+            ),
+            exit = androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (AILauncherColors.current.isDark)
+                            AILauncherColors.current.Background
+                        else Color(0xFFE8E2D9)
+                    )
+            )
+        }
         // v0.43.1：宠物回首页——v0.31.0 按"只留 Dock"把 PetZone 从首页移除后，
         // v0.43.0 的七仔场景改的是一段从未被调用的代码，所以真机上看不到。
         // v0.65.8：顶部对齐（之前居中导致宠物上方大量空白）——七仔贴近状态栏下方，
