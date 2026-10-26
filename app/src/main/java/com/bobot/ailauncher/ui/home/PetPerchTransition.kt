@@ -1,14 +1,14 @@
 package com.bobot.ailauncher.ui.home
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.bobot.ailauncher.ui.theme.MotionTokens
+import com.bobot.ailauncher.ui.theme.PetMotion
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -29,7 +29,9 @@ import kotlinx.coroutines.launch
  * - 不碰意图逻辑本身（提交、IME Done、拼音 composing、状态条）；
  * - 不另起第三套宠物渲染或响应路径：宠物本体仍是 Dock 那只 HybridPet，
  *   眼睛／眨眼／呼吸／注视全部复用 Dock 的活感引擎（见 IntentEntry /
- *   PullUpDock 的 HybridPet 调用点，本文件只驱动位移与 alpha/影子）。
+ *   PullUpDock 的 HybridPet 调用点，本文件只驱动位移与 alpha）。
+ *   影子已无：进出影子动画（550ms＋90ms 延迟进、300ms 退）按 Bob
+ *   22:02 verdict 随接触影一并作废，本文件不再有影子通道。
  *
  * 四步退态时序（写死在 HomeScreen.requestExitFocus，不许打乱）：
  *  ① 键盘落下：清焦点＋收 IME，卡片＋宠物组跟键盘一起落下（组内相对位置
@@ -99,14 +101,19 @@ class PetPerchTransitionState {
     /** 0 = Dock perch，1 = 意图卡片 perch；附加 offset = delta × (1 − travel)。 */
     val travel = Animatable(0f)
     val travelAlpha = Animatable(0f)
-    val shadowTravel = Animatable(0f)
 
     fun freezeDelta(deltaX: Dp, deltaY: Dp) {
         travelDeltaX = deltaX
         travelDeltaY = deltaY
     }
 
-    /** 进态：与 355 一字不差——弹簧 damping 0.75、alpha 180ms、影子晚 90ms。 */
+    /**
+     * 进态：家族规格——位移走 PetMotion.EnterStandard（值与 355 一字不差，
+     * damping 0.75），alpha 走 FadeHandoff 180ms＋EaseOutCubic（值不动、
+     * 仅具名）。影子通道已随 22:02 摘除作废，不再有影子动画。
+     * 竖屏一拍（本批）：alpha 在 IntentEntry 侧锚点等待之前即起步（见
+     * IntentEntry），此处 animateEnter 仍从当前值续到 1，不冲突。
+     */
     suspend fun animateEnter(reduceMotion: Boolean) {
         from = PetPerch.DOCK
         to = PetPerch.INTENT
@@ -114,17 +121,15 @@ class PetPerchTransitionState {
         if (reduceMotion) {
             travel.snapTo(1f)
             travelAlpha.snapTo(1f)
-            shadowTravel.snapTo(1f)
         } else {
             coroutineScope {
+                launch { travel.animateTo(1f, PetMotion.EnterStandard) }
                 launch {
-                    travel.animateTo(
+                    travelAlpha.animateTo(
                         1f,
-                        spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)
+                        tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
                     )
                 }
-                launch { travelAlpha.animateTo(1f, tween(180)) }
-                launch { shadowTravel.animateTo(1f, tween(550, delayMillis = 90)) }
             }
         }
         phase = PetPerchPhase.FOCUSED
@@ -132,7 +137,6 @@ class PetPerchTransitionState {
 
     /**
      * 退态行程：同一弹簧、同一冻结位移量取负（travel 1→0）。
-     * 影子先离地（300ms 淡出）——进态“身体先到、影子后跟”的镜像。
      * alpha 不在此处动：它由 HomeScreen 在 Dock 淡入步里单独走 180ms，
      * 与 Dock 卡片 fadeIn 交叠为一次交接（意图宠物淡出、Dock 宠物淡入），
      * 不出现两只实体的静止并存。
@@ -141,17 +145,8 @@ class PetPerchTransitionState {
         phase = PetPerchPhase.EXIT_TRAVEL
         if (reduceMotion) {
             travel.snapTo(0f)
-            shadowTravel.snapTo(0f)
         } else {
-            coroutineScope {
-                launch { shadowTravel.animateTo(0f, tween(300)) }
-                launch {
-                    travel.animateTo(
-                        0f,
-                        spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)
-                    )
-                }
-            }
+            travel.animateTo(0f, PetMotion.EnterStandard)
         }
     }
 

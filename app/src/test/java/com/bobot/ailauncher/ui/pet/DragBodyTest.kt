@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 拖拽一体拉伸（2026-10-26 定稿）纯 dp 映射单测：阻力曲线、肩跟随、脖子间隙、横向、倾角、形变。 */
+/** 拖拽一体拉伸（2026-10-26 定稿，22:10 后肩升锁定模型）纯 dp 映射单测：阻力曲线、肩锁定、横向、倾角、形变。 */
 class DragBodyTest {
 
     private val eps = 0.05f
@@ -49,19 +49,18 @@ class DragBodyTest {
     }
 
     @Test
-    fun `shoulder follows at 0 55 and neck gap never negative`() {
+    fun `shoulder locks to head rise one to one and never opens a gap`() {
         assertEquals(0f, dragShoulderRiseDp(0f), 0f)
-        approx(16.15f, dragShoulderRiseDp(29.37f))
-        approx(17.6f, dragShoulderRiseDp(32f))
-        // 全程不断开的不变量：头升恒 ≥ 肩升、间隙恒 ≥ 0
+        approx(29.37f, dragShoulderRiseDp(29.37f))
+        assertEquals(32f, dragShoulderRiseDp(32f), 0f)
+        // 锁定不变量（22:10 后模型，脖子带已摘）：肩升恒等于头升，头底与
+        // 肩峰的 5dp 压入全程恒定，任何帧、任何速度都不出现 wallpaper
+        // 夹缝——由构造保证，不靠画带子 bridging。
         for (up in 0..200 step 5) {
             val rise = dragHeadRiseDp(up.toFloat())
             val shoulder = dragShoulderRiseDp(rise)
-            assertTrue("shoulder($shoulder) must not exceed rise($rise)", shoulder <= rise)
-            assertTrue("neck gap must be >= 0", dragNeckGapDp(rise) >= 0f)
+            assertEquals(rise, shoulder, 0f)
         }
-        // 满拉伸间隙 = 32 − 17.6 = 14.4dp（脖子收窄分母）
-        approx(14.4f, dragNeckGapDp(32f))
     }
 
     @Test

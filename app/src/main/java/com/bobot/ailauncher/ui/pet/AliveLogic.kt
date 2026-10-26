@@ -263,20 +263,21 @@ fun eyeLidFraction(mood: PetMood, thinking: Boolean, alert: Boolean): Float = wh
 }
 
 // ------------------------------------------------------------------
-// 活感第一批（2026-10-26，Bob 全部接受）：头弹簧＋接触影随动＋
-// 注视与注意力＋待机小行为＋重心转移（不做纯缩放呼吸）。
+// 活感第一批（2026-10-26，Bob 全部接受）：头弹簧＋注视与注意力＋
+// 待机小行为＋重心转移（不做纯缩放呼吸；接触影随动一项已按 Bob
+// 22:02 verdict 整个摘除，见下）。
 // 纯逻辑层：区间、时序、概率收敛在这里，组合层只消费，不在组合代码里算。
 // ------------------------------------------------------------------
 
 /**
- * ① 头弹簧：整颗头作颈上弹簧质量。k ≈ 25/s²、阻尼比 0.3 →
- * 可见 2–3 次过冲（SpringSim 单测锁死）。复用现有头 offset／倾角通道
- * （头跟随 x ±8px、y ±5px，Compose spring(dampingRatio, stiffness)
- * 的刚度单位与此 k 同量纲：对 px 值动画，刚度 25 即 ω＝5rad/s）。
+ * ① 头弹簧：整颗头作颈上弹簧质量。弹簧参数 canonical 在
+ * PetMotion.HeadSoft（k ≈ 25/s²、阻尼比 0.3 → 可见 2–3 次过冲，
+ * SpringSim 单测锁死）；此处只留注视跟随范围。复用现有头 offset／
+ * 倾角通道（头跟随 x ±8px、y ±5px，Compose spring(dampingRatio,
+ * stiffness) 的刚度单位与此 k 同量纲：对 px 值动画，刚度 25 即
+ * ω＝5rad/s）。
  */
 object HeadSpring {
-    const val STIFFNESS = 25f
-    const val DAMPING_RATIO = 0.3f
     const val RANGE_X_PX = 8f
     const val RANGE_Y_PX = 5f
 }
@@ -287,7 +288,7 @@ const val PUPIL_RANGE_Y_PX = 3f
 
 /**
  * 弹簧阶跃响应模拟（半隐式 Euler，调用方按帧 dt 推进）：
- * 只供单测验证 HeadSpring 参数的过冲次数与落定，不进生产动画
+ * 只供单测验证 PetMotion.HeadSoft 参数的过冲次数与落定，不进生产动画
  * （生产动画走 Compose spring，参数同一套）。
  */
 class SpringSim(private val stiffness: Float, dampingRatio: Float) {
@@ -398,26 +399,8 @@ object IdleBehavior {
         if (random.nextBoolean()) IdleKind.TILT else IdleKind.LOOK
 }
 
-/** ② 接触影随动参数：影子由头状态驱动（x 跟头走，随高低变大小深浅）。 */
-data class ShadowParams(val widthScale: Float, val alpha: Float)
-
-object ContactShadow {
-    /** 基线（评估口径）：宽 62.2dp、高 10dp、黑 14%，按宠物宽相对参考宽缩放。 */
-    const val BASE_WIDTH_DP = 62.2f
-    const val BASE_HEIGHT_DP = 10f
-    const val BASE_ALPHA = 0.14f
-    const val REF_PET_WIDTH_DP = 86.4f
-
-    /**
-     * liftPx：头抬高量（＝－头总位移 Y，上为正）。头抬高 1px → 影宽 ×0.98、
-     * alpha −0.004；头压低反向；下压过冲（squash01，dip 动画 0..1）再加宽
-     * 加深一档。全部钳制，影子永远比头动得小（不许影比头大）。
-     */
-    fun params(liftPx: Float, squash01: Float): ShadowParams {
-        val widthScale = ((1f - 0.02f * liftPx).coerceIn(0.8f, 1.15f) *
-            (1f + 0.10f * squash01.coerceIn(0f, 1f))).coerceAtMost(1.25f)
-        val alpha = (BASE_ALPHA - 0.004f * liftPx +
-            0.02f * squash01.coerceIn(0f, 1f)).coerceIn(0.08f, 0.20f)
-        return ShadowParams(widthScale, alpha)
-    }
-}
+/**
+ * ② 接触影随动：已按 Bob 2026-10-26 22:02 verdict 整个摘除（接触影是
+ * 减分项，去掉；“全程无脚下阴影”铁律恢复完整效力，面板面接触影亦禁）。
+ * 本对象与 ShadowParams 一并删除，不留参数残留；天气云影等无关元素不动。
+ */

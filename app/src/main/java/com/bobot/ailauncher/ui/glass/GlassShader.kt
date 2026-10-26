@@ -8,6 +8,8 @@ import androidx.annotation.RequiresApi
  * 强玻璃 AGSL（docs/GLASS_DESIGN.md v0.2 §3 强玻璃路线）：
  * 按圆角矩形 SDF 只在边缘带内做位移折射 + 方向性镜面高光（光从上方来），
  * 中心区域权重为 0——采样不位移、高光不叠加，玻璃不是水滴。
+ * 外延补全（2026-10-26 本批，意图卡片圆角外延）：见 uFlareH／uFlareExt
+ * 注释——SDF 取平圆角与外延矩形的 min，否则翅膀无锐利层、交界现台阶。
  *
  * 输入 = 元素背后的一块「锐利背景」（比元素大一圈 margin 的 GraphicsLayer 截图），
  * 输出为预乘 alpha：边缘带内是折射后的背景，带外 alpha=0，露出下层的模糊层。
@@ -30,6 +32,16 @@ uniform float uRadius;
 uniform float uRefraction;
 uniform float uBand;
 uniform float uSpecular;
+// 外延补全（意图卡片圆角外延，2026-10-26 本批）：外延翅膀超出平圆角
+// 轮廓，锐利层若只按平圆角 SDF 算，翅膀处 alpha=0、只剩模糊层，
+// 与本体（模糊＋锐利）交界现色阶台阶。故 SDF 取平圆角与外延矩形
+// （底边 flareH 带、外扩 flareExt 至全宽，圆角 0）的 min；外层
+// clipPath 已按真形状裁剪，矩形近似超出贝塞尔的部分不会超画
+// （折射方向在翅膀内为轴向近似，属已知近似：贝塞尔精确 SDF 需多段
+// 折线 uniform，若 Bob 真机仍见差异再升级）。两值皆为 0 时门关闭，
+// SDF 与旧版一字相同（未设置的 uniform 默认 0，调用方亦显式置 0）。
+uniform float uFlareH;
+uniform float uFlareExt;
 
 float sdRoundBox(float2 p, float2 b, float r) {
     float2 q = abs(p) - b + r;
@@ -37,7 +49,13 @@ float sdRoundBox(float2 p, float2 b, float r) {
 }
 
 float sdfAt(float2 elemCoord) {
-    return sdRoundBox(elemCoord - uElemSize * 0.5, uElemSize * 0.5, uRadius);
+    float d = sdRoundBox(elemCoord - uElemSize * 0.5, uElemSize * 0.5, uRadius);
+    if (uFlareH > 0.5 && uFlareExt > 0.5) {
+        float2 flareCenter = float2(uElemSize.x * 0.5, uElemSize.y - uFlareH * 0.5);
+        float2 flareHalf = float2(uElemSize.x * 0.5 + uFlareExt, uFlareH * 0.5);
+        d = min(d, sdRoundBox(elemCoord - flareCenter, flareHalf, 0.0));
+    }
+    return d;
 }
 
 half4 main(float2 coord) {

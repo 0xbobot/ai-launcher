@@ -108,6 +108,8 @@ import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.DockLightParams
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.MotionTokens
+import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.systemGestureBottomPx
 import kotlin.math.abs
 import androidx.compose.foundation.layout.width
@@ -536,37 +538,35 @@ fun PullUpDock(
                     .let { if (isLandscapeDock) it.padding(end = 12.dp) else it },
                 enter = if (isLandscapeDock) {
                     // v0.68.82（第 3 项）：横屏从右下角斜向滑入
+                    // 家族规格（值不动、仅具名）：滑入 DockEnter、淡入 FadeHandoff。
                     slideIn(
                         initialOffset = { IntOffset(it.width, it.height) },
-                        animationSpec = spring(
-                            stiffness = Spring.StiffnessMediumLow,
-                            dampingRatio = 0.86f
-                        )
-                    ) + fadeIn(tween(180))
+                        animationSpec = PetMotion.DockEnter
+                    ) + fadeIn(
+                        tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
+                    )
                 } else {
                     slideInVertically(
-                        animationSpec = spring(
-                            stiffness = Spring.StiffnessMediumLow,
-                            dampingRatio = 0.86f
-                        )
-                    ) { it } + fadeIn(tween(180))
+                        animationSpec = PetMotion.DockEnter
+                    ) { it } + fadeIn(
+                        tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
+                    )
                 },
                 exit = if (isLandscapeDock) {
                     // v0.68.82（第 3 项）：横屏向右下角斜向滑出
+                    // 家族规格（值不动、仅具名）：滑出 DockExit、淡出 FadeQuick。
                     slideOut(
                         targetOffset = { IntOffset(it.width, it.height) },
-                        animationSpec = spring(
-                            stiffness = Spring.StiffnessMedium,
-                            dampingRatio = 0.9f
-                        )
-                    ) + fadeOut(tween(150))
+                        animationSpec = PetMotion.DockExit
+                    ) + fadeOut(
+                        tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)
+                    )
                 } else {
                     slideOutVertically(
-                        animationSpec = spring(
-                            stiffness = Spring.StiffnessMedium,
-                            dampingRatio = 0.9f
-                        )
-                    ) { it } + fadeOut(tween(150))
+                        animationSpec = PetMotion.DockExit
+                    ) { it } + fadeOut(
+                        tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)
+                    )
                 },
                 label = "dockCard"
             ) {
@@ -623,13 +623,15 @@ fun PullUpDock(
                 val shoulderChord = floatPetWidth + 70.dp
                 val shoulderRise = shoulderChord * (18f / 156f)
                 val petPress = 5.dp
-                // 拖拽一体拉伸（2026-10-26 定稿）：肩升以 0.55 倍量跟头升，
-                // 面板纵向拉长 = 肩线 rise 增大（shape 与 dressing 同一
-                // effectiveRise，玻璃面 shape 同一实例）；外层 Box 向上长
-                // headRise（底锚不动——AnimatedVisibility 底锚 BottomCenter/
-                // BottomEnd，故只向上长、面板不移位）；宠物 offset 公式
-                // 一字不动（视觉头底恰好抬升 headRise，dragShoulder 在
-                // 式中相消——几何见 FloatingPet 脖子注释）。
+                // 拖拽一体拉伸（2026-10-26 定稿，22:10 后肩升锁定模型）：
+                // 肩升锁定等于头升（FloatingPet 侧同帧赋值），面板纵向拉长
+                // = 肩线 rise 增大（shape 与 dressing 同一 effectiveRise，
+                // 玻璃面 shape 同一实例）；满拉伸拱高 = 肩 rise（D1 约
+                // 18.1dp）＋头升 32dp ≈ 50.1dp（1:1 拉伸的直接后果，列为
+                // 真机复核项）；外层 Box 向上长 headRise（底锚不动——
+                // AnimatedVisibility 底锚 BottomCenter/BottomEnd，故只向上
+                // 长、面板不移位）；宠物 offset 公式一字不动（头底与肩峰
+                // 压入 5dp 全程恒定，见 DragBody 锁定模型）。
                 val dragHeadRiseDp = with(density) { dragBody.headRisePx.toDp() }
                 val dragShoulderRiseDp = with(density) { dragBody.shoulderRisePx.toDp() }
                 val dragRise = shoulderRise + dragShoulderRiseDp
@@ -833,14 +835,17 @@ fun PullUpDock(
                     }
                 }
                 // 圆肩批：连接混合宠物（面板之后画、前面图层；面板底锚
-                // 不变，宠物只向上长；输入态不呈现，横屏面板在场时也让位，
-                // 保证任何时刻恰一只）。手势语义（2026-10-26 入口子项）：
+                // 不变，宠物只向上长）。单宠物原则（本批横屏整体）：
+                // 竖屏输入态不呈现（让位给意图宠物），横屏输入态整只留
+                // Dock（头＋Dock 面板一个身体，卡片无宠物——意图宠物横屏
+                // 不挂载，见 IntentEntry），仍保证任何时刻恰一只。
+                // 手势语义（2026-10-26 入口子项）：
                 // 点宠物 = 问（直进意图输入，327 语义恢复，另带 3dp 小峰值），
                 // 长按 = 表演清单；testTag 沿用 dock_pet_cell（冒烟入口
                 // 定位契约不变）；layout_check 已随之上新为接触/压入几何
                 // （压入肩峰 5dp、脸盘完整）。B2+A 几何一字不动（宠物系数
                 // 1.224、弦 +70dp、rise 18/156、压入 5dp）。
-                if (!intentInputMode) {
+                if (!intentInputMode || isLandscapeDock) {
                     HybridPet(
                         petWidth = floatPetWidth,
                         onPetTap = {
@@ -849,6 +854,12 @@ fun PullUpDock(
                         },
                         onPetLongPress = onPetCellLongPress,
                         dragBodyState = dragBody,
+                        // 横屏聚焦：整只留 Dock、注视看向左侧卡片（DOCK_LEFT
+                        // 经现有通道得头 −8px、瞳孔 −5px 满幅向左，走头弹簧、
+                        // 平滑不跳；repo 说话目标仍优先，退出聚焦后回 null、
+                        // 注视自然回落）。
+                        gazeOverride = if (isLandscapeDock && intentInputMode)
+                            GazeTarget.DOCK_LEFT else null,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress))

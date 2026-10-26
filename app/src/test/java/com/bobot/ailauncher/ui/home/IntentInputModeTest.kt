@@ -196,12 +196,12 @@ class IntentInputModeTest {
     }
 
     @Test
-    fun `底边垫高 - 横屏恒为导航垫不抬底垫`() {
-        // Bob 横屏不推口径：横屏专注态不做任何键盘避让——停靠 inset、悬浮、
-        // 已收缩信号一律不抬垫，垫恒为导航垫（停靠键盘靠窗口收缩自然顶起，
-        // 悬浮键盘由用户自己放位置）
+    fun `底边垫高 - 横屏恒为零不钉导航垫`() {
+        // Bob 横屏不推＋底边不钉导航垫口径（本批）：横屏专注态不做任何
+        // 键盘避让——停靠 inset、悬浮、已收缩信号一律不抬垫，垫恒为 0dp
+        // （停靠键盘靠窗口收缩自然顶起，悬浮键盘由用户自己放位置）
         org.junit.Assert.assertEquals(
-            padNav,
+            0.dp,
             resolveFocusBottomPad(
                 imeBottom = 300.dp, windowResized = false, keyboardExpected = true,
                 isPortrait = false, windowHeight = 360.dp, navClearance = padNav,
@@ -209,7 +209,7 @@ class IntentInputModeTest {
             )
         )
         org.junit.Assert.assertEquals(
-            padNav,
+            0.dp,
             resolveFocusBottomPad(
                 imeBottom = 0.dp, windowResized = false, keyboardExpected = true,
                 isPortrait = false, windowHeight = 360.dp, navClearance = padNav,
@@ -217,7 +217,7 @@ class IntentInputModeTest {
             )
         )
         org.junit.Assert.assertEquals(
-            padNav,
+            0.dp,
             resolveFocusBottomPad(
                 imeBottom = 0.dp, windowResized = true, keyboardExpected = true,
                 isPortrait = false, windowHeight = 360.dp, navClearance = padNav,

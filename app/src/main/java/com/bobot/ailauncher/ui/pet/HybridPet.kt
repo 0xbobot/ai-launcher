@@ -34,6 +34,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.bobot.ailauncher.data.BatteryState
+import com.bobot.ailauncher.data.GazeTarget
 import com.bobot.ailauncher.data.PetRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -89,6 +90,9 @@ fun HybridPet(
     // 本层不含任何拖拽逻辑；默认 null = 意图路径旧行为。Dock 侧由
     // PullUpDock remember 后传入。
     dragBodyState: DragBodyState? = null,
+    // 注视 override：只透传给 FloatingPet，本层不含注视逻辑；
+    // 默认 null 不生效。横屏聚焦时 PullUpDock 传入 DOCK_LEFT。
+    gazeOverride: GazeTarget? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -324,6 +328,7 @@ fun HybridPet(
                 onTap = { hybridTap() },
                 onLongPress = { hybridLongPress() },
                 dragBody = dragBodyState,
+                gazeOverride = gazeOverride,
             )
         }
         // 视频层：仅播片/待换片时挂载。PlayerView 默认 SurfaceView 画在
