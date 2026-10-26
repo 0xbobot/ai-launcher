@@ -97,7 +97,7 @@ fun HomeScreen(
     onBlindActiveChange: (Boolean) -> Unit = {},
     // v0.68.32：扇形选择状态上报 MainScreen（扇形绘制层级提到 Dock 之上）
     // v0.68.35：Selecting 自带动态段列表，不再传自定义标签
-    // v0.68.42：上报全状态（Selecting/Dismissing/PhotoFlash 共用顶层绘制）
+    // v0.68.42：上报全状态（Selecting/Dismissing 共用顶层绘制）
     onBlindSelectingChange: (BlindUiState) -> Unit = { },
     // v0.68.64：把 controller 交给 MainScreen——退出编辑态时调 exitEditMode()
     // 清钉住并同步状态（MainScreen 直接 Hidden 会导致 HomeScreen 副本残留）
@@ -340,7 +340,7 @@ fun HomeScreen(
     // v0.68.35：旧"自定义☆"固定槽位已作废——扇形快捷段直接读七仔装备列表，
     // 增删复用七仔装备长按/+ 流程，不再需要扇形侧配置弹窗
     // v0.68.32：扇形选择状态上报 MainScreen（扇形在 MainScreen 最顶层绘制，盖住 Dock）
-    // v0.68.42：上报全状态（Selecting/Dismissing/PhotoFlash）；收起动画 160ms 后通知
+    // v0.68.42：上报全状态（Selecting/Dismissing）；收起动画 160ms 后通知
     // controller 收尾（动画本身 120ms，留余量）
     val blindFanState = blindUi
     androidx.compose.runtime.LaunchedEffect(blindFanState) {

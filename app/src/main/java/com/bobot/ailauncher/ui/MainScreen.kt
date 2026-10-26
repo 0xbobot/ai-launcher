@@ -296,7 +296,7 @@ private fun HomeHost(
     // 避免长按（~400ms）与盲操 dwell（120ms）在重叠区双重触发
     var blindActive by remember { mutableStateOf(false) }
     // v0.68.32：扇形全状态（上报自 HomeScreen）——扇形在最顶层绘制，盖住 Dock
-    // v0.68.42：Selecting/Dismissing/PhotoFlash 共用顶层
+    // v0.68.42：Selecting/Dismissing 共用顶层
     var blindFanState by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
     // v0.68.64：controller 引用（HomeScreen 上报；退出编辑态时调 exitEditMode 清钉住）
     var blindCtlRef by remember { mutableStateOf<BlindCaptureController?>(null) }
@@ -396,7 +396,7 @@ private fun HomeHost(
             cleanHome = dockState != DockState.D3,
             onBlindActiveChange = { blindActive = it },
             // v0.68.32：扇形状态上报（顶层绘制）+ Dock 区高度（圆心钳制）
-            // v0.68.42：上报全状态（Selecting/Dismissing/PhotoFlash）
+            // v0.68.42：上报全状态（Selecting/Dismissing）
             onBlindSelectingChange = { s ->
                 blindFanState = s
             },
@@ -673,7 +673,8 @@ private fun HomeHost(
             )
         }
         // v0.68.32：盲操扇形——临时操作层级最高，在 MainScreen 最顶层绘制（盖住 Dock/卡片/弹窗）
-        // v0.68.42：Dismissing（收起 120ms 内收+淡出）/ PhotoFlash（快门白闪 80ms）共用顶层
+        // v0.68.42：Dismissing（收起 120ms 内收+淡出）共用顶层
+        // 2026-10-27 fan-quick-services 批：PhotoFlash 应用内快门闪作废（拍照直开系统相机）
         when (val s = blindFanState) {
             is BlindUiState.Selecting -> BlindCaptureFan(
                 centerX = s.centerX,
@@ -763,12 +764,6 @@ private fun HomeHost(
                     )
                 }
             }
-            is BlindUiState.PhotoFlash -> Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .zIndex(100f)
-                    .background(Color.White.copy(alpha = 0.85f))
-            )
             BlindUiState.Hidden -> { }
         }
     }
