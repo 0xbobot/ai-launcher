@@ -251,6 +251,9 @@ private fun HomeHost(
     // 「问七仔」提交后回首页看结果）。开 D3 抽屉即退出（见 HomeScreen 调用点）。
     var intentInputMode by remember { mutableStateOf(false) }
     var intentFocusWanted by remember { mutableStateOf(false) }
+    // 竖屏切换闪烁修复（2026-10-27）：退出 funnel 进行中（HomeScreen
+    // 上报的 perchTransition.isExiting）——Dock 宠物挂载门用。
+    var intentExitInProgress by remember { mutableStateOf(false) }
     // 宠物表演清单（2026-10-26 宠物交互重构，入口子项）：长按宠物打开
     // 的单层 8 行表演清单；点宠物已恢复 327 语义（问，直进意图输入），
     // 不再开关清单。进输入态时清单状态一并清零（见 onPetCellTap），
@@ -420,6 +423,7 @@ private fun HomeHost(
             intentInputMode = intentInputMode,
             intentRequestFocus = intentFocusWanted,
             onExitIntentInput = { intentInputMode = false },
+            onExitFocusChange = { intentExitInProgress = it },
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位）
@@ -438,6 +442,7 @@ private fun HomeHost(
             // 先关清单再进输入，避免退出输入态后清单重现）；长按宠物 =
             // 表演清单（单层 8 行）。清单 2 级与意图搜索行已随 2 级移除。
             intentInputMode = intentInputMode,
+            exitInProgress = intentExitInProgress,
             onPetCellTap = {
                 petActionsVisible = false
                 enterIntentInput(focus = true)

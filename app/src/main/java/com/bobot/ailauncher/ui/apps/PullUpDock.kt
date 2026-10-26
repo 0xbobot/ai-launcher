@@ -356,6 +356,11 @@ fun PullUpDock(
     petActionsVisible: Boolean = false,
     onPetActionsVisibleChange: (Boolean) -> Unit = {},
     intentInputMode: Boolean = false,
+    // 竖屏切换闪烁修复（2026-10-27）：退出 funnel 进行中（HomeScreen
+    // 经 MainScreen 上报的 perchTransition.isExiting）——Dock 宠物压到
+    // 落地后才挂载，否则与在途意图宠物在不同高度同时在场（70% 翻转
+    // 点双影）；落地交接的意图宠物 alpha 淡出见 HomeScreen 落地段。
+    exitInProgress: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -942,7 +947,7 @@ fun PullUpDock(
                 // 定位契约不变）；layout_check 已随之上新为接触/压入几何
                 // （压入肩峰 5dp、脸盘完整）。B2+A 几何一字不动（宠物系数
                 // 1.224、弦 +70dp、rise 18/156、压入 5dp）。
-                if (!intentInputMode) {
+                if (dockPetVisible(intentInputMode, exitInProgress)) {
                     HybridPet(
                         petWidth = floatPetWidth,
                         onPetTap = {
@@ -1228,6 +1233,14 @@ private fun DockIconButton(
  */
 internal fun dockCardFocusSwapIsFadeOnly(isLandscape: Boolean, inFocusSignal: Boolean): Boolean =
     isLandscape && inFocusSignal
+
+/**
+ * 竖屏切换闪烁修复（2026-10-27）：Dock 宠物挂载门（纯函数，单测锁死）。
+ * 输入态让位意图宠物；退出 funnel 进行中仍让位——Dock 宠物只在落地
+ * （finishExit）后挂载，否则与在途意图宠物在不同高度同时在场。
+ */
+internal fun dockPetVisible(intentInputMode: Boolean, exitInProgress: Boolean): Boolean =
+    !intentInputMode && !exitInProgress
 
 /** v0.68.44：页脚刊头字距文本 */
 @Composable
