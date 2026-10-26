@@ -1247,7 +1247,9 @@ fun IntentEntry(
             dragBodyState = intentDragBody,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .offset(y = -(panelHeight + INTENT_SHOULDER_RISE - INTENT_PET_PRESS))
+                // 走纯函数（单测锁定）：值与旧式一字相同（面板高＋基底
+                // rise－压入），拖拽不改盒位（见文件头压入不变量）。
+                .offset(y = intentPetBoxOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, INTENT_PET_PRESS.value).dp)
                 .offset(
                     x = travelDeltaX * (1f - petTravel.value),
                     y = travelDeltaY * (1f - petTravel.value)
@@ -1273,8 +1275,9 @@ fun IntentEntry(
                     .align(Alignment.BottomCenter)
                     // 拖拽跟头（Dock 同款，PullUpDock:900）：清单在宠物头上方，
                     // 头升多少清单跟多少（只跟头升，不跟横移／头沉——清单只在
-                    // 静止时长按打开，拖拽中 longPressFired 门禁）。
-                    .offset(y = -(panelHeight + INTENT_SHOULDER_RISE + intentPetHeight - INTENT_PET_PRESS + 8.dp + intentDragHeadRiseDp))
+                    // 静止时长按打开，拖拽中 longPressFired 门禁）。走纯函数
+                    // （单测锁定）。
+                    .offset(y = intentListOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, intentPetHeight.value, INTENT_PET_PRESS.value, intentDragHeadRiseDp.value).dp)
                     .testTag("pet_action_list")
             )
         }
@@ -1291,10 +1294,11 @@ fun IntentEntry(
                     // 拖拽跟头（2026-10-27 气泡跟头）：基底不动，跟随量取复用后
                     // 的同一组 DragBody 量（头横移、－头升＋头沉），另加进态滑入
                     // travelDelta×(1－petTravel) 让气泡随宠物滑入；不加肩升
-                    // （头跟随已含头升，见文件头压入不变量）。
+                    // （头跟随已含头升，见文件头压入不变量）。走纯函数
+                    // （单测锁定）。
                     .offset(
-                        x = intentDragHeadXdp + travelDeltaX * (1f - petTravel.value),
-                        y = -(panelHeight + INTENT_SHOULDER_RISE + intentPetHeight - INTENT_PET_PRESS + 8.dp) - intentDragHeadRiseDp + intentDragHeadSinkDp + travelDeltaY * (1f - petTravel.value)
+                        x = intentBubbleOffsetXDps(intentDragHeadXdp.value, travelDeltaX.value, petTravel.value).dp,
+                        y = intentBubbleOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, intentPetHeight.value, INTENT_PET_PRESS.value, intentDragHeadRiseDp.value, intentDragHeadSinkDp.value, travelDeltaY.value, petTravel.value).dp
                     )
             )
         }
