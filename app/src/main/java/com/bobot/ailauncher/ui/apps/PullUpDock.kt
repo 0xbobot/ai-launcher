@@ -91,6 +91,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import com.bobot.ailauncher.ui.pet.DragBodyState
 import com.bobot.ailauncher.ui.pet.HybridPet
 import com.bobot.ailauncher.ui.pet.PetActionList
 import com.bobot.ailauncher.data.PetRepository.PetManualAction
@@ -390,6 +391,10 @@ fun PullUpDock(
     // 肩线弹性（2026-10-25，Bob 拍板）：仅 Dock 图标点按触发。
     // 峰值动画单位 dp：0 静止 → 7 峰值 → -1 落回过冲 → 0。
     val shoulderScope = rememberCoroutineScope()
+    // 拖拽一体拉伸状态机（2026-10-26 定稿）：在 PullUpDock 函数体顶层
+    // remember（不在 AnimatedVisibility 内容里），visibility 切换不丢态；
+    // 只透传给 Dock 的 HybridPet → FloatingPet，意图侧不传（旧行为）。
+    val dragBody = remember { DragBodyState(shoulderScope) }
     val shoulderPeakAnim = remember { Animatable(0f) }
     val shoulderPeakDp by shoulderPeakAnim.asState()
     // 肩线协同（2026-10-26 入口子项，评审 P1-6 口径统一）：
@@ -618,13 +623,23 @@ fun PullUpDock(
                 val shoulderChord = floatPetWidth + 70.dp
                 val shoulderRise = shoulderChord * (18f / 156f)
                 val petPress = 5.dp
+                // 拖拽一体拉伸（2026-10-26 定稿）：肩升以 0.55 倍量跟头升，
+                // 面板纵向拉长 = 肩线 rise 增大（shape 与 dressing 同一
+                // effectiveRise，玻璃面 shape 同一实例）；外层 Box 向上长
+                // headRise（底锚不动——AnimatedVisibility 底锚 BottomCenter/
+                // BottomEnd，故只向上长、面板不移位）；宠物 offset 公式
+                // 一字不动（视觉头底恰好抬升 headRise，dragShoulder 在
+                // 式中相消——几何见 FloatingPet 脖子注释）。
+                val dragHeadRiseDp = with(density) { dragBody.headRisePx.toDp() }
+                val dragShoulderRiseDp = with(density) { dragBody.shoulderRisePx.toDp() }
+                val dragRise = shoulderRise + dragShoulderRiseDp
                 // 圆肩轮廓（弦长 = 宠物宽 + 两侧各 35dp）；shape 只影响
                 // 绘制（clip / 玻璃 / 高光 / 内晕），不改变布局尺寸，故
                 // dockPanelHeight 回写不会引起布局循环。
-                val shoulderShape = remember(dockPanelHeight, seatCompact, shoulderPeakDp) {
+                val shoulderShape = remember(dockPanelHeight, seatCompact, shoulderPeakDp, dragShoulderRiseDp) {
                     DockShoulderShape(
                         chordDp = shoulderChord,
-                        riseDp = shoulderRise,
+                        riseDp = dragRise,
                         cornerDp = 28.dp,
                         peakDp = shoulderPeakDp.dp,
                     )
@@ -632,7 +647,7 @@ fun PullUpDock(
                 Box(
                     modifier = Modifier
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                        .height(dockPanelHeight + floatPetHeight + shoulderRise - petPress + shoulderPeakDp.dp)
+                        .height(dockPanelHeight + floatPetHeight + shoulderRise - petPress + shoulderPeakDp.dp + dragHeadRiseDp)
                 ) {
                 Column(
                     modifier = Modifier
@@ -676,9 +691,10 @@ fun PullUpDock(
                             noRim = true
                         )
                         // 圆肩批：弧形高光 + 暖白内晕（玻璃之上、图标之下）。
+                        // 拖拽一体拉伸：rise 跟 shape 同一 effectiveRise。
                         .dockShoulderDressing(
                             chordDp = shoulderChord,
-                            riseDp = shoulderRise,
+                            riseDp = dragRise,
                             cornerDp = 28.dp,
                             peakDp = shoulderPeakDp.dp
                         )
@@ -832,6 +848,7 @@ fun PullUpDock(
                             onPetCellTap()
                         },
                         onPetLongPress = onPetCellLongPress,
+                        dragBodyState = dragBody,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress))
@@ -848,7 +865,7 @@ fun PullUpDock(
                         onDismiss = { onPetActionsVisibleChange(false) },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp))
+                            .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp + dragHeadRiseDp))
                             .testTag("pet_action_list")
                     )
                 }
