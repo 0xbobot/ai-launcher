@@ -165,12 +165,12 @@ internal fun SpeechBubble(
  * 气泡，现有机制），宿主不另造注视通道、不驱动注视。
  *
  * 单挂载点契约（供入口手势子项集成）：全 App 同一时刻只挂一个本宿主。
- * 本批挂在 PetZone 列尾（隐藏时零高度，Dock 在 MainScreen 另行锚定、
- * 不会被 PetZone 增高顶走；气泡在 Dock 宠物上方，故 tailDown = true）。
- * 入口子项把宿主移到 Dock 宠物旁（PullUpDock 内 HybridPet 附近）时，
- * 须删掉 PetZone 的挂载点，禁止两处同挂（否则同一条 say 出现两个气泡）；
- * 移动后若气泡仍在宠物上方，保持 tailDown = true；若改放宠物下方，
- * 改传 tailDown = false。
+ * 家里宿主挂在 PullUpDock 外层 Box（与 Dock 宠物同一 Box、同一中轴线，
+ * 贴头锚定＋拖拽跟头；气泡在 Dock 宠物上方，故 tailDown = true）；
+ * 意图宿主挂在 IntentEntry 覆盖层（卡片宠物上方，同款锚定＋跟头＋滑入）。
+ * PetZone 列尾挂载点已于 2026-10-27 删除，禁止两处同挂（否则同一条
+ * say 出现两个气泡）；气泡在宠物上方时保持 tailDown = true，若改放
+ * 宠物下方，改传 tailDown = false。
  */
 @Composable
 internal fun PetSpeechBubbleHost(

@@ -94,6 +94,7 @@ import androidx.compose.ui.unit.IntOffset
 import com.bobot.ailauncher.ui.pet.DragBodyState
 import com.bobot.ailauncher.ui.pet.HybridPet
 import com.bobot.ailauncher.ui.pet.PetActionList
+import com.bobot.ailauncher.ui.pet.PetSpeechBubbleHost
 import com.bobot.ailauncher.data.PetRepository.PetManualAction
 import kotlinx.coroutines.delay
 import com.bobot.ailauncher.data.AppCatalog
@@ -660,6 +661,8 @@ fun PullUpDock(
                 // 长、面板不移位）；宠物 offset 公式一字不动（头底与肩峰
                 // 压入 5dp 全程恒定，见 DragBody 锁定模型）。
                 val dragHeadRiseDp = with(density) { dragBody.headRisePx.toDp() }
+                val dragHeadXdp = with(density) { dragBody.headXPx.toDp() }
+                val dragHeadSinkDp = with(density) { dragBody.headSinkPx.toDp() }
                 val dragShoulderRiseDp = with(density) { dragBody.shoulderRisePx.toDp() }
                 val dragRise = shoulderRise + dragShoulderRiseDp
                 // 圆肩轮廓（弦长 = 宠物宽 + 两侧各 35dp）；shape 只影响
@@ -899,6 +902,30 @@ fun PullUpDock(
                             .align(Alignment.BottomCenter)
                             .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp + dragHeadRiseDp))
                             .testTag("pet_action_list")
+                    )
+                }
+                // 家里气泡宿主（2026-10-27 气泡搬家）：原 PetZone 列尾宿主移至
+                // 此处——与 Dock 宠物同一外层 Box、同一中轴线（BottomCenter＋
+                // fillMaxWidth，内容居中对齐宠物中心），尾巴朝下指宠物
+                // （tailDown=true 不变）；按钮在文本下方同一中轴线，布局一字
+                // 不动。门控：家里只在 !intentInputMode（= PetZone 的
+                // !inputActive，HomeScreen 传入 intentInputMode）且清单未开时
+                // 挂载——清单与气泡同锚点须让位（意图宿主同款门控；speech 状态
+                // 在仓储里不丢，清单关闭后重挂复现）。单挂载点契约不变：
+                // PetZone 挂载点已删，意图宿主只在聚焦覆盖层。
+                // 拖拽跟头：跟随量取本 perch 的 DragBodyState（头横移、
+                // －头升＋头沉），与 FloatingPet 头盒同一量（dragHeadX／
+                // dragHeadY），故拖拽中气泡贴头走、不脱节。
+                if (!intentInputMode && !petActionsVisible) {
+                    PetSpeechBubbleHost(
+                        tailDown = true,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .offset(
+                                x = dragHeadXdp,
+                                y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp) - dragHeadRiseDp + dragHeadSinkDp
+                            )
                     )
                 }
                 } // v6 外层 Box（面板 + 前面图层七仔）

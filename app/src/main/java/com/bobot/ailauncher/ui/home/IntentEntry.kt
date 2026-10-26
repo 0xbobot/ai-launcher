@@ -50,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -116,6 +117,7 @@ import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.data.CapabilityRegistry
+import com.bobot.ailauncher.ui.pet.DragBodyState
 import com.bobot.ailauncher.ui.pet.HybridPet
 import com.bobot.ailauncher.ui.pet.PetActionList
 import com.bobot.ailauncher.ui.pet.PetSpeechBubbleHost
@@ -154,6 +156,53 @@ private val INTENT_PET_PRESS = 5.dp
  */
 private val INTENT_SHOULDER_CHORD = 156.4.dp
 private val INTENT_SHOULDER_RISE = 18.0.dp
+
+/**
+ * 意图拖拽几何（纯 dp 函数，可单测；量全部取自 DragBody 同一套映射，
+ * 故意图拖拽与 Dock 逐项同值）。坐标：面板底为原点、向上为负。
+ *
+ * 压入不变量：宠物盒偏移一字不动（Dock 侧同款构造，PullUpDock 注释
+ * “宠物 offset 公式一字不动”）——盒不动、头在盒内升 headRise、卡片
+ * 肩形升 dragShoulder（FloatingPet 锁定 headRise 1:1），头底与肩峰
+ * 压入 5dp 全程恒定。盒再升 dragShoulder 会双倍计数：头顶出肩峰
+ * (dragShoulder − press) 的缝，违背“任何拖拽帧都不许头身分开”。
+ * 气泡／清单跟随头升（不跟肩升）：头跟随已含头升，肩升另由形状承担，
+ * 双加同样顶出缝。
+ */
+internal fun intentCardShapeRiseDp(baseRiseDp: Float, dragShoulderRiseDp: Float): Float =
+    baseRiseDp + dragShoulderRiseDp
+
+/** 意图宠物盒偏移 Y：面板高＋基底 rise－压入；拖拽不改盒位（见上）。 */
+internal fun intentPetBoxOffsetYDp(panelHeightDp: Float, baseRiseDp: Float, pressDp: Float): Float =
+    -(panelHeightDp + baseRiseDp - pressDp)
+
+/** 意图气泡总偏移 Y：基底（面板高＋基底 rise＋宠物高－压入＋8dp）＋头跟随（－头升＋头沉）＋进态滑入 travelDeltaY×(1－travel)。 */
+internal fun intentBubbleOffsetYDp(
+    panelHeightDp: Float,
+    baseRiseDp: Float,
+    petHeightDp: Float,
+    pressDp: Float,
+    headRiseDp: Float,
+    headSinkDp: Float,
+    travelDeltaYDp: Float,
+    travel: Float,
+): Float =
+    -(panelHeightDp + baseRiseDp + petHeightDp - pressDp + 8f) - headRiseDp + headSinkDp +
+        travelDeltaYDp * (1f - travel)
+
+/** 意图气泡总偏移 X：头横移＋进态滑入 travelDeltaX×(1－travel)。 */
+internal fun intentBubbleOffsetXDps(headXDps: Float, travelDeltaXDps: Float, travel: Float): Float =
+    headXDps + travelDeltaXDps * (1f - travel)
+
+/** 意图清单总偏移 Y（Dock 同款：只跟头升）：基底＋头升。 */
+internal fun intentListOffsetYDp(
+    panelHeightDp: Float,
+    baseRiseDp: Float,
+    petHeightDp: Float,
+    pressDp: Float,
+    headRiseDp: Float,
+): Float =
+    -(panelHeightDp + baseRiseDp + petHeightDp - pressDp + 8f + headRiseDp)
 
 /** 意图卡片底部圆角外延区高度（2026-10-26 Bob 点选圆角外延，设计附录）。 */
 private val INTENT_FLARE_HEIGHT = 24.dp
@@ -912,15 +961,30 @@ fun IntentEntry(
         }
     }
     val intentPetHeight = INTENT_PET_WIDTH * (1318f / 1043f)
+    // 意图覆盖层专属拖拽状态机（2026-10-27 意图拖拽复用）：与 Dock 的
+    // PullUpDock:399 实例绝不共用——两 perch 各自独立实例，动效走同一套
+    // DragBody 纯函数与家族弹簧，故逐项同值。remember 无 key：面板组合
+    // 内稳定；FloatingPet 的 pointerInput(Unit) 捕获同一实例。
+    // 传给 HybridPet 后意图宠物即走一体拉伸全套（tanh 上拉／0.8×横移／
+    // 下压沉入／肩 1:1＋横移滞后／倾角 5°／松手弹簧＋过冲压扁），旧
+    // head-only 跟手分支不再走；点按空操作／长按开清单／slop 仲裁
+    // 全在 FloatingPet 手势层，一字不动。
+    val intentDragScope = rememberCoroutineScope()
+    val intentDragBody = remember { DragBodyState(intentDragScope) }
+    val intentDragHeadRiseDp = with(densityNow) { intentDragBody.headRisePx.toDp() }
+    val intentDragHeadXdp = with(densityNow) { intentDragBody.headXPx.toDp() }
+    val intentDragHeadSinkDp = with(densityNow) { intentDragBody.headSinkPx.toDp() }
+    val intentDragShoulderRiseDp = with(densityNow) { intentDragBody.shoulderRisePx.toDp() }
     // 意图卡片轮廓（输入态专注·圆角外延）：顶缘复用 Dock 肩线、底部外延，
     // 参数常量见文件头。横屏整体（本批）：横屏纯圆角 28dp、无外延
     // （flare 0、extent 0——IntentCardShape 在 flare=0 时走真圆角底边，
     // 无外延残留、无退化贝塞尔凸起）；竖屏保留 24dp 外延＋20dp 外扩。
-    // remember keyed on isLandscapeCard（横竖屏切换时形状重建）。
-    val intentCardShape = remember(isLandscapeCard) {
+    // remember keyed on isLandscapeCard（横竖屏切换时形状重建）＋拖拽肩升
+    // （Dock 同款：shape 随 dragShoulderRiseDp 逐帧重建，肩形与头升同频）。
+    val intentCardShape = remember(isLandscapeCard, intentDragShoulderRiseDp) {
         IntentCardShape(
             chordDp = INTENT_SHOULDER_CHORD,
-            riseDp = INTENT_SHOULDER_RISE,
+            riseDp = INTENT_SHOULDER_RISE + intentDragShoulderRiseDp,
             cornerDp = 28.dp,
             flareDp = if (isLandscapeCard) 0.dp else INTENT_FLARE_HEIGHT,
             flareExtentDp = if (isLandscapeCard) 0.dp else 20.dp,
@@ -1169,13 +1233,23 @@ fun IntentEntry(
         // （左侧卡片承载身体，坐法与竖屏同款：前面图层、居中、脚底压进
         // 卡片肩峰；进态位移横屏恒为零，见上方 LaunchedEffect 横屏分支；
         // travel／travelAlpha 仍照常跑，保持退态 funnel 状态机一致）。
+        // 拖拽复用（2026-10-27）：传意图专属 intentDragBody 后走一体拉伸全套。
+        // 盒偏移一字不动（Dock 同款构造）：盒不动、头在盒内升、肩形升锁定
+        // 头升，压入 5dp 全程恒定；盒再升肩升会双倍计数顶出缝（见文件头
+        // 压入不变量）。抬起 32dp 的头不 clip：覆盖层 Box 无 clip 修饰、
+        // 面板的 .clip(intentCardShape) 在兄弟面板列上不在覆盖层、
+        // HomeScreen 全仓无 .clip()，静止宠物本就向上探出、拖拽只沿同方向
+        // 多探 32dp；屏顶是唯一物理极限（与动作清单同款既有 caveat）。
         HybridPet(
             petWidth = INTENT_PET_WIDTH,
             onPetTap = { /* 意图态已在问，点按空操作；清单只挂长按 */ },
             onPetLongPress = { petActionsVisible = true },
+            dragBodyState = intentDragBody,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .offset(y = -(panelHeight + INTENT_SHOULDER_RISE - INTENT_PET_PRESS))
+                // 走纯函数（单测锁定）：值与旧式一字相同（面板高＋基底
+                // rise－压入），拖拽不改盒位（见文件头压入不变量）。
+                .offset(y = intentPetBoxOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, INTENT_PET_PRESS.value).dp)
                 .offset(
                     x = travelDeltaX * (1f - petTravel.value),
                     y = travelDeltaY * (1f - petTravel.value)
@@ -1199,7 +1273,11 @@ fun IntentEntry(
                 onDismiss = { petActionsVisible = false },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .offset(y = -(panelHeight + INTENT_SHOULDER_RISE + intentPetHeight - INTENT_PET_PRESS + 8.dp))
+                    // 拖拽跟头（Dock 同款，PullUpDock:900）：清单在宠物头上方，
+                    // 头升多少清单跟多少（只跟头升，不跟横移／头沉——清单只在
+                    // 静止时长按打开，拖拽中 longPressFired 门禁）。走纯函数
+                    // （单测锁定）。
+                    .offset(y = intentListOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, intentPetHeight.value, INTENT_PET_PRESS.value, intentDragHeadRiseDp.value).dp)
                     .testTag("pet_action_list")
             )
         }
@@ -1213,7 +1291,15 @@ fun IntentEntry(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .offset(y = -(panelHeight + INTENT_SHOULDER_RISE + intentPetHeight - INTENT_PET_PRESS + 8.dp))
+                    // 拖拽跟头（2026-10-27 气泡跟头）：基底不动，跟随量取复用后
+                    // 的同一组 DragBody 量（头横移、－头升＋头沉），另加进态滑入
+                    // travelDelta×(1－petTravel) 让气泡随宠物滑入；不加肩升
+                    // （头跟随已含头升，见文件头压入不变量）。走纯函数
+                    // （单测锁定）。
+                    .offset(
+                        x = intentBubbleOffsetXDps(intentDragHeadXdp.value, travelDeltaX.value, petTravel.value).dp,
+                        y = intentBubbleOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, intentPetHeight.value, INTENT_PET_PRESS.value, intentDragHeadRiseDp.value, intentDragHeadSinkDp.value, travelDeltaY.value, petTravel.value).dp
+                    )
             )
         }
         // ---- 输入态专注 D·✕ 一键退出（卡片角，48dp 热区） ----
