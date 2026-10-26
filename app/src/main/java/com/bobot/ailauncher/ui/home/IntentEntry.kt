@@ -6,10 +6,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,7 +22,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -544,8 +547,11 @@ fun IntentEntry(
     // HomeScreen 持有的同一过渡状态与单一退出入口。传 perchTransition
     // 时宠物位移／alpha／影子走共享 Animatable（进出同一弹簧、退态复用
     // 进态冻结位移量）；不传时走本函数内旧的本地 Animatable（独立使用
-    // 时行为与 355 一致）。onExitFocusRequest 是 D 的 ✕ 一键退出也要调
-    // 的唯一入口：✕ 只调它，不自写退出动画；默认回落到 onRequestExitInput。
+    // 时行为与 355 一致）。onExitFocusRequest 是卡片角 ✕ 一键退出（D）
+    // 也要调的唯一入口：✕ 只调它，不自写退出动画、不直接改
+    // intentInputMode、不清焦点不收键盘（收键盘/反向位移/复位全归
+    // funnel 一路）；HomeScreen 传入 C 的 funnel 实现，默认回落到
+    // onRequestExitInput。
     perchTransition: PetPerchTransitionState? = null,
     onExitFocusRequest: () -> Unit = onRequestExitInput,
     modifier: Modifier = Modifier
@@ -745,6 +751,14 @@ fun IntentEntry(
     // 让位）。状态须为编辑系——思考/回复/追问/权限态在场时甲板收起，
     // 不与结果槽位抢呈现。
     val showDeck = idleOrEditing && sessionFocused && text.isEmpty()
+    // 输入态专注 D·甲板应用行判定（2026-10-26 设计 §1：专注态默认隐藏，
+    // 搜索命中时才显示）：甲板应用面即卡片内结果槽位的本地结果条
+    // （DeckAppsBlock 已于 2026-10-25 随意图卡片统一整段删除，不恢复）。
+    // 判定 = 本地搜索命中非空，匹配规则沿用现状 localResults（字面键 +
+    // 拼音流键双键、字面在前合并、最多 4 个，见上 localResults 定义），
+    // 本处不新发明匹配逻辑；空文本/未命中时行根本不进槽位，不留空带。
+    // 点按行为不动：释放焦点 + onRequestExitInput + 打开应用（见槽位内）。
+    val showDeckApps = localResults.isNotEmpty()
 
     // ---- 意图卡片统一（2026-10-25，Bob 拍板） ----
     // 面板实测高：只用于宠物/清单的锚定偏移，不参与面板自身布局——
@@ -907,59 +921,48 @@ fun IntentEntry(
         // 剩下的只有下方推荐问主行（能力问题，做事型推荐，不是应用推荐，
         // 不动）+ 胶囊 + 结果槽位。
 
-        // ---- 输入区：胶囊 + 推荐问主行（2026-10-25：宠物已移出胶囊） ----
-        // 七仔不再栖坐胶囊上沿（旧 v6 坐法随 InputPetCompanion 退役），改栖
-        // 坐卡片上沿（见面板外覆盖层，与 Dock 上沿同一套坐法）。带高回到胶
-        // 囊本身；推荐行底距胶囊顶 8dp（底部对齐）不变，起横滚位置从七仔右
-        // 缘回到面板内容左缘；胶囊高实测 onGloballyPositioned 回写（首帧
-        // 默认 56dp = 胶囊 min 高，实测到即纠正）。七仔常驻（打字后示例让
-        // 位、七仔仍在场）；胶囊本体行为不动。静态布局，无尺寸动画（310 教训）。
-        var capsuleHeight by remember { mutableStateOf(56.dp) }
-        // 2026-10-25 示例行回槽（346 回归修复，Bob 23:18“推荐问法还是需要”
-        // 的前提）：346 把宠物移上卡片上沿后，带盒高从胶囊+宠物缩回只剩
-        // 胶囊，示例行沿用 -(capsuleHeight+8) 的上偏移后落到面板裁剪区外、
-        // 只剩约 6dp 被裁（与脚本 §25/a11y“示例在场可点”口径不符）。带盒
-        // 在行在场时补回行高+间距（48+8=56dp），行底回到胶囊顶上 8dp、
-        // 完整落在面板内且不与胶囊重叠；行隐藏（打字后）时带盒同步缩回，
-        // 不留空带。行本身位置公式一字不动，胶囊尺寸位置不动。
+        // ---- 卡片内顺序（输入态专注设计 §3，D 接线）：示例行 → 12dp →
+        // 输入框（56dp pill、28dp 圆角，见 IntentCapsuleField）→ 结果槽位
+        // （12dp 间距、有内容时才出现）。面板 Column 的 spacedBy(12.dp)
+        // 即此两处 12dp，不另设间距。旧带盒（input_pet_band：示例行以
+        // -(capsuleHeight+8) 负偏移叠在胶囊上方、带高随行在场与否伸缩）
+        // 就此退役：它与 12dp 口径不符（行底距胶囊顶是 8dp），且负偏移
+        // 曾在 346 把行推出面板裁剪区；示例行改为面板 Column 的直排子项，
+        // 位置由流式布局保证，不再依赖胶囊实测高。七仔仍栖坐卡片上沿
+        // （见面板外覆盖层，与 Dock 上沿同一套坐法），打字后示例让位、
+        // 七仔仍在场；胶囊本体行为不动。
+        // 示例行淡出（设计 §5 打字态）：开始输入（showExamplesRow 翻 false）
+        // 即淡出动画——进场 fadeIn 150ms、出场 fadeOut 150ms + shrinkVertically
+        // 150ms 同步一次完成，退场后行移除、不留空带、不留占位跳变第二步；
+        // 淡出只动示例行本身，不动面板 Shape/肩线（B 的活）、不动进态路径
+        // （面板进出仍由 HomeScreen 的 fade-only 承担，310 教训不变）。
+        // 点按仍为整句填入输入框、不直接提交（见 pickExample）；示例与
+        // 结果共用输入框下方槽位心智、互斥不并列（showDeck 与结果槽位
+        // 的互斥规则见上，专注态只是把它收进卡片内）。
         val showExamplesRow = showDeck && showDeckExamples && deckExamples.isNotEmpty()
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("input_pet_band")
-                .height(capsuleHeight + if (showExamplesRow) 56.dp else 0.dp)
+        AnimatedVisibility(
+            visible = showExamplesRow,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150)) + shrinkVertically(tween(150))
         ) {
-            // 胶囊本体（与应用中心同一组件；面板语境用卡片同款玻璃，见上）
-            IntentCapsuleField(
-                value = fieldValue,
-                onValueChange = { nv -> onFieldValueChange(nv) },
-                onSubmit = { submitIfReady() },
-                planning = planning,
-                requestFocusOnMount = requestFocusOnMount,
-                onFocusChanged = { capsuleFocused = it },
-                solidBackground = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .onGloballyPositioned { coords ->
-                        with(densityNow) {
-                            capsuleHeight = coords.size.height.toDp()
-                        }
-                    }
+            // 推荐问主行：从面板内容左缘起横滚；滤空时整行隐藏（按已装能力
+            // 过滤后池子可能为空，不留空白占位）
+            DeckExamplesRow(
+                examples = deckExamples,
+                onPick = { pickExample(it) }
             )
-            // 推荐问主行：底部对齐（行底距胶囊顶 8dp），从面板内容左缘起横滚；
-            // 滤空时整行隐藏（按已装能力过滤后池子可能为空，不留空白占位）
-            if (showExamplesRow) {
-                DeckExamplesRow(
-                    examples = deckExamples,
-                    onPick = { pickExample(it) },
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .fillMaxWidth()
-                        .offset(y = -(capsuleHeight + 8.dp))
-                )
-            }
         }
+        // 胶囊本体（与应用中心同一组件；面板语境用卡片同款玻璃，见上）
+        IntentCapsuleField(
+            value = fieldValue,
+            onValueChange = { nv -> onFieldValueChange(nv) },
+            onSubmit = { submitIfReady() },
+            planning = planning,
+            requestFocusOnMount = requestFocusOnMount,
+            onFocusChanged = { capsuleFocused = it },
+            solidBackground = true,
+            modifier = Modifier.fillMaxWidth()
+        )
 
         // ---- v6 后调整（Bob 2026-10-24 20:31）：胶囊下方「猜你想问」行
         // 整行删除（标签 + 后续推荐素行）；面板 Column 的 spacedBy(12.dp)
@@ -971,7 +974,12 @@ fun IntentEntry(
         // 槽位上限与条内滚动（输入态专注·卡片侧）：全部结果条共用 180dp 上限
         // （RESULT_BAR_MAX_HEIGHT 原注释即“三者共用”），超限槽位内滚动、
         // 不把卡片顶出可用高；卡片总高上限（键盘顶边到状态栏避让区）由宿主
-        // 锚定保证（见集成注意点，HomeScreen 不在本批文件范围）。
+        // 锚定保证。
+        // 状态槽接线（设计 §5，只改变化点）：打字态本地结果经 showDeckApps
+        // 进本槽；思考态 PlanningStrip 进本槽、键盘保持升起、输入框禁用沿用
+        // 现状；结果态沿用“提交即收键盘”；追问、权限（优先序最高）沿用现状；
+        // 高风险确认是全链路唯一弹窗例外，专注态不另起弹窗；气泡锚点随
+        // perch 走（卡片宠物上方 8dp）。
         Column(modifier = Modifier.testTag("intent_result_slot").heightIn(max = RESULT_BAR_MAX_HEIGHT).verticalScroll(rememberScrollState())) {
         when (val s = state) {
             is IntentUiState.NeedsPermission -> {
@@ -999,7 +1007,7 @@ fun IntentEntry(
                 PlanningStrip(onCancel = onCancelPlanning)
             }
             else -> {
-                if (localResults.isNotEmpty() &&
+                if (showDeckApps &&
                     state !is IntentUiState.NeedsConfirmation
                 ) {
                     LocalResultsBar(
@@ -1102,6 +1110,39 @@ fun IntentEntry(
                     .offset(y = -(panelHeight + INTENT_SHOULDER_RISE + intentPetHeight - INTENT_PET_PRESS + 8.dp))
                     .testTag("pet_action_list")
             )
+        }
+        // ---- 输入态专注 D·✕ 一键退出（卡片角，48dp 热区） ----
+        // 落位：覆盖层 TopEnd、顶边下 14dp（= 面板内容顶边距），圆心落在
+        // 示例行高度中心，与接合原型图“卡片角 ✕”同位；前面图层最后画、
+        // 恒在最上，不被示例行/宠物盖住。视觉沿用 StatusStrip 关闭钮同款
+        // （48dp 外框可点、内 32dp 圆、16dp ✕ 图标），不新发明样式。
+        // 点按只调单一退出入口 onExitFocusRequest（C 的 funnel）：不自写
+        // 退出动画、不直接改 intentInputMode、不清焦点、不收键盘——收键盘/
+        // 反向位移/复位全归 funnel 一路。注意：示例行横滚末段会从 ✕ 下方
+        // 经过，行尾留白已在 DeckExamplesRow 加到 64dp（✕ 48dp + 16dp
+        // 间隙），末项可完整滚出 ✕ 覆盖区再点。
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(y = 14.dp)
+                .size(48.dp)
+                .testTag("intent_focus_exit")
+                .clickable { onExitFocusRequest() },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "退出输入",
+                    tint = AILauncherColors.current.Hint,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
       }
       } // 外层 Box（面板 + 前面图层宠物 + 动作清单）
