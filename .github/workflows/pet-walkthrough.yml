@@ -1,0 +1,70 @@
+name: Pet Walkthrough P0
+
+# P0 语义：非阻塞报告任务（发布门禁是 P1）。
+# 触发：手动（可填 subset，id 前缀，空＝全量 P0）、推 pet-walkthrough-* 分支、
+# 推 main（每批一报）。失败只写进报告，不使工作流变红（步骤均 continue-on-error，
+# 报告步骤恒跑），P1 再决定是否升级为 required check。
+on:
+  workflow_dispatch:
+    inputs:
+      subset:
+        description: "Matrix item id prefix filter (comma-separated, empty = full P0)"
+        required: false
+        default: ""
+  push:
+    branches:
+      - "pet-walkthrough-*"
+      - main
+
+jobs:
+  walkthrough:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Run walkthrough numeric tests (enforce on, report only)
+        # 报告目录用测试默认值 build/pet-walkthrough（相对模块目录 app/，
+        # 即 app/build/pet-walkthrough），不在此改向，避免路径错位。
+        continue-on-error: true
+        env:
+          PETWALKTHROUGH_ENFORCE: "true"
+          PETWALKTHROUGH_SUBSET: ${{ inputs.subset }}
+        run: gradle :app:testDebugUnitTest --no-daemon
+
+      - name: Record Paparazzi snapshots
+        continue-on-error: true
+        run: gradle :app:recordPaparazziDebug --no-daemon
+
+      - name: Build walkthrough report
+        if: always()
+        run: |
+          python3 scripts/pet-walkthrough-report.py \
+            --numeric-dir app/build/pet-walkthrough \
+            --record-dir app/src/test/snapshots/images \
+            --goldens-dir app/src/test/pet-walkthrough-goldens \
+            --diff-dir walkthrough-artifacts/diffs \
+            --out walkthrough-artifacts/walkthrough-report.md
+          cp -r app/src/test/snapshots/images walkthrough-artifacts/recorded 2>/dev/null || mkdir -p walkthrough-artifacts/recorded
+          cp app/build/pet-walkthrough/report-*.json walkthrough-artifacts/ 2>/dev/null || true
+
+      - name: Upload walkthrough artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pet-walkthrough-report
+          path: |
+            walkthrough-artifacts/
+            app/build/test-results/testDebugUnitTest/
