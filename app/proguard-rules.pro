@@ -1,28 +1,23 @@
-# AI Launcher ProGuard 规则（v0.54.0 收紧：排除 Material2）
-
-# 保持主 Activity 和 Application
+# AI Launcher ProGuard 规则（v0.68.154 瘦身：收紧 keep，R8 按引用剥离）
+#
+# 收紧依据（2026-10-27 全仓审计，基底 13d466ec）：
+# - 应用代码无 Class.forName / ServiceLoader / getIdentifier / kotlin-reflect / 序列化；
+# - 导航路由为字符串字面量直连 composable（"home"/"settings"），无 typed route；
+# - 无 ViewModel / navArgument / rememberSaveable 自定义类型；应用无布局 XML、无 XML 自定义 View；
+# - manifest 组件（LauncherApp / MainActivity / PanelAccessibilityService /
+#   LauncherNotificationService / BatteryOverlayService / BatteryGuardActivity /
+#   FileProvider）由 R8 按 manifest 自动 keep；
+# - 各库自带 consumer 规则继续生效（Compose / Navigation / Biometric / OkHttp /
+#   Okio / Tink），本文件不再整包 keep；
+# - EncryptedSharedPreferences 迁移读路径仍在（LlmRouter.kt:110 调 securePrefs），
+#   Tink 经直接引用可达，不受本次收紧影响（security-crypto 依赖本身不动）。
+#
+# 保持主 Activity（显式；manifest 也会自动 keep）
 -keep class com.bobot.ailauncher.MainActivity { *; }
--keep class com.bobot.ailauncher.** { *; }
 
-# Compose Navigation
--keep class androidx.navigation.** { *; }
-
-# Biometric（v0.41.9 隐藏应用入口生物识别）
--keep class androidx.biometric.** { *; }
-
-# OkHttp
--keep class okhttp3.** { *; }
--keep class okio.** { *; }
-
-# Compose：按包精确保留，排除 Material2（androidx.compose.material）
-# icons 由 R8 按引用自动保留（17 个），不整包 keep
+# Compose：icons 由 R8 按引用自动保留（v0.55 做法），不整包 keep
 -keep class androidx.compose.material.icons.Icons { *; }
 -keep class androidx.compose.material.icons.Icons$* { *; }
--keep class androidx.compose.material3.** { *; }
--keep class androidx.compose.foundation.** { *; }
--keep class androidx.compose.ui.** { *; }
--keep class androidx.compose.runtime.** { *; }
--keep class androidx.compose.animation.** { *; }
 -dontwarn androidx.compose.**
 
 # EncryptedSharedPreferences / Tink（v0.68.89 API Key 加密存储）：
