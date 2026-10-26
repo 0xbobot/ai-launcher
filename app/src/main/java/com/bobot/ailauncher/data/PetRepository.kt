@@ -91,6 +91,31 @@ object PetRepository {
     private val _speech = MutableStateFlow<SpeechMsg?>(null)
     val speech: StateFlow<SpeechMsg?> get() = _speech.asStateFlow()
 
+    // ============ 宠物交互重构·气泡子项（评审 §9 第 3、5 题）：说话配下一步动作 ============
+    // 气泡只讲一件事 + 一个下一步动作（宠物不做列表）：每条 say 可带一个
+    // SpeechAction，渲染层（ui.pet.PetSpeechBubbleHost）据此在气泡下画一个
+    // 48dp 动作钮；无动作的 say 渲染层补一个“知道了”关闭钮，保证任何来源的
+    // say 都有可点落点。动作只带数据（会议事件 / 会话 PendingIntent / 应用
+    // 包名），不带 lambda：执行逻辑归渲染层（入会走 PetZone.joinCalendarEvent
+    // 现有路径，会话走 contentIntent 直达，兜底按包名开应用）。
+    enum class SpeechActionKind { JOIN_MEETING, OPEN_SESSION, DISMISS }
+    data class SpeechAction(
+        val kind: SpeechActionKind,
+        val label: String,
+        val meetingEvent: CalEvent? = null,
+        val sessionPendingIntent: android.app.PendingIntent? = null,
+        val appPackage: String? = null
+    )
+    private val _speechAction = MutableStateFlow<SpeechAction?>(null)
+    val speechAction: StateFlow<SpeechAction?> get() = _speechAction.asStateFlow()
+
+    // 普通通知的瞥视落点：只瞥视不出声（30 秒合并、防打扰方向不变），但瞥视
+    // 之后留一条可点气泡，不再是只转一下眼就没了。瞥视落点与 say 互斥：任何
+    // say 发布时清掉落点（最新优先）；点动作 / 点气泡关闭时清掉本条。
+    data class GlanceLanding(val id: Long, val text: String, val action: SpeechAction)
+    private val _glanceLanding = MutableStateFlow<GlanceLanding?>(null)
+    val glanceLanding: StateFlow<GlanceLanding?> get() = _glanceLanding.asStateFlow()
+
     // ============ alive-p1：注视（说前先看 / 瞥视） ============
     // 注视目标：say() 发布前先行设定，PetView 据此先转瞳孔与头再出气泡。
     private val _gazeTarget = MutableStateFlow(GazeTarget.CENTER)
@@ -108,13 +133,19 @@ object PetRepository {
      * alive-p1：播报前 200–300ms 先定向到 target 再出气泡；气泡展示时长
      * （打字机+停留+淡出，见 ui.pet.speechDisplayMs）到后注视自动释放回
      * 正前方——气泡在当前首页未必有渲染面，释放不依赖 clearSpeech。
+     * 气泡子项：action 随气泡一同发布（不先于文本），渲染层据此画下一步
+     * 动作钮；新 say 发布时清掉普通通知的瞥视落点（最新优先）。
+     * 任何来源的 say() 都经同一 speech 状态发布，渲染层不分来源——拖拽
+     * 玩笑、扇形播报等非提醒类 say 同样经气泡可见。
      */
-    fun say(text: String, target: GazeTarget = GazeTarget.CENTER) {
+    fun say(text: String, target: GazeTarget = GazeTarget.CENTER, action: SpeechAction? = null) {
         sayJob?.cancel()
         _gazeTarget.value = target
         sayJob = scope.launch {
             delay(250)
             _gazeTarget.value = target // 发布时重申，避免中间 clearSpeech 冲掉目标
+            _speechAction.value = action
+            _glanceLanding.value = null
             _speech.value = SpeechMsg(System.currentTimeMillis(), text)
             delay(com.bobot.ailauncher.ui.pet.speechDisplayMs(text))
             _gazeTarget.value = GazeTarget.CENTER
@@ -123,7 +154,13 @@ object PetRepository {
 
     fun clearSpeech() {
         _speech.value = null
+        _speechAction.value = null
         _gazeTarget.value = GazeTarget.CENTER
+    }
+
+    /** 清掉普通通知的瞥视落点（点动作 / 点气泡关闭时由渲染层调用）。 */
+    fun clearGlanceLanding() {
+        _glanceLanding.value = null
     }
 
     /** 瞥视一次：不出声、不弹泡，只让七仔「注意到」——组合层按事件持有 ≤600ms。 */
@@ -444,16 +481,32 @@ object PetRepository {
         // v0.49.0：重要通知 → AI Capsule（一次只说一件）
         // v0.64.0：重要消息不再弹 Capsule，只走七仔表情+头顶气泡+TODAY P0 置顶
         if (cat == PetCat.IMP) {
-            // 重要消息七仔也开口（alive-p1：先定向到 TODAY 再说）
-            say("${n.appName}有重要消息", GazeTarget.TODAY_CARD)
+            // 重要消息七仔也开口（alive-p1：先定向到 TODAY 再说），并配
+            // 下一步动作“打开会话”（contentIntent 直达，兜底按包名开应用）。
+            say(
+                "${n.appName}有重要消息", GazeTarget.TODAY_CARD,
+                SpeechAction(
+                    SpeechActionKind.OPEN_SESSION, "打开会话",
+                    sessionPendingIntent = n.contentIntent, appPackage = n.packageName
+                )
+            )
         } else {
             // alive-p1：普通通知只瞥视一次（≤600ms，不出声、不弹泡；
             // 同应用 30 秒内合并，沿用 sayApp 的合并口径，不刷屏）。
+            // 气泡子项：瞥视后留一条可点落点（气泡讲应用名 + “看看”动作，
+            // 点后直达会话），不再是只转一下眼就没了；落点不走 say，故不出声。
             val nowGlance = System.currentTimeMillis()
             val lastGlance = lastGlancePerApp[n.packageName] ?: 0L
             if (nowGlance - lastGlance >= 30_000L) {
                 lastGlancePerApp[n.packageName] = nowGlance
                 glance(GazeTarget.TODAY_CARD)
+                _glanceLanding.value = GlanceLanding(
+                    nowGlance, "${n.appName}有新消息",
+                    SpeechAction(
+                        SpeechActionKind.OPEN_SESSION, "看看",
+                        sessionPendingIntent = n.contentIntent, appPackage = n.packageName
+                    )
+                )
             }
         }
         // v0.64.0：十万火急判断（IMP 才判）
