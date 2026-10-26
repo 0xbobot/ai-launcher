@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.pet
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -16,6 +17,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,6 +27,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -54,8 +57,10 @@ import com.bobot.ailauncher.data.GazeTarget
 import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.PetRepository.PetManualAction
+import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.sqrt
@@ -129,6 +134,10 @@ fun FloatingPet(
     // 2026-10-26 入口子项：长按 = 表演清单（点按已还给“问”，见调用方）。
     // 默认空实现，HybridPet 转发 PullUpDock 的 onPetCellLongPress。
     onLongPress: () -> Unit = {},
+    // 拖拽一体拉伸状态机（2026-10-26 定稿）：非空时走 Dock 一体拉伸
+    // 路径（头升/肩滞后/脖子连接带/弹簧回弹）；空时走旧 head-only 跟手
+    // （意图路径保持现状一字不动）。由 PullUpDock remember 后传入。
+    dragBody: DragBodyState? = null,
     modifier: Modifier = Modifier,
 ) {
     val reduceMotion = rememberReduceMotion()
@@ -456,6 +465,9 @@ fun FloatingPet(
     // 松手回到底锚，不破坏头 + 面板 = 一个身体（提起期间底锚临时脱离
     // 是拖拽本身的语义，弹回即复位）。
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    // Dock 一体拉伸路径的原始行程（px，不钳制向量）：上拉走 tanh 阻力
+    // 曲线、横向/下压走 40dp 硬钳制，换算在 onDrag 里做。意图路径不用它。
+    var dragTravelPx by remember { mutableStateOf(Offset.Zero) }
     // 长按已触发的同一手势内不再跟手（长按消费了按下，拖拽本应被取消，
     // 此旗标是第二道保险；新一手势的 onDragStart 会复位它）。
     var longPressFired by remember { mutableStateOf(false) }
@@ -471,6 +483,33 @@ fun FloatingPet(
         label = "floatDragY",
     )
 
+    // 拖拽一体拉伸：肩滞后追踪（仅 Dock 路径，dragBody 非空时生效）。
+    // 肩升 = 0.55 × 头升、肩横移 = 0.5625 × 头横移（= 0.45 × 手指），
+    // 均经 critically damped 弹簧（stiffness 550，约 90ms 达 63%）滞后——
+    // 头先行、肩延迟跟上；collectLatest 使新头量到达时取消旧追踪、立即
+    // 改向；松手过冲时头量逐帧回落（含负值下压），肩跟着同一弹簧走、
+    // 同样带过冲下压，连接处不焊死。
+    if (dragBody != null) {
+        LaunchedEffect(dragBody) {
+            snapshotFlow { dragBody.headRisePx }.collectLatest { rise ->
+                animate(
+                    dragBody.shoulderRisePx,
+                    DragBodyLag.SHOULDER_RISE_RATIO * rise,
+                    dragShoulderLagSpring(),
+                ) { v, _ -> dragBody.shoulderRisePx = v }
+            }
+        }
+        LaunchedEffect(dragBody) {
+            snapshotFlow { dragBody.headXPx }.collectLatest { hx ->
+                animate(
+                    dragBody.shoulderXPx,
+                    DragBodyLag.SHOULDER_X_RATIO * hx,
+                    dragShoulderLagSpring(),
+                ) { v, _ -> dragBody.shoulderXPx = v }
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .size(width = touch, height = maxOf(petHeight, 48.dp))
@@ -481,30 +520,69 @@ fun FloatingPet(
                 detectDragGestures(
                     onDragStart = {
                         longPressFired = false
+                        dragBody?.onDragStart()
+                        dragTravelPx = Offset.Zero
                         PetRepository.onDragStart()
                         PetRepository.say("借过借过~")
                     },
                     onDrag = { change, dragAmount ->
                         if (longPressFired) return@detectDragGestures
                         change.consume()
-                        val newX = dragOffset.x + dragAmount.x
-                        val newY = dragOffset.y + dragAmount.y
-                        val dist = sqrt(newX * newX + newY * newY)
-                        dragOffset = if (dist > dragMaxPx) {
-                            Offset(
-                                newX / dist * dragMaxPx,
-                                newY / dist * dragMaxPx
+                        if (dragBody != null) {
+                            // Dock 一体拉伸路径：累计原始行程（不钳制向量），
+                            // 上拉走 tanh 阻力曲线、横向/下压走 40dp 硬钳制。
+                            dragTravelPx += dragAmount
+                            val upDp = with(density) {
+                                maxOf(0f, -dragTravelPx.y).toDp().value
+                            }
+                            val latDp = with(density) { dragTravelPx.x.toDp().value }
+                            val downDp = with(density) {
+                                maxOf(0f, dragTravelPx.y).toDp().value
+                            }
+                            dragBody.onDragMove(
+                                headRiseTargetPx = with(density) {
+                                    dragHeadRiseDp(upDp).dp.toPx()
+                                },
+                                headXTargetPx = with(density) {
+                                    dragHeadXDps(latDp).dp.toPx()
+                                },
+                                headSinkTargetPx = with(density) {
+                                    minOf(downDp, 40f).dp.toPx()
+                                },
                             )
                         } else {
-                            Offset(newX, newY)
+                            // 意图路径：旧行为一字不动（40dp 半径内跟手）。
+                            val newX = dragOffset.x + dragAmount.x
+                            val newY = dragOffset.y + dragAmount.y
+                            val dist = sqrt(newX * newX + newY * newY)
+                            dragOffset = if (dist > dragMaxPx) {
+                                Offset(
+                                    newX / dist * dragMaxPx,
+                                    newY / dist * dragMaxPx
+                                )
+                            } else {
+                                Offset(newX, newY)
+                            }
                         }
                     },
                     onDragEnd = {
-                        dragOffset = Offset.Zero
+                        if (dragBody != null) {
+                            dragBody.onDragEnd(
+                                with(density) { dragBody.headRisePx.toDp().value }
+                            )
+                        } else {
+                            dragOffset = Offset.Zero
+                        }
                         PetRepository.onDragEnd()
                     },
                     onDragCancel = {
-                        dragOffset = Offset.Zero
+                        if (dragBody != null) {
+                            dragBody.onDragEnd(
+                                with(density) { dragBody.headRisePx.toDp().value }
+                            )
+                        } else {
+                            dragOffset = Offset.Zero
+                        }
                         PetRepository.onDragEnd()
                     }
                 )
@@ -550,6 +628,65 @@ fun FloatingPet(
                 center = Offset(size.width / 2f, size.height * 0.45f),
             )
         }
+        // 拖拽一体拉伸：脖子连接带（仅 Dock 路径）。头底与肩峰之间、
+        // 上窄下宽、随拉伸收窄；面板材质（Card 色）向上延伸，读作身体
+        // 的一部分而非贴纸。几何（pet Box 坐标，Y 向下）：
+        // 头底 Y = petHeight − headRise + headSink；肩峰 Y = petHeight −
+        // press(5dp) − shoulderRise；可见间隙 = neckGap − press − sink；
+        // 间隙 > 1dp 才画（≤ 1dp 时头已压进肩峰、连接自带）；盒子两端
+        // 各伸 2px 塞缝（上端被后画的头盒盖住、下端盖住肩峰顶）。
+        // 画在光晕之后、头盒之前：面板先画、脖子次之、头最后——前面图层。
+        if (dragBody != null) {
+            val neckGapDp = dragNeckGapDp(
+                with(density) { dragBody.headRisePx.toDp().value }
+            )
+            val sinkDp = with(density) { dragBody.headSinkPx.toDp().value }
+            val visibleGapDp = neckGapDp - 5f - sinkDp
+            if (visibleGapDp > 1f) {
+                val shoulderRiseDp = with(density) {
+                    dragBody.shoulderRisePx.toDp().value
+                }
+                val pxToDp = 1f / density.density
+                val neckHeightDp = visibleGapDp + 4f * pxToDp
+                val neckOffsetYDp = -(shoulderRiseDp + 5f - 2f * pxToDp)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .size(width = petWidth, height = neckHeightDp.dp)
+                        .offset(y = neckOffsetYDp.dp),
+                ) {
+                    val cardColor = AILauncherColors.current.Card.copy(alpha = 0.92f)
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val w = size.width
+                        val h = size.height
+                        val narrow = 1f - 0.15f * (neckGapDp / 14.4f).coerceIn(0f, 1f)
+                        val topW = w * 0.55f * narrow
+                        val botW = w * 0.80f * narrow
+                        val topCx = w / 2f + dragBody.headXPx
+                        val botCx = w / 2f + dragBody.shoulderXPx
+                        val neckPath = Path().apply {
+                            moveTo(topCx - topW / 2f, 0f)
+                            lineTo(topCx + topW / 2f, 0f)
+                            quadraticTo(
+                                (topCx + topW / 2f + botCx + botW / 2f) / 2f + h * 0.12f,
+                                h / 2f,
+                                botCx + botW / 2f,
+                                h,
+                            )
+                            lineTo(botCx - botW / 2f, h)
+                            quadraticTo(
+                                (topCx - topW / 2f + botCx - botW / 2f) / 2f - h * 0.12f,
+                                h / 2f,
+                                topCx - topW / 2f,
+                                0f,
+                            )
+                            close()
+                        }
+                        drawPath(neckPath, color = cardColor)
+                    }
+                }
+            }
+        }
         // 玻璃头本体：去瞳孔底图 + 眼睛三层（瞳孔 / 反光点 / 眼睑）。
         // 静止态三层合成与原图一致（仅羽化边缘 1–2px 差异，显示约亚像素）。
         // 全身动作合成（绕底原点，底部钉在肩峰上不脱离）：
@@ -568,12 +705,25 @@ fun FloatingPet(
                     // 头部延迟跟上（±8px/±5px，80ms 延迟 300ms）+ 倾斜 4°。
                     // 注视位移不碰底部锚点：headY 上移至多约 2.3dp，
                     // 小于 5dp 压入量，连接不断；呼吸只缩放不位移。
-                    // 拖拽位移叠加其上：整只跟手（提起语义），松手弹簧回零。
-                    translationX = headX + dragX
-                    translationY = headY + blinkNodPx + motionDipPx + dragY
-                    rotationZ = turnTilt + tiltAnim.value + shakeAnim.value + swayAnim.value
-                    scaleX = popScale * breatheScaleX * motionScaleX
-                    scaleY = popScale * breatheScaleY * motionScaleY
+                    // 拖拽位移叠加其上：Dock 路径走一体拉伸（头升/横移/下沉
+                    // 来自 DragBodyState，倾角取肩横移，形变取头升），松手
+                    // 弹簧回零且带过冲压扁；意图路径走旧 dragX/dragY 一字不动。
+                    val dragHeadX = dragBody?.headXPx ?: dragX
+                    val dragHeadY = dragBody?.let { -it.headRisePx + it.headSinkPx } ?: dragY
+                    val dragTilt = dragBody?.let {
+                        dragTiltDeg(with(density) { it.shoulderXPx.toDp().value })
+                    } ?: 0f
+                    val dragScale = dragBody?.let {
+                        dragStretchScale(
+                            with(density) { it.headRisePx.toDp().value },
+                            it.releaseStartRiseDp,
+                        )
+                    } ?: (1f to 1f)
+                    translationX = headX + dragHeadX
+                    translationY = headY + blinkNodPx + motionDipPx + dragHeadY
+                    rotationZ = turnTilt + tiltAnim.value + shakeAnim.value + swayAnim.value + dragTilt
+                    scaleX = popScale * breatheScaleX * motionScaleX * dragScale.first
+                    scaleY = popScale * breatheScaleY * motionScaleY * dragScale.second
                     transformOrigin = TransformOrigin(0.5f, 1f)
                 },
             contentAlignment = Alignment.Center,

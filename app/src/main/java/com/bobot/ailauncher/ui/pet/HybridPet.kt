@@ -85,6 +85,10 @@ fun HybridPet(
     // FloatingPet 的长按回调必须经本层转发到 PullUpDock，否则长按清单
     // 无法接线；本层不含任何长按逻辑，只透传。
     onPetLongPress: () -> Unit = {},
+    // 拖拽一体拉伸状态机（2026-10-26 定稿）：只透传给 FloatingPet，
+    // 本层不含任何拖拽逻辑；默认 null = 意图路径旧行为。Dock 侧由
+    // PullUpDock remember 后传入。
+    dragBodyState: DragBodyState? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -319,6 +323,7 @@ fun HybridPet(
                 active = resumed,
                 onTap = { hybridTap() },
                 onLongPress = { hybridLongPress() },
+                dragBody = dragBodyState,
             )
         }
         // 视频层：仅播片/待换片时挂载。PlayerView 默认 SurfaceView 画在
