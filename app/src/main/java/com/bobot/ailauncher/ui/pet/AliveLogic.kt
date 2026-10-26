@@ -44,10 +44,10 @@ object BlinkPolicy {
     fun intervalMs(lowPower: Boolean, random: Random): Long =
         if (lowPower) 12_000L else 2_000L + (random.nextFloat() * 4_000L).toLong()
 
-    /** 约 10% 概率连眨。 */
+    /** 约 10% 概率连眨（与 BlinkVariety 的 DOUBLE 档同概率，单测沿用）。 */
     fun isDoubleBlink(random: Random): Boolean = random.nextFloat() < 0.10f
 
-    /** alive-p2：约 12% 概率半眨（只收到 [BLINK_HALF_TARGET]，放松/困的前奏）。 */
+    /** alive-p2：约 12% 概率半眨（与 BlinkVariety 的 HALF 档同概率，单测沿用）。 */
     fun isHalfBlink(random: Random): Boolean = random.nextFloat() < 0.12f
 
     /** alive-p2：扫视出发瞬间约 30% 概率伴眨。 */
@@ -260,4 +260,164 @@ fun eyeLidFraction(mood: PetMood, thinking: Boolean, alert: Boolean): Float = wh
     mood == PetMood.FETCH || thinking -> 0f
     mood == PetMood.SHY -> 0.30f
     else -> 0.15f
+}
+
+// ------------------------------------------------------------------
+// 活感第一批（2026-10-26，Bob 全部接受）：头弹簧＋接触影随动＋
+// 注视与注意力＋待机小行为＋重心转移（不做纯缩放呼吸）。
+// 纯逻辑层：区间、时序、概率收敛在这里，组合层只消费，不在组合代码里算。
+// ------------------------------------------------------------------
+
+/**
+ * ① 头弹簧：整颗头作颈上弹簧质量。k ≈ 25/s²、阻尼比 0.3 →
+ * 可见 2–3 次过冲（SpringSim 单测锁死）。复用现有头 offset／倾角通道
+ * （头跟随 x ±8px、y ±5px，Compose spring(dampingRatio, stiffness)
+ * 的刚度单位与此 k 同量纲：对 px 值动画，刚度 25 即 ω＝5rad/s）。
+ */
+object HeadSpring {
+    const val STIFFNESS = 25f
+    const val DAMPING_RATIO = 0.3f
+    const val RANGE_X_PX = 8f
+    const val RANGE_Y_PX = 5f
+}
+
+/** 瞳孔跟随范围（复用眼睛引擎口径）：开孔内 x ±5px、y ±3px。 */
+const val PUPIL_RANGE_X_PX = 5f
+const val PUPIL_RANGE_Y_PX = 3f
+
+/**
+ * 弹簧阶跃响应模拟（半隐式 Euler，调用方按帧 dt 推进）：
+ * 只供单测验证 HeadSpring 参数的过冲次数与落定，不进生产动画
+ * （生产动画走 Compose spring，参数同一套）。
+ */
+class SpringSim(private val stiffness: Float, dampingRatio: Float) {
+    var x = 0f
+        private set
+    var v = 0f
+        private set
+    private val c = 2f * dampingRatio * kotlin.math.sqrt(stiffness)
+
+    fun step(dt: Float, target: Float) {
+        val a = stiffness * (target - x) - c * v
+        v += a * dt
+        x += v * dt
+    }
+}
+
+/**
+ * ③ 注视跟随触点：头转强度＝触点位移 × 0.35，钳制到头跟随范围；
+ * 归一化后走现有注视通道（头＝偏移 × 8px／5px，瞳孔＝偏移 × 5px／3px）。
+ */
+object TouchGaze {
+    const val FOLLOW_FACTOR = 0.35f
+    /** 注视停顿门：位移 < 8px 且距上次更新 < 300ms 时不更新（防抽搐）。 */
+    const val MIN_MOVE_PX = 8f
+    const val MIN_INTERVAL_MS = 300L
+    /** 松手后注视再持有 600ms（与瞥视同口径）再释放回底层目标。 */
+    const val RELEASE_HOLD_MS = 600L
+
+    /** 触点位移（相对头心，px）→ 归一化注视偏移（-1..1）。 */
+    fun offsetFor(dxPx: Float, dyPx: Float): GazeOffset = GazeOffset(
+        x = (dxPx * FOLLOW_FACTOR).coerceIn(
+            -HeadSpring.RANGE_X_PX, HeadSpring.RANGE_X_PX
+        ) / HeadSpring.RANGE_X_PX,
+        y = (dyPx * FOLLOW_FACTOR).coerceIn(
+            -HeadSpring.RANGE_Y_PX, HeadSpring.RANGE_Y_PX
+        ) / HeadSpring.RANGE_Y_PX,
+    )
+
+    /** 停顿门：位移够大或间隔够久才更新。 */
+    fun shouldUpdate(
+        lastDxPx: Float, lastDyPx: Float,
+        newDxPx: Float, newDyPx: Float,
+        lastMs: Long, nowMs: Long,
+    ): Boolean {
+        val moved = kotlin.math.sqrt(
+            (newDxPx - lastDxPx) * (newDxPx - lastDxPx) +
+                (newDyPx - lastDyPx) * (newDyPx - lastDyPx)
+        )
+        return moved >= MIN_MOVE_PX || nowMs - lastMs >= MIN_INTERVAL_MS
+    }
+}
+
+/** 瞳孔 clamp：基点扫视＋高频抖动叠加后仍钳制在开孔名义范围内，不许整颗滑出。 */
+fun clampPupilOffset(dxPx: Float, dyPx: Float): GazeOffset = GazeOffset(
+    x = dxPx.coerceIn(-PUPIL_RANGE_X_PX, PUPIL_RANGE_X_PX),
+    y = dyPx.coerceIn(-PUPIL_RANGE_Y_PX, PUPIL_RANGE_Y_PX),
+)
+
+/** 眨眼多样化：正常眨、双眨（沿用 10%）、半眨（沿用 12%）、慢半眨。 */
+enum class BlinkKind { FULL, DOUBLE, HALF, SLOW_HALF }
+
+/** 眨眼时序与深度：深度 1.0＝全闭，0.45＝半闭（不触发闭合点头）。 */
+data class BlinkTiming(
+    val closeMs: Long,
+    val holdMs: Long,
+    val openMs: Long,
+    val depth: Float,
+)
+
+object BlinkVariety {
+    fun pick(random: Random): BlinkKind {
+        val r = random.nextFloat()
+        return when {
+            r < 0.10f -> BlinkKind.DOUBLE
+            r < 0.22f -> BlinkKind.HALF
+            r < 0.30f -> BlinkKind.SLOW_HALF
+            else -> BlinkKind.FULL
+        }
+    }
+
+    fun timing(kind: BlinkKind): BlinkTiming = when (kind) {
+        BlinkKind.FULL, BlinkKind.DOUBLE -> BlinkTiming(85, 70, 85, 1f)
+        BlinkKind.HALF -> BlinkTiming(70, 50, 70, 0.45f)
+        BlinkKind.SLOW_HALF -> BlinkTiming(120, 100, 120, 0.45f)
+    }
+
+    /** 双眨两眨之间的间隔（沿用 120ms）。 */
+    const val DOUBLE_GAP_MS = 120L
+}
+
+/** ④ 待机小行为：偶尔歪头／环顾，交互开始立即取消（组合层状态复位）。 */
+enum class IdleKind { TILT, LOOK }
+
+object IdleBehavior {
+    /** 触发间隔随机 20–60s（Bob 定）；行为后重新掷间隔，即冷却。 */
+    fun intervalMs(random: Random): Long =
+        20_000L + (random.nextFloat() * 40_000L).toLong()
+
+    /** 歪头幅度 4°（好奇，弱于手动清单的 7–10°）。 */
+    const val TILT_ANGLE_DEG = 4f
+    fun tiltHoldMs(random: Random): Long =
+        700L + (random.nextFloat() * 500L).toLong()
+
+    /** 环顾持有 1.2s（与手动巡看同口径）。 */
+    const val LOOK_HOLD_MS = 1200L
+
+    fun pick(random: Random): IdleKind =
+        if (random.nextBoolean()) IdleKind.TILT else IdleKind.LOOK
+}
+
+/** ② 接触影随动参数：影子由头状态驱动（x 跟头走，随高低变大小深浅）。 */
+data class ShadowParams(val widthScale: Float, val alpha: Float)
+
+object ContactShadow {
+    /** 基线（评估口径）：宽 62.2dp、高 10dp、黑 14%，按宠物宽相对参考宽缩放。 */
+    const val BASE_WIDTH_DP = 62.2f
+    const val BASE_HEIGHT_DP = 10f
+    const val BASE_ALPHA = 0.14f
+    const val REF_PET_WIDTH_DP = 86.4f
+
+    /**
+     * liftPx：头抬高量（＝－头总位移 Y，上为正）。头抬高 1px → 影宽 ×0.98、
+     * alpha −0.004；头压低反向；下压过冲（squash01，dip 动画 0..1）再加宽
+     * 加深一档。全部钳制，影子永远比头动得小（不许影比头大）。
+     */
+    fun params(liftPx: Float, squash01: Float): ShadowParams {
+        val widthScale = ((1f - 0.02f * liftPx).coerceIn(0.8f, 1.15f) *
+            (1f + 0.10f * squash01.coerceIn(0f, 1f))).coerceAtMost(1.25f)
+        val alpha = (BASE_ALPHA - 0.004f * liftPx +
+            0.02f * squash01.coerceIn(0f, 1f)).coerceIn(0.08f, 0.20f)
+        return ShadowParams(widthScale, alpha)
+    }
 }

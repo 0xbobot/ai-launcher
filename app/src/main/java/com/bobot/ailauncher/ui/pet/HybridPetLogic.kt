@@ -54,34 +54,51 @@ class PetBlinkState {
     /** 闭合保持期：组合层在此期画粗 ∪ 形弯曲线（不用细线压缩条）并点头。 */
     var closedPhase by mutableStateOf(false)
         private set
+
+    /**
+     * 本次眨眼深度（活感第一批多样化）：1.0＝全闭，0.45＝半闭；
+     * 组合层 blinkLid 取此值（半闭不触发闭合点头，见 closedPhase 门）。
+     * 眨眼外恒为 0。
+     */
+    var blinkDepth by mutableStateOf(0f)
+        private set
     private var blinkJob: Job? = null
 
-    private suspend fun oneBlink() {
+    private suspend fun oneBlink(timing: BlinkTiming) {
         try {
             blinking = true
-            delay(85) // 闭合
-            closedPhase = true
-            delay(70) // 闭合保持
+            blinkDepth = timing.depth
+            delay(timing.closeMs) // 闭合
+            // 半闭不进闭合保持期：不画粗弯曲线、不点头（只是眼睑半落）。
+            if (timing.depth >= 1f) closedPhase = true
+            delay(timing.holdMs) // 闭合保持
             closedPhase = false
-            delay(85) // 睁开
+            delay(timing.openMs) // 睁开
         } finally {
             // G1：取消（effect 重启等）时必复位。原来无 finally，
             // 取消会跳过末尾复位、blinking 永久为真，此后一切
             // requestBlink 被丢弃、眼睛永久闭合。
             blinking = false
             closedPhase = false
+            blinkDepth = 0f
         }
     }
 
-    /** 强制眨眼一次（已在眨眼中则不重复触发）。 */
+    /**
+     * 强制眨眼一次（已在眨眼中则不重复触发）。
+     * 活感第一批多样化（BlinkVariety）：正常眨、双眨（沿用 10%＋120ms 间隔）、
+     * 半眨、慢半眨；双眨的第二眨与第一眨同参。
+     */
     fun requestBlink(scope: CoroutineScope) {
         if (blinking) return
         blinkJob?.cancel()
         blinkJob = scope.launch {
-            oneBlink()
-            if (BlinkPolicy.isDoubleBlink(Random)) {
-                delay(120)
-                oneBlink()
+            val kind = BlinkVariety.pick(Random)
+            val timing = BlinkVariety.timing(kind)
+            oneBlink(timing)
+            if (kind == BlinkKind.DOUBLE) {
+                delay(BlinkVariety.DOUBLE_GAP_MS)
+                oneBlink(timing)
             }
         }
     }
