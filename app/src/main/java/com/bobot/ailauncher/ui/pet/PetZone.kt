@@ -390,14 +390,34 @@ fun PetZone(
         ) {
         // v0.68.101（D-1）：横屏输入态 hero 整体让位——横屏 IME 抬升后
         // 可用高度只剩约四成，左区只装胶囊堆栈；竖屏走各模板 inputCompact。
+        // 输入态专注壳·A：专注态简报淡出——fade-only 150ms，不缩小、
+        // 不移位；退场完成后零高度、不留占位。进态路径不许高度动画
+        // （310 冻结教训）。卡片槽位不在本处，不受影响。
+        // （本改动在 PetZone.kt：简报节点宿主；HomeScreen 侧无此节点可改。）
         if (!(isLandscapeCover && inputActive)) {
-            CoverHero(
-                summary = coverSummary,
-                weatherDesc = weatherDesc ?: "",
-                palette = briefingPalette,
-                accent = briefingAccent,
-                inputCompact = inputActive
-            )
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !inputActive,
+                enter = androidx.compose.animation.fadeIn(
+                    animationSpec = androidx.compose.animation.core.tween(
+                        com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                        easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                    )
+                ),
+                exit = androidx.compose.animation.fadeOut(
+                    animationSpec = androidx.compose.animation.core.tween(
+                        com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                        easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                    )
+                )
+            ) {
+                CoverHero(
+                    summary = coverSummary,
+                    weatherDesc = weatherDesc ?: "",
+                    palette = briefingPalette,
+                    accent = briefingAccent,
+                    inputCompact = inputActive
+                )
+            }
         }
         // v0.68.99（R-1 修订）：输入态胶囊槽（.97 位置：hero 与会行之间；
         // 横屏只占左侧区，右端不滑入面板下——.97 原注）
@@ -412,15 +432,33 @@ fun PetZone(
         }
         // v0.68.99（主页重构 R-1）：简报会行——有会议才显示，无会时 hero 已有
         // "难得清闲"，不重复。横屏走 coverLeftFrac 左区分区（.97 成果延续）。
-        if (coverNextEvent != null) {
-            Spacer(modifier = Modifier.height(14.dp))
-            BriefMeetingRow(
-                event = coverNextEvent!!,
-                palette = briefingPalette,
-                accent = briefingAccent,
-                onJoin = { e -> joinMeeting(e) },
-                modifier = Modifier.fillMaxWidth(coverLeftFrac)
+        // 输入态专注壳·A：专注态会议行淡出——与简报同一口径：fade-only
+        // 150ms，不缩小、不移位；退场完成后零高度、不留占位。
+        androidx.compose.animation.AnimatedVisibility(
+            visible = !inputActive,
+            enter = androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
+            ),
+            exit = androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
             )
+        ) {
+            if (coverNextEvent != null) {
+                Spacer(modifier = Modifier.height(14.dp))
+                BriefMeetingRow(
+                    event = coverNextEvent!!,
+                    palette = briefingPalette,
+                    accent = briefingAccent,
+                    onJoin = { e -> joinMeeting(e) },
+                    modifier = Modifier.fillMaxWidth(coverLeftFrac)
+                )
+            }
         }
         // 末尾留白 26dp（原罩纱尾巴间距保留，纱已删，布局不动）
         Spacer(modifier = Modifier.height(26.dp))
