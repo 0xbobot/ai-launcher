@@ -184,12 +184,44 @@ class IntentInputModeTest {
 
     @Test
     fun `底边垫高 - 悬浮键盘横屏不走竖屏兜底`() {
-        // 横屏悬浮避让改走卡片左区布局，竖屏兜底不适用，垫回导航垫
+        // 横屏不走竖屏 50% 兜底（isPortrait 门只管竖屏），垫回导航垫；
+        // 横屏不推的显式分支见下一测试
         org.junit.Assert.assertEquals(
             padNav,
             resolveFocusBottomPad(
                 imeBottom = 0.dp, windowResized = false, keyboardExpected = true,
                 isPortrait = false, windowHeight = 360.dp, navClearance = padNav
+            )
+        )
+    }
+
+    @Test
+    fun `底边垫高 - 横屏恒为导航垫不抬底垫`() {
+        // Bob 横屏不推口径：横屏专注态不做任何键盘避让——停靠 inset、悬浮、
+        // 已收缩信号一律不抬垫，垫恒为导航垫（停靠键盘靠窗口收缩自然顶起，
+        // 悬浮键盘由用户自己放位置）
+        org.junit.Assert.assertEquals(
+            padNav,
+            resolveFocusBottomPad(
+                imeBottom = 300.dp, windowResized = false, keyboardExpected = true,
+                isPortrait = false, windowHeight = 360.dp, navClearance = padNav,
+                isLandscape = true
+            )
+        )
+        org.junit.Assert.assertEquals(
+            padNav,
+            resolveFocusBottomPad(
+                imeBottom = 0.dp, windowResized = false, keyboardExpected = true,
+                isPortrait = false, windowHeight = 360.dp, navClearance = padNav,
+                isLandscape = true
+            )
+        )
+        org.junit.Assert.assertEquals(
+            padNav,
+            resolveFocusBottomPad(
+                imeBottom = 0.dp, windowResized = true, keyboardExpected = true,
+                isPortrait = false, windowHeight = 360.dp, navClearance = padNav,
+                isLandscape = true
             )
         )
     }
@@ -218,33 +250,24 @@ class IntentInputModeTest {
         )
     }
 
-    // ---- 输入态专注·修复：横屏卡片宽决策 ----
+    // ---- 输入态专注·弹闪修复（2026-10-26，357 真机反馈）：卡片外边距容器相对口径 ----
     @Test
-    fun `横屏卡片宽 - 非悬浮沿用封顶居中口径`() {
-        org.junit.Assert.assertEquals(
-            520.dp,
-            resolveLandscapeCardWidth(screenWidth = 800.dp, landscapeFloating = false)
-        )
-        org.junit.Assert.assertEquals(
-            520.dp,
-            resolveLandscapeCardWidth(screenWidth = 560.dp, landscapeFloating = false)
-        )
-        org.junit.Assert.assertEquals(
-            500.dp,
-            resolveLandscapeCardWidth(screenWidth = 540.dp, landscapeFloating = false)
-        )
+    fun `卡片外边距 - 容器相对口径`() {
+        // 竖屏容器即屏宽：360 → 20（卡片 320）、800 → 140（卡片 520 居中）
+        org.junit.Assert.assertEquals(20.dp, resolveCardHorizontalPadding(360.dp))
+        org.junit.Assert.assertEquals(140.dp, resolveCardHorizontalPadding(800.dp))
+        // 横屏容器即左区槽宽：840 → 160（卡片 520 居于槽内）、560 → 20（卡片 520）
+        org.junit.Assert.assertEquals(160.dp, resolveCardHorizontalPadding(840.dp))
+        org.junit.Assert.assertEquals(20.dp, resolveCardHorizontalPadding(560.dp))
     }
 
     @Test
-    fun `横屏卡片宽 - 悬浮时左区宽取屏宽一半封顶`() {
-        // Bob 横屏截图校准：悬浮键盘左缘约屏宽 52.6%，50% 封顶使内容右缘落在键盘左缘左侧
-        org.junit.Assert.assertEquals(
-            400.dp,
-            resolveLandscapeCardWidth(screenWidth = 800.dp, landscapeFloating = true)
-        )
-        org.junit.Assert.assertEquals(
-            390.dp,
-            resolveLandscapeCardWidth(screenWidth = 780.dp, landscapeFloating = true)
-        )
+    fun `卡片外边距 - 357 横屏塌卡回归锁`() {
+        // 357 回归：屏宽 800dp 时左区槽宽 440dp（coverLeftFrac 0.55），旧屏宽
+        // 公式在槽内二次扣减致卡片 40dp、胶囊 weight 文本框负约束闪退；
+        // 容器相对口径下卡片 = 440 − 2×20 = 400dp，不塌。
+        val padding = resolveCardHorizontalPadding(440.dp)
+        org.junit.Assert.assertEquals(20.dp, padding)
+        org.junit.Assert.assertEquals(400.dp, 440.dp - padding * 2f)
     }
 }

@@ -395,17 +395,19 @@ fun PetZone(
         // （310 冻结教训）。卡片槽位不在本处，不受影响。
         // （本改动在 PetZone.kt：简报节点宿主；HomeScreen 侧无此节点可改。）
         if (!(isLandscapeCover && inputActive)) {
+            // 弹闪修复：简报淡出与背景、卡片同一节拍（250ms Medium），
+            // 不许首页 150ms 先没、背景后切。
             androidx.compose.animation.AnimatedVisibility(
                 visible = !inputActive,
                 enter = androidx.compose.animation.fadeIn(
                     animationSpec = androidx.compose.animation.core.tween(
-                        com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                        com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
                         easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
                     )
                 ),
                 exit = androidx.compose.animation.fadeOut(
                     animationSpec = androidx.compose.animation.core.tween(
-                        com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                        com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
                         easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
                     )
                 )
@@ -433,18 +435,19 @@ fun PetZone(
         // v0.68.99（主页重构 R-1）：简报会行——有会议才显示，无会时 hero 已有
         // "难得清闲"，不重复。横屏走 coverLeftFrac 左区分区（.97 成果延续）。
         // 输入态专注壳·A：专注态会议行淡出——与简报同一口径：fade-only
-        // 150ms，不缩小、不移位；退场完成后零高度、不留占位。
+        // 250ms（弹闪修复：与背景、卡片同一节拍），不缩小、不移位；
+        // 退场完成后零高度、不留占位。
         androidx.compose.animation.AnimatedVisibility(
             visible = !inputActive,
             enter = androidx.compose.animation.fadeIn(
                 animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
                     easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
                 )
             ),
             exit = androidx.compose.animation.fadeOut(
                 animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Fast,
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
                     easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
                 )
             )

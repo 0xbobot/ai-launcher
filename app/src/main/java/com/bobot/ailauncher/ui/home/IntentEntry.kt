@@ -559,10 +559,6 @@ fun IntentEntry(
     // 不挂载时，气泡改挂本卡片覆盖层（卡片宠物上方）；退态翻转后由
     // HomeScreen 关掉（列尾宿主接回），全程单挂载点。
     focusBubbleActive: Boolean = false,
-    // 输入态专注·修复（2026-10-26，356 真机反馈）：横屏悬浮键盘时卡片改
-    // 左区布局（宽见 resolveLandscapeCardWidth），躲开右侧悬浮键盘；默认
-    // false，唯一调用点 HomeScreen 在横屏悬浮情形下才置 true。
-    landscapeFloating: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -873,24 +869,22 @@ fun IntentEntry(
             flareExtentDp = 20.dp,
         )
     }
-    // 卡片宽：竖屏 320dp（两侧各 20dp）、横屏封顶 520dp 居中——外边距取
-    // 20dp 与 (屏宽 − 520dp)/2 的大值，屏宽 ≤ 560dp 时恒为 20dp。
-    // 横屏悬浮键盘（landscapeFloating）：卡片改左区布局——宽 =
-    // resolveLandscapeCardWidth（min(520dp, 屏宽 × 50%)）、左贴 20dp，
-    // 躲开右侧悬浮键盘；示例行本身已横向滚动、末项 64dp 避让 ✕，左区内
-    // 不再被键盘遮出“查…”式中途截断。非悬浮分支保持 356 原公式一字不动
-    // （与 resolveLandscapeCardWidth 非悬浮分支同值：min(520dp, 屏宽 − 40dp））。
-    val cardPadding = if (landscapeFloating) {
-        androidx.compose.foundation.layout.PaddingValues(
-            start = 20.dp,
-            end = screenWidthDp - 20.dp - resolveLandscapeCardWidth(screenWidthDp, true)
+    // 卡片宽（弹闪修复，2026-10-26）：容器相对口径——BoxWithConstraints 的
+    // maxWidth 即本列实际容器宽（竖屏 = 屏宽，横屏 = PetZone 左区槽宽）；
+    // 外边距 = max(20dp, (容器宽 − 520dp) / 2)，卡片 = min(520dp, 容器宽 − 40dp)
+    // 居于容器内。357 的左区垫高按屏宽算、在槽内二次扣减致卡片塌到 40dp
+    // 闪退（见 resolveCardHorizontalPadding），本批拆除；横屏不左区躲、
+    // 不窄化，底边钉导航垫（Bob 横屏不推口径）。容器宽恒有界（根 fillMaxSize
+    // 链），Infinity 兜底走屏宽公式。
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        modifier = modifier.fillMaxWidth()
+    ) {
+        val containerWidth =
+            if (maxWidth != Dp.Infinity) maxWidth else screenWidthDp
+        val cardPadding = androidx.compose.foundation.layout.PaddingValues(
+            horizontal = resolveCardHorizontalPadding(containerWidth)
         )
-    } else {
-        androidx.compose.foundation.layout.PaddingValues(
-            horizontal = maxOf(20.dp, (screenWidthDp - 520.dp) / 2)
-        )
-    }
-    Column(modifier = modifier.fillMaxWidth().padding(cardPadding)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(cardPadding)) {
       // ---- 外层 Box：面板 + 前面图层宠物 + 动作清单（Dock 外层 Box 同款结构） ----
       // 外层 Box 高 = 面板高（面板是唯一决定尺寸的孩子）；宠物与清单放在
       // matchParentSize 覆盖层里、用 BottomCenter + 负偏移锚到面板顶缘上方，
@@ -1489,6 +1483,7 @@ private fun NeedsInputStrip(
                 )
             }
         }
+    }
     }
 }
 
