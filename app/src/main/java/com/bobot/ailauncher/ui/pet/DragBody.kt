@@ -134,9 +134,9 @@ class DragBodyState(private val scope: CoroutineScope) {
         val spec = spring<Float>(dampingRatio = 0.45f, stiffness = 90f)
         releaseJob = scope.launch {
             coroutineScope {
-                launch { animate(headRisePx, 0f, spec) { v, _ -> headRisePx = v } }
-                launch { animate(headXPx, 0f, spec) { v, _ -> headXPx = v } }
-                launch { animate(headSinkPx, 0f, spec) { v, _ -> headSinkPx = v } }
+                launch { animate(headRisePx, 0f, animationSpec = spec) { v, _ -> headRisePx = v } }
+                launch { animate(headXPx, 0f, animationSpec = spec) { v, _ -> headXPx = v } }
+                launch { animate(headSinkPx, 0f, animationSpec = spec) { v, _ -> headSinkPx = v } }
             }
         }
     }

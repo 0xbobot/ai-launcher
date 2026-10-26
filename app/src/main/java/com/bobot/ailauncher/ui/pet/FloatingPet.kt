@@ -495,7 +495,7 @@ fun FloatingPet(
                 animate(
                     dragBody.shoulderRisePx,
                     DragBodyLag.SHOULDER_RISE_RATIO * rise,
-                    dragShoulderLagSpring(),
+                    animationSpec = dragShoulderLagSpring(),
                 ) { v, _ -> dragBody.shoulderRisePx = v }
             }
         }
@@ -504,7 +504,7 @@ fun FloatingPet(
                 animate(
                     dragBody.shoulderXPx,
                     DragBodyLag.SHOULDER_X_RATIO * hx,
-                    dragShoulderLagSpring(),
+                    animationSpec = dragShoulderLagSpring(),
                 ) { v, _ -> dragBody.shoulderXPx = v }
             }
         }
