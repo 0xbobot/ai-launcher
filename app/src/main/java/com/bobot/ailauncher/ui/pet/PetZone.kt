@@ -471,11 +471,9 @@ fun PetZone(
         if (!inputActive) {
             // 末尾留白 26dp（原罩纱尾巴间距保留，纱已删，布局不动）
             Spacer(modifier = Modifier.height(26.dp))
-            // 气泡子项·单挂载点：宠物的嘴挂在 PetZone 列尾（无 say / 无瞥视
-            // 落点时零高度，不占布局；有话时出现在简报下方、Dock 宠物上方，
-            // 尾巴朝下指向宠物）。入口手势子项把宿主移到 Dock 宠物旁时须删
-            // 本处，禁止两处同挂（见 PetCards.PetSpeechBubbleHost 契约）。
-            PetSpeechBubbleHost(modifier = Modifier.fillMaxWidth())
+            // 气泡宿主已于 2026-10-27 搬家至 PullUpDock 外层 Box（与 Dock 宠物
+            // 同一 Box、同一中轴线，贴头锚定＋跟头；见 PetCards 契约）。
+            // 本处不再挂宿主，禁止两处同挂；列尾留白保留、布局不动。
         }
         }  // Column 结束
     }  // v0.68.74：BoxWithConstraints 结束
