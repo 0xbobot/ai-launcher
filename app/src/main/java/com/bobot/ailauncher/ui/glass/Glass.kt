@@ -192,6 +192,21 @@ data class DockLightParams(
 )
 
 /**
+ * 径向渐变半径防线（357 横屏闪退根因，2026-10-26）：
+ * android.graphics.RadialGradient 要求 ending radius 严格 > 0；
+ * 玻璃面宽为 0 时 fraction × width = 0，主线程直接炸
+ * IllegalArgumentException（崩溃记录 Glass.kt:378，nubia P0110）。
+ * 0 宽的来源：357 横屏左区垫高按屏宽算、在 PetZone 左区槽内二次扣减，
+ * 屏宽 ≤ 720dp 时卡片宽塌到 0（屏宽 720 恰好为 0、更小恒为 0）；
+ * 布局侧已由 IntentEntry 容器相对口径修掉 0 宽条件，本防线守另一端——
+ * 任何路径递来 0 宽都不许再炸主线程。钳制到 1px：0 宽面上的 1px
+ * 渐变不可见；正常尺寸下 fraction × width 恒远大于 1px，渲染一字不动。
+ * 三处径向渐变（暖核／高光／左下出口）一律走本函数，不许再裸乘。
+ */
+internal fun glassRadialRadius(fraction: Float, extentPx: Float): Float =
+    (fraction * extentPx).coerceAtLeast(1f)
+
+/**
  * 玻璃面修饰（放在原 `.background(...)` 的位置调用，链的其余部分不动）：
  * SIMULATED 档或无玻璃环境时就地退化为原半透明色背景，像素级等同现状；
  * 玻璃档绘制：模糊+增色补丁（中/强共用）→（强玻璃）AGSL 折射层 → 叠色 → 顶部亮边。
@@ -385,7 +400,7 @@ private fun glassDraw(
                                     margin + dockLight.coreCenterX * elemW,
                                     margin + dockLight.coreCenterY * elemH,
                                 ),
-                                radius = dockLight.coreRadiusFraction * elemW,
+                                radius = glassRadialRadius(dockLight.coreRadiusFraction, elemW),
                             ),
                         )
                     }
@@ -487,7 +502,7 @@ private fun glassDraw(
                                 dockLight.highlightCenterX * size.width,
                                 dockLight.highlightCenterY * size.height,
                             ),
-                            radius = dockLight.highlightRadiusFraction * size.width,
+                            radius = glassRadialRadius(dockLight.highlightRadiusFraction, size.width),
                         ),
                     )
                     // ③ 左下出口：沿底边横向拉长的暖白亮边（各向异性缩放
@@ -506,7 +521,7 @@ private fun glassDraw(
                                     Color(0xFFFFF6E8).copy(alpha = 0f),
                                 ),
                                 center = exitCenter,
-                                radius = dockLight.exitRadiusFraction * size.width,
+                                radius = glassRadialRadius(dockLight.exitRadiusFraction, size.width),
                             ),
                         )
                     }

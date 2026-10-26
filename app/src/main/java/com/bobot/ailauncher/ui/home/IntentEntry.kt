@@ -1178,6 +1178,7 @@ fun IntentEntry(
       }
       } // 外层 Box（面板 + 前面图层宠物 + 动作清单）
     }
+    } // BoxWithConstraints 闭合（容器相对卡片宽；AlertDialog 仍属 IntentEntry）
 
     // ---- 唯一弹窗：中/高风险动作确认（安全门，Bob 拍板归类） ----
     if (state is IntentUiState.NeedsConfirmation) {
@@ -1483,7 +1484,6 @@ private fun NeedsInputStrip(
                 )
             }
         }
-    }
     }
 }
 

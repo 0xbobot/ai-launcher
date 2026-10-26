@@ -263,11 +263,28 @@ class IntentInputModeTest {
 
     @Test
     fun `卡片外边距 - 357 横屏塌卡回归锁`() {
-        // 357 回归：屏宽 800dp 时左区槽宽 440dp（coverLeftFrac 0.55），旧屏宽
-        // 公式在槽内二次扣减致卡片 40dp、胶囊 weight 文本框负约束闪退；
-        // 容器相对口径下卡片 = 440 − 2×20 = 400dp，不塌。
+        // 357 回归（崩溃记录已定性，2026-10-26 19:41）：屏宽 800dp 时左区槽宽
+        // 440dp（coverLeftFrac 0.55），旧屏宽公式在槽内二次扣减致卡片 40dp；
+        // 屏宽 ≤ 720dp 时卡片恰好塌到 0，玻璃暖核半径 = 0.35 × 0 = 0，
+        // RadialGradient 要求 radius > 0，主线程炸 IllegalArgumentException
+        // （Glass.kt:378）。容器相对口径下卡片 = 440 − 2×20 = 400dp，不塌。
         val padding = resolveCardHorizontalPadding(440.dp)
         org.junit.Assert.assertEquals(20.dp, padding)
         org.junit.Assert.assertEquals(400.dp, 440.dp - padding * 2f)
+    }
+
+    @Test
+    fun `卡片外边距 - 全宽扫卡片恒大于零`() {
+        // 357 崩溃宽：屏宽 720dp 时左区槽 360dp，旧公式卡片恰好为 0；
+        // 容器相对口径下 360dp 容器 → 外边距 20dp、卡片 320dp，恢复健康。
+        val padding360 = resolveCardHorizontalPadding(360.dp)
+        org.junit.Assert.assertEquals(20.dp, padding360)
+        org.junit.Assert.assertEquals(320.dp, 360.dp - padding360 * 2f)
+        // 全宽扫一遍：不存在让卡片塌到 0 的容器宽。
+        for (w in 200..1200 step 40) {
+            val pad = resolveCardHorizontalPadding(w.dp)
+            val card = w.dp - pad * 2f
+            assertTrue("container ${w}dp -> card $card must stay > 0", card > 0.dp)
+        }
     }
 }
