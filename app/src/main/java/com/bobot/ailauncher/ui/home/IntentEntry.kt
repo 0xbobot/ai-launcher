@@ -259,8 +259,26 @@ internal class IntentCardShape(
  * 实测起点差一个面板高以内），宠物仍从 Dock 方向滑入，不留空窗。
  */
 private val PERCH_TRAVEL_DOCK_FOOT_FROM_BOTTOM = 149.1.dp
-private val PERCH_TRAVEL_DOCK_CENTER_END_LANDSCAPE = 184.dp
 private val PERCH_TRAVEL_FALLBACK_Y = 320.dp
+
+/**
+ * 进态位移量（纯函数，单测锁死）。横屏场景切换（2026-10-26，Bob 22:57
+ * 最终口径）：切换不移头，横屏位移恒为零（与锚点无关）；竖屏：锚点未量到
+ * 时返回 null（调用方保持 remember 初值——funnel 残值或兜底，原行为），
+ * 量到时按脚底落差公式（钳制 0..屏高；横向恒为零，横屏横移公式已随本批
+ * 删除）。返回 Pair（横向，纵向）。
+ */
+internal fun resolveEnterTravelDelta(
+    isLandscape: Boolean,
+    anchorTop: Dp?,
+    dockFootY: Dp,
+    intentFootY: Dp,
+    screenHeightDp: Dp
+): Pair<Dp, Dp>? {
+    if (isLandscape) return 0.dp to 0.dp
+    if (anchorTop == null) return null
+    return 0.dp to (dockFootY - intentFootY).coerceIn(0.dp, screenHeightDp)
+}
 
 /**
  * 意图胶囊输入行（2026-10-21 新规格：胶囊与应用中心搜索合二为一的同一组件）。
@@ -812,8 +830,8 @@ fun IntentEntry(
     //    四步时序见 PetPerchTransition.kt）。旧口径“退场由 HomeScreen
     //    fadeOut＋Dock 卡片重进承担、无交接”就此废掉，不许再各自保留一套 fade。
     // 面板在根坐标的位置（外层 Box 回写，取整 dp 防抖动重组）。
+    // 横屏横移公式已随 22:57 口径删除，中心 X 不再采集。
     var petAnchorTop by remember { mutableStateOf<Int?>(null) }
-    var petAnchorCenterX by remember { mutableStateOf<Int?>(null) }
     // 位移向量（dp）：进态那一刻冻结，之后面板位置变化不再重算。
     // 竖屏一拍（本批）：复进时首帧即取已冻结值（上一轮进态的落点），
     // 不跳变；首进时冻结值尚未写入（0dp／兜底），锚点通常首帧内到、
@@ -831,7 +849,8 @@ fun IntentEntry(
     val reduceMotion = rememberReduceMotion()
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
-    // 横屏判定（进态横移公式、卡片形状、外延 shader 共用同一值）。
+    // 横屏判定（卡片形状、外延 shader 共用同一值；进态位移横屏恒为零，
+    // 见上方 resolveEnterTravelDelta 横屏分支）。
     val isLandscapeCard = screenWidthDp > screenHeightDp
     LaunchedEffect(Unit) {
         // 竖屏一拍（本批）：宠物 alpha 不另等锚点——在锚点等待之前立即
@@ -847,27 +866,30 @@ fun IntentEntry(
                 )
             }
         }
-        // 等一小段让外层 Box 的 onGloballyPositioned 先回写锚点
-        // （布局回调在首帧内到达；等不到则用兜底起点，不阻塞挂载）。
-        var waited = 0
-        while (petAnchorTop == null && waited < 6) {
-            delay(16)
-            waited++
+        // 锚点等待：竖屏等锚点回写（布局回调首帧内到达，等不到用兜底起点，
+        // 不阻塞挂载）；横屏跳过（位移恒为零，不需要锚点）。
+        if (!isLandscapeCard) {
+            var waited = 0
+            while (petAnchorTop == null && waited < 6) {
+                delay(16)
+                waited++
+            }
         }
         val anchorTop = petAnchorTop?.dp
-        val anchorCenterX = petAnchorCenterX?.dp
-        if (anchorTop != null) {
-            val dockFootY = screenHeightDp - PERCH_TRAVEL_DOCK_FOOT_FROM_BOTTOM
-            // 脚底在肩峰上：峰顶 = 面板顶缘 − rise，脚底压进峰顶 5dp。
-            val intentFootY = anchorTop - INTENT_SHOULDER_RISE + INTENT_PET_PRESS
-            travelDeltaY = (dockFootY - intentFootY)
-                .coerceIn(0.dp, screenHeightDp)
-            travelDeltaX = if (isLandscapeCard && anchorCenterX != null) {
-                (screenWidthDp - PERCH_TRAVEL_DOCK_CENTER_END_LANDSCAPE - anchorCenterX)
-                    .coerceIn(-screenWidthDp / 2, screenWidthDp / 2)
-            } else {
-                0.dp
-            }
+        // 脚底在肩峰上：峰顶 = 面板顶缘 − rise，脚底压进峰顶 5dp。
+        val delta = resolveEnterTravelDelta(
+            isLandscape = isLandscapeCard,
+            anchorTop = anchorTop,
+            dockFootY = screenHeightDp - PERCH_TRAVEL_DOCK_FOOT_FROM_BOTTOM,
+            intentFootY = if (anchorTop != null)
+                anchorTop - INTENT_SHOULDER_RISE + INTENT_PET_PRESS else 0.dp,
+            screenHeightDp = screenHeightDp
+        )
+        // 横屏位移恒为零（resolveEnterTravelDelta 横屏分支）；竖屏锚点未量到
+        // 时 delta 为 null，保持 remember 初值（funnel 残值或兜底，原行为）。
+        if (delta != null) {
+            travelDeltaX = delta.first
+            travelDeltaY = delta.second
         }
         if (perchTransition != null) {
             // 过渡 C：上一轮退态未收尾时先等它收尾（封顶 ~1s），再冻结本轮
@@ -937,13 +959,11 @@ fun IntentEntry(
       // 取整 dp、变化才写，避免布局抖动引发重组风暴。
       Box(modifier = Modifier.fillMaxWidth().onGloballyPositioned { coords ->
           // 本仓 Compose 版本无 positionInRoot（编译已证实），用 HomeScreen
-          // 同款 boundsInRoot：top = 面板顶缘，center.x = 面板中心 X。
+          // 同款 boundsInRoot：top = 面板顶缘。
           val bounds = coords.boundsInRoot()
           with(densityNow) {
               val top = bounds.top.toDp().value.toInt()
-              val centerX = bounds.center.x.toDp().value.toInt()
               if (petAnchorTop != top) petAnchorTop = top
-              if (petAnchorCenterX != centerX) petAnchorCenterX = centerX
           }
       }) {
       // ---- F 批·一体化面板：输入区（胶囊 + 推荐行）+ 结果槽位同处一面 ----
@@ -1123,12 +1143,14 @@ fun IntentEntry(
       // ---- 覆盖层：接触影 + 宠物 + 动作清单（面板之后画、前面图层，不 clip） ----
       // 图层顺序即绘制顺序：面板 → 接触影 → 宠物 → 动作清单。覆盖层用
       // matchParentSize，不改变外层 Box 尺寸（= 面板高），宠物与清单只向
-      // 上探出、不推面板。单宠物保证：Dock 宠物由 (!intentInputMode ||
-      // isLandscapeDock) 门控（PullUpDock.kt），意图宠物只活在 IntentEntry
-      // 内（仅竖屏输入态挂载；横屏输入态不挂载、Dock 宠物整只留场），
-      // 静止态下屏幕上恰有一只；进态交接窗内（HomeScreen 的
+      // 上探出、不推面板。单宠物保证：Dock 宠物由 !intentInputMode 门控
+      // （PullUpDock.kt，横屏聚焦亦隐藏），意图宠物只活在 IntentEntry
+      // 内（输入态挂载，横屏亦挂载在左侧卡片上、头＋卡片一个身体），
+      // 静止态下屏幕上恰有一只；竖屏进态交接窗内（HomeScreen 的
       // AnimatedVisibility fade + Dock 卡片退场 fadeOut）意图宠物以
-      // FadeHandoff 180ms alpha 交接滑入，属一次交接、不出现两只实体的静止并存。
+      // FadeHandoff 180ms alpha 交接滑入，属一次交接、不出现两只实体的静止并存；
+      // 横屏无交接（场景整体换：Dock 先淡出、槽位后淡入；退时槽位先淡出、
+      // Dock 后淡入，先后不重叠、不滑动，见 HomeScreen 横屏分支）。
       // 意图旧胶囊接触影已按 22:02 verdict 整个摘除（黑 0.14、宽 72%、
       // 高 10dp、晚 90ms 的那枚），不再有影子跟随段。
       Box(modifier = Modifier.matchParentSize()) {
@@ -1143,36 +1165,36 @@ fun IntentEntry(
         // 即落回回弹）；减动效时 travel 已 snap 到 1，附加量为零。
         // 真机待验：卡片顶缘坐姿、压入量，以及位移全程（起步落点、
         // 弹簧过冲）是否自然。
-        // 横屏整体（本批）：横屏意图宠物不挂载（Dock 宠物整只留场），
-        // 进态 LaunchedEffect 仍照常跑（travel／travelAlpha 走不可见值，
-        // 保持退态 funnel 状态机一致，Dock 淡入步在横屏本就是 no-op，
-        // 因 Dock 卡片从未离开）。
-        if (!isLandscapeCard) {
-            HybridPet(
-                petWidth = INTENT_PET_WIDTH,
-                onPetTap = { /* 意图态已在问，点按空操作；清单只挂长按 */ },
-                onPetLongPress = { petActionsVisible = true },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .offset(y = -(panelHeight + INTENT_SHOULDER_RISE - INTENT_PET_PRESS))
-                    .offset(
-                        x = travelDeltaX * (1f - petTravel.value),
-                        y = travelDeltaY * (1f - petTravel.value)
-                    )
-                    .graphicsLayer { alpha = petTravelAlpha.value }
-                    .testTag("pet_qizai")
-            )
-        }
+        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏意图宠物亦挂载
+        // （左侧卡片承载身体，坐法与竖屏同款：前面图层、居中、脚底压进
+        // 卡片肩峰；进态位移横屏恒为零，见上方 LaunchedEffect 横屏分支；
+        // travel／travelAlpha 仍照常跑，保持退态 funnel 状态机一致）。
+        HybridPet(
+            petWidth = INTENT_PET_WIDTH,
+            onPetTap = { /* 意图态已在问，点按空操作；清单只挂长按 */ },
+            onPetLongPress = { petActionsVisible = true },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .offset(y = -(panelHeight + INTENT_SHOULDER_RISE - INTENT_PET_PRESS))
+                .offset(
+                    x = travelDeltaX * (1f - petTravel.value),
+                    y = travelDeltaY * (1f - petTravel.value)
+                )
+                .graphicsLayer { alpha = petTravelAlpha.value }
+                .testTag("pet_qizai")
+        )
         // 动作清单：与 Dock 宠物上方同款（PetActionList 同一组件、同一清单、
         // 同一状态机；气泡底距宠物顶 8dp、尾巴朝下指向宠物）。单层 8 行，
         // 无 2 级；关闭靠气泡内 ✕，退出输入态时随面板一并消失。
         // 真机待验：意图面板上方空间有限（紧凑简报 + 状态栏），气泡顶部
         // 在小屏/横屏可能探出屏顶——若实测被裁，另起一单定清单落点。
-        // 横屏整体（本批）：横屏意图宠物不挂载，清单亦不挂载（横屏聚焦
-        // 时长按 Dock 宠物会把 MainScreen petActionsVisible 置 true，但
-        // 清单门仍要求 !isLandscapeCard，清单要到退出聚焦后才现形——
-        // 可 ✕ 关，不改仲裁与门控；已知小 wart，见回报）。
-        if (petActionsVisible && !isLandscapeCard) {
+        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏意图宠物已挂载，
+        // 清单亦挂载（与竖屏同款：长按卡片宠物开清单；否则长按置 local
+        // petActionsVisible=true 后无清单可关、且专注气泡被 !petActionsVisible
+        // 门持续隐藏成卡死态）。先前 wart（横屏聚焦时长按 Dock 宠物置
+        // MainScreen petActionsVisible、清单须退出聚焦后才现形）已随 Dock
+        // 隐藏＋宠物上卡片而消除（触发条件不再存在）。
+        if (petActionsVisible) {
             PetActionList(
                 onDismiss = { petActionsVisible = false },
                 modifier = Modifier

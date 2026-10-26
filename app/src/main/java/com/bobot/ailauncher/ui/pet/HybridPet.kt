@@ -91,7 +91,9 @@ fun HybridPet(
     // PullUpDock remember 后传入。
     dragBodyState: DragBodyState? = null,
     // 注视 override：只透传给 FloatingPet，本层不含注视逻辑；
-    // 默认 null 不生效。横屏聚焦时 PullUpDock 传入 DOCK_LEFT。
+    // 默认 null 不生效。2026-10-26 横屏聚焦改 Dock 隐藏＋宠物上卡片后
+    // 暂无调用方传入（机制保留，优先级与映射一字不动；DOCK_LEFT 目标
+    // 本身仍由滑动瞥视等复用）。
     gazeOverride: GazeTarget? = null,
     modifier: Modifier = Modifier,
 ) {

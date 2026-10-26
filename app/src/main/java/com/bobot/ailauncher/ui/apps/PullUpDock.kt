@@ -494,11 +494,19 @@ fun PullUpDock(
         // 作用域里隐式 receiver 不可达，故在此提升为局部值）
         val dockAvailableHeight = maxHeight
         // v0.68.99：输入态下卡片让位（意图胶囊在底部原地接管，Dock 内容不与
-        // 之叠画）——让位只针对竖屏底栏形态：横屏 Dock 是右下面板，与左区
-        // 胶囊不争空间，保持在场（与 .97 基线一致；矩阵 landphone 腿实测
-        // 横屏让位会抽走底部带可点节点且与基线几何脱钩）。
+        // 之叠画）。横屏聚焦（2026-10-26，Bob 22:57 最终口径）：Dock 要隐藏
+        // （与竖屏聚焦一致）——聚焦批的横屏留场例外（isLandscapeDock）已删除，
+        // 横屏聚焦时 Dock 隐藏、宠物在左侧意图卡片上（头＋卡片一个身体）。
         val cardVisible = (state == DockState.D1 || state == DockState.D2) &&
-            (!intentInputMode || isLandscapeDock)
+            !intentInputMode
+        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：场景整体换时 Dock
+        // 卡片只做淡入淡出、不滑动。重进方向的信号取上一帧 intentInputMode
+        // （SideEffect 在组合后才更新，故翻转当帧仍持旧值 true → fade-only；
+        // 正常回场时上一帧为 false → 沿用滑动＋淡入）。退出方向直接读当帧
+        // intentInputMode（翻转当帧已为 true → fade-only；D3／状态变化离场
+        // 时为 false → 沿用滑动＋淡出）。竖屏一字不动。
+        var prevIntentInputMode by remember { mutableStateOf(intentInputMode) }
+        androidx.compose.runtime.SideEffect { prevIntentInputMode = intentInputMode }
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
         // D2→D1 改由下滑/右滑手势触发
         // 点外关闭层（2026-10-26 入口子项，仅清单打开时存在，与 v0.27.4
@@ -537,14 +545,23 @@ fun PullUpDock(
                     // v0.68.78：横屏时右侧留边，不贴边
                     .let { if (isLandscapeDock) it.padding(end = 12.dp) else it },
                 enter = if (isLandscapeDock) {
-                    // v0.68.82（第 3 项）：横屏从右下角斜向滑入
-                    // 家族规格（值不动、仅具名）：滑入 DockEnter、淡入 FadeHandoff。
-                    slideIn(
-                        initialOffset = { IntOffset(it.width, it.height) },
-                        animationSpec = PetMotion.DockEnter
-                    ) + fadeIn(
-                        tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
-                    )
+                    // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：聚焦退出
+                    // 回场时只淡入、不滑动（上一帧仍在聚焦 → fade-only）；正常
+                    // 回场（D3 关闭、状态回 D1/D2）沿用 v0.68.82 斜向滑入。
+                    if (dockCardFocusSwapIsFadeOnly(isLandscapeDock, prevIntentInputMode)) {
+                        fadeIn(
+                            tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
+                        )
+                    } else {
+                        // v0.68.82（第 3 项）：横屏从右下角斜向滑入
+                        // 家族规格（值不动、仅具名）：滑入 DockEnter、淡入 FadeHandoff。
+                        slideIn(
+                            initialOffset = { IntOffset(it.width, it.height) },
+                            animationSpec = PetMotion.DockEnter
+                        ) + fadeIn(
+                            tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
+                        )
+                    }
                 } else {
                     slideInVertically(
                         animationSpec = PetMotion.DockEnter
@@ -553,14 +570,24 @@ fun PullUpDock(
                     )
                 },
                 exit = if (isLandscapeDock) {
-                    // v0.68.82（第 3 项）：横屏向右下角斜向滑出
-                    // 家族规格（值不动、仅具名）：滑出 DockExit、淡出 FadeQuick。
-                    slideOut(
-                        targetOffset = { IntOffset(it.width, it.height) },
-                        animationSpec = PetMotion.DockExit
-                    ) + fadeOut(
-                        tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)
-                    )
+                    // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：进聚焦离场
+                    // 时只淡出、不滑动（当帧 intentInputMode 已为 true → fade-only；
+                    // 150ms 淡出完成后 HomeScreen 才挂载意图槽位，先出后进不重叠）；
+                    // D3／状态变化离场时沿用 v0.68.82 斜向滑出。
+                    if (dockCardFocusSwapIsFadeOnly(isLandscapeDock, intentInputMode)) {
+                        fadeOut(
+                            tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)
+                        )
+                    } else {
+                        // v0.68.82（第 3 项）：横屏向右下角斜向滑出
+                        // 家族规格（值不动、仅具名）：滑出 DockExit、淡出 FadeQuick。
+                        slideOut(
+                            targetOffset = { IntOffset(it.width, it.height) },
+                            animationSpec = PetMotion.DockExit
+                        ) + fadeOut(
+                            tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)
+                        )
+                    }
                 } else {
                     slideOutVertically(
                         animationSpec = PetMotion.DockExit
@@ -835,17 +862,17 @@ fun PullUpDock(
                     }
                 }
                 // 圆肩批：连接混合宠物（面板之后画、前面图层；面板底锚
-                // 不变，宠物只向上长）。单宠物原则（本批横屏整体）：
-                // 竖屏输入态不呈现（让位给意图宠物），横屏输入态整只留
-                // Dock（头＋Dock 面板一个身体，卡片无宠物——意图宠物横屏
-                // 不挂载，见 IntentEntry），仍保证任何时刻恰一只。
+                // 不变，宠物只向上长）。单宠物原则（2026-10-26，Bob 22:57
+                // 最终口径）：输入态不呈现（让位给意图宠物，横屏亦同——
+                // 横屏聚焦时 Dock 隐藏、宠物在左侧意图卡片上，见 IntentEntry），
+                // 仍保证任何时刻恰一只。
                 // 手势语义（2026-10-26 入口子项）：
                 // 点宠物 = 问（直进意图输入，327 语义恢复，另带 3dp 小峰值），
                 // 长按 = 表演清单；testTag 沿用 dock_pet_cell（冒烟入口
                 // 定位契约不变）；layout_check 已随之上新为接触/压入几何
                 // （压入肩峰 5dp、脸盘完整）。B2+A 几何一字不动（宠物系数
                 // 1.224、弦 +70dp、rise 18/156、压入 5dp）。
-                if (!intentInputMode || isLandscapeDock) {
+                if (!intentInputMode) {
                     HybridPet(
                         petWidth = floatPetWidth,
                         onPetTap = {
@@ -854,12 +881,6 @@ fun PullUpDock(
                         },
                         onPetLongPress = onPetCellLongPress,
                         dragBodyState = dragBody,
-                        // 横屏聚焦：整只留 Dock、注视看向左侧卡片（DOCK_LEFT
-                        // 经现有通道得头 −8px、瞳孔 −5px 满幅向左，走头弹簧、
-                        // 平滑不跳；repo 说话目标仍优先，退出聚焦后回 null、
-                        // 注视自然回落）。
-                        gazeOverride = if (isLandscapeDock && intentInputMode)
-                            GazeTarget.DOCK_LEFT else null,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress))
@@ -1102,6 +1123,17 @@ private fun DockIconButton(
         )
     }
 }
+
+/**
+ * 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：Dock 卡片进出是否只做
+ * 淡入淡出、不滑动。横屏＋聚焦切换信号为真时 fade-only；竖屏恒走原滑动＋
+ * 淡入淡出（竖屏进态位移、Dock 滑入／滑出、漏斗四步时序一字不动）。
+ * 调用方传不同的信号：退出（离场）传当帧 intentInputMode，重进（回场）传
+ * 上一帧 intentInputMode（SideEffect 滞后一帧，翻转当帧仍为 true）。
+ * 纯函数，单测锁死。
+ */
+internal fun dockCardFocusSwapIsFadeOnly(isLandscape: Boolean, inFocusSignal: Boolean): Boolean =
+    isLandscape && inFocusSignal
 
 /** v0.68.44：页脚刊头字距文本 */
 @Composable
