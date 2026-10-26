@@ -917,8 +917,8 @@ fun IntentEntry(
     // 外边距 = max(20dp, (容器宽 − 520dp) / 2)，卡片 = min(520dp, 容器宽 − 40dp)
     // 居于容器内。357 的左区垫高按屏宽算、在槽内二次扣减致卡片塌到 40dp
     // 闪退（见 resolveCardHorizontalPadding），本批拆除；横屏不左区躲、
-    // 不窄化，底边钉导航垫（Bob 横屏不推口径）。容器宽恒有界（根 fillMaxSize
-    // 链），Infinity 兜底走屏宽公式。
+    // 不窄化，底边不钉导航垫（本批横屏垫高恒 0dp，见 resolveFocusBottomPad）。
+    // 容器宽恒有界（根 fillMaxSize 链），Infinity 兜底走屏宽公式。
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = modifier.fillMaxWidth()
     ) {
