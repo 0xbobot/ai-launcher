@@ -447,7 +447,7 @@ private fun ShortcutRow(
 }
 
 @Composable
-private fun AppIconDrawable(drawable: Drawable, size: Dp) {
+internal fun AppIconDrawable(drawable: Drawable, size: Dp) {
     val bmp = remember(drawable) {
         try { drawable.toImageBitmap() } catch (_: Exception) { null }
     }
@@ -467,7 +467,7 @@ private fun AppIconDrawable(drawable: Drawable, size: Dp) {
 }
 
 @Composable
-private fun ShortcutIconDrawable(context: Context, packageName: String, shortcutId: String, size: Dp) {
+internal fun ShortcutIconDrawable(context: Context, packageName: String, shortcutId: String, size: Dp) {
     val bmp = remember(packageName, shortcutId) {
         try { loadShortcutIcon(context, packageName, shortcutId)?.toImageBitmap() } catch (_: Exception) { null }
     }

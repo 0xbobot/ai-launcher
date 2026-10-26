@@ -6,8 +6,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
-import android.os.Handler
-import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.compose.animation.core.Animatable
@@ -57,9 +55,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
@@ -67,6 +68,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +80,12 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.apps.loadShortcutIcon
+import com.bobot.ailauncher.ui.glass.BackdropKind
+import com.bobot.ailauncher.ui.glass.DockLightParams
+import com.bobot.ailauncher.ui.glass.GlassPolicy
+import com.bobot.ailauncher.ui.glass.GlassTier
+import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
+import com.bobot.ailauncher.ui.glass.glassRadialRadius
 import com.bobot.ailauncher.ui.pet.QuickActionItem
 import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
 import com.bobot.ailauncher.ui.pet.launchQuickAction
@@ -295,8 +303,6 @@ sealed interface BlindUiState {
         val direction: FanDirection = FanDirection.LEFT,
         val segments: List<FanSegment> = emptyList(),
     ) : BlindUiState
-    /** v0.68.42：拍照快门闪——白闪 80ms + 咔嚓震感后进相机 */
-    data object PhotoFlash : BlindUiState
     /** v0.68.62：扇形内编辑——长按某快捷段 500ms 后松手，扇形钉住，点×删除，点别处取消
      * v0.68.64：升级为完整编辑模式——停留 800ms 整扇钉住（手指可松开）；
      * 装备段×删除、拖动换位、空槽位＋添加、点扇形外退出；openAddSheet=经＋段点入时自动弹添加表 */
@@ -350,6 +356,11 @@ class BlindCaptureController(
     // v0.68.62：扇形内长按删除——某快捷段停留 500ms 即 arm，松手进 Editing 钉住
     // v0.68.64：500ms arm 作废，改 800ms 整扇钉住进完整编辑模式（见 enterEditMode）
     private var dwellStartMs = 0L
+    // 2026-10-27 fan-quick-services 批：防误触两阶段——停留 800ms 只 arm
+    // （语音 + tick 提示），松手仍落在同一快捷段才进编辑；滑走 / 松手落别处
+    // 一律不进编辑（落别处只收扇形、不触发任何段）。arm 只认快捷段：
+    // 拍照段钉死、空槽位有点入路径、死区无段，停留再久也不 arm。
+    private var editArmedIdx = -1
     /** v0.68.64：编辑钉住时手势层移交扇形自身（点×/＋/拖拽由 MainScreen 侧处理），
      * controller 不再接管 down/move/up（HomeScreen 侧 LaunchedEffect 同步） */
     var editPinned = false
@@ -364,6 +375,7 @@ class BlindCaptureController(
         val wasTriggered = triggered
         tracking = false
         triggered = false
+        editArmedIdx = -1
         modeIndex = -1
         if (wasTriggered) {
             setUi(BlindUiState.Dismissing(centerX, centerY, fanDir, segments))
@@ -382,6 +394,7 @@ class BlindCaptureController(
         editPinned = false
         tracking = false
         triggered = false
+        editArmedIdx = -1
         modeIndex = -1
         setUi(BlindUiState.Hidden)
     }
@@ -456,6 +469,7 @@ class BlindCaptureController(
         if (editPinned) return
         tracking = true
         triggered = false
+        editArmedIdx = -1
         modeIndex = -1
         maxLeftPx = 0f
         maxRightPx = 0f
@@ -550,6 +564,8 @@ class BlindCaptureController(
         }
         val idx = sectorForIndex(pos.x - centerX, pos.y - centerY, deadZonePx, sweeps, fanDir)
         if (idx != modeIndex) {
+            // 换段即解 arm：滑走再滑回须重新停留满 800ms 才再 arm，不闪进编辑
+            editArmedIdx = -1
             modeIndex = idx
             dwellStartMs = change.uptimeMillis
             setUi(BlindUiState.Selecting(centerX, centerY, idx, fanDir, segments))
@@ -559,8 +575,17 @@ class BlindCaptureController(
                 Log.d(TAG, "diag: sector=${segmentLabel(idx)}")
             }
         } else if (change.uptimeMillis - dwellStartMs >= 800L) {
-            // v0.68.64：停留 800ms → 整扇钉住进完整编辑模式（取代 500ms 删除 arm）
-            enterEditMode(openAddSheet = false)
+            // 2026-10-27 fan-quick-services 批：停留 800ms 只 arm，不直接进编辑
+            // （取代 v0.68.64 的停留即钉住——盲操靠停留听段名，停留即进编辑最
+            // 容易误触）。arm 只认快捷段，拍照段 / 空槽位 / 死区一律不 arm；
+            // 进编辑须松手仍落在同一快捷段（见 onEnd 的 armed 分支）。
+            val seg = segments.getOrNull(idx)
+            if (seg is FanSegment.Quick && editArmedIdx != idx) {
+                editArmedIdx = idx
+                hapticView.tickHaptic()
+                PetRepository.say("松手进入编辑")
+                Log.d(TAG, "diag: editArmed=$idx")
+            }
         }
     }
 
@@ -583,6 +608,22 @@ class BlindCaptureController(
     fun onEnd(): Boolean {
         if (editPinned) return true
         if (!tracking) return false
+        // 2026-10-27 fan-quick-services 批：armed 两阶段收尾——松手落在
+        // 同一快捷段才进编辑；落别处只收扇形，不触发任何段（含拍照），
+        // 防止“停留听段名后手指一滑就拍照 / 进编辑”的误触。armed 优先于
+        // 快滑：arm 态下甩手也不拍照（快滑直拍只在未 arm 时生效）。
+        if (editArmedIdx >= 0) {
+            val armed = editArmedIdx
+            editArmedIdx = -1
+            if (modeIndex == armed) {
+                enterEditMode(openAddSheet = false)
+                Log.d(TAG, "diag: edit(armed 松手进入)")
+            } else {
+                dismissFan()
+                Log.d(TAG, "diag: editArmed 落别处只收扇形")
+            }
+            return true
+        }
         val wasTriggered = triggered
         val idx = modeIndex
         val flingPhoto = try {
@@ -595,9 +636,16 @@ class BlindCaptureController(
             // 快滑优先（>4500px/s 仍直接拍照，不进添加）
             val seg = segments.getOrNull(idx)
             if (flingPhoto || idx < 0 || seg is FanSegment.Photo) {
-                // v0.68.42：拍照 signature——白闪 80ms + 咔嚓震感 → 进相机
-                commitPhotoWithFlash()
-                Log.d(TAG, "diag: commit(拍照-快门闪)")
+                // 2026-10-27 fan-quick-services 批：拍照直接开系统相机，
+                // 不再走应用内快门闪（v0.68.42 的白闪 80ms + 咔嚓震感模拟
+                // 快门作废）；拍完回流按系统相机常规路径（相机应用自存
+                // 相册、返回回启动器，本应用不接回流、不存图）。
+                tracking = false
+                triggered = false
+                modeIndex = -1
+                setUi(BlindUiState.Hidden)
+                launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
+                Log.d(TAG, "diag: commit(拍照-直开系统相机)")
             } else if (seg is FanSegment.AddSlot) {
                 enterEditMode(openAddSheet = true)
                 Log.d(TAG, "diag: edit(+段点入)")
@@ -616,24 +664,6 @@ class BlindCaptureController(
         // v0.68.64：编辑钉住时取消手势不杀扇形
         if (editPinned) return
         dismissFan()
-    }
-
-    // v0.68.42：快门闪 token——80ms 内又有新手势则旧 flash 回调作废
-    private var flashToken = 0
-
-    /** v0.68.42：拍照快门闪——白闪 80ms + 强短震（咔嚓感）→ 再进系统相机 */
-    private fun commitPhotoWithFlash() {
-        tracking = false
-        triggered = false
-        modeIndex = -1
-        setUi(BlindUiState.PhotoFlash)
-        hapticView.confirmHaptic()
-        val t = ++flashToken
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (t != flashToken) return@postDelayed
-            launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
-            setUi(BlindUiState.Hidden)
-        }, 80L)
     }
 
     /** v0.68.40：拍照（系统唯一预设）/ 快捷装备段（复用 launchQuickAction） */
@@ -822,11 +852,16 @@ fun BlindCaptureFan(
     // v0.68.64：非拍照段都算（快捷＋空槽位），绘制/命中一致
     val sweeps = fanSweeps(segments.size - 1)
     val density = LocalDensity.current
-    // v0.68.42：选中段暖金 #D9A05B alpha 0.85（替代暖棕 #D8CBB6，克制的记忆色）
-    val selectedFill = Color(0xFFD9A05B).copy(alpha = 0.85f)
     val goldRipple = Color(0xFFD9A05B)
     val titleColor = AILauncherColors.current.Title
     val bodyColor = AILauncherColors.current.Body
+    // 2026-10-27 fan-quick-services 批：扇形玻璃取值全部来自 Dock，不另起一套——
+    // tint 取当前主题 Card（与 Dock 面板 tintColor 同源），光影取 DockLightParams()
+    // 默认值；tintAlpha 按扇形中心所在背景带取 STRONG 档（与 Dock 的 bandKind
+    // 口径一致；无背景态时按 TEXTURED 档兜底）。选中段暖金记忆色保留，但由
+    // 不透金填充改为金色罩染（仍透玻璃，见楔形绘制处）。
+    val dockLight = remember { DockLightParams() }
+    val cardTint = AILauncherColors.current.Card
 
     // v0.68.24 方案A：选中段径向伸长——每段外半径独立 spring；
     // v0.68.35：展开 0→120dp，选中该段 120→140dp（+20dp），滑出回弹；
@@ -895,6 +930,18 @@ fun BlindCaptureFan(
     val onEditTapOutsideState = rememberUpdatedState(onEditTapOutside)
     // v0.68.29 方案C：探出七仔位置钳制需要屏幕尺寸
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
+    // 2026-10-27 fan-quick-services 批：扇形 Box 的窗口坐标——扇形中心所在
+    // 背景带（tintAlpha 取档）按 Dock 同款公式算（窗口 Y − 背景原点 Y）/ 背景高
+    var fanPosInWindow by remember { mutableStateOf(Offset.Zero) }
+    val glassState = LocalGlassBackdrop.current
+    val fanTintAlpha = if (glassState != null && glassState.backdropHeightPx > 0) {
+        val frac = (fanPosInWindow.y + centerY - glassState.originInWindow.y) /
+            glassState.backdropHeightPx
+        val band = GlassPolicy.kindAtFraction(glassState.backdropBands, frac.coerceIn(0f, 1f))
+        GlassPolicy.paramsFor(GlassTier.STRONG, band)?.tintAlpha ?: 0.07f
+    } else {
+        0.07f // 无背景态：按 TEXTURED 档兜底（Dock 下部常用档）
+    }
     // v0.68.62：armed 段抖动（±7° 往复），只在有 armed 段时建 transition
     // v0.68.64：编辑态所有装备段抖动（iOS 式，暗示可编辑）；拍照段钉死不抖
     val wobbleDeg: Float = if (editMode) {
@@ -912,7 +959,10 @@ fun BlindCaptureFan(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .onGloballyPositioned { screenSize = it.size }
+            .onGloballyPositioned {
+                screenSize = it.size
+                fanPosInWindow = it.positionInWindow()
+            }
             // v0.68.64：编辑态手势——点×删除 / 点＋添加 / 装备段拖动换位 /
             // 点扇形外空白退出；手势态（Selecting）不装点击
             // key 只跟 editMode：回调与段列表经 rememberUpdatedState 取最新，
@@ -1019,8 +1069,10 @@ fun BlindCaptureFan(
             val center = Offset(centerX, centerY)
             // v0.68.24 方案A：选中光晕已删除，改径向伸长
             // v0.68.35：毛玻璃质感——段底半透明白 + 外缘 1px 高光描边；选中段暖金
-            // v0.68.42：段间 2dp 分隔线删除，改 4dp 气隙（±1.4°，透背景）；
-            // 未选中段整体透明度 0.6；选中段柔和投影（HW 安全：两层错位暗弧）
+            // v0.68.42：段间 2dp 分隔线删除，改 4dp 气隙（±1.4°，透背景）
+            // 2026-10-27 fan-quick-services 批：楔形改 Dock 卡片同款玻璃（见下）——
+            // 旧“段底半透明白 + 选中段不透金 + 两层错位暗弧投影 + 未选中 0.6  dim”
+            // 全部作废；填充 / 渐变 / 高光 / 通透度一律取 Dock 的值。
             val gapHalf = 1.4f
             segments.forEachIndexed { i, seg ->
                 val (s, sw) = segmentAngles(i, sweeps, direction)
@@ -1074,38 +1126,110 @@ fun BlindCaptureFan(
                     return@forEachIndexed
                 }
                 val selected = i == selectedIndex
-                val segAlpha = if (selected) 1f else 0.6f
-                if (selected) {
-                    val shColor = Color(0xFF6E5A3E)
-                    drawArc(
-                        color = shColor.copy(alpha = 0.14f),
-                        startAngle = s + gapHalf,
-                        sweepAngle = sw - gapHalf * 2,
-                        useCenter = true,
-                        topLeft = Offset(centerX - rOuter - 4f, centerY - rOuter + 10f),
-                        size = Size((rOuter + 4f) * 2f, (rOuter + 4f) * 2f)
+                // 2026-10-27 fan-quick-services 批：楔形 Dock 同款玻璃——
+                // 底色 Card tint × STRONG 档 tintAlpha → 对角明暗 → 沉底暖核 →
+                // 高光面 → 左下出口，全部取 DockLightParams() 默认值、光方向与
+                // Dock 一致（右上亮 → 左下暗）；光场按扇形整体算（140dp 选中
+                // 外半径为界），换段选中时光位不动、跨楔连续。
+                // 局限：Dock 的底还有背景抓拍模糊 + AGSL 折射层，Canvas 楔形
+                // 画不出抓拍模糊层——楔形下是实时内容 + 同款 tint 与 dressing，
+                // 模糊层除外；扇形只在手势中短暂展开，不值得为 5 个楔形各建
+                // 一套抓拍管线。选中段暖金记忆色保留，改为罩染（仍透玻璃）。
+                val wedgePath = Path().apply {
+                    moveTo(centerX, centerY)
+                    arcTo(
+                        rect = Rect(
+                            centerX - rOuter, centerY - rOuter,
+                            centerX + rOuter, centerY + rOuter
+                        ),
+                        startAngleDegrees = s + gapHalf,
+                        sweepAngleDegrees = sw - gapHalf * 2,
+                        forceMoveTo = false
                     )
-                    drawArc(
-                        color = shColor.copy(alpha = 0.10f),
-                        startAngle = s + gapHalf,
-                        sweepAngle = sw - gapHalf * 2,
-                        useCenter = true,
-                        topLeft = Offset(centerX - rOuter - 8f, centerY - rOuter + 18f),
-                        size = Size((rOuter + 8f) * 2f, (rOuter + 8f) * 2f)
-                    )
+                    close()
                 }
-                drawArc(
-                    color = if (selected) selectedFill
-                    else Color.White.copy(alpha = 0.55f * segAlpha),
-                    startAngle = s + gapHalf,
-                    sweepAngle = sw - gapHalf * 2,
-                    useCenter = true,
-                    topLeft = Offset(centerX - rOuter, centerY - rOuter),
-                    size = Size(rOuter * 2f, rOuter * 2f)
+                val fanR = with(density) { FAN_R_OUTER_SELECTED_DP.dp.toPx() }
+                val fanLeft = centerX - fanR
+                val fanTop = centerY - fanR
+                val fanW = fanR * 2f
+                val diagBrush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.Black.copy(alpha = dockLight.diagonalSpan / 2f),
+                        Color.Transparent,
+                        Color.White.copy(alpha = dockLight.diagonalSpan / 2f),
+                    ),
+                    start = Offset(fanLeft, fanTop + fanW),
+                    end = Offset(fanLeft + fanW, fanTop),
                 )
-                // 1px 高光描边（外缘弧线）
+                clipPath(wedgePath) {
+                    // ① 底色：Dock 同款 Card tint
+                    drawRect(color = cardTint.copy(alpha = fanTintAlpha))
+                    // ② 对角明暗（右上亮 → 左下暗）
+                    drawRect(brush = diagBrush)
+                    // ③ 沉底暖核
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                dockLight.coreColor.copy(alpha = dockLight.corePeakAlpha),
+                                dockLight.coreColor.copy(alpha = 0f),
+                            ),
+                            center = Offset(
+                                fanLeft + dockLight.coreCenterX * fanW,
+                                fanTop + dockLight.coreCenterY * fanW,
+                            ),
+                            radius = glassRadialRadius(dockLight.coreRadiusFraction, fanW),
+                        ),
+                    )
+                    // ④ 高光面（右上）
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = dockLight.highlightPeakAlpha),
+                                Color.White.copy(alpha = 0f),
+                            ),
+                            center = Offset(
+                                fanLeft + dockLight.highlightCenterX * fanW,
+                                fanTop + dockLight.highlightCenterY * fanW,
+                            ),
+                            radius = glassRadialRadius(dockLight.highlightRadiusFraction, fanW),
+                        ),
+                    )
+                    // ⑤ 左下出口（沿底边横向拉长的暖白亮边）
+                    val exitCenter = Offset(
+                        fanLeft + dockLight.exitCenterX * fanW,
+                        fanTop + dockLight.exitCenterY * fanW,
+                    )
+                    withTransform({
+                        scale(dockLight.exitStretchX, dockLight.exitStretchY, pivot = exitCenter)
+                    }) {
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFFFFF6E8).copy(alpha = dockLight.exitPeakAlpha),
+                                    Color(0xFFFFF6E8).copy(alpha = 0f),
+                                ),
+                                center = exitCenter,
+                                radius = glassRadialRadius(dockLight.exitRadiusFraction, fanW),
+                            ),
+                        )
+                    }
+                    // ⑥ 选中段：暖金记忆色改罩染（不盖住玻璃）
+                    if (selected) {
+                        drawPath(wedgePath, Color(0xFFD9A05B).copy(alpha = 0.45f))
+                    }
+                }
+                // 外缘 1px 描边：浮动楔形没有 Dock 面板的抓拍模糊衬底，边缘须
+                // 自带亮度定义；亮度沿对角方向走（左下暗 → 右上亮，与光方向
+                // 一致），取值全部来自 DockLightParams（0.05 → 宽环值）。
                 drawArc(
-                    color = Color.White.copy(alpha = 0.5f * segAlpha),
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.05f),
+                            Color.White.copy(alpha = dockLight.rimWideAlpha),
+                        ),
+                        start = Offset(fanLeft, fanTop + fanW),
+                        end = Offset(fanLeft + fanW, fanTop),
+                    ),
                     startAngle = s + gapHalf,
                     sweepAngle = sw - gapHalf * 2,
                     useCenter = false,

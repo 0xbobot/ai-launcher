@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -84,6 +85,12 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * 歪头好奇＝问号、害羞＝内收、惊讶＝闪电、晕乎乎＝星星、开心＝笑脸、
  * 深呼吸＝气流。圆底用主题 Divider 暖灰（浅/深各一份），图标用 Title
  * 色、标签用 Body 色，浅/深色同代码路径。
+ * 2026-10-27 fan-quick-services 批 rebase 适配：快捷服务不另起文字节，
+ * 直接并入上面同一套圆形格（真实应用图标＋标签、自动换行，有装备时
+ * 才出现），与扇形同一套 QuickActionsPrefs 数据 + launchQuickAction
+ * 启动入口，不另造第二套动作层；表演 8 项的语义、顺序、触发入口一字
+ * 不动。点按仍是“问”（直进意图输入）、拖拽仍是拉伸物理——快捷服务
+ * 只落长按清单这一处入口。
  */
 internal data class PetActionItem(
     val label: String,
@@ -117,6 +124,7 @@ fun PetActionList(
     // （自主行为的手动复读）、摸头（害羞的纯重复）、拖拽反应
     // （按钮模拟手势——拖拽反应归拖拽手势本身，见 FloatingPet 拖拽），
     // 以及点头 / 摇头 / 重心微移 / 晃头（同质小动作，验证清单不留）。
+    val context = LocalContext.current
     val bodyColor = AILauncherColors.current.Body
     val hintColor = AILauncherColors.current.Hint
     val tailColor = AILauncherColors.current.Card
@@ -194,6 +202,36 @@ fun PetActionList(
                             }
                         }
                     }
+                    // 2026-10-27 fan-quick-services 批 rebase 适配：宠物复用
+                    // 快捷服务——与扇形同一套数据（QuickActionsPrefs）+ 同一个
+                    // 启动入口（launchQuickAction），不另造第二套动作层。
+                    // 快捷项不另起文字节，直接并入上面同一套圆形格（真实应用
+                    // 图标＋标签；表演 8 项恰占 2 整行，快捷格自然从第 3 行起，
+                    // chunked(4) 自动换行）；无装备时整批不出现。
+                    // Dock perch 与意图 perch 共用本组件，两处同时获得快捷服务。
+                    val quickItems = remember {
+                        try {
+                            QuickActionsPrefs.load(context)
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                    for (rowChunk in quickItems.withIndex().toList().chunked(4)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                        ) {
+                            for ((qi, item) in rowChunk) {
+                                QuickActionButton(
+                                    item = item,
+                                    testTag = "pet_quick_$qi",
+                                    // 与扇形段提交同一入口：快捷方式走 LauncherApps，
+                                    // 主应用走包启动，打不开时同一套七仔语音兜底。
+                                    onClick = { launchQuickAction(context, item) },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -248,6 +286,68 @@ private fun ActionButton(
         Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = item.label,
+            fontSize = 12.sp,
+            color = AILauncherColors.current.Body,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * 快捷服务格：同款 56dp 圆底＋12sp 标签，图标用真实应用图标
+ * （快捷方式走 ShortcutIconDrawable，主应用走 AppIconDrawable；
+ * 取不到图标时 helper 自带 AccentSoft 兜底块）。
+ * 图标 contentDescription 置空（helper 内已标装饰语义），TalkBack 只读标签。
+ */
+@Composable
+private fun QuickActionButton(
+    item: QuickActionItem,
+    testTag: String,
+    onClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .testTag(testTag)
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) { onClick() }
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(AILauncherColors.current.Divider),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (item.shortcutId != null) {
+                ShortcutIconDrawable(context, item.packageName, item.shortcutId, 36.dp)
+            } else {
+                val drawable = remember(item.packageName) {
+                    try {
+                        context.packageManager.getApplicationIcon(item.packageName)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                if (drawable != null) {
+                    AppIconDrawable(drawable, 36.dp)
+                } else {
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AILauncherColors.current.AccentSoft)
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = item.label.takeIf { it.isNotBlank() } ?: "快捷",
             fontSize = 12.sp,
             color = AILauncherColors.current.Body,
             maxLines = 1,
