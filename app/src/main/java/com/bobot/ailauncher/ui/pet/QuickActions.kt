@@ -78,12 +78,16 @@ import org.json.JSONObject
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 
 /**
- * v0.65.2：快捷操作从 TODAY 卡片移到七仔气泡。
- * - 点七仔 → 气泡展开为快捷面板：一排小图标（36dp）+ 10sp 标签，点即直达
+ * v0.65.2：快捷操作从 TODAY 卡片移到七仔气泡（旧面板已退役，见下）。
+ * - 2026-10-26 宠物重构 D：旧快捷面板本体在 354 基线里已无独立 Composable
+ *   （全仓 grep 仅剩本文件头注释提及），面板期图标 helper QuickActionIcon
+ *   与其专属 helper appIconOrNull 零调用方，已删除；数据层 QuickActionsPrefs、
+ *   启动函数 launchQuickAction 与三步添加流程 QuickActionAddFlow 保留——
+ *   BlindCapture 快捷段与 MainScreen 快捷段还在用它们，绝不删数据层。
  * - 面板底部小 "+ 添加"（虚线圆）→ 三步添加流程（选应用→选快捷方式→输标签）
  * - 长按图标 → 删除（震动+确认）
  * - 数据层 QuickActionsPrefs 复用不动
- * - 首次点七仔时七仔引导："点图标直达，+ 可以添加常用按钮"
+ * - 首次点七仔时七仔引导："点图标直达，+ 可以添加常用按钮"（旧面板口径，已随面板退役）
  */
 
 // ============ 数据（v0.65.0，不动） ============
@@ -148,44 +152,10 @@ private fun Drawable.toImageBitmap(): ImageBitmap {
     return bmp.asImageBitmap()
 }
 
-/** 快捷按钮图标：快捷方式图标优先，取不到/主应用则用应用图标；图标实时解析不持久化 */
-@Composable
-private fun QuickActionIcon(item: QuickActionItem, size: Dp) {
-    val context = LocalContext.current
-    val bitmap = remember(item.packageName, item.shortcutId) {
-        try {
-            val d: Drawable? = if (item.shortcutId != null) {
-                loadShortcutIcon(context, item.packageName, item.shortcutId)
-                    ?: appIconOrNull(context, item.packageName)
-            } else {
-                appIconOrNull(context, item.packageName)
-            }
-            d?.toImageBitmap()
-        } catch (_: Exception) { null }
-    }
-    if (bitmap != null) {
-        Image(
-            bitmap = bitmap,
-            contentDescription = item.label,
-            modifier = Modifier
-                .size(size)
-                .clip(RoundedCornerShape(8.dp))
-        )
-    } else {
-        Box(
-            modifier = Modifier
-                .size(size)
-                .clip(RoundedCornerShape(8.dp))
-                .background(AILauncherColors.current.AccentSoft)
-        )
-    }
-}
-
-private fun appIconOrNull(context: Context, packageName: String): Drawable? {
-    return try {
-        context.packageManager.getApplicationIcon(packageName)
-    } catch (_: Exception) { null }
-}
+// 2026-10-26 宠物重构 D：旧快捷面板期图标 helper QuickActionIcon 与其专属
+// helper appIconOrNull 已删除——全仓 grep 零调用方（面板本体在 354 基线里已
+// 无独立 Composable），其余图标 helper（AppIconDrawable / ShortcutIconDrawable
+// 在添加流程内在用）保留不动。
 
 internal fun launchQuickAction(context: Context, item: QuickActionItem) {
     try {
