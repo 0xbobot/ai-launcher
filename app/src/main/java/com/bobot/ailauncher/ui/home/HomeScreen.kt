@@ -47,6 +47,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -54,6 +55,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -541,6 +543,63 @@ fun HomeScreen(
         // 专注组在场：进专注态起、退态完成止（isExiting 期间槽位仍挂载，
         // 锚定须保留，否则翻转瞬间卡片跳回顶部、反向位移无从渲染）。
         val focusGroupVisible = intentInputMode || perchTransition.isExiting
+        // 输入态专注·修复（2026-10-26，356 真机反馈）：组底边改走显式垫高，
+        // 不再只依赖窗口收缩。356 的锚定是权重 Spacer + adjustResize：窗口
+        // 不收缩时等于没锚。Bob 机上横屏截图证实键盘是悬浮式（右侧圆角浮
+        // 窗、压住卡片右侧）——悬浮键盘既不触发窗口收缩、也不产生底部 IME
+        // inset，两条旧路径同时失效，卡片留在屏底被键盘盖住；同机竖屏同
+        // 一键盘模式，竖屏“没有推起来”与此同根（竖屏截图本身无键盘在场，
+        // 故竖屏机制由横屏证据 + 代码链完整性推断：三环逐一核过——Manifest
+        // 是 adjustResize、无运行时覆盖、宿主链 Box→NavHost→HomeScreen 全
+        // fillMaxSize、无 Popup、无 inset 消费，收缩链本身无断点）。
+        // 四路分流（纯函数 resolveFocusBottomPad，单测锁死）：
+        // ① 停靠键盘且窗口未收缩（imeBottom > 0）：垫 = imeBottom，卡片精确
+        //    坐在键盘顶边，0dp 贴合；
+        // ② 停靠键盘且窗口已收缩（窗口高 < 屏高 − 48dp，imeBottom 归零）：
+        //    垫 = 0，Spacer 已把卡片推到窗口底边即键盘顶边（356 在此情形下
+        //    误加了导航垫、卡片会浮在键盘上方 16dp，本批一并修正）；
+        // ③ 悬浮键盘（键盘在场预期成立、窗口未收缩、imeBottom = 0）：竖屏
+        //    垫 = 窗口高 × 50%，把组顶到屏幕上半区、躲开底部悬浮键盘（悬浮
+        //    键盘位置／尺寸系统不提供，50% 是保守兜底：覆盖底部半屏内任意
+        //    高度的悬浮键盘；被用户拖到屏幕中部的悬浮键盘仍可能压住，此为
+        //    系统能力边界、如实标注）；
+        // ④ 其余（键盘收起／结果态）：垫 = 导航栏 clearance（356 原口径不变）。
+        // 键盘在场预期 = 输入态且（胶囊聚焦，或 Planning／NeedsInput——这两
+        // 态键盘按设计保持升起）；Reply／Error 等态键盘按设计已收，走 ④。
+        val imeBottomDp = with(density) { imeBottomPx.toDp() }
+        val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
+        val windowResized = maxHeight < screenHeightDp - 48.dp
+        val keyboardExpected = intentInputMode && (intentFocused ||
+            intentState is com.bobot.ailauncher.core.intent.IntentUiState.Planning ||
+            intentState is com.bobot.ailauncher.core.intent.IntentUiState.NeedsInput)
+        val focusBottomPadResolved = resolveFocusBottomPad(
+            imeBottom = imeBottomDp,
+            windowResized = windowResized,
+            keyboardExpected = keyboardExpected,
+            isPortrait = !isLandscapeHome,
+            windowHeight = maxHeight,
+            navClearance = navClearanceDp
+        )
+        // 退态期间冻结垫高：退出起步先翻 isExiting、后清焦点（同一 funnel
+        // 内 beginExit 在 clearFocus 之前），不冻结则清焦点后
+        // keyboardExpected 翻 false、垫高瞬间掉回导航垫，卡片在宠物起步前
+        // 跳变（悬浮竖屏约 50% 窗口高），反向位移无从渲染；冻结后卡片原地
+        // 不动、宠物从原位走回 Dock，退态结束（isExiting 翻 false）后恢复
+        // 按信号计算。
+        var frozenExitPad by remember { mutableStateOf<Dp?>(null) }
+        androidx.compose.runtime.LaunchedEffect(focusBottomPadResolved, perchTransition.isExiting) {
+            if (!perchTransition.isExiting) frozenExitPad = focusBottomPadResolved
+        }
+        val focusBottomPad = if (perchTransition.isExiting) {
+            frozenExitPad ?: navClearanceDp
+        } else {
+            focusBottomPadResolved
+        }
+        // 横屏悬浮键盘：卡片改左区布局（见 IntentEntry 的 landscapeFloating），
+        // 躲开右侧悬浮键盘；停靠键盘／键盘收起时仍用 520dp 居中（停靠键盘
+        // 占满底边、无左右遮挡）。
+        val landscapeFloating = isLandscapeHome && keyboardExpected &&
+            !windowResized && imeBottomPx == 0
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -633,6 +692,7 @@ fun HomeScreen(
                                 perchTransition = perchTransition,
                                 onExitFocusRequest = onExitFocusRequest,
                                 focusBubbleActive = intentInputMode,
+                                landscapeFloating = landscapeFloating,
                                 onRequestExitInput = onExitFocusRequest,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -640,11 +700,11 @@ fun HomeScreen(
                     }
                 }
             )
-            // 输入态专注·集成：结果态（键盘已收）组底边钉导航栏上方——
-            // 键盘升起时窗口底边即键盘顶边，不加垫（0dp 贴合）；键盘收起
-            // 时窗口底边 = 屏底，垫起导航栏高（见 navClearanceDp）。
-            if (focusGroupVisible && imeBottomPx == 0) {
-                Spacer(modifier = Modifier.height(navClearanceDp))
+            // 输入态专注·修复：组底边垫高见上方四路分流（resolveFocusBottomPad），
+            // 退态期间冻结值——此处不再按 imeBottomPx == 0 一刀切（窗口已收缩
+            // 时 imeBottom 同样归零，356 在此误加导航垫、卡片浮在键盘上方）。
+            if (focusGroupVisible) {
+                Spacer(modifier = Modifier.height(focusBottomPad))
             }
         }
         // v0.68.99：返回退出输入态——IME 在场时不启用（那一按归输入法收键盘，
@@ -760,6 +820,50 @@ internal fun intentStateHoldsInput(
     is com.bobot.ailauncher.core.intent.IntentUiState.Error -> true
     is com.bobot.ailauncher.core.intent.IntentUiState.Idle,
     is com.bobot.ailauncher.core.intent.IntentUiState.Editing -> false
+}
+
+/**
+ * 输入态专注·修复（2026-10-26，356 真机反馈）：专注组底边垫高决策（纯函数，单测锁死）。
+ * 四路按序分流，互斥且全覆盖——调用方只传信号，不在这里再算窗口／键盘状态：
+ *  - imeBottom > 0：停靠键盘且窗口未收缩，垫 = 键盘高，卡片精确坐键盘顶边（0dp 贴合）；
+ *  - windowResized：停靠键盘且窗口已收缩（imeBottom 已归零），垫 = 0，权重 Spacer
+ *    已把卡片推到窗口底边即键盘顶边（356 在此误加导航垫的回归锁）；
+ *  - keyboardExpected && isPortrait：悬浮键盘兜底（窗口未收缩、imeBottom = 0、键盘
+ *    在场预期成立），垫 = 窗口高 × 50%，把组顶到屏幕上半区；
+ *  - 其余：键盘收起／结果态，垫 = 导航栏 clearance（356 原口径）。
+ * 注意：悬浮键盘的横屏情形不走本函数（横屏垫仍为导航垫，避让改走卡片左区布局，
+ * 见 resolveLandscapeCardWidth），故 isPortrait 门只管竖屏兜底。
+ */
+internal fun resolveFocusBottomPad(
+    imeBottom: Dp,
+    windowResized: Boolean,
+    keyboardExpected: Boolean,
+    isPortrait: Boolean,
+    windowHeight: Dp,
+    navClearance: Dp,
+): Dp = when {
+    imeBottom > 0.dp -> imeBottom
+    windowResized -> 0.dp
+    keyboardExpected && isPortrait -> windowHeight * 0.5f
+    else -> navClearance
+}
+
+/**
+ * 输入态专注·修复（2026-10-26，356 真机反馈）：横屏卡片宽决策（纯函数，单测锁死）。
+ *  - landscapeFloating = false：沿用 356 口径，封顶 520dp 居中；
+ *  - landscapeFloating = true：左区布局，宽 = min(520dp, 屏宽 × 50%)——按 Bob 横屏
+ *    截图实测校准：其悬浮键盘左缘约在屏宽 52.6% 处，50% 封顶使卡片内容右缘
+ *    （卡片宽 − 16dp 内容边距）落在键盘左缘左侧；仅底部 24dp 外延区右尖可能
+ *    触到键盘圆角（无内容，不改外延几何）。被用户改大／拖位的悬浮键盘仍可能
+ *    压住，此为系统不提供键盘位置下的能力边界。
+ */
+internal fun resolveLandscapeCardWidth(
+    screenWidth: Dp,
+    landscapeFloating: Boolean,
+): Dp = if (landscapeFloating) {
+    minOf(520.dp, screenWidth * 0.5f)
+} else {
+    minOf(520.dp, screenWidth - 40.dp)
 }
 
 /**

@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.ui.home
 
+import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.core.action.ActionRequest
 import com.bobot.ailauncher.core.intent.IntentUiState
 import com.bobot.ailauncher.data.RiskLevel
@@ -138,6 +139,112 @@ class IntentInputModeTest {
         // 有在场状态（自动带起呈现，不弹键盘是正道）
         assertFalse(
             intentInputStranded(hasFocused = false, textEmpty = true, holdsNow = true)
+        )
+    }
+
+    // ---- 输入态专注·修复（2026-10-26，356 真机反馈）：专注组底边垫高四路分流 ----
+    private val padNav = 16.dp
+    private val padWindow = 700.dp
+
+    @Test
+    fun `底边垫高 - 停靠键盘未收缩时垫等于键盘高`() {
+        // 停靠键盘、窗口未收缩：卡片精确坐键盘顶边，0dp 贴合
+        org.junit.Assert.assertEquals(
+            300.dp,
+            resolveFocusBottomPad(
+                imeBottom = 300.dp, windowResized = false, keyboardExpected = true,
+                isPortrait = true, windowHeight = padWindow, navClearance = padNav
+            )
+        )
+    }
+
+    @Test
+    fun `底边垫高 - 窗口已收缩时垫为零且不误加导航垫`() {
+        // 356 回归锁：窗口已收缩时 imeBottom 归零，旧逻辑误加导航垫、卡片浮在键盘上方
+        org.junit.Assert.assertEquals(
+            0.dp,
+            resolveFocusBottomPad(
+                imeBottom = 0.dp, windowResized = true, keyboardExpected = true,
+                isPortrait = true, windowHeight = 400.dp, navClearance = padNav
+            )
+        )
+    }
+
+    @Test
+    fun `底边垫高 - 悬浮键盘竖屏兜底为窗口高一半`() {
+        // 悬浮键盘：窗口未收缩、imeBottom = 0、键盘在场预期成立 → 组顶到上半区
+        org.junit.Assert.assertEquals(
+            350.dp,
+            resolveFocusBottomPad(
+                imeBottom = 0.dp, windowResized = false, keyboardExpected = true,
+                isPortrait = true, windowHeight = padWindow, navClearance = padNav
+            )
+        )
+    }
+
+    @Test
+    fun `底边垫高 - 悬浮键盘横屏不走竖屏兜底`() {
+        // 横屏悬浮避让改走卡片左区布局，竖屏兜底不适用，垫回导航垫
+        org.junit.Assert.assertEquals(
+            padNav,
+            resolveFocusBottomPad(
+                imeBottom = 0.dp, windowResized = false, keyboardExpected = true,
+                isPortrait = false, windowHeight = 360.dp, navClearance = padNav
+            )
+        )
+    }
+
+    @Test
+    fun `底边垫高 - 键盘收起与结果态垫导航垫`() {
+        // 键盘收起／结果态（在场预期不成立）：沿用 356 原口径
+        org.junit.Assert.assertEquals(
+            padNav,
+            resolveFocusBottomPad(
+                imeBottom = 0.dp, windowResized = false, keyboardExpected = false,
+                isPortrait = true, windowHeight = padWindow, navClearance = padNav
+            )
+        )
+    }
+
+    @Test
+    fun `底边垫高 - 停靠键盘优先于窗口收缩信号`() {
+        // imeBottom > 0 恒优先（窗口收缩与否不影响停靠键盘的精确贴合）
+        org.junit.Assert.assertEquals(
+            280.dp,
+            resolveFocusBottomPad(
+                imeBottom = 280.dp, windowResized = true, keyboardExpected = true,
+                isPortrait = true, windowHeight = 420.dp, navClearance = padNav
+            )
+        )
+    }
+
+    // ---- 输入态专注·修复：横屏卡片宽决策 ----
+    @Test
+    fun `横屏卡片宽 - 非悬浮沿用封顶居中口径`() {
+        org.junit.Assert.assertEquals(
+            520.dp,
+            resolveLandscapeCardWidth(screenWidth = 800.dp, landscapeFloating = false)
+        )
+        org.junit.Assert.assertEquals(
+            520.dp,
+            resolveLandscapeCardWidth(screenWidth = 560.dp, landscapeFloating = false)
+        )
+        org.junit.Assert.assertEquals(
+            500.dp,
+            resolveLandscapeCardWidth(screenWidth = 540.dp, landscapeFloating = false)
+        )
+    }
+
+    @Test
+    fun `横屏卡片宽 - 悬浮时左区宽取屏宽一半封顶`() {
+        // Bob 横屏截图校准：悬浮键盘左缘约屏宽 52.6%，50% 封顶使内容右缘落在键盘左缘左侧
+        org.junit.Assert.assertEquals(
+            400.dp,
+            resolveLandscapeCardWidth(screenWidth = 800.dp, landscapeFloating = true)
+        )
+        org.junit.Assert.assertEquals(
+            390.dp,
+            resolveLandscapeCardWidth(screenWidth = 780.dp, landscapeFloating = true)
         )
     }
 }
