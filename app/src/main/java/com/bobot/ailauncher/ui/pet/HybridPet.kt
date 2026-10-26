@@ -68,6 +68,15 @@ import java.io.IOException
 /** 应急总开关：true = 视频层彻底关闭（333 后闪退应急，见文件头注释）。 */
 private const val VIDEO_LAYER_EMERGENCY_OFF = true
 
+/**
+ * 单一宠物引擎契约（宠物交互重构 P0-3，2026-10-26）：Dock 上沿与意图
+ * 卡片上沿两处 perch 共用本组件与 FloatingPet 活感引擎——同一玻璃头
+ * 资产、同一眨眼状态体（PetBlinkState，约 240ms）、同一呼吸/注视/
+ * 手动动作管线，不另建第二套。旧毛绒路径 PetView 已随本批退役
+ * （零调用方；其约 190ms 眨眼、4s 呼吸、毛绒资产渲染自此不再是
+ * 在场宠物的参数来源）。perch 切换的位移本身由 IntentEntry 侧的
+ * 附加 offset 承担，本组件不感知 perch、不持有位移状态。
+ */
 @Composable
 fun HybridPet(
     petWidth: Dp,
