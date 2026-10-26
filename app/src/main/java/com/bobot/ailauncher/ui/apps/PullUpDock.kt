@@ -129,11 +129,14 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * - D3：不透明整屏替换（App 底色），顶部常用横滑一行 + 全部应用 A-Z 列表 + 弧形 A-Z 导航
  *
  * 手势签名（全 App 统一，v0.14 纠正）：左滑 = 更多，右滑 = 更少
- * - D1 —左滑→ D2 —左滑→ D3；D3 —右滑→ D2 —右滑→ D1
+ * - D1 —左拖→ D2（2026-10-27 拖拽代滑动：跟手＋松手确认，可中途取消）；
+ *   D2 —左滑→ D3（中途触发，不动）；D3 —右滑→ D2 —右滑→ D1
+ * - D2 —右拖→ D1（拖拽代滑动）；D1 右滑 → 隐藏确认（入口之一，不动）
  * - v0.16：隐藏的唯一入口是 D1 右滑（弹确认框，"不再提醒"可记）；D1 下滑不再隐藏；
  *   点按卡片外部不再隐藏（D2→D1 收一档，D1 无动作）
  * - 上滑：隐藏→记住的行数（首页上滑）；D1/D2→D3（直接全屏）
  * - 下滑：D3→D2→D1（逐级收回）；点按卡片外部 → D2 收回 D1
+ * - v0.57.0 长按 Dock → 隐藏（与 D1 右滑并存），拖拽批不动（隐藏入口，不是切换触发）
  */
 enum class DockState { Hidden, D1, D2, D3 }
 
@@ -509,7 +512,7 @@ fun PullUpDock(
         var prevIntentInputMode by remember { mutableStateOf(intentInputMode) }
         androidx.compose.runtime.SideEffect { prevIntentInputMode = intentInputMode }
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
-        // D2→D1 改由下滑/右滑手势触发
+        // D2→D1 改由下滑/拖拽手势触发（2026-10-27：右滑触发改为右拖确认）
         // 点外关闭层（2026-10-26 入口子项，仅清单打开时存在，与 v0.27.4
         // 删除的常驻层不同）：透明全屏 Box，画在 D1/D2 盒之下、简报之上——
         // 简报 / 背景区的点按落到它身上即关闭清单；Dock 面板与宠物在其
@@ -600,6 +603,12 @@ fun PullUpDock(
             ) {
                 val hThreshPx = with(density) { 48.dp.toPx() }
                 val vThreshPx = with(density) { 72.dp.toPx() }
+                // D1/D2 拖拽切换（2026-10-27）：内容跟手量（px），卡片本体与
+                // 宠物栖坐不动，只平移 AnimatedContent；松手弹簧回落到 0。
+                // 跟手钳制 32dp（阻尼 0.8，见 DockDragSwitch）。
+                val tierFollowClampPx = with(density) { 32.dp.toPx() }
+                val tierDragScope = rememberCoroutineScope()
+                val tierFollowAnim = remember { Animatable(0f) }
                 // v0.16.1：底部系统手势区高度（导航条/手势区），落在该区域内的拖拽起点不抢——
                 // 让系统处理底部左右滑（切最近应用）、底部上滑（回桌面/最近任务）
                 val sysGestureBottomPx = systemGestureBottomPx()  // 批B ⑧：收口到 Insets helper（原内联读 WindowInsets.systemGestures）
@@ -758,11 +767,34 @@ fun PullUpDock(
                             var accumY = 0f
                             var fired = false
                             var inSysGestureZone = false
+                            // D1/D2 拖拽切换（2026-10-27）：水平方向一旦确立即锁定，
+                            // 本次手势不再判竖直；拖拽中只跟手、不触发，松手再确认。
+                            var horizontalLocked = false
+                            fun resetFollow() {
+                                tierDragScope.launch { tierFollowAnim.snapTo(0f) }
+                            }
+                            fun updateFollow() {
+                                val follow = dragTierFollowPx(state, accumX, tierFollowClampPx)
+                                tierDragScope.launch { tierFollowAnim.snapTo(follow) }
+                            }
+                            fun springBack() {
+                                tierDragScope.launch {
+                                    tierFollowAnim.animateTo(
+                                        0f,
+                                        animationSpec = spring(
+                                            stiffness = Spring.StiffnessMediumLow,
+                                            dampingRatio = 0.9f
+                                        )
+                                    )
+                                }
+                            }
                             detectDragGestures(
                                 onDragStart = { start ->
                                     accumX = 0f
                                     accumY = 0f
                                     fired = false
+                                    horizontalLocked = false
+                                    resetFollow()
                                     // 起点在底部系统手势区内（卡片底部 dockBottomPadPx 之上、
                                     // 屏幕底部 sysGestureBottomPx 之内）→ 本次不消费、不触发，交还系统
                                     val dangerPx = sysGestureBottomPx - dockBottomPadPx
@@ -775,6 +807,11 @@ fun PullUpDock(
                                     accumX += dragAmount.x
                                     accumY += dragAmount.y
                                     if (fired) return@detectDragGestures
+                                    // 已锁定水平：只更新跟手，不再判竖直（防斜拖中途跳 D3）。
+                                    if (horizontalLocked) {
+                                        updateFollow()
+                                        return@detectDragGestures
+                                    }
                                     val ax = abs(accumX)
                                     val ay = abs(accumY)
                                     val go = onStateChangeState.value
@@ -782,24 +819,49 @@ fun PullUpDock(
                                     //（Bob：任何时候从底部上滑都要能回桌面主页）
                                     if (ay > vThreshPx && accumY < 0) {
                                         fired = true
+                                        resetFollow()
                                         if (state == DockState.D3) onD3SwipeUpToHomeState.value()
                                         else go(DockState.D3)
                                     } else if (ax > hThreshPx && ax >= ay) {
-                                        fired = true
-                                        if (accumX < 0) {
-                                            // 左滑 = 更多：D1→D2→D3
-                                            if (state == DockState.D1) go(DockState.D2)
-                                            else if (state == DockState.D2) go(DockState.D3)
+                                        // 水平方向确立：D2 左滑 → D3、D1 右滑 → 隐藏确认
+                                        // 仍沿用旧的中途触发（非 D1/D2 切换，不动）；
+                                        // D1↔D2 改走拖拽：锁定水平、只跟手，松手再确认，
+                                        // 旧的中途触发分支就此删除（拖拽覆盖完整才删的条件已满足，
+                                        // 见 DockDragSwitch：两方向＋阈值＋回落均已覆盖）。
+                                        if (state == DockState.D2 && accumX < 0) {
+                                            fired = true
+                                            resetFollow()
+                                            go(DockState.D3)
+                                        } else if (state == DockState.D1 && accumX > 0) {
+                                            fired = true
+                                            resetFollow()
+                                            onHideDockRequestState.value()
                                         } else {
-                                            // 右滑 = 更少：D2→D1；D1 右滑 → 隐藏确认（唯一隐藏入口）
-                                            if (state == DockState.D2) go(DockState.D1)
-                                            else if (state == DockState.D1) onHideDockRequestState.value()
+                                            horizontalLocked = true
+                                            updateFollow()
                                         }
                                     } else if (ay > vThreshPx && ay > ax) {
                                         fired = true
+                                        resetFollow()
                                         // 下滑 → 收一档（D1 下滑不再隐藏）
                                         if (state == DockState.D2) go(DockState.D1)
+                                    } else {
+                                        // 方向未确立：水平倾向时先跟手（竖直倾向不跟手，
+                                        // 防竖拖带水平抖动）；松手时低于阈值即回落。
+                                        if (ax >= ay) updateFollow() else resetFollow()
                                     }
+                                },
+                                onDragEnd = {
+                                    // 拖拽松手确认：仅水平锁定且净位移过阈值才切换；
+                                    // 低于阈值、拖回原方向一律回落（可中途取消）。
+                                    if (horizontalLocked) {
+                                        val target = resolveDragTierTarget(state, accumX, hThreshPx)
+                                        if (target != null) onStateChangeState.value(target)
+                                    }
+                                    springBack()
+                                },
+                                onDragCancel = {
+                                    springBack()
                                 }
                             )
                         },
@@ -811,7 +873,12 @@ fun PullUpDock(
                     // HybridPet 兄弟节点（见面板 Column 闭合后的调用），
                     // 面板不再 clip 它，漂浮高度才放得下。
                     // 一二档内容：crossfade + scale，卡片高度弹簧跟随
+                    // D1/D2 拖拽跟手：只平移内容（卡片本体与宠物栖坐不动，
+                    // 不碰布局尺寸）；松手弹簧回落到 0，切换本身仍走 crossfade。
                     AnimatedContent(
+                        modifier = Modifier.graphicsLayer {
+                            translationX = tierFollowAnim.value
+                        },
                         targetState = state,
                         transitionSpec = {
                             (fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
