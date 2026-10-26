@@ -8,8 +8,6 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -113,6 +111,7 @@ import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.apps.appendShoulderArch
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.DockLightParams
+import com.bobot.ailauncher.ui.glass.FlareShaderParams
 import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.island.IslandToasts
@@ -122,6 +121,8 @@ import com.bobot.ailauncher.ui.pet.PetActionList
 import com.bobot.ailauncher.ui.pet.PetSpeechBubbleHost
 import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.MotionTokens
+import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -162,6 +163,8 @@ private val INTENT_FLARE_HEIGHT = 24.dp
  * 顶缘 = Dock 肩线——直接复用 PullUpDock 的 [appendShoulderArch]（两段
  * cubicTo，k = 弦长/4，弦端与峰顶切线水平），不为意图卡片另写肩线；
  * 底部 = [flareDp] 高的外延区内两侧贝塞尔外扩 [flareExtentDp] 到全宽；
+ * flareDp = 0 且 flareExtentDp = 0 时底边走纯圆角（横屏本批），不留
+ * 退化贝塞尔凸起；
  * 全程单一 contour：拱与外延都在同一 Path 里续画，不 addPath、不另起
  * contour（351 对角线教训：addPath 另起 contour 会让 close() 从轮廓末点
  * 向拱起点拉对角线）。
@@ -217,13 +220,23 @@ internal class IntentCardShape(
             appendShoulderArch(x0, x1, cx, k, rise, 0f, 0f, moveToStart = false)
             lineTo(w - corner, 0f)
             quadraticTo(w, 0f, w, corner)
-            lineTo(w, yFlare)
-            // 右侧外延：上端竖直相切、下端水平相切。
-            cubicTo(w, h - c1Drop, w + ext - c2Run, h, w + ext, h)
-            // 底边：全宽直线，贴键盘顶边（0dp 缝由宿主锚定保证）。
-            lineTo(-ext, h)
-            // 左侧外延（反向画）：下端水平相切、上端竖直相切。
-            cubicTo(-ext + c2Run, h, 0f, h - c1Drop, 0f, yFlare)
+            if (flare > 0f || ext > 0f) {
+                lineTo(w, yFlare)
+                // 右侧外延：上端竖直相切、下端水平相切。
+                cubicTo(w, h - c1Drop, w + ext - c2Run, h, w + ext, h)
+                // 底边：全宽直线，贴键盘顶边（0dp 缝由宿主锚定保证）。
+                lineTo(-ext, h)
+                // 左侧外延（反向画）：下端水平相切、上端竖直相切。
+                cubicTo(-ext + c2Run, h, 0f, h - c1Drop, 0f, yFlare)
+            } else {
+                // 纯圆角（横屏本批 flare=0）：底边两角走 28dp 圆角（与顶角
+                // 同款），不留退化贝塞尔凸起（flare=0 时原贝塞尔会在底角
+                // 留 11×10.8dp 小凸起，属外延残留，必须分支掉）。
+                lineTo(w, h - corner)
+                quadraticTo(w, h, w - corner, h)
+                lineTo(corner, h)
+                quadraticTo(0f, h, 0f, h - corner)
+            }
             // close() 只回到起点 (0, corner)，即左侧边竖直线，无对角线。
             close()
         })
@@ -755,7 +768,10 @@ fun IntentEntry(
     // 甲板可见：仅在聚焦 + 空文本时（打字后本地结果接管下方槽位，甲板
     // 让位）。状态须为编辑系——思考/回复/追问/权限态在场时甲板收起，
     // 不与结果槽位抢呈现。
-    val showDeck = idleOrEditing && sessionFocused && text.isEmpty()
+    // 竖屏一拍（本批）：推荐行与面板同门——showDeck 不再挂 sessionFocused
+    // （胶囊实际获得焦点才翻 true 的另一拍）；打字非空与非 idle／editing
+    // 态仍隐藏。sessionFocused 本身保留供其他用途。
+    val showDeck = idleOrEditing && text.isEmpty()
     // 输入态专注 D·甲板应用行判定（2026-10-26 设计 §1：专注态默认隐藏，
     // 搜索命中时才显示）：甲板应用面即卡片内结果槽位的本地结果条
     // （DeckAppsBlock 已于 2026-10-25 随意图卡片统一整段删除，不恢复）。
@@ -782,8 +798,8 @@ fun IntentEntry(
     //    以附加 offset 叠加在终态锚定偏移之上，面板高变化（结果槽位
     //    伸缩）时终态锚定照常跟随，位移向量冻结在进态那一刻不重算；
     //  - 落回带回弹过冲：宠物位移走弹簧（damping 0.75，终点附近轻微
-    //    越过再回落），不是线性滑到位；头先动、跟随延迟：接触影
-    //    晚 90ms 才淡入归位（影子跟在身体后面，不是焊在脚底同步走）；
+    //    越过再回落），不是线性滑到位；影子已无（22:02 摘除），不再有
+    //    “影子跟在身体后面”的时序；
     //  - 交接淡入：宠物 alpha 在 180ms 内 0→1，与 Dock 卡片退场
     //    fadeOut（150ms）交叠为一次交接，不出现两只实体的静止并存；
     //  - 尺寸：位移全程保持 INTENT_PET_WIDTH 不变（Dock D1 86.6dp →
@@ -791,7 +807,7 @@ fun IntentEntry(
     //    不猜 DockState 做假插值，见文件头常量注释与集成注意点）；
     //  - 减动效：位移直接 snap 到终态，不播弹簧；
     //  - 退态（退出输入态）反向位移：由 HomeScreen 的 PetPerchTransition
-    //    funnel 承担（本函数传 perchTransition 时位移／alpha／影子走共享
+    //    funnel 承担（本函数传 perchTransition 时位移／alpha 走共享
     //    Animatable；退态 = travel 1→0、同一弹簧、进态冻结位移量取负，
     //    四步时序见 PetPerchTransition.kt）。旧口径“退场由 HomeScreen
     //    fadeOut＋Dock 卡片重进承担、无交接”就此废掉，不许再各自保留一套 fade。
@@ -799,21 +815,38 @@ fun IntentEntry(
     var petAnchorTop by remember { mutableStateOf<Int?>(null) }
     var petAnchorCenterX by remember { mutableStateOf<Int?>(null) }
     // 位移向量（dp）：进态那一刻冻结，之后面板位置变化不再重算。
-    var travelDeltaX by remember { mutableStateOf(0.dp) }
-    var travelDeltaY by remember { mutableStateOf(PERCH_TRAVEL_FALLBACK_Y) }
-    // 过渡 C：共享状态在场时位移／alpha／影子走 HomeScreen 持有的同一组
+    // 竖屏一拍（本批）：复进时首帧即取已冻结值（上一轮进态的落点），
+    // 不跳变；首进时冻结值尚未写入（0dp／兜底），锚点通常首帧内到、
+    // 跳变窗口约 1 帧且 alpha 尚低。
+    var travelDeltaX by remember { mutableStateOf(perchTransition?.travelDeltaX ?: 0.dp) }
+    var travelDeltaY by remember { mutableStateOf(perchTransition?.travelDeltaY ?: PERCH_TRAVEL_FALLBACK_Y) }
+    // 过渡 C：共享状态在场时位移／alpha 走 HomeScreen 持有的同一组
     // Animatable（退态由 HomeScreen 的 funnel 反向驱动同一组）；否则走
     // 本地组（355 行为）。本地组恒创建（廉价），只在无共享状态时使用。
+    // 影子通道已随 22:02 摘除作废，不再有 shadowTravel。
     val legacyTravel = remember { Animatable(0f) }
     val legacyTravelAlpha = remember { Animatable(0f) }
-    val legacyShadowTravel = remember { Animatable(0f) }
     val petTravel = perchTransition?.travel ?: legacyTravel
     val petTravelAlpha = perchTransition?.travelAlpha ?: legacyTravelAlpha
-    val shadowTravel = perchTransition?.shadowTravel ?: legacyShadowTravel
     val reduceMotion = rememberReduceMotion()
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
+    // 横屏判定（进态横移公式、卡片形状、外延 shader 共用同一值）。
+    val isLandscapeCard = screenWidthDp > screenHeightDp
     LaunchedEffect(Unit) {
+        // 竖屏一拍（本批）：宠物 alpha 不另等锚点——在锚点等待之前立即
+        // 起步（FadeHandoff，与面板同门），随后锚点等待＋退态等待＋冻结
+        // delta＋animateEnter 接续（animateTo 从当前值到 1，不冲突；
+        // 共享路径下 animateEnter 内会再起一次同目标同规格的 alpha 动画，
+        // 从当前值续跑、无跳变）。减动效路径不动（snap 本就一拍）。
+        if (!reduceMotion) {
+            launch {
+                petTravelAlpha.animateTo(
+                    1f,
+                    tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
+                )
+            }
+        }
         // 等一小段让外层 Box 的 onGloballyPositioned 先回写锚点
         // （布局回调在首帧内到达；等不到则用兜底起点，不阻塞挂载）。
         var waited = 0
@@ -829,7 +862,7 @@ fun IntentEntry(
             val intentFootY = anchorTop - INTENT_SHOULDER_RISE + INTENT_PET_PRESS
             travelDeltaY = (dockFootY - intentFootY)
                 .coerceIn(0.dp, screenHeightDp)
-            travelDeltaX = if (screenWidthDp > screenHeightDp && anchorCenterX != null) {
+            travelDeltaX = if (isLandscapeCard && anchorCenterX != null) {
                 (screenWidthDp - PERCH_TRAVEL_DOCK_CENTER_END_LANDSCAPE - anchorCenterX)
                     .coerceIn(-screenWidthDp / 2, screenWidthDp / 2)
             } else {
@@ -850,24 +883,34 @@ fun IntentEntry(
         } else if (reduceMotion) {
             petTravel.snapTo(1f)
             petTravelAlpha.snapTo(1f)
-            shadowTravel.snapTo(1f)
         } else {
-            launch { petTravel.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) }
-            launch { petTravelAlpha.animateTo(1f, tween(180)) }
-            launch { shadowTravel.animateTo(1f, tween(550, delayMillis = 90)) }
+            // 本地路径：位移走家族弹簧；alpha 已在 effect 起步时先行，
+            // 此处不再重起（同 Animatable 重起亦无跳变，但无必要）。
+            launch { petTravel.animateTo(1f, PetMotion.EnterStandard) }
         }
     }
     val intentPetHeight = INTENT_PET_WIDTH * (1318f / 1043f)
     // 意图卡片轮廓（输入态专注·圆角外延）：顶缘复用 Dock 肩线、底部外延，
-    // 参数常量见文件头；remember 无 key——参数全是常量，不随状态变。
-    val intentCardShape = remember {
+    // 参数常量见文件头。横屏整体（本批）：横屏纯圆角 28dp、无外延
+    // （flare 0、extent 0——IntentCardShape 在 flare=0 时走真圆角底边，
+    // 无外延残留、无退化贝塞尔凸起）；竖屏保留 24dp 外延＋20dp 外扩。
+    // remember keyed on isLandscapeCard（横竖屏切换时形状重建）。
+    val intentCardShape = remember(isLandscapeCard) {
         IntentCardShape(
             chordDp = INTENT_SHOULDER_CHORD,
             riseDp = INTENT_SHOULDER_RISE,
             cornerDp = 28.dp,
-            flareDp = INTENT_FLARE_HEIGHT,
-            flareExtentDp = 20.dp,
+            flareDp = if (isLandscapeCard) 0.dp else INTENT_FLARE_HEIGHT,
+            flareExtentDp = if (isLandscapeCard) 0.dp else 20.dp,
         )
+    }
+    // 外延玻璃 shader 覆盖（本批外延颜色修复）：竖屏外延翅膀超出平圆角
+    // SDF，shader 锐利层须以外延矩形 SDF 取 min 补全覆盖，否则翅膀只有
+    // 模糊层、本体有锐利层，交界现色阶台阶；横屏无外延传 null（shader
+    // 走原平圆角 SDF，与形状一字对齐，无残留）。
+    val panelFlareShader = remember(isLandscapeCard) {
+        if (isLandscapeCard) null
+        else FlareShaderParams(height = INTENT_FLARE_HEIGHT, extent = 20.dp)
     }
     // 卡片宽（弹闪修复，2026-10-26）：容器相对口径——BoxWithConstraints 的
     // maxWidth 即本列实际容器宽（竖屏 = 屏宽，横屏 = PetZone 左区槽宽）；
@@ -924,14 +967,21 @@ fun IntentEntry(
                 fallbackColor = AILauncherColors.current.GlassCard,
                 tintBoost = 0f,
                 shape = intentCardShape,
-                dockLight = DockLightParams()
+                dockLight = DockLightParams(),
+                flareShader = panelFlareShader
             )
             .onGloballyPositioned { coords ->
                 with(densityNow) { panelHeight = coords.size.height.toDp() }
             }
-            // 底垫 14dp 在外延区之上：总底垫 = 14dp + 24dp 外延区，全部内容
-            // （示例行、输入框、结果槽位）收在外延区之上，不压外延曲线。
-            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp + INTENT_FLARE_HEIGHT),
+            // 底垫 14dp 在外延区之上：竖屏总底垫 = 14dp + 24dp 外延区，
+            // 全部内容（示例行、输入框、结果槽位）收在外延区之上，不压
+            // 外延曲线；横屏无外延区，总底垫 = 14dp。
+            .padding(
+                start = 16.dp,
+                end = 16.dp,
+                top = 14.dp,
+                bottom = 14.dp + if (isLandscapeCard) 0.dp else INTENT_FLARE_HEIGHT
+            ),
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
         // ---- 输入甲板已瘦身（2026-10-25）：面板上区应用推荐整段删除 ----
@@ -950,8 +1000,9 @@ fun IntentEntry(
         // （见面板外覆盖层，与 Dock 上沿同一套坐法），打字后示例让位、
         // 七仔仍在场；胶囊本体行为不动。
         // 示例行淡出（设计 §5 打字态）：开始输入（showExamplesRow 翻 false）
-        // 即淡出动画——进场 fadeIn 150ms、出场 fadeOut 150ms + shrinkVertically
-        // 150ms 同步一次完成，退场后行移除、不留空带、不留占位跳变第二步；
+        // 即淡出动画——家族 FadeQuick 150ms＋EaseOutCubic：进场 fadeIn、
+        // 出场 fadeOut + shrinkVertically 同步一次完成，退场后行移除、
+        // 不留空带、不留占位跳变第二步；
         // 淡出只动示例行本身，不动面板 Shape/肩线（B 的活）、不动进态路径
         // （面板进出仍由 HomeScreen 的 fade-only 承担，310 教训不变）。
         // 点按仍为整句填入输入框、不直接提交（见 pickExample）；示例与
@@ -960,8 +1011,9 @@ fun IntentEntry(
         val showExamplesRow = showDeck && showDeckExamples && deckExamples.isNotEmpty()
         AnimatedVisibility(
             visible = showExamplesRow,
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(150)) + shrinkVertically(tween(150))
+            enter = fadeIn(tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)),
+            exit = fadeOut(tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)) +
+                shrinkVertically(tween(PetMotion.FadeQuick, easing = MotionTokens.Easing))
         ) {
             // 推荐问主行：从面板内容左缘起横滚；滤空时整行隐藏（按已装能力
             // 过滤后池子可能为空，不留空白占位）
@@ -1071,25 +1123,15 @@ fun IntentEntry(
       // ---- 覆盖层：接触影 + 宠物 + 动作清单（面板之后画、前面图层，不 clip） ----
       // 图层顺序即绘制顺序：面板 → 接触影 → 宠物 → 动作清单。覆盖层用
       // matchParentSize，不改变外层 Box 尺寸（= 面板高），宠物与清单只向
-      // 上探出、不推面板。单宠物保证：Dock 宠物由 !intentInputMode 门控
-      // （PullUpDock.kt），意图宠物只活在 IntentEntry 内（仅输入态挂载），
+      // 上探出、不推面板。单宠物保证：Dock 宠物由 (!intentInputMode ||
+      // isLandscapeDock) 门控（PullUpDock.kt），意图宠物只活在 IntentEntry
+      // 内（仅竖屏输入态挂载；横屏输入态不挂载、Dock 宠物整只留场），
       // 静止态下屏幕上恰有一只；进态交接窗内（HomeScreen 的
       // AnimatedVisibility fade + Dock 卡片退场 fadeOut）意图宠物以
-      // 180ms alpha 交接滑入，属一次交接、不出现两只实体的静止并存。
+      // FadeHandoff 180ms alpha 交接滑入，属一次交接、不出现两只实体的静止并存。
+      // 意图旧胶囊接触影已按 22:02 verdict 整个摘除（黑 0.14、宽 72%、
+      // 高 10dp、晚 90ms 的那枚），不再有影子跟随段。
       Box(modifier = Modifier.matchParentSize()) {
-        // 接触影：落在肩峰面上、宠物脚底正下方（面板之后、宠物之前画；
-        // 口径沿用旧胶囊接触影：黑 0.14、宽为宠物宽 72%、高 10dp、落点
-        // 改到肩峰面下 4dp，即面板顶缘上 rise−4dp 处）。位移跟随：影子不跟宠物同步走全程——
-        // 晚 90ms 才淡入归位（travel 0→1），落点带 8dp 上滑收束，
-        // 读作“身体先到、影子后跟上”，连接处不焊死。
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = 4.dp - INTENT_SHOULDER_RISE + 8.dp * (1f - shadowTravel.value))
-                .size(width = INTENT_PET_WIDTH * 0.72f, height = 10.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.14f * shadowTravel.value))
-        )
         // 宠物：Dock 宠物本体（HybridPet，同一组件、同一活感引擎、同一动
         // 作状态机），只是换了个 perch——坐法与 Dock 上沿同一套：前面图
         // 层、居中、脚底压进卡片肩峰 INTENT_PET_PRESS（峰顶 = 面板顶缘 − rise）、接触不断；手势
@@ -1099,28 +1141,38 @@ fun IntentEntry(
         // 位移：终态锚定偏移（面板高 ＋ rise − 压入，脚底压进肩峰 5dp）之上叠加位移附加量
         // travelDelta × (1 − travel)，travel 弹簧到 1（轻微过冲回落
         // 即落回回弹）；减动效时 travel 已 snap 到 1，附加量为零。
-        // 真机待验：卡片顶缘坐姿、压入量、接触影在真实壁纸上的观感，
-        // 以及位移全程（起步落点、弹簧过冲、影子跟随）是否自然。
-        HybridPet(
-            petWidth = INTENT_PET_WIDTH,
-            onPetTap = { /* 意图态已在问，点按空操作；清单只挂长按 */ },
-            onPetLongPress = { petActionsVisible = true },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = -(panelHeight + INTENT_SHOULDER_RISE - INTENT_PET_PRESS))
-                .offset(
-                    x = travelDeltaX * (1f - petTravel.value),
-                    y = travelDeltaY * (1f - petTravel.value)
-                )
-                .graphicsLayer { alpha = petTravelAlpha.value }
-                .testTag("pet_qizai")
-        )
+        // 真机待验：卡片顶缘坐姿、压入量，以及位移全程（起步落点、
+        // 弹簧过冲）是否自然。
+        // 横屏整体（本批）：横屏意图宠物不挂载（Dock 宠物整只留场），
+        // 进态 LaunchedEffect 仍照常跑（travel／travelAlpha 走不可见值，
+        // 保持退态 funnel 状态机一致，Dock 淡入步在横屏本就是 no-op，
+        // 因 Dock 卡片从未离开）。
+        if (!isLandscapeCard) {
+            HybridPet(
+                petWidth = INTENT_PET_WIDTH,
+                onPetTap = { /* 意图态已在问，点按空操作；清单只挂长按 */ },
+                onPetLongPress = { petActionsVisible = true },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -(panelHeight + INTENT_SHOULDER_RISE - INTENT_PET_PRESS))
+                    .offset(
+                        x = travelDeltaX * (1f - petTravel.value),
+                        y = travelDeltaY * (1f - petTravel.value)
+                    )
+                    .graphicsLayer { alpha = petTravelAlpha.value }
+                    .testTag("pet_qizai")
+            )
+        }
         // 动作清单：与 Dock 宠物上方同款（PetActionList 同一组件、同一清单、
         // 同一状态机；气泡底距宠物顶 8dp、尾巴朝下指向宠物）。单层 8 行，
         // 无 2 级；关闭靠气泡内 ✕，退出输入态时随面板一并消失。
         // 真机待验：意图面板上方空间有限（紧凑简报 + 状态栏），气泡顶部
         // 在小屏/横屏可能探出屏顶——若实测被裁，另起一单定清单落点。
-        if (petActionsVisible) {
+        // 横屏整体（本批）：横屏意图宠物不挂载，清单亦不挂载（横屏聚焦
+        // 时长按 Dock 宠物会把 MainScreen petActionsVisible 置 true，但
+        // 清单门仍要求 !isLandscapeCard，清单要到退出聚焦后才现形——
+        // 可 ✕ 关，不改仲裁与门控；已知小 wart，见回报）。
+        if (petActionsVisible && !isLandscapeCard) {
             PetActionList(
                 onDismiss = { petActionsVisible = false },
                 modifier = Modifier

@@ -192,6 +192,19 @@ data class DockLightParams(
 )
 
 /**
+ * 强玻璃 shader 外延补全参数（2026-10-26 本批，意图卡片圆角外延专用）：
+ * 外延翅膀超出布局边界与平圆角 SDF，shader 锐利层须以外延矩形 SDF
+ * 取 min 补全覆盖，否则翅膀只有模糊层、本体有锐利层，交界现色阶台阶。
+ * 其他玻璃面一律不传（null → 两 uniform 置 0，shader 与旧版一字相同）。
+ */
+data class FlareShaderParams(
+    /** 外延带高（意图卡片 INTENT_FLARE_HEIGHT = 24dp）。 */
+    val height: Dp,
+    /** 外延单侧外扩（意图卡片竖屏 = 20dp 外边距，底边恰为屏宽）。 */
+    val extent: Dp,
+)
+
+/**
  * 径向渐变半径防线（357 横屏闪退根因，2026-10-26）：
  * android.graphics.RadialGradient 要求 ending radius 严格 > 0；
  * 玻璃面宽为 0 时 fraction × width = 0，主线程直接炸
@@ -221,6 +234,8 @@ internal fun glassRadialRadius(fraction: Float, extentPx: Float): Float =
  * @param noRim true 时跳过全部轮廓描边（外侧暗描边、v2 方向性亮带、
  *   1dp 顶部亮边）：Dock 面板专用（Bob 2026-10-25 22:31：玻璃边框效果不要），
  *   默认 false，其他玻璃面一字不动。
+ * @param flareShader 强玻璃 shader 外延补全（意图卡片圆角外延专用）；
+ *   默认 null 不补全，其他玻璃面一字不动。
  */
 @Composable
 fun Modifier.glassSurface(
@@ -232,6 +247,7 @@ fun Modifier.glassSurface(
     shape: Shape? = null,
     dockLight: DockLightParams? = null,
     noRim: Boolean = false,
+    flareShader: FlareShaderParams? = null,
 ): Modifier {
     val fallbackShape = shape ?: RoundedCornerShape(cornerRadius)
     val state = LocalGlassBackdrop.current
@@ -248,7 +264,7 @@ fun Modifier.glassSurface(
         return this.background(fallbackColor, fallbackShape)
     }
     return this.then(
-        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost, shape, dockLight, noRim)
+        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost, shape, dockLight, noRim, flareShader)
     )
 }
 
@@ -288,6 +304,7 @@ private fun glassDraw(
     shape: Shape? = null,
     dockLight: DockLightParams? = null,
     noRim: Boolean = false,
+    flareShader: FlareShaderParams? = null,
 ): Modifier {
     val composeDensity = LocalDensity.current.density
     val patchBlur = rememberGraphicsLayer()
@@ -458,6 +475,9 @@ private fun glassDraw(
                     shader.setFloatUniform("uRefraction", refrPx)
                     shader.setFloatUniform("uBand", params.bandDp * density)
                     shader.setFloatUniform("uSpecular", params.specularStrength * (1f + boost * 0.25f))
+                    // 外延补全（意图卡片）：无外延时两值皆 0，shader 门关闭。
+                    shader.setFloatUniform("uFlareH", flareShader?.height?.toPx() ?: 0f)
+                    shader.setFloatUniform("uFlareExt", flareShader?.extent?.toPx() ?: 0f)
                     patchSharp.renderEffect = shaderEffect
                     patchSharp.topLeft = IntOffset(-cache.margin, -cache.margin)
                     drawLayer(patchSharp)

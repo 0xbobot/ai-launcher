@@ -59,6 +59,7 @@ import com.bobot.ailauncher.data.PetMood
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.PetRepository.PetManualAction
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -97,17 +98,18 @@ import kotlin.random.Random
  * - 手动动作（动作清单触发）：[PetRepository.actionTick] 事件驱动的
  *   全身动作引擎——所有动作都走平移 / 旋转 / 绕底缩放 / 眼带 / 肩线
  *   峰值（PullUpDock 侧协同），头与面板始终是一个身体，不许部件分离。
- * - 接触影（活感第一批新增，取代旧“无脚下阴影”口径）：头下方一枚
- *   62.2×10dp、黑 14% 的柔边椭圆（按宠物宽相对 86.4dp 参考宽缩放），
- *   由头状态驱动——x 跟头走，头抬高变小变淡、头压低变宽变深、
- *   下压过冲再加宽加深一档；光晕仍是头周围的径向晕（不是脚下阴影）。
+ * - 无脚下阴影（Bob 2026-10-26 22:02 verdict，接触影是减分项、去掉）：
+ *   活感第一批加的那层接触影（62.2×10dp、黑 14%）已整个摘除，文件头
+ *   口径恢复为无脚下阴影；光晕仍是头周围的径向晕（不是脚下阴影）。
+ *   意图卡片旧胶囊接触影亦随本批一并摘除（见 IntentEntry）。
  * - 活感第一批（2026-10-26，Bob 全部接受）：头弹簧（整颗头作颈上弹簧
  *   质量，k≈25/s²、阻尼比 0.3、可见 2–3 次过冲，复用头 offset／倾角通道）；
  *   注视跟随触点（头转强度＝触点位移 × 0.35，瞳孔复用眼睛引擎、
  *   瞳孔 clamp、注视停顿门、眨眼中不新起扫视）；眨眼多样化（正常／双眨／
  *   半眨／慢半眨）；待机小行为（20–60s 随机歪头 4°／环顾，交互立即取消）；
  *   自主重心转移（25–50s 换一只脚承重 ±2.5°，复用 WeightShift 口径）；
- *   不做纯缩放呼吸。注视优先级：repo ＞ 瞥视 ＞ 手动 ＞ 触点 ＞ 待机 ＞ 巡看。
+ *   不做纯缩放呼吸。注视优先级：repo ＞ override（横屏聚焦看向卡片）
+ *   ＞ 瞥视 ＞ 手动 ＞ 触点 ＞ 待机 ＞ 巡看。
  *
  * 眼睛分层（相对位图坐标，Python 离线检测 glass-cut.png 1043×1318，
  * 全部从原图派生、无 AI 重画）：
@@ -147,10 +149,14 @@ fun FloatingPet(
     // 2026-10-26 入口子项：长按 = 表演清单（点按已还给“问”，见调用方）。
     // 默认空实现，HybridPet 转发 PullUpDock 的 onPetCellLongPress。
     onLongPress: () -> Unit = {},
-    // 拖拽一体拉伸状态机（2026-10-26 定稿）：非空时走 Dock 一体拉伸
-    // 路径（头升/肩滞后/脖子连接带/弹簧回弹）；空时走旧 head-only 跟手
-    // （意图路径保持现状一字不动）。由 PullUpDock remember 后传入。
+    // 拖拽一体拉伸状态机（2026-10-26 定稿，22:10 后脖子带已摘、肩升锁定）：
+    // 非空时走 Dock 一体拉伸路径（头升/肩锁定+横移滞后/弹簧回弹）；空时
+    // 走旧 head-only 跟手（意图路径保持现状一字不动）。由 PullUpDock
+    // remember 后传入。
     dragBody: DragBodyState? = null,
+    // 注视 override（默认 null 不生效）：横屏聚焦时 PullUpDock 传入
+    // DOCK_LEFT，让留 Dock 的整只宠物看向左侧卡片；repo 说话目标仍优先。
+    gazeOverride: GazeTarget? = null,
     modifier: Modifier = Modifier,
 ) {
     val reduceMotion = rememberReduceMotion()
@@ -255,12 +261,14 @@ fun FloatingPet(
     var idleGazeTarget by remember { mutableStateOf<GazeTarget?>(null) }
     val effectiveGazeTarget = when {
         repoGazeTarget != GazeTarget.CENTER -> repoGazeTarget
+        gazeOverride != null -> gazeOverride
         glanceTarget != null -> glanceTarget!!
         manualTurn != null -> manualTurn!!
         manualPatrol != null -> manualPatrol!!
         else -> patrolTarget
     }
     val higherGazeActive = repoGazeTarget != GazeTarget.CENTER ||
+        gazeOverride != null ||
         glanceTarget != null || manualTurn != null || manualPatrol != null
     val gazeOff = when {
         higherGazeActive -> gazeOffsetFor(effectiveGazeTarget)
@@ -334,26 +342,17 @@ fun FloatingPet(
     }
     val headX by animateFloatAsState(
         targetValue = headGaze.x * 8f,
-        animationSpec = spring(
-            dampingRatio = HeadSpring.DAMPING_RATIO,
-            stiffness = HeadSpring.STIFFNESS,
-        ),
+        animationSpec = PetMotion.HeadSoft,
         label = "floatHeadX",
     )
     val headY by animateFloatAsState(
         targetValue = headGaze.y * 5f,
-        animationSpec = spring(
-            dampingRatio = HeadSpring.DAMPING_RATIO,
-            stiffness = HeadSpring.STIFFNESS,
-        ),
+        animationSpec = PetMotion.HeadSoft,
         label = "floatHeadY",
     )
     val turnTilt by animateFloatAsState(
         targetValue = headGaze.x * 4f,
-        animationSpec = spring(
-            dampingRatio = HeadSpring.DAMPING_RATIO,
-            stiffness = HeadSpring.STIFFNESS,
-        ),
+        animationSpec = PetMotion.HeadSoft,
         label = "floatTurnTilt",
     )
 
@@ -535,20 +534,18 @@ fun FloatingPet(
         label = "floatDragY",
     )
 
-    // 拖拽一体拉伸：肩滞后追踪（仅 Dock 路径，dragBody 非空时生效）。
-    // 肩升 = 0.55 × 头升、肩横移 = 0.5625 × 头横移（= 0.45 × 手指），
-    // 均经 critically damped 弹簧（stiffness 550，约 90ms 达 63%）滞后——
-    // 头先行、肩延迟跟上；collectLatest 使新头量到达时取消旧追踪、立即
-    // 改向；松手过冲时头量逐帧回落（含负值下压），肩跟着同一弹簧走、
-    // 同样带过冲下压，连接处不焊死。
+    // 拖拽一体拉伸：肩跟随（仅 Dock 路径，dragBody 非空时生效；22:10 后模型）。
+    // 垂直方向肩升锁定等于头升（同帧直接赋值、无弹簧）：压入 5dp 全程恒定，
+    // 任何帧、任何速度都不出现 wallpaper 夹缝；松手过冲时肩与头同量下压，
+    // 接触区挤压由同步下压＋头压扁共同给。
+    // 水平方向肩横移 = 0.5625 × 头横移（= 0.45 × 手指），经家族弹簧
+    // PetMotion.ShoulderLag（critically damped，约 90ms 达 63%）滞后——
+    // 头先行、肩延迟跟上，倾角由肩横移导出故自然滞后；collectLatest 使
+    // 新头量到达时取消旧追踪、立即改向；连接处不焊死。
     if (dragBody != null) {
         LaunchedEffect(dragBody) {
-            snapshotFlow { dragBody.headRisePx }.collectLatest { rise ->
-                animate(
-                    dragBody.shoulderRisePx,
-                    DragBodyLag.SHOULDER_RISE_RATIO * rise,
-                    animationSpec = dragShoulderLagSpring(),
-                ) { v, _ -> dragBody.shoulderRisePx = v }
+            snapshotFlow { dragBody.headRisePx }.collect { rise ->
+                dragBody.shoulderRisePx = rise
             }
         }
         LaunchedEffect(dragBody) {
@@ -556,7 +553,7 @@ fun FloatingPet(
                 animate(
                     dragBody.shoulderXPx,
                     DragBodyLag.SHOULDER_X_RATIO * hx,
-                    animationSpec = dragShoulderLagSpring(),
+                    animationSpec = PetMotion.ShoulderLag,
                 ) { v, _ -> dragBody.shoulderXPx = v }
             }
         }
@@ -804,65 +801,6 @@ fun FloatingPet(
                 center = Offset(size.width / 2f, size.height * 0.45f),
             )
         }
-        // 拖拽一体拉伸：脖子连接带（仅 Dock 路径）。头底与肩峰之间、
-        // 上窄下宽、随拉伸收窄；面板材质（Card 色）向上延伸，读作身体
-        // 的一部分而非贴纸。几何（pet Box 坐标，Y 向下）：
-        // 头底 Y = petHeight − headRise + headSink；肩峰 Y = petHeight −
-        // press(5dp) − shoulderRise；可见间隙 = neckGap − press − sink；
-        // 间隙 > 0 才画（≤ 0 时头已压进肩峰、连接自带）；盒子两端
-        // 各伸 2px 塞缝（上端被后画的头盒盖住、下端盖住肩峰顶）。
-        // 画在光晕之后、头盒之前：面板先画、脖子次之、头最后——前面图层。
-        if (dragBody != null) {
-            val neckGapDp = dragNeckGapDp(
-                with(density) { dragBody.headRisePx.toDp().value }
-            )
-            val sinkDp = with(density) { dragBody.headSinkPx.toDp().value }
-            val visibleGapDp = neckGapDp - 5f - sinkDp
-            if (visibleGapDp > 0f) {
-                val shoulderRiseDp = with(density) {
-                    dragBody.shoulderRisePx.toDp().value
-                }
-                val pxToDp = 1f / density.density
-                val neckHeightDp = visibleGapDp + 4f * pxToDp
-                val neckOffsetYDp = -(shoulderRiseDp + 5f - 2f * pxToDp)
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .size(width = petWidth, height = neckHeightDp.dp)
-                        .offset(y = neckOffsetYDp.dp),
-                ) {
-                    val cardColor = AILauncherColors.current.Card.copy(alpha = 0.92f)
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val w = size.width
-                        val h = size.height
-                        val narrow = 1f - 0.15f * (neckGapDp / 14.4f).coerceIn(0f, 1f)
-                        val topW = w * 0.55f * narrow
-                        val botW = w * 0.80f * narrow
-                        val topCx = w / 2f + dragBody.headXPx
-                        val botCx = w / 2f + dragBody.shoulderXPx
-                        val neckPath = Path().apply {
-                            moveTo(topCx - topW / 2f, 0f)
-                            lineTo(topCx + topW / 2f, 0f)
-                            quadraticTo(
-                                (topCx + topW / 2f + botCx + botW / 2f) / 2f + h * 0.12f,
-                                h / 2f,
-                                botCx + botW / 2f,
-                                h,
-                            )
-                            lineTo(botCx - botW / 2f, h)
-                            quadraticTo(
-                                (topCx - topW / 2f + botCx - botW / 2f) / 2f - h * 0.12f,
-                                h / 2f,
-                                topCx - topW / 2f,
-                                0f,
-                            )
-                            close()
-                        }
-                        drawPath(neckPath, color = cardColor)
-                    }
-                }
-            }
-        }
         // 玻璃头本体：去瞳孔底图 + 眼睛三层（瞳孔 / 反光点 / 眼睑）。
         // 静止态三层合成与原图一致（仅羽化边缘 1–2px 差异，显示约亚像素）。
         // 全身动作合成（绕底原点，底部钉在肩峰上不脱离）：
@@ -875,47 +813,10 @@ fun FloatingPet(
         val motionScaleX = (1f - 0.03f * stretchAnim.value) *
             (1f + 0.02f * dipAnim.value)
         val motionDipPx = with(density) { 2.dp.toPx() } * (dipAnim.value + nodAnim.value)
-        // ② 接触影（活感第一批新增；生产此前并无此层，评估称“已存在”
-        // 实为 mock 影）：头下方柔边椭圆，由头状态驱动——x 跟头走，
-        // 头抬高变小变淡、头压低变宽变深、下压过冲再加宽加深一档。
-        // 画在头盒之前（头压住影上沿），影心在盒底之下约 1/4 影高处：
-        // 宠物底压入肩峰 5dp，影落点仍在面板面上；纵使上层 clip 盒底，
-        // 盒内 3/4 仍可见为下巴下的一抹软影，不穿帮。
-        // 头盒位移（与下方 graphicsLayer 同一套）：Dock 路径取 DragBodyState，
-        // 意图路径取旧 dragX/dragY；接触影 x 跟头走，故此处与头盒共用同一量，
-        // Dock 拖拽时 dragOffset 恒为零、不可沿用 dragX/dragY。
+        // 头盒位移量（Dock 路径取 DragBodyState，意图路径取旧 dragX/dragY；
+        // Dock 拖拽时 dragOffset 恒为零、不可沿用 dragX/dragY）。
         val dragHeadX = dragBody?.headXPx ?: dragX
         val dragHeadY = dragBody?.let { -it.headRisePx + it.headSinkPx } ?: dragY
-        val shadowHeadTxPx = headX + dragHeadX
-        val shadowHeadTyPx = headY + blinkNodPx + motionDipPx + dragHeadY
-        val shadowParams = ContactShadow.params(
-            liftPx = -shadowHeadTyPx,
-            squash01 = dipAnim.value,
-        )
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val baseW = petWidth.toPx() * (ContactShadow.BASE_WIDTH_DP / ContactShadow.REF_PET_WIDTH_DP)
-            val baseH = petWidth.toPx() * (ContactShadow.BASE_HEIGHT_DP / ContactShadow.REF_PET_WIDTH_DP)
-            val w = baseW * shadowParams.widthScale
-            val h = baseH * shadowParams.widthScale
-            drawOval(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color.Black.copy(alpha = shadowParams.alpha),
-                        Color.Black.copy(alpha = 0f),
-                    ),
-                    center = Offset(
-                        size.width / 2f + shadowHeadTxPx,
-                        size.height + h * 0.25f,
-                    ),
-                    radius = w / 2f,
-                ),
-                topLeft = Offset(
-                    size.width / 2f + shadowHeadTxPx - w / 2f,
-                    size.height + h * 0.25f - h / 2f,
-                ),
-                size = androidx.compose.ui.geometry.Size(w, h),
-            )
-        }
         Box(
             modifier = Modifier
                 .size(width = petWidth, height = petHeight)
@@ -927,7 +828,7 @@ fun FloatingPet(
                     // 来自 DragBodyState，倾角取肩横移，形变取头升），松手
                     // 弹簧回零且带过冲压扁；意图路径走旧 dragX/dragY 一字不动。
                     // 活感第一批叠加其上：待机歪头与自主重心转移同为绕底旋转。
-                    // dragHeadX/dragHeadY 已在接触影处与头盒共用定义，此处不重定义。
+                    // dragHeadX/dragHeadY 在头盒上方定义（与头盒位移同一量）。
                     val dragTilt = dragBody?.let {
                         dragTiltDeg(with(density) { it.shoulderXPx.toDp().value })
                     } ?: 0f

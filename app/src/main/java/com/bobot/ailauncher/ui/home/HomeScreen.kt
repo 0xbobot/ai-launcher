@@ -68,6 +68,7 @@ import com.bobot.ailauncher.service.PanelAccessibilityService
 import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.island.IslandToasts
@@ -215,7 +216,10 @@ fun HomeScreen(
                     perchScope.launch {
                         perchTransition.travelAlpha.animateTo(
                             0f,
-                            androidx.compose.animation.core.tween(180)
+                            androidx.compose.animation.core.tween(
+                                PetMotion.FadeHandoff,
+                                easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                            )
                         )
                     }
                 }
@@ -489,42 +493,12 @@ fun HomeScreen(
                 )
             }
     ) {
-        // 输入态专注壳·A：专注态实色底——只在 intentInputMode 时出现，
-        // 放在根容器最底层（Column 之前），壁纸完全不透，不做压暗/模糊纱
-        // （351 教训）。fade-only 250ms（MotionTokens.Medium，与卡片槽位
-        // 进场、简报／会议行淡出同一节拍——357 真机反馈：150ms 切黑读着
-        // 像跳变；进出过渡同一节拍，不许背景先切、卡片后到、首页最后叠）。
-        // 不改尺寸、不触发布局；无点击处理，不挡卡片/宠物/键盘/触控；状态栏是系统
-        // chrome，不受影响；顶部避让仍走 Column 既有规则。
-        // 浅色 #E8E2D9（设计 §1）；深色用深色主题同系暖灰 token
-        // AILauncherColors.current.Background（深色值 0xFF1A1815），不另发明色值。
-        // 注意：本层在内容之下，只负责底色；简报/会议行的淡出在 PetZone.kt
-        // （节点宿主，见另一次提交），HomeScreen 内无此节点可改。
-        androidx.compose.animation.AnimatedVisibility(
-            visible = intentInputMode,
-            enter = androidx.compose.animation.fadeIn(
-                animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
-                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                )
-            ),
-            exit = androidx.compose.animation.fadeOut(
-                animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
-                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                )
-            )
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        if (AILauncherColors.current.isDark)
-                            AILauncherColors.current.Background
-                        else Color(0xFFE8E2D9)
-                    )
-            )
-        }
+        // 输入态专注（2026-10-26 本批，Bob 21:56：聚焦不用黑屏）。
+        // 实色底已整个删除：聚焦态保留主页壁纸（取代 13:51“壁纸按纯色
+        // 暖灰”口径），其他内容弱化或隐藏——简报／会议行经 PetZone 门控
+        // 淡出、竖屏 Dock 经 cardVisible 门＋宠物门全藏、横屏 Dock 作为
+        // 宠物身体保留（见 PullUpDock）。此处不加任何纱：卡片自身玻璃
+        // 保证可读；忙乱壁纸上的卡片可读性列为真机复核项。
         // v0.43.1：宠物回首页——v0.31.0 按"只留 Dock"把 PetZone 从首页移除后，
         // v0.43.0 的七仔场景改的是一段从未被调用的代码，所以真机上看不到。
         // v0.65.8：顶部对齐（之前居中导致宠物上方大量空白）——七仔贴近状态栏下方，
@@ -547,20 +521,24 @@ fun HomeScreen(
         // 跳悬浮 50%、键盘一升跳停靠贴合、窗口一缩跳垫 0），卡片上下跳、
         // 宠物位移与卡片／键盘各动各的；退态冻结垫高又让卡片在键盘落下
         // 后仍悬在原位、首页淡入时双影。本批改三处（垫高数值口径一字不动）：
-        // ① 悬浮 50% 兜底加 350ms 落定门——键盘在场预期成立后 350ms 内仍
-        //    无 inset、无收缩才认定悬浮，落定前卡片留在底部不动；停靠键盘
-        //    的 inset 在门内到达，永不触 50%；
+        // ① 悬浮 50% 兜底不再设落定门（本批竖屏一拍）——键盘在场预期成立
+        //    即认定，垫高连续跟随键盘动画：停靠键盘 inset 通常首帧内即
+        //    > 0，50% 误触窗口极小；悬浮键盘与键盘自身动画同节拍上升，
+        //    不再门后 350ms＋250ms 两段走（21:08“卡片在键盘出现后才又被
+        //    推起一段”的根因之一）；
         // ② 渲染垫高由 Animatable 驱动：imeBottom > 0 时逐帧 snap 跟键盘
-        //    顶边（窗口未收缩时 imeBottom 即键盘高，卡片精确坐键盘顶边）；
-        //    imeBottom = 0 时向目标值 250ms 滑过去（导航垫 ↔ 50% ↔ 0 之间
-        //    不再一帧跳变；停靠键盘冷启动晚到、落定门已开时，50% 与新到
-        //    inset 差值 > 48dp 则 150ms 快滑过去，不跳）；
+        //    顶边（窗口未收缩时 imeBottom 即键盘高，卡片精确坐键盘顶边，
+        //    snap 不动——精确贴合不是自由运动）；imeBottom = 0 时向目标值
+        //    走家族弹簧滑过去（PadStandard 临界阻尼约 250ms，导航垫 ↔
+        //    50% ↔ 0 之间不再一帧跳变；停靠键盘冷启动晚到、50% 与新到
+        //    inset 差值 > 48dp 则 PadFast 约 150ms 快滑过去，不跳）；
         // ③ 退态不再冻结垫高——退出时垫高跟键盘一起落下（imeBottom 缩小
         //    即跟下），键盘落定后再滑向导航垫；冻结机制随之删除（其防跳变
         //    的本意由 ② 的滑过去接管）。
-        // 横屏（Bob 2026-10-26 新口径，取代 357 左区躲避）：横屏专注态不做
-        // 任何键盘避让——垫高恒为导航垫（停靠键盘靠窗口收缩自然顶起卡片，
-        // 悬浮键盘由用户自己放位置），左区躲避与窄化一并拆除。
+        // 横屏（Bob 2026-10-26 新口径，取代 357 左区躲避；本批底边不钉
+        // 导航垫）：横屏专注态不做任何键盘避让——垫高恒为 0dp（停靠键盘
+        // 靠窗口收缩自然顶起卡片，悬浮键盘由用户自己放位置），左区躲避
+        // 与窄化一并拆除。
         // 专注组在场：进专注态起、退态完成止（isExiting 期间槽位仍挂载，
         // 锚定须保留，否则翻转瞬间卡片跳回顶部、反向位移无从渲染）。
         val focusGroupVisible = intentInputMode || perchTransition.isExiting
@@ -587,33 +565,21 @@ fun HomeScreen(
         // ④ 其余（键盘收起／结果态）：垫 = 导航栏 clearance（356 原口径不变）。
         // 键盘在场预期 = 输入态且（胶囊聚焦，或 Planning／NeedsInput——这两
         // 态键盘按设计保持升起）；Reply／Error 等态键盘按设计已收，走 ④。
-        // 弹闪修复（2026-10-26，357 真机反馈）：③ 的在场预期改走落定门后
-        // 的值（见下方 floatingSettled），横屏恒走导航垫（见 resolveFocusBottomPad
-        // 的 isLandscape 分支，Bob 横屏不推口径）。
+        // 竖屏一拍（2026-10-26 本批）：③ 的在场预期直接用 keyboardExpected
+        // （落定门删除），横屏恒走 0dp（见 resolveFocusBottomPad
+        // 的 isLandscape 分支，Bob 横屏不推＋底边不钉导航垫口径）。
         val imeBottomDp = with(density) { imeBottomPx.toDp() }
         val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
         val windowResized = maxHeight < screenHeightDp - 48.dp
         val keyboardExpected = intentInputMode && (intentFocused ||
             intentState is com.bobot.ailauncher.core.intent.IntentUiState.Planning ||
             intentState is com.bobot.ailauncher.core.intent.IntentUiState.NeedsInput)
-        // 悬浮落定门：键盘在场预期成立后 350ms 内仍无 inset、无收缩，才认定
-        // 悬浮键盘；落定前 50% 兜底不生效（卡片留在底部不动），停靠键盘的
-        // inset 在门内到达，永不触 50%。退出时预期翻 false，门同步复位。
-        var floatingSettled by remember { mutableStateOf(false) }
-        androidx.compose.runtime.LaunchedEffect(keyboardExpected) {
-            if (keyboardExpected) {
-                delay(350)
-                floatingSettled = true
-            } else {
-                floatingSettled = false
-            }
-        }
-        // 垫高目标：四路分流数值口径不变，只把 50% 兜底的在场预期换成落定
-        // 门后的值；横屏恒走导航垫（isLandscape 分支优先于全部四路）。
+        // 垫高目标：四路分流数值口径不变（横屏分支除外：恒 0dp）；
+        // 50% 兜底的在场预期直接用 keyboardExpected，不再过落定门。
         val focusBottomPadTarget = resolveFocusBottomPad(
             imeBottom = imeBottomDp,
             windowResized = windowResized,
-            keyboardExpected = keyboardExpected && floatingSettled,
+            keyboardExpected = keyboardExpected,
             isPortrait = !isLandscapeHome,
             windowHeight = maxHeight,
             navClearance = navClearanceDp,
@@ -621,10 +587,11 @@ fun HomeScreen(
         )
         // 渲染垫高：Animatable 单一连续值（像素 Float，免 Dp VectorConverter）。
         // imeBottom 在场时逐帧 snap 跟键盘顶边（窗口未收缩时 imeBottom 即
-        // 键盘高）；imeBottom = 0 时向目标值 250ms 滑过去（导航垫 ↔ 50% ↔ 0
-        // 之间不跳档；退出时键盘落下即跟下、落定后滑向导航垫，冻结机制删除）。
-        // 冷启动停靠键盘晚到、落定门已开时，50% 与新到 inset 差值 > 48dp
-        // 则 150ms 快滑过去，不跳（正常停靠键盘门内到达，差值小、直接 snap）。
+        // 键盘高，精确贴合 0dp 不动）；imeBottom = 0 时向目标值走家族弹簧
+        // 滑过去（PadStandard 约 250ms；退出时键盘落下即跟下、落定后滑向
+        // 导航垫，冻结机制删除）。冷启动停靠键盘晚到、50% 与新到 inset
+        // 差值 > 48dp 则 PadFast 约 150ms 快滑过去，不跳（正常停靠键盘
+        // 首帧内到达，差值小、直接 snap）。
         val focusPadAnim = remember {
             androidx.compose.animation.core.Animatable(0f)
         }
@@ -634,17 +601,14 @@ fun HomeScreen(
                 if (focusPadAnim.value - imePx > 48f ||
                     imePx - focusPadAnim.value > 48f
                 ) {
-                    focusPadAnim.animateTo(
-                        imePx,
-                        androidx.compose.animation.core.tween(150)
-                    )
+                    focusPadAnim.animateTo(imePx, PetMotion.PadFast)
                 } else {
                     focusPadAnim.snapTo(imePx)
                 }
             } else {
                 focusPadAnim.animateTo(
                     with(density) { focusBottomPadTarget.toPx() },
-                    androidx.compose.animation.core.tween(250)
+                    PetMotion.PadStandard
                 )
             }
         }
@@ -694,15 +658,15 @@ fun HomeScreen(
                         visible = intentInputMode || perchTransition.isExiting,
                         enter = androidx.compose.animation.fadeIn(
                             animationSpec = androidx.compose.animation.core.tween(
-                                com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                                PetMotion.FadeStandard,
                                 easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
                             )
                         ),
-                        // 弹闪修复：退场与进场、背景、首页淡出同一节拍（250ms），
-                        // 不许卡片 150ms 先没、首页后叠出双影。
+                        // 弹闪修复：退场与进场、首页淡出同一节拍（家族 FadeStandard
+                        // 250ms），不许卡片 150ms 先没、首页后叠出双影。
                         exit = androidx.compose.animation.fadeOut(
                             animationSpec = androidx.compose.animation.core.tween(
-                                com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                                PetMotion.FadeStandard,
                                 easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
                             )
                         )
@@ -883,9 +847,9 @@ internal fun intentStateHoldsInput(
  *  - keyboardExpected && isPortrait：悬浮键盘兜底（窗口未收缩、imeBottom = 0、键盘
  *    在场预期成立），垫 = 窗口高 × 50%，把组顶到屏幕上半区；
  *  - 其余：键盘收起／结果态，垫 = 导航栏 clearance（356 原口径）。
- * 注意：横屏情形由 isLandscape 分支优先接管（恒为导航垫，Bob 横屏不推
- * 口径），故 isPortrait 门只管竖屏兜底；调用方传给 keyboardExpected 的
- * 须是落定门后的值（弹闪修复：焦点初落 350ms 内不认定悬浮，见 HomeScreen）。
+ * 注意：横屏情形由 isLandscape 分支优先接管（恒为 0dp，Bob 横屏不推＋
+ * 底边不钉导航垫口径），故 isPortrait 门只管竖屏兜底；调用方传给
+ * keyboardExpected 的是直接的在场预期（本批竖屏一拍：落定门已删除）。
  */
 internal fun resolveFocusBottomPad(
     imeBottom: Dp,
@@ -896,10 +860,10 @@ internal fun resolveFocusBottomPad(
     navClearance: Dp,
     isLandscape: Boolean = false,
 ): Dp = when {
-    // 横屏不推（Bob 2026-10-26 新口径，取代 357 左区躲避）：横屏专注态不做
-    // 任何键盘避让——垫高恒为导航垫；停靠键盘靠窗口收缩自然顶起卡片，
-    // 悬浮键盘由用户自己放位置。
-    isLandscape -> navClearance
+    // 横屏不推（Bob 2026-10-26 新口径，取代 357 左区躲避；本批底边不钉
+    // 导航垫）：横屏专注态不做任何键盘避让——垫高恒为 0dp；停靠键盘靠
+    // 窗口收缩自然顶起卡片，悬浮键盘由用户自己放位置。
+    isLandscape -> 0.dp
     imeBottom > 0.dp -> imeBottom
     windowResized -> 0.dp
     keyboardExpected && isPortrait -> windowHeight * 0.5f
@@ -916,7 +880,7 @@ internal fun resolveFocusBottomPad(
  * IllegalArgumentException → 横屏进输入闪退。本函数以容器宽（竖屏即屏
  * 宽、横屏即左区槽宽）统一口径：max(20dp, (容器宽 − 520dp) / 2)，卡片
  * = min(520dp, 容器宽 − 40dp) 居于容器内；横屏不再左区躲、不窄化，
- * 底边钉导航垫（见 resolveFocusBottomPad 的 isLandscape 分支）。
+ * 底边不钉导航垫（见 resolveFocusBottomPad 的 isLandscape 分支，恒 0dp）。
  */
 internal fun resolveCardHorizontalPadding(
     containerWidth: Dp,

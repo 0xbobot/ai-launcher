@@ -1,25 +1,28 @@
 package com.bobot.ailauncher.ui.pet
 
+import com.bobot.ailauncher.ui.theme.PetMotion
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
 import kotlin.random.Random
 
-/** 活感第一批（2026-10-26）纯逻辑单测：头弹簧、触点注视、瞳孔 clamp、眨眼多样化、待机、接触影。 */
+/** 活感第一批（2026-10-26）纯逻辑单测：头弹簧、触点注视、瞳孔 clamp、眨眼多样化、待机（接触影已按 22:02 摘除，相关用例删除）。 */
 class AliveBatch1Test {
 
     @Test
     fun `head spring parameters match approved spec`() {
-        assertEquals(25f, HeadSpring.STIFFNESS, 0f)
-        assertEquals(0.3f, HeadSpring.DAMPING_RATIO, 0f)
+        // 弹簧参数 canonical 在 PetMotion.HeadSoft（家族化后唯一事实源）；
+        // 注视范围仍在 AliveLogic.HeadSpring。
+        assertEquals(25f, PetMotion.HeadSoft.stiffness, 0f)
+        assertEquals(0.3f, PetMotion.HeadSoft.dampingRatio, 0f)
         assertEquals(8f, HeadSpring.RANGE_X_PX, 0f)
         assertEquals(5f, HeadSpring.RANGE_Y_PX, 0f)
     }
 
     @Test
     fun `head spring step response overshoots visibly two to three times then settles`() {
-        val sim = SpringSim(HeadSpring.STIFFNESS, HeadSpring.DAMPING_RATIO)
+        val sim = SpringSim(PetMotion.HeadSoft.stiffness, PetMotion.HeadSoft.dampingRatio)
         val target = 8f
         val dt = 1f / 60f
         val errors = mutableListOf<Float>()
@@ -98,32 +101,6 @@ class AliveBatch1Test {
         val kinds = mutableSetOf<IdleKind>()
         repeat(200) { kinds.add(IdleBehavior.pick(r)) }
         assertEquals(setOf(IdleKind.TILT, IdleKind.LOOK), kinds)
-    }
-
-    @Test
-    fun `contact shadow follows head height and squash within bounds`() {
-        val rest = ContactShadow.params(0f, 0f)
-        assertEquals(1f, rest.widthScale, 0.001f)
-        assertEquals(0.14f, rest.alpha, 0.001f)
-        // 头抬高 5px：影变小变淡。
-        val up = ContactShadow.params(5f, 0f)
-        assertEquals(0.9f, up.widthScale, 0.001f)
-        assertEquals(0.12f, up.alpha, 0.001f)
-        // 头压低 5px：影变宽变深。
-        val down = ContactShadow.params(-5f, 0f)
-        assertEquals(1.1f, down.widthScale, 0.001f)
-        assertEquals(0.16f, down.alpha, 0.001f)
-        // 下压过冲：再加宽加深一档。
-        val squash = ContactShadow.params(0f, 1f)
-        assertEquals(1.1f, squash.widthScale, 0.001f)
-        assertEquals(0.16f, squash.alpha, 0.001f)
-        // 极端位移全部钳制，影子永远比头动得小。
-        val extremeUp = ContactShadow.params(1000f, 0f)
-        assertEquals(0.8f, extremeUp.widthScale, 0.001f)
-        assertEquals(0.08f, extremeUp.alpha, 0.001f)
-        val extremeDown = ContactShadow.params(-1000f, 1f)
-        assertEquals(1.25f, extremeDown.widthScale, 0.001f)
-        assertEquals(0.20f, extremeDown.alpha, 0.001f)
     }
 
     @Test
