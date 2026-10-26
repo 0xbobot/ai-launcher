@@ -633,7 +633,7 @@ fun FloatingPet(
         // 的一部分而非贴纸。几何（pet Box 坐标，Y 向下）：
         // 头底 Y = petHeight − headRise + headSink；肩峰 Y = petHeight −
         // press(5dp) − shoulderRise；可见间隙 = neckGap − press − sink；
-        // 间隙 > 1dp 才画（≤ 1dp 时头已压进肩峰、连接自带）；盒子两端
+        // 间隙 > 0 才画（≤ 0 时头已压进肩峰、连接自带）；盒子两端
         // 各伸 2px 塞缝（上端被后画的头盒盖住、下端盖住肩峰顶）。
         // 画在光晕之后、头盒之前：面板先画、脖子次之、头最后——前面图层。
         if (dragBody != null) {
@@ -642,7 +642,7 @@ fun FloatingPet(
             )
             val sinkDp = with(density) { dragBody.headSinkPx.toDp().value }
             val visibleGapDp = neckGapDp - 5f - sinkDp
-            if (visibleGapDp > 1f) {
+            if (visibleGapDp > 0f) {
                 val shoulderRiseDp = with(density) {
                     dragBody.shoulderRisePx.toDp().value
                 }
