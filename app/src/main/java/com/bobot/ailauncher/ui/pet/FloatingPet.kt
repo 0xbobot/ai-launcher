@@ -154,8 +154,9 @@ fun FloatingPet(
     // 走旧 head-only 跟手（意图路径保持现状一字不动）。由 PullUpDock
     // remember 后传入。
     dragBody: DragBodyState? = null,
-    // 注视 override（默认 null 不生效）：横屏聚焦时 PullUpDock 传入
-    // DOCK_LEFT，让留 Dock 的整只宠物看向左侧卡片；repo 说话目标仍优先。
+    // 注视 override（默认 null 不生效）：2026-10-26 横屏聚焦改 Dock 隐藏＋
+    // 宠物上卡片后暂无调用方传入（机制保留，优先级一字不动；repo 说话
+    // 目标仍优先）。
     gazeOverride: GazeTarget? = null,
     modifier: Modifier = Modifier,
 ) {

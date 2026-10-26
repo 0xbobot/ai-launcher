@@ -171,6 +171,18 @@ fun HomeScreen(
     // 槽位挂载条件因此是 intentInputMode || isExiting：退态进行中 mode
     // 尚未翻转、翻转后槽位仍挂到宠物落地才松开，意图宠物才有机会沿
     // 镜像路径走回去，而不是随 mode 翻转瞬间消失。
+    // 横屏例外（2026-10-26，Bob 22:57 最终口径）：横屏槽位挂载条件为
+    // mode && landscapeSlotReady（场景整体换，先出后进），见 focusSlotVisible；
+    // 横屏退聚焦不走 funnel 行程，见 requestExitFocus 横屏分支。
+    // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏聚焦槽位挂载门。
+    // 家场景先出、聚焦场景后进——横屏下槽位只在 intentInputMode 为真且
+    // 进场延迟已走完（Dock 退出淡出 FadeQuick 完成）时挂载；竖屏不走此门
+    // （沿用 mode || 退态进行中）。由进场 LaunchedEffect 与横屏退出分支
+    // 两处写入（进场 effect 已结束时退出分支才写，无争夺）。
+    var landscapeSlotReady by remember { mutableStateOf(false) }
+    // 横屏判定共享值（BoxWithConstraints 内算出后经 SideEffect 同步到此，
+    // 供 requestExitFocus 横屏分支读取；槽位公式直接读内容域内值）。
+    var isLandscapeHomeShared by remember { mutableStateOf(false) }
     val perchTransition = remember { PetPerchTransitionState() }
     val perchScope = rememberCoroutineScope()
     val reduceMotionHome = rememberReduceMotion()
@@ -185,6 +197,31 @@ fun HomeScreen(
     fun requestExitFocus() {
         if (perchTransition.isExiting || !intentInputModeLatest) return
         perchScope.launch {
+            if (isLandscapeHomeShared) {
+                // 横屏退聚焦（2026-10-26，Bob 22:57 最终口径）：场景整体换、
+                // 不移头、不双头、不走 funnel 行程。beginExit／finishExit 仅借
+                // isExiting 守卫（防重入）与相位复位，不跑行程／70% 交接。
+                // ① 键盘落下（同竖屏第①步；横屏悬浮键盘 imeBottom 恒为 0，
+                //    等待循环即时退出）；
+                // ② 聚焦场景先出：槽位挂载门关闭 → 槽位 fadeOut（FadeStandard
+                //    250ms），等淡出完成；
+                // ③ 家场景后进：翻转 mode → Dock 卡片 fade-only 重进（上一帧
+                //    仍在聚焦，PullUpDock 取 fade-only）＋首页淡入。
+                // 竖屏 funnel（行程＋70% 交接）一字不动，见下方。
+                perchTransition.beginExit()
+                focusManager.clearFocus()
+                keyboardController?.hide()
+                var waited = 0
+                while (imeBottomLatest > 0 && waited < 22) {
+                    delay(16)
+                    waited++
+                }
+                landscapeSlotReady = false
+                delay(PetMotion.FadeStandard.toLong())
+                exitIntentInputLatest()
+                perchTransition.finishExit()
+                return@launch
+            }
             perchTransition.beginExit()
             // ① 键盘落下：清焦点＋收 IME（各路调用方多半已做过，幂等重做
             // 无害）；最多等 350ms 让 IME 底部归零，等不到也继续、不阻塞退态。
@@ -509,6 +546,29 @@ fun HomeScreen(
         // 修法：两侧直接吃 displayCutout inset——竖屏侧边 inset 为 0，竖屏布局零变化；
         // 顶部横屏取 max(16dp, 状态栏高)，竖屏保持 16dp 不动。
         val isLandscapeHome = maxWidth > maxHeight
+        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：把内容域横屏判定
+        // 同步到外层，供 requestExitFocus 横屏分支读取（该分支在内容域外，
+        // 读不到此局部值；SideEffect 在组合后更新，退出点按时值已稳定）。
+        androidx.compose.runtime.SideEffect { isLandscapeHomeShared = isLandscapeHome }
+        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏进聚焦的槽位
+        // 进场延迟——家场景先出（Dock 卡片 fade-only 退出，FadeQuick 150ms），
+        // 聚焦场景后进（延迟走完才挂载槽位）。key 只取 intentInputMode：
+        // 横竖屏旋转不重启（旋转时已在聚焦中，Dock 早已隐藏，无需再等；
+        // 若 key 含 isLandscape，旋转会重启延迟、槽位闪烁）。竖屏直接置
+        // true（槽位公式竖屏分支不读此门，但保持值与 mode 同步、退出时复位）。
+        androidx.compose.runtime.LaunchedEffect(intentInputMode) {
+            if (intentInputMode) {
+                if (isLandscapeHome) {
+                    landscapeSlotReady = false
+                    delay(PetMotion.FadeQuick.toLong())
+                    landscapeSlotReady = true
+                } else {
+                    landscapeSlotReady = true
+                }
+            } else {
+                landscapeSlotReady = false
+            }
+        }
         val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
         // 输入态专注·集成：专注组底边锚定——adjustResize 下窗口底边 =
         // 键盘顶边（键盘升起）或屏底（键盘收起）；结果态导航栏 clearance
@@ -656,7 +716,17 @@ fun HomeScreen(
                     androidx.compose.animation.AnimatedVisibility(
                         // 退态进行中仍挂载（mode 已翻转、宠物未落地前不卸载），
                         // 否则意图宠物随翻转瞬间消失、反向位移无从渲染。
-                        visible = intentInputMode || perchTransition.isExiting,
+                        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏
+                        // 下槽位只在 mode 为真且进场延迟已走完时挂载（家场景
+                        // 先出、聚焦场景后进，不重叠）；横屏退聚焦由
+                        // requestExitFocus 横屏分支先关此门、等淡出完成再翻
+                        // mode（不走 funnel 行程与 70% 交接）。竖屏沿用原口径。
+                        visible = focusSlotVisible(
+                            intentInputMode = intentInputMode,
+                            isExiting = perchTransition.isExiting,
+                            isLandscape = isLandscapeHome,
+                            landscapeSlotReady = landscapeSlotReady
+                        ),
                         enter = androidx.compose.animation.fadeIn(
                             animationSpec = androidx.compose.animation.core.tween(
                                 PetMotion.FadeStandard,
@@ -838,6 +908,21 @@ internal fun intentStateHoldsInput(
     is com.bobot.ailauncher.core.intent.IntentUiState.Idle,
     is com.bobot.ailauncher.core.intent.IntentUiState.Editing -> false
 }
+
+/**
+ * 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：聚焦槽位可见门（纯函数，
+ * 单测锁死）。横屏：家场景先出、聚焦场景后进——槽位只在 mode 为真且进场
+ * 延迟已走完（Dock 退出淡出完成）时挂载；竖屏：沿用原口径（mode || 退态
+ * 进行中，退态宠物走回 Dock 的镜像路径需要槽位在 mode 翻转后仍挂载）。
+ */
+internal fun focusSlotVisible(
+    intentInputMode: Boolean,
+    isExiting: Boolean,
+    isLandscape: Boolean,
+    landscapeSlotReady: Boolean
+): Boolean =
+    if (isLandscape) intentInputMode && landscapeSlotReady
+    else intentInputMode || isExiting
 
 /**
  * 输入态专注·修复（2026-10-26，356 真机反馈）：专注组底边垫高决策（纯函数，单测锁死）。

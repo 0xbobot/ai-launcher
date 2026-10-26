@@ -273,6 +273,67 @@ class IntentInputModeTest {
         org.junit.Assert.assertEquals(400.dp, 440.dp - padding * 2f)
     }
 
+    // ---- 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：槽位可见门 ----
+    @Test
+    fun `槽位可见门 - 横屏只在 mode 真且进场延迟走完时挂载`() {
+        // 家场景先出、聚焦场景后进：进场延迟未走完（Dock 退出淡出未完成）
+        // 时槽位不挂载，不与 Dock 重叠。
+        assertTrue(focusSlotVisible(true, false, true, true))
+        assertFalse(focusSlotVisible(true, false, true, false))
+        assertFalse(focusSlotVisible(false, false, true, true))
+        assertFalse(focusSlotVisible(false, false, true, false))
+    }
+
+    @Test
+    fun `槽位可见门 - 竖屏沿用 mode 或退态进行中`() {
+        assertTrue(focusSlotVisible(true, false, false, false))
+        assertTrue(focusSlotVisible(true, true, false, false))
+        // 退态进行中 mode 已翻转、宠物未落地前槽位仍挂载（镜像路径需要）
+        assertTrue(focusSlotVisible(false, true, false, false))
+        assertFalse(focusSlotVisible(false, false, false, false))
+    }
+
+    // ---- 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：进态位移量 ----
+    @Test
+    fun `进态位移 - 横屏恒为零与锚点无关`() {
+        // 横屏不移头：锚点量到与否、落差多大，位移一律为零。
+        org.junit.Assert.assertEquals(
+            0.dp to 0.dp,
+            resolveEnterTravelDelta(true, 100.dp, 500.dp, 300.dp, 800.dp)
+        )
+        org.junit.Assert.assertEquals(
+            0.dp to 0.dp,
+            resolveEnterTravelDelta(true, null, 500.dp, 300.dp, 800.dp)
+        )
+    }
+
+    @Test
+    fun `进态位移 - 竖屏锚点未量到时返回 null 保持初值`() {
+        // 原行为：锚点未量到时不写位移量（保持 funnel 残值或兜底），不归零。
+        org.junit.Assert.assertNull(
+            resolveEnterTravelDelta(false, null, 500.dp, 300.dp, 800.dp)
+        )
+    }
+
+    @Test
+    fun `进态位移 - 竖屏按脚底落差公式且钳制`() {
+        // 落差 200dp：横向恒为零，纵向 = dockFoot − intentFoot。
+        org.junit.Assert.assertEquals(
+            0.dp to 200.dp,
+            resolveEnterTravelDelta(false, 100.dp, 500.dp, 300.dp, 800.dp)
+        )
+        // 负落差钳制到 0（意图脚底已低于 Dock 脚底，不反向位移）。
+        org.junit.Assert.assertEquals(
+            0.dp to 0.dp,
+            resolveEnterTravelDelta(false, 100.dp, 100.dp, 300.dp, 800.dp)
+        )
+        // 超屏高钳制到屏高。
+        org.junit.Assert.assertEquals(
+            0.dp to 800.dp,
+            resolveEnterTravelDelta(false, 100.dp, 900.dp, 100.dp, 800.dp)
+        )
+    }
+
     @Test
     fun `卡片外边距 - 全宽扫卡片恒大于零`() {
         // 357 崩溃宽：屏宽 720dp 时左区槽 360dp，旧公式卡片恰好为 0；
