@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -20,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +71,12 @@ fun DeckExamplesRow(
     onPick: (SlotTemplate) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // 2026-10-28 意图页设计评审第 1 轮（P1-1／P1-2／P1-5／P1-7／P1-8／P2-2）：
+    // 衬底降到 0.50 后深色 Body 在亮蓝壁纸取样上复测仅 3.76:1、不过 4.5，
+    // 故深色示例文字改 Title（同衬底上 7.08:1）；浅色文字 alpha 0.65→0.90、
+    // 琥珀点 alpha 0.6→1.0（浅色衬底上推导 5.28:1）；琥珀点径 6dp→8dp；
+    // 行内边 12dp→32dp（点轴 48dp、文字轴 62dp，与胶囊／结果轴一线）；
+    // 项距 20dp→16dp；行右缘加 24dp 渐隐，行尾 16dp Spacer 保留。
     // 2026-10-27 设计精致化 P0-1：推荐行文字坐稳局部底色上（不只给字加亮）——
     // 素行本身无容器，但整行套一层与胶囊同色系的弱衬底：玻璃＋花纹壁纸下
     // 对比度不再随壁纸走；圆角裁剪、卡片边缘仍透玻璃，整卡不改黑。
@@ -82,8 +90,8 @@ fun DeckExamplesRow(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(20.dp)
+            .padding(horizontal = 32.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         examples.forEach { t ->
             Row(
@@ -97,14 +105,14 @@ fun DeckExamplesRow(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
+                        .size(8.dp)
                         .clip(CircleShape)
-                        .background(if (AILauncherColors.current.isDark) AILauncherColors.current.Accent else AILauncherColors.current.Accent.copy(alpha = 0.6f))
+                        .background(AILauncherColors.current.Accent)
                 )
                 Text(
                     text = t.exampleFillText(),
                     fontSize = 13.sp,
-                    color = if (AILauncherColors.current.isDark) AILauncherColors.current.Body else AILauncherColors.current.Body.copy(alpha = 0.65f),
+                    color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body.copy(alpha = 0.90f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -112,16 +120,34 @@ fun DeckExamplesRow(
         }
         Spacer(modifier = Modifier.width(16.dp))
     }
+    // 右缘渐隐（不拦截点按：本 Box 无 clickable，事件落到下层横滚行）：
+    // 24dp 内从透明过渡到卡片实色，溢出项呈现为“字＋渐隐”而非半字硬切；
+    // 内容未溢出时渐隐区只盖空衬底（同色系，无可见变化）。
+    Box(
+        modifier = Modifier
+            .align(Alignment.CenterEnd)
+            .width(24.dp)
+            .fillMaxHeight()
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(Color.Transparent, AILauncherColors.current.Card)
+                )
+            )
+    )
     }
 }
 
 /**
  * 意图卡片内容区弱衬底（2026-10-27 设计精致化 P0-1）：推荐行、结果条、
  * 查找态文字共用的局部底色——卡片玻璃＋壁纸透过来时文字对比度不再随壁纸
- * 走；只盖文字区、卡片边缘仍透玻璃，整卡不改黑。浅色白 0.60、深色卡色 0.65。
+ * 走；只盖文字区、卡片边缘仍透玻璃，整卡不改黑。
+ * 2026-10-28 意图页设计评审第 1 轮 P1-1：三层深色条重量倒置，衬底
+ * 深色 0.65／浅色 0.60 → 两档同值 0.50（胶囊平底另取 0.55，高一档）；
+ * 衬底降后深色 Body 不过线，故同衬底上的深色正文一律改 Title（见
+ * DeckExamplesRow、结果标签、SlotStatusLine），不把衬底加回去。
  */
 @Composable
 internal fun intentContentScrim(): Color =
-    if (AILauncherColors.current.isDark) AILauncherColors.current.Card.copy(alpha = 0.65f)
-    else AILauncherColors.current.Card.copy(alpha = 0.60f)
+    if (AILauncherColors.current.isDark) AILauncherColors.current.Card.copy(alpha = 0.50f)
+    else AILauncherColors.current.Card.copy(alpha = 0.50f)
 

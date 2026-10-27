@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
@@ -62,6 +63,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
@@ -151,9 +153,13 @@ private val INTENT_PET_PRESS = 5.dp
  * 意图卡片肩线（输入态专注，2026-10-26 设计 §2）：弦 156.4dp、rise 18.0dp、
  * 压入 5dp——与 Dock B2+A 同一套语言，数值按设计定稿字面取，不从 Dock
  * 公式二次推导（156.4 × 18/156 = 18.05 ≈ 18.0，舍入差不可见）。
+ * 2026-10-28 意图页设计评审第 1 轮 P1-9：18dp 浅肩峰托 86.4dp 宽的头
+ * 接触弦显窄、视觉像贴纸，弦 156.4dp→175dp、rise 18.0dp→21.0dp
+ * （报告区间弦 170～180dp、rise 20～22dp 内取中值），压入 5dp 不动，
+ * 单宠物结构（前面图层、一只 HybridPet）一字不动。
  */
-private val INTENT_SHOULDER_CHORD = 156.4.dp
-private val INTENT_SHOULDER_RISE = 18.0.dp
+private val INTENT_SHOULDER_CHORD = 175.dp
+private val INTENT_SHOULDER_RISE = 21.0.dp
 
 /**
  * 意图拖拽几何（纯 dp 函数，可单测；量全部取自 DragBody 同一套映射，
@@ -395,7 +401,13 @@ fun IntentCapsuleField(
             // R3-A：最小高度策略——fontScale 放大时允许胶囊长高，不定死 56dp 裁字；
             // 内容最高项是提交钮触控外框 48dp（R3-C），< 56dp 下限，外观仍是原规格 56dp
             .heightIn(min = 56.dp)
-            .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+            // 2026-10-28 意图页设计评审第 1 轮 P2-1：面板语境（solidBackground）
+            // 下删 8dp 阴影（玻璃面板内多一层脏边）；应用中心变体（实心底）
+            // 保留原阴影，一字不动。
+            .then(
+                if (solidBackground) Modifier
+                else Modifier.shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+            )
             .clip(RoundedCornerShape(28.dp))
             .then(
                 if (solidBackground) {
@@ -403,10 +415,13 @@ fun IntentCapsuleField(
                     // 面板已是强玻璃，胶囊不再套第二层强玻璃＋方向高光（两层打架），
                     // 改平底：仅明度差（比面板玻璃更实一档）＋金色光标＋占位文案
                     // 表达可输入；金色发送键仍是唯一强强调。应用中心变体不动。
-                    // 平底不透明度 0.72：高于面板玻璃（约 0.55）形成明度台阶，又
-                    // 低于实心卡色，避开 2026-10-25 实心黑 pill 压玻璃的旧问题。
+                    // 平底不透明度 0.55：比示例／结果衬底 0.50 高一档（主输入
+                    // 区仍是卡内最实的一层），又低于实心卡色，避开 2026-10-25
+                    // 实心黑 pill 压玻璃的旧问题。
+                    // 2026-10-28 意图页设计评审第 1 轮 P1-1：0.72→0.55（衬底
+                    // 0.50 之上一档），胶囊正文 Title 在新平底上复测 7.54:1。
                     Modifier.background(
-                        AILauncherColors.current.Card.copy(alpha = 0.72f),
+                        AILauncherColors.current.Card.copy(alpha = 0.55f),
                         RoundedCornerShape(28.dp)
                     )
                 } else {
@@ -422,7 +437,10 @@ fun IntentCapsuleField(
             // 体检批D ⑨：装饰图标（输入框用途由占位文案表达）——明确标装饰语义，
             // 不进无障碍树，避免 TalkBack 在输入框旁多读一个无名节点
             contentDescription = null,
-            tint = AILauncherColors.current.Accent,
+            // 2026-10-28 意图页设计评审第 1 轮 P1-2：星标 tint Accent→Body——
+            // 它在代码中已是装饰语义（invisibleToUser），不承担信息职能，
+            // 金色只留提交盘＋示例点两处。
+            tint = AILauncherColors.current.Body,
             modifier = Modifier
                 .size(18.dp)
                 .semantics { invisibleToUser() }
@@ -526,14 +544,20 @@ fun IntentCapsuleField(
                 if (planning) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
-                        color = Color.White,
+                        // 2026-10-28 意图页设计评审第 1 轮 P1-3：规划态进度圈
+                        // 同步改深色（白圈落在金盘上同样偏低），与提交箭头同色。
+                        color = AILauncherColors.Light.Title,
                         strokeWidth = 2.dp
                     )
                 } else {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = "提交",
-                        tint = Color.White,
+                        // 2026-10-28 意图页设计评审第 1 轮 P1-3：白箭头 on 金盘
+                        // 仅 2.42:1，改主题 onPrimary 深色字 #1F1D1A（同金盘
+                        // 6.94:1；Light.Title 即该字面值，与深浅主题无关，
+                        // 金盘深浅两档同色故不跟 current 走）。
+                        tint = AILauncherColors.Light.Title,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -1089,14 +1113,15 @@ fun IntentEntry(
             .onGloballyPositioned { coords ->
                 with(densityNow) { panelHeight = coords.size.height.toDp() }
             }
-            // 底垫 14dp 在外延区之上：竖屏总底垫 = 14dp + 24dp 外延区，
+            // 底垫 8dp 在外延区之上：竖屏总底垫 = 8dp + 24dp 外延区，
             // 全部内容（示例行、输入框、结果槽位）收在外延区之上，不压
-            // 外延曲线；横屏无外延区，总底垫 = 14dp。
+            // 外延曲线；横屏无外延区，总底垫 = 8dp。
+            // 2026-10-28 意图页设计评审第 1 轮 P1-4：14dp→8dp（外延 24dp 不动）。
             .padding(
                 start = 16.dp,
                 end = 16.dp,
                 top = 14.dp,
-                bottom = 14.dp + if (isLandscapeCard) 0.dp else INTENT_FLARE_HEIGHT
+                bottom = 8.dp + if (isLandscapeCard) 0.dp else INTENT_FLARE_HEIGHT
             ),
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
@@ -1256,34 +1281,39 @@ fun IntentEntry(
         // 卡片内底边之上，悬浮／停靠键盘都不盖住它（面板整体坐键盘顶
         // 之上）；竖屏／横屏同款（面板 Column 共用）；热区 ≥48dp、走
         // 同一退出入口 onExitFocusRequest；TalkBack 读“收起”。
-    // 2026-10-27 设计精致化 P1-4：胶囊底已去（见下透明 Row），热区／位置／入口／TalkBack 不动。
+        // 2026-10-27 设计精致化 P1-4：角 ✕ 已删，收起在面板 Column 末项；
+        // 2026-10-28 意图页设计评审第 1 轮 P0-1＋P1-4＋P1-10：透明底收起在亮壁纸
+    // 上实测仅 1.90:1，恢复与结果条同源的 intentContentScrim() 底托
+    // （Row 级、圆角 14dp）、文字与箭头改 Title（同衬底上 7.08:1）；
+    // Box 改顶对齐、Row 顶距 4dp（结果→字形 12dp 间距＋4dp＝16dp）；
+    // 字号 13sp→12sp、箭头 18dp→16dp，收起读成一条安静的底栏；
+    // 热区 48dp、位置、testTag、同一退出入口、TalkBack 一字不动。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
                 .testTag("intent_focus_exit")
                 .clickable { onExitFocusRequest() },
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.TopCenter
         ) {
-            // 2026-10-27 设计精致化 P1-4：收起减重——深色实心 pill 比结果还
-            // 抢眼，改透明底小下箭头＋弱化文字；外层 Box 热区 48dp、位置、
-            // testTag、退出入口、TalkBack 一字不动（文字保留，纯箭头不易发现）。
             Row(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(intentContentScrim())
+                    .padding(horizontal = 12.dp, top = 4.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Icon(
                     imageVector = Icons.Filled.KeyboardArrowDown,
                     contentDescription = null,
-                    tint = AILauncherColors.current.Body,
-                    modifier = Modifier.size(18.dp)
+                    tint = AILauncherColors.current.Title,
+                    modifier = Modifier.size(16.dp)
                 )
                 Text(
                     text = "收起",
-                    fontSize = 13.sp,
-                    color = AILauncherColors.current.Body
+                    fontSize = 12.sp,
+                    color = AILauncherColors.current.Title
                 )
             }
         }
@@ -1456,7 +1486,7 @@ private fun LocalResultsBar(
 ) {
     // 保底高度构成：固定部分 69dp = 容器上下内边距 16 + 结果行上距 6
     // + 结果项（上下内边距 8 + 图标 36 + 标签上距 3）；文字部分 = 标题行高 15sp
-    // + 标签行高 15sp（P1-5 名称 12sp，按 sp 换算，fontScale 多大都完整算入）；另加 4dp 余量
+    // + 标签行高 15sp（名称字号现为 13sp、行高仍钉 15sp，故公式一字不动）；另加 4dp 余量
     // （R4 dump 实测 TextView 高度比 lineHeight 多约 2.6dp，字体内边距关不干净）。
     val density = LocalDensity.current
     val minBarHeight = 73.dp + with(density) { 15.sp.toDp() + 15.sp.toDp() }
@@ -1480,8 +1510,10 @@ private fun LocalResultsBar(
             // 2026-10-27 设计精致化 P1-5：说明缩成“应用 · N 个”，更紧更好扫。
             text = "应用 · ${apps.size} 个",
             fontSize = 12.sp,
-            // 2026-10-27 暗黑可读：深色 Hint 在深色玻璃上近隐形，改 Body；浅色不动。
-            color = if (AILauncherColors.current.isDark) AILauncherColors.current.Body else AILauncherColors.current.Hint,
+            // 2026-10-28 意图页设计评审第 1 轮 P1-6：标签深色 Body 实测
+            // 4.43:1、浅色 Hint 推导 3.75:1，双双不过线——深色改 Title
+            // （同衬底上 7.08:1）、浅色改 Body（对白约 7.06:1），字号 12sp 不动。
+            color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             style = TextStyle(
                 lineHeight = 15.sp,
                 platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -1490,6 +1522,9 @@ private fun LocalResultsBar(
         // 2026-10-27 设计精致化 P0-2：结果行可横滚——固定 64dp 一项在窄屏
         // （320dp）放不下 4 项且 Row 无换行、末项会出界；横滚后任何可用宽、
         // 任何字号档都不出界，4 项全部可达。
+        // 2026-10-28 意图页设计评审第 1 轮 P1-5：结果行同理加右缘 24dp
+        // 渐隐（示例行同款，不拦截点按），溢出时呈现为“图标＋渐隐”。
+        Box(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1500,6 +1535,18 @@ private fun LocalResultsBar(
             apps.forEach { app ->
                 ResultAppItem(app = app, onOpen = onOpen)
             }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(24.dp)
+                .fillMaxHeight()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(Color.Transparent, AILauncherColors.current.Card)
+                    )
+                )
+        )
         }
     }
 }
@@ -1530,7 +1577,10 @@ fun ResultAppItem(
         Text(
             text = app.label.toString(),
             // 2026-10-27 设计精致化 P1-5：名称 11sp→12sp，更好扫。
-            fontSize = 12.sp,
+            // 2026-10-28 意图页设计评审第 1 轮 P2-3：名称 12sp→13sp，与
+            // 标签 12sp 拉开字阶；行高仍钉 15sp，故条保底高公式与 180dp
+            // 上限、单项高（4＋36＋3＋15）一字不动，不溢出。
+            fontSize = 13.sp,
             // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             maxLines = 1,
@@ -1580,7 +1630,11 @@ private fun SlotStatusLine(text: String, testTag: String) {
         Text(
             text = text,
             fontSize = 13.sp,
-            color = AILauncherColors.current.Body
+            // 2026-10-28 意图页设计评审第 1 轮 P1-1 连带：本行坐 intentContentScrim
+            // 上，衬底降到 0.50 后深色 Body 复测仅 3.76:1，故深色改 Title
+            // （同衬底上 7.08:1；与回复／思考条的深色 Title 口径一致），
+            // 浅色 Body 在浅色衬底上 6.72:1、不动。
+            color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body
         )
     }
 }
