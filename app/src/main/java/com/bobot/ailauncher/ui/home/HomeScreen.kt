@@ -55,6 +55,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -278,6 +280,74 @@ fun HomeScreen(
             onExitFocusRequest()
         }
         intentPrevHolds = holdsNow
+    }
+    // ⑦ IME 收起自动收卡片（2026-10-27，Bob 追问）：悬浮键盘下 imeBottom 恒为 0，
+    //    底部 inset 看不见键盘；Compose 本版 BOM（2024.10.01）又没有
+    //    WindowInsets.isImeVisible（CI 实证 Unresolved reference）——改读平台
+    //    兼容旗 ViewCompat.getRootWindowInsets(view).isVisible(ime())（可见性
+    //    与是否和窗口相交无关，悬浮键盘同样翻转）。意图态在场期间 100ms
+    //    轮询一次（只读、不碰 inset 分发链；意图态外不轮询；remember 以
+    //    intentInputMode 为 key，进态即重置为 false，防上一会话残留 true
+    //    在进态首轮造成幻边沿）。仅输入态（Idle／Editing）的可见→隐藏边沿
+    //    触发，走单一退出入口；120ms 防抖：边沿后复核守卫，期间可见性翻回
+    //    则 effect 重启、取消本次触发。
+    //    不触发：提交转场（提交 flag＋状态守卫双拦）、程序化收起、旋转（方向
+    //    变化即重置跟踪不触发）、呈现态／在场态（状态守卫）、退出进行中。
+    //    如实标注：nubia 悬浮键盘上的翻转行为未经本机验证——若真机上
+    //    isVisible 不翻转，本通道静默不触发、无回归，兜底仍是 375 的返回键。
+    var imeVisible by remember(intentInputMode) { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(intentInputMode) {
+        if (!intentInputMode) return@LaunchedEffect
+        while (true) {
+            val visible = ViewCompat.getRootWindowInsets(view)
+                ?.isVisible(WindowInsetsCompat.Type.ime())
+            if (visible != null && visible != imeVisible) imeVisible = visible
+            delay(100)
+        }
+    }
+    val imeOrientation = LocalConfiguration.current.orientation
+    var imeSubmitPending by remember { mutableStateOf(false) }
+    val onIntentSubmitWrapped: (String) -> Unit = { text ->
+        imeSubmitPending = true
+        onIntentSubmit(text)
+    }
+    // 提交 flag 清理：状态离输入态、mode 退出时清（边沿消费时另清，见下）。
+    androidx.compose.runtime.LaunchedEffect(intentState, intentInputMode) {
+        if (!intentInputMode || intentStateHoldsInput(intentState)) imeSubmitPending = false
+    }
+    var imePrevVisible by remember { mutableStateOf(false) }
+    var imePrevMode by remember { mutableStateOf(false) }
+    var imePrevOrientation by remember { mutableStateOf(-1) }
+    androidx.compose.runtime.LaunchedEffect(imeVisible, imeOrientation, intentInputMode) {
+        val modeChanged = intentInputMode != imePrevMode
+        val orientationChanged = imeOrientation != imePrevOrientation
+        imePrevMode = intentInputMode
+        imePrevOrientation = imeOrientation
+        if (!imeAutoCloseShouldFire(
+                prevVisible = imePrevVisible,
+                nowVisible = imeVisible,
+                inputMode = intentInputMode,
+                modeChanged = modeChanged,
+                orientationChanged = orientationChanged,
+                isInputState = !intentStateHoldsInput(intentStateLatest),
+                submitPending = imeSubmitPending,
+                isExiting = perchTransition.isExiting,
+            )
+        ) {
+            // 未触发的边沿同样消费提交 flag（提交那次收键盘即此沿；新一轮
+            // 可见边沿也清，旧提交不污染下一会话）。
+            if (imePrevVisible != imeVisible) imeSubmitPending = false
+            imePrevVisible = imeVisible
+            return@LaunchedEffect
+        }
+        delay(120)
+        // 防抖后复核最新守卫（effect 重启会取消本分支，故翻回不触发）。
+        if (intentInputModeLatest && !intentStateHoldsInput(intentStateLatest) &&
+            !imeSubmitPending && !perchTransition.isExiting
+        ) {
+            onExitFocusRequest()
+        }
+        imePrevVisible = imeVisible
     }
     // ⑥ 滞留兜底：进态 2.5 秒后仍「从未聚焦 + 文本为空 + 无在场状态」
     // 才收起——防聚焦请求被吞后空胶囊永久滞留。真实会话必先聚焦（锁存
@@ -860,7 +930,7 @@ fun HomeScreen(
                             // 仍须过 intentFocusGateOpen。
                             IntentEntry(
                                 state = intentState,
-                                onSubmit = onIntentSubmit,
+                                onSubmit = onIntentSubmitWrapped,
                                 onConfirm = onIntentConfirm,
                                 onDismiss = onIntentDismiss,
                                 onCancelPlanning = onIntentCancelPlanning,
@@ -1009,6 +1079,26 @@ internal fun intentStateHoldsInput(
     is com.bobot.ailauncher.core.intent.IntentUiState.Error -> true
     is com.bobot.ailauncher.core.intent.IntentUiState.Idle,
     is com.bobot.ailauncher.core.intent.IntentUiState.Editing -> false
+}
+
+/**
+ * IME 收起自动收卡片判定（2026-10-27，纯函数，单测锁死）：仅可见→隐藏边沿、
+ * 且在输入态、且无提交在途、且未在退出中才放行；mode 变化／方向变化／未在
+ * 输入态时一律不触发（调用方以此重置跟踪，不形成边沿）。
+ */
+internal fun imeAutoCloseShouldFire(
+    prevVisible: Boolean,
+    nowVisible: Boolean,
+    inputMode: Boolean,
+    modeChanged: Boolean,
+    orientationChanged: Boolean,
+    isInputState: Boolean,
+    submitPending: Boolean,
+    isExiting: Boolean,
+): Boolean = when {
+    modeChanged || orientationChanged || !inputMode -> false
+    prevVisible && !nowVisible && isInputState && !submitPending && !isExiting -> true
+    else -> false
 }
 
 /**
