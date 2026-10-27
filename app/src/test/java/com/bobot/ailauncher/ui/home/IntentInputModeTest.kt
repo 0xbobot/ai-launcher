@@ -101,30 +101,9 @@ class IntentInputModeTest {
         )
     }
 
-    // ---- PetPerchTransition（输入态专注·进出过渡 C，2026-10-26） ----
-    // 退态 = 进态位移取负：travel 1→0 对应行程进度 0→1；Dock 淡入／首页
-    // 淡入触发点 = 行程过 70%（travel ≤ 0.30），与宠物落地交叠。
-
-    @Test
-    fun `退态进度 - travel 从 1 到 0 对应进度 0 到 1`() {
-        org.junit.Assert.assertEquals(0f, exitTravelProgress(1f), 0.001f)
-        org.junit.Assert.assertEquals(0.70f, exitTravelProgress(0.30f), 0.001f)
-        org.junit.Assert.assertEquals(1f, exitTravelProgress(0f), 0.001f)
-    }
-
-    @Test
-    fun `退态进度 - 越界值钳制在 0 到 1`() {
-        org.junit.Assert.assertEquals(0f, exitTravelProgress(1.2f), 0.001f)
-        org.junit.Assert.assertEquals(1f, exitTravelProgress(-0.2f), 0.001f)
-    }
-
-    @Test
-    fun `Dock 淡入触发 - 行程过 70 才触发`() {
-        assertFalse(exitDockFadeShouldStart(1f))
-        assertFalse(exitDockFadeShouldStart(0.31f))
-        assertTrue(exitDockFadeShouldStart(0.30f))
-        assertTrue(exitDockFadeShouldStart(0f))
-    }
+    // 注：竖屏区块切换（2026-10-27）删除了 PetPerchTransition 的退态
+    // 行程函数（exitTravelProgress／exitDockFadeShouldStart）及其测试；
+    // 竖屏槽位可见性改由 focusSlotVisible 锁定（见 EnterExitFlashTest）。
 
     @Test
     fun `滞留不收 - 聚焦过、有文本、有在场任一成立`() {
@@ -278,19 +257,21 @@ class IntentInputModeTest {
     fun `槽位可见门 - 横屏只在 mode 真且进场延迟走完时挂载`() {
         // 家场景先出、聚焦场景后进：进场延迟未走完（Dock 退出淡出未完成）
         // 时槽位不挂载，不与 Dock 重叠。
-        assertTrue(focusSlotVisible(true, false, true, true))
-        assertFalse(focusSlotVisible(true, false, true, false))
-        assertFalse(focusSlotVisible(false, false, true, true))
-        assertFalse(focusSlotVisible(false, false, true, false))
+        assertTrue(focusSlotVisible(true, true, true))
+        assertFalse(focusSlotVisible(true, true, false))
+        assertFalse(focusSlotVisible(false, true, true))
+        assertFalse(focusSlotVisible(false, true, false))
     }
 
     @Test
-    fun `槽位可见门 - 竖屏沿用 mode 或退态进行中`() {
-        assertTrue(focusSlotVisible(true, false, false, false))
-        assertTrue(focusSlotVisible(true, true, false, false))
-        // 退态进行中 mode 已翻转、宠物未落地前槽位仍挂载（镜像路径需要）
-        assertTrue(focusSlotVisible(false, true, false, false))
-        assertFalse(focusSlotVisible(false, false, false, false))
+    fun `槽位可见门 - 竖屏区块切换后可见性即 mode`() {
+        // 离散切换无退态滞留挂载：mode 回落当帧槽位即消失，不与回场
+        // 的信息区／Dock 区半透明重叠；旧口径（mode || 退态进行中）
+        // 已随竖屏 funnel 删除而作废。
+        assertTrue(focusSlotVisible(true, false, false))
+        assertTrue(focusSlotVisible(true, false, true))
+        assertFalse(focusSlotVisible(false, false, false))
+        assertFalse(focusSlotVisible(false, false, true))
     }
 
     // ---- 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：进态位移量 ----

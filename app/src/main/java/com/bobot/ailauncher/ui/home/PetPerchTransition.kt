@@ -13,17 +13,22 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * 输入态专注·进出过渡 C（2026-10-26，设计文档 input-focus-design.md §4）。
+ * 输入态专注·进出过渡（2026-10-26 起，2026-10-27 竖屏区块切换重做）。
  *
- * 退态反向位移缺口的闭合点：355 的退场是“HomeScreen fadeOut＋Dock 卡片重进”
- * 各自为政——意图宠物随槽位淡出消失、Dock 宠物随卡片重进出现，两段动画无
- * 交接、宠物没有“走回去”的过程。本文件把进出两路收进同一个状态：
- * [PetPerchTransitionState] 由 HomeScreen 持有（remember），进态与退态共用
- * 同一组 Animatable、同一弹簧、同一份进态冻结的位移量；退态 = 位移取负
- * （travel 1→0 时附加 offset = 冻结 delta × (1−travel)，自然回到 Dock 方向），
- * 不是第二套动画。
+ * 竖屏（2026-10-27，Bob 12:54 verdict：367 在真机上未过关，进出都闪）：
+ * 区块离散切换——信息区、Dock 区、意图区三区块同帧整体显隐
+ * （Enter/ExitTransition.None），不 stagger、不 crossfade 重叠、不走
+ * funnel 行程、不做 70% 交接与落地溶解；宠物随区块显隐（主页属 Dock
+ * 区、聚焦属意图区），不跨区块飞行。竖屏进出不再用本文件的行程／
+ * 交接函数（已删除），只借 travel／travelAlpha 的终态值（竖屏进态
+ * effect 直接 snap 到 1，供横竖屏旋转时横屏渲染读一致值）。
  *
- * 责任边界（只动过渡状态与退出 funnel 本身）：
+ * 横屏（2026-10-26，Bob 22:57 最终口径，竖屏重做一字不动）：场景整体换
+ * （先出后进），本文件只剩 beginExit／finishExit 作重入守卫与相位复位，
+ * 以及横屏进态 effect 用的 animateEnter／freezeDelta／travel／travelAlpha。
+ * [PetPerchTransitionState] 由 HomeScreen 持有（remember）。
+ *
+ * 责任边界（只动过渡状态与退出机制本身）：
  * - 不碰 Dock 几何（B2+A）、视频层应急开关、351 noRim 口径；
  * - 不碰卡片 Shape 与肩线几何（B 的活）、专注壳背景与隐藏清单（A 的活）；
  * - 不碰意图逻辑本身（提交、IME Done、拼音 composing、状态条）；
@@ -33,24 +38,14 @@ import kotlinx.coroutines.launch
  *   影子已无：进出影子动画（550ms＋90ms 延迟进、300ms 退）按 Bob
  *   22:02 verdict 随接触影一并作废，本文件不再有影子通道。
  *
- * 四步退态时序（写死在 HomeScreen.requestExitFocus，不许打乱）：
- *  ① 键盘落下：清焦点＋收 IME，卡片＋宠物组跟键盘一起落下（组内相对位置
- *    不动——组锚定 IME 顶边是 A 的专注壳的活，本文件只保证退态在键盘落下
- *    后才起步，见 requestExitFocus 的 IME 归零等待，上限 350ms）；
- *  ② 宠物离开卡片肩峰，沿镜像路径走回 Dock 肩峰（本文件的 animateExitTravel）；
- *  ③ Dock 卡片在宠物落点下方淡入（150ms，宠物落地时淡入完成，宠物最后
- *    落地、不悬空——淡入由 intentInputMode 翻转驱动 PullUpDock 的 cardVisible
- *    门禁，翻转点定在行程 70%，见 exitDockFadeShouldStart；注意：PullUpDock
- *    的卡片 enter fadeIn 实测是 180ms，不是 150ms，HomeScreen 的意图宠物
- *    alpha 交接按 180ms 对齐 Dock 实测值，30ms 差值留给协调方定夺是否改
- *    Dock enter 规格，本批不擅自改 Dock 的进场规格）；
- *  ④ 首页内容淡入（同样由 mode 翻转驱动 PetZone inputActive 回落，翻转点
- *    即行程 70%，与落地交叠，不出现“宠物已走、内容未回”的空窗）。
+ * 竖屏旧四步退态时序（键盘落下→镜像走回→Dock 淡入→首页淡入，70%
+ * 翻转点）已随竖屏区块切换删除；横屏退聚焦不走行程，见 HomeScreen
+ * 横屏分支（beginExit／finishExit 仅借 isExiting 守卫与相位复位）。
  *
- * 减动效：进出皆直接 snap（355 已有口径，专注态沿用），见 animateEnter /
- * animateExitTravel 的 reduceMotion 分支。
+ * 减动效：横屏进态直接 snap（animateEnter 的 reduceMotion 分支）；
+ * 竖屏离散切换本身无动画，减动效同一行为。
  *
- * 退出 funnel 与 D 的 ✕ 接线（协调方集成时）：
+ * 退出入口与 D 的 ✕ 接线（协调方集成时）：
  * - HomeScreen 内唯一的退出入口是它创建并向下传的 onExitFocusRequest
  *   lambda（= requestExitFocus）；Back、点卡片外、落定、滞留兜底、点本地
  *   结果打开 App 全部改走它，不再直接调 onExitIntentInput。
@@ -61,8 +56,9 @@ import kotlinx.coroutines.launch
  *   确认／追问／权限在场时退出走各自收起路径；否则 MainScreen 的
  *   “在场状态自动带起”effect 会把刚翻转的 mode 又翻回 true，造成进出打架）。
  * - 旁路（本批不动，协调方知晓）：MainScreen 上滑开 D3 时直接把 mode 置
- *   false，不经过 funnel——那是切屏不是专注退出，退态位移不与 D3 覆盖层打架；
- *   若退态进行中途用户开了 D3，旧退态协程只是 harmless 地跑完（翻转调用幂等）。
+ *   false，不经过退出入口——那是切屏不是专注退出，退态不与 D3 覆盖层打架；
+ *   若横屏退态进行中途用户开了 D3，旧退态协程只是 harmless 地跑完
+ *   （翻转调用幂等）；竖屏无在途退态协程。
  */
 enum class PetPerch { DOCK, INTENT }
 
@@ -71,14 +67,12 @@ enum class PetPerchPhase {
     ENTERING,
     FOCUSED,
     EXIT_KEYBOARD,
-    EXIT_TRAVEL,
-    EXIT_DOCK_FADE,
 }
 
 /**
  * 进出共用的过渡状态。Animatable 在构造时创建、由 HomeScreen 的 remember
  * 持有，整个输入态会话期间不重建；进态冻结的位移量（[travelDeltaX] /
- * [travelDeltaY]）只在进态那一刻写入，退态只读不重算。
+ * [travelDeltaY]）只在横屏进态那一刻写入（竖屏离散切换不冻结、不读）。
  */
 class PetPerchTransitionState {
     var phase: PetPerchPhase by mutableStateOf(PetPerchPhase.IDLE)
@@ -88,7 +82,7 @@ class PetPerchTransitionState {
     var to: PetPerch by mutableStateOf(PetPerch.DOCK)
         private set
 
-    /** 退态进行中：HomeScreen 的槽位挂载条件（mode || isExiting）据此保持。 */
+    /** 横屏退聚焦进行中（重入守卫与挂载门用）；竖屏离散切换不置此位。 */
     var isExiting: Boolean by mutableStateOf(false)
         private set
 
@@ -108,11 +102,10 @@ class PetPerchTransitionState {
     }
 
     /**
-     * 进态：家族规格——位移走 PetMotion.EnterStandard（值与 355 一字不差，
-     * damping 0.75），alpha 走 FadeHandoff 180ms＋EaseOutCubic（值不动、
-     * 仅具名）。影子通道已随 22:02 摘除作废，不再有影子动画。
-     * 竖屏一拍（本批）：alpha 在 IntentEntry 侧锚点等待之前即起步（见
-     * IntentEntry），此处 animateEnter 仍从当前值续到 1，不冲突。
+     * 横屏进态（竖屏进态 effect 不调本函数，直接 snap）：家族规格——
+     * 位移走 PetMotion.EnterStandard（值与 355 一字不差，damping
+     * 0.75），alpha 走 FadeHandoff 180ms＋EaseOutCubic（值不动、仅具名）。
+     * 影子通道已随 22:02 摘除作废，不再有影子动画。
      */
     suspend fun animateEnter(reduceMotion: Boolean) {
         from = PetPerch.DOCK
@@ -135,21 +128,6 @@ class PetPerchTransitionState {
         phase = PetPerchPhase.FOCUSED
     }
 
-    /**
-     * 退态行程：同一弹簧、同一冻结位移量取负（travel 1→0）。
-     * alpha 不在此处动：它由 HomeScreen 在 Dock 淡入步里单独走 180ms，
-     * 与 Dock 卡片 fadeIn 交叠为一次交接（意图宠物淡出、Dock 宠物淡入），
-     * 不出现两只实体的静止并存。
-     */
-    suspend fun animateExitTravel(reduceMotion: Boolean) {
-        phase = PetPerchPhase.EXIT_TRAVEL
-        if (reduceMotion) {
-            travel.snapTo(0f)
-        } else {
-            travel.animateTo(0f, PetMotion.EnterStandard)
-        }
-    }
-
     fun beginExit() {
         if (isExiting) return
         isExiting = true
@@ -158,24 +136,10 @@ class PetPerchTransitionState {
         phase = PetPerchPhase.EXIT_KEYBOARD
     }
 
-    fun markDockFade() {
-        phase = PetPerchPhase.EXIT_DOCK_FADE
-    }
-
     fun finishExit() {
         isExiting = false
         phase = PetPerchPhase.IDLE
     }
 }
 
-/** 退态行程进度：travel 1→0 对应进度 0→1（纯函数，单测锁死）。 */
-fun exitTravelProgress(travelValue: Float): Float =
-    (1f - travelValue).coerceIn(0f, 1f)
 
-/**
- * Dock 淡入／首页淡入触发点：行程过 70%（travel ≤ 0.30）时开始。
- * 触发动作是 intentInputMode 翻转（Dock cardVisible 门禁＋PetZone
- * inputActive 回落同由它驱动），故 Dock 淡入与首页淡入同点起步、与
- * 宠物落地交叠（纯函数，单测锁死）。
- */
-fun exitDockFadeShouldStart(travelValue: Float): Boolean = travelValue <= 0.30f

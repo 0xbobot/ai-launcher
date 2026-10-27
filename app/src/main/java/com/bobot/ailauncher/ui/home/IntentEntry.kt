@@ -313,7 +313,7 @@ private val PERCH_TRAVEL_FALLBACK_Y = 320.dp
 /**
  * 进态位移量（纯函数，单测锁死）。横屏场景切换（2026-10-26，Bob 22:57
  * 最终口径）：切换不移头，横屏位移恒为零（与锚点无关）；竖屏：锚点未量到
- * 时返回 null（调用方保持 remember 初值——funnel 残值或兜底，原行为），
+ * 时返回 null（调用方保持 remember 初值——残值或兜底，原行为），
  * 量到时按脚底落差公式（钳制 0..屏高；横向恒为零，横屏横移公式已随本批
  * 删除）。返回 Pair（横向，纵向）。
  */
@@ -630,13 +630,14 @@ fun IntentEntry(
     // 进态冻结位移量）；不传时走本函数内旧的本地 Animatable（独立使用
     // 时行为与 355 一致）。onExitFocusRequest 是卡片角 ✕ 一键退出（D）
     // 也要调的唯一入口：✕ 只调它，不自写退出动画、不直接改
-    // intentInputMode、不清焦点不收键盘（收键盘/反向位移/复位全归
-    // funnel 一路）；HomeScreen 传入 C 的 funnel 实现，默认回落到
+    // intentInputMode、不清焦点不收键盘（收键盘／翻转／复位全归
+    // 该入口一路）；HomeScreen 传入 C 的退出入口实现，默认回落到
     // onRequestExitInput。
     perchTransition: PetPerchTransitionState? = null,
-    // 竖屏切换闪烁修复（2026-10-27）：进态会话号——宿主 mode 一变真
-    // 即递增；进态 effect 改以它为 key，退出进行中重进（槽位不卸载）
+    // 进态会话号（2026-10-27 闪烁修复，横屏沿用）：宿主 mode 一变真
+    // 即递增；进态 effect 改以它为 key，横屏退出进行中重进（槽位不卸载）
     // 也能重跑进态动画（旧 LaunchedEffect(Unit) 永不重跑是缺口）。
+    // 竖屏离散切换无进态动画可重启，会话号在竖屏是 no-op。
     enterSession: Int = 0,
     onExitFocusRequest: () -> Unit = onRequestExitInput,
     // 输入态专注·集成：专注态气泡挂载开关——PetZone 列尾宿主在专注态
@@ -859,40 +860,42 @@ fun IntentEntry(
     // 2 级，意图语境下点它仅收起（本来就在意图搜索里，不再重进）。
     var panelHeight by remember { mutableStateOf(96.dp) }
     var petActionsVisible by remember { mutableStateOf(false) }
-    // ---- 同一只宠物走过去（宠物交互重构 P0-3，2026-10-26） ----
+    // ---- 同一只宠物在意图卡片上（宠物交互重构 P0-3，2026-10-26；
+    // 2026-10-27 竖屏区块切换重做） ----
     // 1500ms 延迟挂载 + 占位盒已删除：意图宠物随 IntentEntry 挂载即在场，
-    // 不再有 1.5 秒空窗。进态位移在本函数内完成，不碰 PullUpDock 的
-    // Dock 宠物门禁与 HomeScreen 的 fade-only 槽位过渡：
-    //  - 宠物本体：挂载即从 Dock perch 方向（下方）连续滑到面板顶缘，
-    //    全程同一 HybridPet / 同一活感引擎，途中不停留、不消失；
-    //    位移量 = 起点估算（Dock 脚底）− 终点（面板顶缘 + 压入），
-    //    以附加 offset 叠加在终态锚定偏移之上，面板高变化（结果槽位
-    //    伸缩）时终态锚定照常跟随，位移向量冻结在进态那一刻不重算；
-    //  - 落回带回弹过冲：宠物位移走弹簧（damping 0.75，终点附近轻微
-    //    越过再回落），不是线性滑到位；影子已无（22:02 摘除），不再有
-    //    “影子跟在身体后面”的时序；
-    //  - 交接淡入：宠物 alpha 在 180ms 内 0→1，与 Dock 卡片退场
-    //    fadeOut（150ms）交叠为一次交接，不出现两只实体的静止并存；
-    //  - 尺寸：位移全程保持 INTENT_PET_WIDTH 不变（Dock D1 86.6dp →
+    // 不再有 1.5 秒空窗。竖屏离散切换：宠物随意图区同帧出现、终态锚定，
+    // 无滑入、无淡入、无弹簧（“从 Dock 方向连续滑过去”的旧口径已删除，
+    // 见下方进态 effect 竖屏分支与渲染门）；横屏场景换：位移恒为零，
+    // travel／travelAlpha 走进态弹簧与 180ms 淡入（先出后进）：
+    //  - 宠物本体：全程同一 HybridPet / 同一活感引擎；终态锚定偏移
+    //    之上叠加位移附加量 travelDelta × (1 − travel)，横屏进态冻结
+    //    在进态那一刻不重算，面板高变化（结果槽位伸缩）时终态锚定
+    //    照常跟随；竖屏附加量恒为零；
+    //  - 落回带回弹过冲：仅横屏（位移走弹簧 damping 0.75，终点附近轻微
+    //    越过再回落）；影子已无（22:02 摘除），不再有“影子跟在身体
+    //    后面”的时序；
+    //  - 交接淡入：仅横屏（宠物 alpha 180ms 内 0→1，Dock 退场 fade
+    //    在先、槽位后挂，先出后进）；竖屏离散切换无淡入（alpha 首帧
+    //    即 1），不出现两只实体的静止并存；
+    //  - 尺寸：全程保持 INTENT_PET_WIDTH 不变（Dock D1 86.6dp →
     //    意图 86.4dp 差 0.2dp，插值无意义；D2 117.1dp → 86.4dp 的台阶
     //    不猜 DockState 做假插值，见文件头常量注释与集成注意点）；
-    //  - 减动效：位移直接 snap 到终态，不播弹簧；
-    //  - 退态（退出输入态）反向位移：由 HomeScreen 的 PetPerchTransition
-    //    funnel 承担（本函数传 perchTransition 时位移／alpha 走共享
-    //    Animatable；退态 = travel 1→0、同一弹簧、进态冻结位移量取负，
-    //    四步时序见 PetPerchTransition.kt）。旧口径“退场由 HomeScreen
-    //    fadeOut＋Dock 卡片重进承担、无交接”就此废掉，不许再各自保留一套 fade。
+    //  - 减动效：横屏位移直接 snap 到终态，不播弹簧；竖屏离散切换
+    //    本身无动画，减动效同一行为；
+    //  - 退态（退出输入态）：竖屏离散切换即时翻转、无反向位移；
+    //    横屏仅 beginExit／finishExit 守卫与复位（见 PetPerchTransition.kt）。
+    //    旧口径“退场由 HomeScreen fadeOut＋Dock 卡片重进承担”与竖屏
+    //    funnel 四步时序均已废掉，不许再各自保留一套 fade。
     // 面板在根坐标的位置（外层 Box 回写，取整 dp 防抖动重组）。
     // 横屏横移公式已随 22:57 口径删除，中心 X 不再采集。
     var petAnchorTop by remember { mutableStateOf<Int?>(null) }
-    // 位移向量（dp）：进态那一刻冻结，之后面板位置变化不再重算。
-    // 竖屏一拍（本批）：复进时首帧即取已冻结值（上一轮进态的落点），
-    // 不跳变；首进时冻结值尚未写入（0dp／兜底），锚点通常首帧内到、
-    // 跳变窗口约 1 帧且 alpha 尚低。
+    // 位移向量（dp）：横屏进态那一刻冻结，之后面板位置变化不再重算。
+    // 竖屏离散切换（2026-10-27）不冻结、不读（渲染门按 travel=1 计，
+    // 附加量恒为零；此处残值无害）。
     var travelDeltaX by remember { mutableStateOf(perchTransition?.travelDeltaX ?: 0.dp) }
     var travelDeltaY by remember { mutableStateOf(perchTransition?.travelDeltaY ?: PERCH_TRAVEL_FALLBACK_Y) }
     // 过渡 C：共享状态在场时位移／alpha 走 HomeScreen 持有的同一组
-    // Animatable（退态由 HomeScreen 的 funnel 反向驱动同一组）；否则走
+    // Animatable（退态：竖屏不反向驱动、横屏仅守卫与复位）；否则走
     // 本地组（355 行为）。本地组恒创建（廉价），只在无共享状态时使用。
     // 影子通道已随 22:02 摘除作废，不再有 shadowTravel。
     val legacyTravel = remember { Animatable(0f) }
@@ -906,8 +909,23 @@ fun IntentEntry(
     // 见上方 resolveEnterTravelDelta 横屏分支）。
     val isLandscapeCard = screenWidthDp > screenHeightDp
     LaunchedEffect(enterSession) {
-        // 竖屏一拍（本批）：宠物 alpha 不另等锚点——在锚点等待之前立即
-        // 起步（FadeHandoff，与面板同门），随后锚点等待＋退态等待＋冻结
+        if (!isLandscapeCard) {
+            // 竖屏区块切换（2026-10-27）：离散切换无滑入、无淡入——
+            // travel／travelAlpha 直接置为聚焦终态（供横竖屏旋转时横屏
+            // 渲染读一致值），不等待锚点、不冻结位移量、不启动弹簧、
+            // 不先行 alpha 动画；渲染侧亦按 travel=1 计（见下方宠物
+            // offset／alpha 门），故首帧即终态。减动效同一行为。
+            if (perchTransition != null) {
+                perchTransition.travel.snapTo(1f)
+                perchTransition.travelAlpha.snapTo(1f)
+            } else {
+                petTravel.snapTo(1f)
+                petTravelAlpha.snapTo(1f)
+            }
+            return@LaunchedEffect
+        }
+        // 横屏进态：宠物 alpha 不另等锚点——在锚点等待之前立即
+        // 起步（FadeHandoff，与面板同门），随后退态等待＋冻结
         // delta＋animateEnter 接续（animateTo 从当前值到 1，不冲突；
         // 共享路径下 animateEnter 内会再起一次同目标同规格的 alpha 动画，
         // 从当前值续跑、无跳变）。减动效路径不动（snap 本就一拍）。
@@ -917,15 +935,6 @@ fun IntentEntry(
                     1f,
                     tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
                 )
-            }
-        }
-        // 锚点等待：竖屏等锚点回写（布局回调首帧内到达，等不到用兜底起点，
-        // 不阻塞挂载）；横屏跳过（位移恒为零，不需要锚点）。
-        if (!isLandscapeCard) {
-            var waited = 0
-            while (petAnchorTop == null && waited < 6) {
-                delay(16)
-                waited++
             }
         }
         val anchorTop = petAnchorTop?.dp
@@ -939,15 +948,16 @@ fun IntentEntry(
             screenHeightDp = screenHeightDp
         )
         // 横屏位移恒为零（resolveEnterTravelDelta 横屏分支）；竖屏锚点未量到
-        // 时 delta 为 null，保持 remember 初值（funnel 残值或兜底，原行为）。
+        // 时 delta 为 null，保持 remember 初值（残值或兜底，原行为）。
         if (delta != null) {
             travelDeltaX = delta.first
             travelDeltaY = delta.second
         }
         if (perchTransition != null) {
-            // 过渡 C：上一轮退态未收尾时先等它收尾（封顶 ~1s），再冻结本轮
-            // 位移量——避免新冻结值中途改写在途退态的附加 offset（退态渲染
-            // 仍在读同一份冻结量）。随后进态走共享状态（同一弹簧／时序）。
+            // 过渡 C（横屏）：上一轮退态未收尾时先等它收尾（封顶 ~1s），
+            // 再冻结本轮位移量——避免新冻结值中途改写在途退态的附加
+            // offset（退态渲染仍在读同一份冻结量）。随后进态走共享状态
+            // （同一弹簧／时序）。
             var waitedExit = 0
             while (perchTransition.isExiting && waitedExit < 60) {
                 delay(16)
@@ -1175,7 +1185,7 @@ fun IntentEntry(
                             // v0.68.101（D-2）：同时显式退出输入态（明确动作，不再
                             // 依赖失焦边沿推断）
                             releaseInputFocus()
-                            // 过渡 C：显式退出走单一入口（反向位移 funnel）。
+                            // 过渡 C：显式退出走单一入口。
                             onExitFocusRequest()
                             launchLocalApp(context, app)
                         }
@@ -1229,14 +1239,16 @@ fun IntentEntry(
         // 图态已无“问”可进，故为空操作（不与胶囊聚焦、点外退出打
         // 架）；动作清单只挂长按，与 Dock 侧一致，不许点按再开清单。
         // 位移：终态锚定偏移（面板高 ＋ rise − 压入，脚底压进肩峰 5dp）之上叠加位移附加量
-        // travelDelta × (1 − travel)，travel 弹簧到 1（轻微过冲回落
+        // travelDelta × (1 − travel)，横屏 travel 弹簧到 1（轻微过冲回落
         // 即落回回弹）；减动效时 travel 已 snap 到 1，附加量为零。
-        // 真机待验：卡片顶缘坐姿、压入量，以及位移全程（起步落点、
-        // 弹簧过冲）是否自然。
+        // 竖屏区块切换（2026-10-27）：竖屏渲染门按 travel=1 计（见下方
+        // offset／alpha 门），附加量恒为零、alpha 恒为 1，首帧即终态。
+        // 真机待验：卡片顶缘坐姿、压入量是否自然（位移全程待验项已随
+        // 竖屏离散切换删除）。
         // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏意图宠物亦挂载
         // （左侧卡片承载身体，坐法与竖屏同款：前面图层、居中、脚底压进
         // 卡片肩峰；进态位移横屏恒为零，见上方 LaunchedEffect 横屏分支；
-        // travel／travelAlpha 仍照常跑，保持退态 funnel 状态机一致）。
+        // travel／travelAlpha 照常跑进态弹簧与淡入）。
         // 拖拽复用（2026-10-27）：传意图专属 intentDragBody 后走一体拉伸全套。
         // 盒偏移一字不动（Dock 同款构造）：盒不动、头在盒内升、肩形升锁定
         // 头升，压入 5dp 全程恒定；盒再升肩升会双倍计数顶出缝（见文件头
@@ -1255,10 +1267,12 @@ fun IntentEntry(
                 // rise－压入），拖拽不改盒位（见文件头压入不变量）。
                 .offset(y = intentPetBoxOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, INTENT_PET_PRESS.value).dp)
                 .offset(
-                    x = travelDeltaX * (1f - petTravel.value),
-                    y = travelDeltaY * (1f - petTravel.value)
+                    // 竖屏区块切换：竖屏附加量恒为零（travel 按 1 计），
+                    // 首帧即终态；横屏沿用滑入附加量。
+                    x = if (isLandscapeCard) travelDeltaX * (1f - petTravel.value) else 0.dp,
+                    y = if (isLandscapeCard) travelDeltaY * (1f - petTravel.value) else 0.dp
                 )
-                .graphicsLayer { alpha = petTravelAlpha.value }
+                .graphicsLayer { alpha = if (isLandscapeCard) petTravelAlpha.value else 1f }
                 .testTag("pet_qizai")
         )
         // 动作清单：与 Dock 宠物上方同款（PetActionList 同一组件、同一清单、
@@ -1297,12 +1311,13 @@ fun IntentEntry(
                     .fillMaxWidth()
                     // 拖拽跟头（2026-10-27 气泡跟头）：基底不动，跟随量取复用后
                     // 的同一组 DragBody 量（头横移、－头升＋头沉），另加进态滑入
-                    // travelDelta×(1－petTravel) 让气泡随宠物滑入；不加肩升
+                    // travelDelta×(1－petTravel) 让气泡随宠物滑入；竖屏区块切换
+                    // 时 travel 按 1 计、滑入项为零（气泡首帧即终态）；不加肩升
                     // （头跟随已含头升，见文件头压入不变量）。走纯函数
                     // （单测锁定）。
                     .offset(
-                        x = intentBubbleOffsetXDps(intentDragHeadXdp.value, travelDeltaX.value, petTravel.value).dp,
-                        y = intentBubbleOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, intentPetHeight.value, INTENT_PET_PRESS.value, intentDragHeadRiseDp.value, intentDragHeadSinkDp.value, travelDeltaY.value, petTravel.value).dp
+                        x = intentBubbleOffsetXDps(intentDragHeadXdp.value, travelDeltaX.value, if (isLandscapeCard) petTravel.value else 1f).dp,
+                        y = intentBubbleOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, intentPetHeight.value, INTENT_PET_PRESS.value, intentDragHeadRiseDp.value, intentDragHeadSinkDp.value, travelDeltaY.value, if (isLandscapeCard) petTravel.value else 1f).dp
                     )
             )
         }
@@ -1311,9 +1326,9 @@ fun IntentEntry(
         // 示例行高度中心，与接合原型图“卡片角 ✕”同位；前面图层最后画、
         // 恒在最上，不被示例行/宠物盖住。视觉沿用 StatusStrip 关闭钮同款
         // （48dp 外框可点、内 32dp 圆、16dp ✕ 图标），不新发明样式。
-        // 点按只调单一退出入口 onExitFocusRequest（C 的 funnel）：不自写
-        // 退出动画、不直接改 intentInputMode、不清焦点、不收键盘——收键盘/
-        // 反向位移/复位全归 funnel 一路。注意：示例行横滚末段会从 ✕ 下方
+        // 点按只调单一退出入口 onExitFocusRequest：不自写退出动画、不直接
+        // 改 intentInputMode、不清焦点、不收键盘——收键盘／翻转／复位全归
+        // 该入口一路（竖屏即时翻转、横屏场景换）。注意：示例行横滚末段会从 ✕ 下方
         // 经过，行尾留白已在 DeckExamplesRow 加到 64dp（✕ 48dp + 16dp
         // 间隙），末项可完整滚出 ✕ 覆盖区再点。
         Box(

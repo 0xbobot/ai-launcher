@@ -123,9 +123,9 @@ fun HomeScreen(
     // 进入输入态时是否挂载即聚焦（点入口进入 = true 要打字；自动带起呈现 = false 不弹键盘）
     intentRequestFocus: Boolean = false,
     onExitIntentInput: () -> Unit = {},
-    // 竖屏切换闪烁修复（2026-10-27）：退出 funnel 进行中状态上报 MainScreen
-    // （Dock 宠物挂载门用，见 PullUpDock dockPetVisible；上报口径同
-    // onBlindActiveChange 的 LaunchedEffect 模式）。
+    // 退出进行中状态上报 MainScreen（Dock 宠物挂载门用，见 PullUpDock
+    // dockPetVisible；上报口径同 onBlindActiveChange 的 LaunchedEffect
+    // 模式；横屏退出分支置位，竖屏离散切换不置位）。
     onExitFocusChange: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -168,18 +168,17 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(intentInputMode) {
         if (intentInputMode) intentHasFocused = false
     }
-    // ---- 输入态专注·进出过渡 C（PetPerchTransition，2026-10-26） ----
-    // 过渡状态由本宿主持有，进出两路共用（见 PetPerchTransition.kt 的
-    // 四步时序与责任边界）。onExitFocusRequest 是本宿主向下暴露的单一
-    // 退出入口：所有退出路径只调它，它跑完四步退态才调真正的
-    // onExitIntentInput（即 MainScreen 的 mode 翻转）；D 的 ✕ 一键退出
-    // 集成时也只调这个入口（协调方须把它透传给专注卡片的 ✕ 按钮）。
-    // 槽位挂载条件因此是 intentInputMode || isExiting：退态进行中 mode
-    // 尚未翻转、翻转后槽位仍挂到宠物落地才松开，意图宠物才有机会沿
-    // 镜像路径走回去，而不是随 mode 翻转瞬间消失。
-    // 横屏例外（2026-10-26，Bob 22:57 最终口径）：横屏槽位挂载条件为
-    // mode && landscapeSlotReady（场景整体换，先出后进），见 focusSlotVisible；
-    // 横屏退聚焦不走 funnel 行程，见 requestExitFocus 横屏分支。
+    // ---- 输入态专注·进出过渡（PetPerchTransition，2026-10-26 起；
+    // 2026-10-27 竖屏区块切换重做） ----
+    // 过渡状态由本宿主持有（横屏场景换与竖屏终态 snap 用，见
+    // PetPerchTransition.kt）。onExitFocusRequest 是本宿主向下暴露的单一
+    // 退出入口：所有退出路径只调它；竖屏它即时清焦点＋收键盘＋翻转
+    // mode（离散切换同帧完成），横屏它走场景换分支；D 的 ✕ 一键退出
+    // 也只调这个入口（须透传给专注卡片的 ✕ 按钮）。
+    // 槽位挂载条件：竖屏即 intentInputMode（离散切换无退态滞留）；
+    // 横屏为 mode && landscapeSlotReady（场景整体换，先出后进），
+    // 见 focusSlotVisible；横屏退聚焦不走 funnel 行程，见 requestExitFocus
+    // 横屏分支。
     // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏聚焦槽位挂载门。
     // 家场景先出、聚焦场景后进——横屏下槽位只在 intentInputMode 为真且
     // 进场延迟已走完（Dock 退出淡出 FadeQuick 完成）时挂载；竖屏不走此门
@@ -200,9 +199,10 @@ fun HomeScreen(
     // 点外退出走 pointerInput(Unit)（首帧闭包常驻）：护栏不能读参数原值
     // （首帧 intentInputMode 恒 false，退出永不触发），必须读最新态。
     val intentInputModeLatest by rememberUpdatedState(intentInputMode)
-    // 竖屏切换闪烁修复（2026-10-27）：在途退出协程句柄——退出进行中
-    // 重进时进态 effect 取消它（见下方进态会话 effect）；取消后 isExiting
-    // 守卫由句柄的 invokeOnCompletion 补清（否则下一次退出被护栏永久挡下）。
+    // 在途退出协程句柄（横屏退出分支用）：退出进行中重进时进态 effect
+    // 取消它（见下方进态会话 effect）；取消后 isExiting 守卫由句柄的
+    // invokeOnCompletion 补清（否则下一次退出被护栏永久挡下）。竖屏离散
+    // 切换不建长时退出协程。
     var exitJob by remember { mutableStateOf<Job?>(null) }
     fun requestExitFocus() {
         if (perchTransition.isExiting || !intentInputModeLatest) return
@@ -217,7 +217,7 @@ fun HomeScreen(
                 //    250ms），等淡出完成；
                 // ③ 家场景后进：翻转 mode → Dock 卡片 fade-only 重进（上一帧
                 //    仍在聚焦，PullUpDock 取 fade-only）＋首页淡入。
-                // 竖屏 funnel（行程＋70% 交接）一字不动，见下方。
+                // 竖屏已改离散切换（2026-10-27），见下方竖屏分支。
                 perchTransition.beginExit()
                 focusManager.clearFocus()
                 keyboardController?.hide()
@@ -232,77 +232,25 @@ fun HomeScreen(
                 perchTransition.finishExit()
                 return@launch
             }
-            perchTransition.beginExit()
-            // ① 键盘落下：清焦点＋收 IME（各路调用方多半已做过，幂等重做
-            // 无害）；最多等 350ms 让 IME 底部归零，等不到也继续、不阻塞退态。
+            // 竖屏区块切换（2026-10-27）：离散切换，无 funnel——清焦点＋
+            // 收键盘＋翻转 mode 同帧完成：信息区、Dock 区整块重现，意图区
+            // 整块消失；不走行程、不等键盘、不做 70% 交接与落地溶解。
+            // 键盘随后自行落下，家场景不依赖键盘、无跳变；快进快出与退出
+            // 中重进无在途协程可打架（护栏首行仍挡重复调用）。
             focusManager.clearFocus()
             keyboardController?.hide()
-            var waited = 0
-            while (imeBottomLatest > 0 && waited < 22) {
-                delay(16)
-                waited++
-            }
-            // ② 宠物沿镜像路径走回 Dock 肩峰：同一弹簧、进态冻结位移量取负。
-            val travelJob = launch {
-                perchTransition.animateExitTravel(reduceMotionHome)
-            }
-            var dockFadeStarted = false
-            suspend fun startDockFade() {
-                if (dockFadeStarted) return
-                dockFadeStarted = true
-                perchTransition.markDockFade()
-                // ③ Dock 卡片淡入＋④ 首页淡入：两者都由 intentInputMode 翻转
-                // 驱动（PullUpDock cardVisible 门禁、PetZone inputActive 回落），
-                // 故翻转点即两者的起步点。意图宠物 alpha 不在此处淡出（旧口径）：
-                // 翻转点 Dock 宠物若同时挂载（旧门禁只看 mode），会与仍在
-                // 30% 行程高度的意图宠物双影并存约 180ms；现改落地时交接
-                // （见下方落地段），Dock 宠物亦由 exitInProgress 门禁压到
-                // 落地后才挂载（PullUpDock dockPetVisible），同位置溶解、不双影。
-                exitIntentInputLatest()
-            }
-            if (!reduceMotionHome) {
-                // 行程过 70%（travel ≤ 0.30）时触发 Dock 淡入＋首页淡入。
-                while (travelJob.isActive && perchTransition.travel.value > 0.30f) {
-                    delay(8)
-                }
-                if (travelJob.isActive) startDockFade()
-            }
-            travelJob.join()
-            // 兜底：极小位移等情况下行程起步已 ≤ 0.30、循环未触发时，落地后补翻转。
-            if (!dockFadeStarted) startDockFade()
-            // 落地交接（竖屏切换闪烁修复，2026-10-27）：意图宠物 alpha 在此
-            // 才淡出（FadeHandoff 180ms），与 finishExit 挂载的 Dock 宠物同
-            // 位置（均为 Dock 肩峰）溶解——落地前意图宠物全程可见、不中途
-            // 消失，落地后不出现两只不同高度的宠物；减动效直接 snap。
-            if (reduceMotionHome) {
-                perchTransition.travelAlpha.snapTo(0f)
-            } else {
-                perchScope.launch {
-                    perchTransition.travelAlpha.animateTo(
-                        0f,
-                        androidx.compose.animation.core.tween(
-                            PetMotion.FadeHandoff,
-                            easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                        )
-                    )
-                }
-            }
-            // 宠物已落地、Dock 已淡入、首页已回场：松开槽位挂载，槽位按原
-            // fadeOut（Fast 150ms）收尾——面板淡出发生在宠物离场之后，不抢交接。
-            perchTransition.finishExit()
+            exitIntentInputLatest()
         }
         exitJob?.invokeOnCompletion {
             if (perchTransition.isExiting) perchTransition.finishExit()
         }
     }
     val onExitFocusRequest: () -> Unit = { requestExitFocus() }
-    // 竖屏切换闪烁修复（2026-10-27）：退出进行中重进——旧缺口是
-    // IntentEntry 的进态 effect 以 Unit 为 key：槽位在 isExiting 期间不
-    // 卸载、mode 翻转不触发重跑，且在途退出协程会在 70% 点把刚重进的
-    // mode 又翻回 false（进出打架、闪烁）。修法：mode 一变真即取消在途
-    // 退出（句柄补清守卫），并递增进态会话号，IntentEntry 的进态 effect
-    // 改以会话号为 key 重跑（从当前 travel／alpha 值连续续跑、无跳变；
-    // 退出取消的竞态由 effect 内既有的 isExiting 等待循环兜底）。
+    // 退出进行中重进（2026-10-27 闪烁修复，横屏沿用）：横屏退出协程在途
+    // 时 mode 一变真即取消它（句柄补清守卫），并递增进态会话号，
+    // IntentEntry 的横屏进态 effect 以会话号为 key 重跑。竖屏离散切换
+    // 无在途退出协程、无进态动画可重启，本 effect 在竖屏是 no-op，
+    // 保留只为横屏路径与 effect key 稳定。
     var enterSession by remember { mutableStateOf(0) }
     androidx.compose.runtime.LaunchedEffect(intentInputMode) {
         if (intentInputMode) {
@@ -310,8 +258,9 @@ fun HomeScreen(
             enterSession++
         }
     }
-    // 退出 funnel 进行中状态上报 MainScreen（Dock 宠物挂载门用）：
-    // 口径同 onBlindActiveChange 的 LaunchedEffect 模式。
+    // 退出进行中状态上报 MainScreen（Dock 宠物挂载门用；横屏退出分支
+    // 置位，竖屏离散切换不置位）：口径同 onBlindActiveChange 的
+    // LaunchedEffect 模式。
     androidx.compose.runtime.LaunchedEffect(perchTransition.isExiting) {
         onExitFocusChange(perchTransition.isExiting)
     }
@@ -321,7 +270,7 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(intentState, intentFocused, intentInputMode) {
         val holdsNow = intentStateHoldsInput(intentState)
         if (intentSettleShouldExit(intentInputMode, intentPrevHolds, holdsNow, intentFocused)) {
-            // 落定退出同样走过渡 funnel（反向位移），不直接翻转 mode。
+            // 落定退出同样走单一退出入口，不直接翻转 mode。
             onExitFocusRequest()
         }
         intentPrevHolds = holdsNow
@@ -357,7 +306,7 @@ fun HomeScreen(
                     intentStateHoldsInput(intentStateLatest)
                 )
             ) {
-                // 滞留兜底同样走过渡 funnel（反向位移），不直接翻转 mode。
+                // 滞留兜底同样走单一退出入口，不直接翻转 mode。
                 onExitFocusRequest()
             }
         }
@@ -514,7 +463,7 @@ fun HomeScreen(
                 keyboardController = keyboardController,
                 onOutsideTap = {
                     if (!intentStateHoldsInput(intentStateLatest)) {
-                        // 点外退出走过渡 funnel（反向位移），不直接翻转 mode。
+                        // 点外退出走单一退出入口，不直接翻转 mode。
                         onExitFocusRequest()
                     }
                 }
@@ -571,9 +520,10 @@ fun HomeScreen(
         // 输入态专注（2026-10-26 本批，Bob 21:56：聚焦不用黑屏）。
         // 实色底已整个删除：聚焦态保留主页壁纸（取代 13:51“壁纸按纯色
         // 暖灰”口径），其他内容弱化或隐藏——简报／会议行经 PetZone 门控
-        // 淡出、竖屏 Dock 经 cardVisible 门＋宠物门全藏、横屏 Dock 作为
-        // 宠物身体保留（见 PullUpDock）。此处不加任何纱：卡片自身玻璃
-        // 保证可读；忙乱壁纸上的卡片可读性列为真机复核项。
+        // 整体显隐（竖屏 None、横屏 fade）、竖屏 Dock 经 cardVisible 门
+        // ＋宠物门全藏、横屏 Dock 作为宠物身体保留（见 PullUpDock）。
+        // 此处不加任何纱：卡片自身玻璃保证可读；忙乱壁纸上的卡片可读性
+        // 列为真机复核项。
         // v0.43.1：宠物回首页——v0.31.0 按"只留 Dock"把 PetZone 从首页移除后，
         // v0.43.0 的七仔场景改的是一段从未被调用的代码，所以真机上看不到。
         // v0.65.8：顶部对齐（之前居中导致宠物上方大量空白）——七仔贴近状态栏下方，
@@ -638,21 +588,22 @@ fun HomeScreen(
         // 导航垫）：横屏专注态不做任何键盘避让——垫高恒为 0dp（停靠键盘
         // 靠窗口收缩自然顶起卡片，悬浮键盘由用户自己放位置），左区躲避
         // 与窄化一并拆除。
-        // 专注组在场：进专注态起、退态完成止（isExiting 期间槽位仍挂载，
-        // 锚定须保留，否则翻转瞬间卡片跳回顶部、反向位移无从渲染）。
+        // 专注组在场：竖屏即 mode（离散切换同帧翻转）；横屏沿用
+        // mode || 退态进行中（场景换先出后进，锚定在退态完成前保留）。
         val focusGroupVisible = intentInputMode || perchTransition.isExiting
-        // 竖屏切换闪烁修复（2026-10-27）：垫高跳变补偿——进出切换时
-        // focusGroupVisible 一翻转，权重 Spacer 出现／消失，整列 PetZone
-        // 在一帧内于顶部锚定与底部锚定之间瞬移数百 dp（361“一拍”在真机
-        // 上未达成的主因：瞬移帧上又叠了四路同窗淡入淡出＋宠物 sweep，
-        // 读着就是闪）。修法不是改布局结构（稳态布局一字不动），而是
-        // 用绘制期位移把瞬移抹成连续滑动：布局跳变帧的
-        // onGloballyPositioned 回调里同步算出补偿量（绘制前生效、本帧
-        // 不闪），再以家族 FadeStandard 一拍滑回 0；减动效不补偿
-        // （snap 契约本身就是瞬时）。补偿量只依赖布局跳变前后两次
-        // laid-out 顶边（positionInRoot 含自身绘制位移，公式见文件尾
+        // 垫高跳变补偿（2026-10-27 闪烁修复，竖屏区块切换后仅横屏沿用）：
+        // 横屏场景换时 focusGroupVisible 一翻转，权重 Spacer 出现／消失，
+        // 整列 PetZone 在一帧内于顶部锚定与底部锚定之间瞬移数百 dp
+        // （361“一拍”在真机上未达成的主因：瞬移帧上又叠了四路同窗
+        // 淡入淡出＋宠物 sweep，读着就是闪）。修法不是改布局结构
+        // （稳态布局一字不动），而是用绘制期位移把瞬移抹成连续滑动：
+        // 布局跳变帧的 onGloballyPositioned 回调里同步算出补偿量（绘制
+        // 前生效、本帧不闪），再以家族 FadeStandard 一拍滑回 0；减动效
+        // 不补偿（snap 契约本身就是瞬时）。补偿量只依赖布局跳变前后
+        // 两次 laid-out 顶边（positionInRoot 含自身绘制位移，公式见文件尾
         // jumpCompensationShift，单测锁死）；键盘垫高弹簧、英雄区淡出
         // 等连续量不触发补偿（首帧回调后即解除武装，阈值 4px 防抖动）。
+        // 竖屏离散切换同帧完成、无跳变可抹，永不武装（见下方武装门）。
         var jumpShift by remember { mutableStateOf(0f) }
         var lastLaidOutTop by remember { mutableStateOf<Int?>(null) }
         var jumpArmed by remember { mutableStateOf(false) }
@@ -661,7 +612,9 @@ fun HomeScreen(
         androidx.compose.runtime.SideEffect {
             if (prevFocusVisible != focusGroupVisible) {
                 prevFocusVisible = focusGroupVisible
-                jumpArmed = true
+                // 竖屏区块切换：竖屏离散切换同帧完成、无跳变可抹，
+                // 永不武装补偿；横屏场景换沿用 367 补偿。
+                jumpArmed = isLandscapeHome
             }
         }
         androidx.compose.runtime.LaunchedEffect(jumpAnimId) {
@@ -759,40 +712,45 @@ fun HomeScreen(
         ) {
             // 输入态专注·集成：权重 Spacer 把专注态的 PetZone（可见内容
             // 只剩意图卡片）推到窗口底边——adjustResize 下窗口底边即键盘
-            // 顶边，组随键盘同进同退；进态冻结位移量在布局后实测锚点，
-            // 故卡片落底不影响宠物起步落点。
+            // 顶边，组随键盘同进同退（整块位移）；竖屏宠物起步落点不再
+            // 依赖冻结位移量（离散切换无滑入）。
             if (focusGroupVisible) {
                 Spacer(modifier = Modifier.weight(1f))
             }
             // v0.68.44（Bob）：杂志封面模式
             // v0.68.96（F-01 退役）：PetZone 的非封面分支已删除，todayCardAlpha
             // 参数随之移除——该淡出原本只作用于已退役的 TODAY 卡，封面形态从未吃到。
-            // 竖屏切换闪烁修复（2026-10-27）：跳变补偿绘制层——见上方
-            // focusGroupVisible 处的补偿状态说明。绘制期位移不参与布局，
-            // 故不影响槽位锚点、点外退出 bounds 与键盘垫高。
+            // 跳变补偿绘制层（2026-10-27，竖屏区块切换后仅横屏沿用）——
+            // 见上方 focusGroupVisible 处的补偿状态说明。绘制期位移不
+            // 参与布局，故不影响槽位锚点、点外退出 bounds 与键盘垫高。
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .graphicsLayer { translationY = jumpShift }
+                    .graphicsLayer {
+                        translationY = if (isLandscapeHome) jumpShift else 0f
+                    }
                     .onGloballyPositioned { coords ->
-                        val visualTop = coords.positionInRoot().y.toInt()
-                        val laidOutTop = visualTop - jumpShift.toInt()
-                        val prevLaidOut = lastLaidOutTop
-                        if (jumpArmed) {
-                            jumpArmed = false
-                            if (!reduceMotionHome && prevLaidOut != null &&
-                                kotlin.math.abs(laidOutTop - prevLaidOut) > 4
-                            ) {
-                                jumpShift = jumpCompensationShift(
-                                    prevLaidOut, laidOutTop, jumpShift
-                                )
-                                lastLaidOutTop = laidOutTop
-                                jumpAnimId++
+                        // 竖屏不补偿（见上方武装门）；横屏沿用 367 逻辑。
+                        if (isLandscapeHome) {
+                            val visualTop = coords.positionInRoot().y.toInt()
+                            val laidOutTop = visualTop - jumpShift.toInt()
+                            val prevLaidOut = lastLaidOutTop
+                            if (jumpArmed) {
+                                jumpArmed = false
+                                if (!reduceMotionHome && prevLaidOut != null &&
+                                    kotlin.math.abs(laidOutTop - prevLaidOut) > 4
+                                ) {
+                                    jumpShift = jumpCompensationShift(
+                                        prevLaidOut, laidOutTop, jumpShift
+                                    )
+                                    lastLaidOutTop = laidOutTop
+                                    jumpAnimId++
+                                } else {
+                                    lastLaidOutTop = laidOutTop
+                                }
                             } else {
                                 lastLaidOutTop = laidOutTop
                             }
-                        } else {
-                            lastLaidOutTop = laidOutTop
                         }
                     }
             ) {
@@ -814,33 +772,32 @@ fun HomeScreen(
                     // 死亡/楔死、screencap 与层级读取全失效）。fade 不改变
                     // 尺寸，槽位一帧到位，语义与呈现内容不变。
                     androidx.compose.animation.AnimatedVisibility(
-                        // 退态进行中仍挂载（mode 已翻转、宠物未落地前不卸载），
-                        // 否则意图宠物随翻转瞬间消失、反向位移无从渲染。
                         // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏
                         // 下槽位只在 mode 为真且进场延迟已走完时挂载（家场景
                         // 先出、聚焦场景后进，不重叠）；横屏退聚焦由
                         // requestExitFocus 横屏分支先关此门、等淡出完成再翻
-                        // mode（不走 funnel 行程与 70% 交接）。竖屏沿用原口径。
+                        // mode。竖屏区块切换（2026-10-27）：竖屏槽位可见性
+                        // 即 mode（focusSlotVisible 竖屏分支），无退态滞留挂载。
                         visible = focusSlotVisible(
                             intentInputMode = intentInputMode,
-                            isExiting = perchTransition.isExiting,
                             isLandscape = isLandscapeHome,
                             landscapeSlotReady = landscapeSlotReady
                         ),
-                        enter = androidx.compose.animation.fadeIn(
+                        // 竖屏区块切换：竖屏进出用 None——槽位同帧整体显隐，
+                        // 不与信息区／Dock 区半透明重叠、不 stagger；横屏沿用
+                        // fade（先出后进不重叠）。
+                        enter = if (isLandscapeHome) androidx.compose.animation.fadeIn(
                             animationSpec = androidx.compose.animation.core.tween(
                                 PetMotion.FadeStandard,
                                 easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
                             )
-                        ),
-                        // 弹闪修复：退场与进场、首页淡出同一节拍（家族 FadeStandard
-                        // 250ms），不许卡片 150ms 先没、首页后叠出双影。
-                        exit = androidx.compose.animation.fadeOut(
+                        ) else androidx.compose.animation.EnterTransition.None,
+                        exit = if (isLandscapeHome) androidx.compose.animation.fadeOut(
                             animationSpec = androidx.compose.animation.core.tween(
                                 PetMotion.FadeStandard,
                                 easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
                             )
-                        )
+                        ) else androidx.compose.animation.ExitTransition.None
                     ) {
                         Box(
                             Modifier
@@ -872,7 +829,7 @@ fun HomeScreen(
                                 fieldValue = intentFieldValue,
                                 onFieldValueChange = { intentFieldValue = it },
                                 requestFocusOnMount = intentRequestFocus && intentFocusGateOpen,
-                                // 退出 funnel：IntentEntry 的显式退出（含 D 的 ✕
+                                // 单一退出入口：IntentEntry 的显式退出（含 D 的 ✕
                                 // 集成时透传的入口）与旧 onRequestExitInput 同走
                                 // onExitFocusRequest，不再直通 onExitIntentInput。
                                 perchTransition = perchTransition,
@@ -1014,17 +971,16 @@ internal fun intentStateHoldsInput(
 /**
  * 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：聚焦槽位可见门（纯函数，
  * 单测锁死）。横屏：家场景先出、聚焦场景后进——槽位只在 mode 为真且进场
- * 延迟已走完（Dock 退出淡出完成）时挂载；竖屏：沿用原口径（mode || 退态
- * 进行中，退态宠物走回 Dock 的镜像路径需要槽位在 mode 翻转后仍挂载）。
+ * 延迟已走完（Dock 退出淡出完成）时挂载；竖屏区块切换（2026-10-27）：
+ * 槽位可见性即 mode——离散切换无退态滞留挂载。
  */
 internal fun focusSlotVisible(
     intentInputMode: Boolean,
-    isExiting: Boolean,
     isLandscape: Boolean,
     landscapeSlotReady: Boolean
 ): Boolean =
     if (isLandscape) intentInputMode && landscapeSlotReady
-    else intentInputMode || isExiting
+    else intentInputMode
 
 /**
  * 输入态专注·修复（2026-10-26，356 真机反馈）：专注组底边垫高决策（纯函数，单测锁死）。
@@ -1100,7 +1056,8 @@ internal fun intentInputStranded(
 ): Boolean = !hasFocused && textEmpty && !holdsNow
 
 /**
- * 竖屏切换闪烁修复（2026-10-27）：跳变补偿量（纯函数，单测锁死）。
+ * 跳变补偿量（2026-10-27 闪烁修复，竖屏区块切换后仅横屏沿用；纯函数，
+ * 单测锁死）。
  * 布局跳变后，为把视觉位置钉在跳变前那一帧、再滑向新 laid-out 位置，
  * 绘制位移应取 (prevLaidOutTop − newLaidOutTop)＋currentShiftPx：
  * 进态（列下移，new > prev）为负（先上抬回旧位）、退态（列上移）
