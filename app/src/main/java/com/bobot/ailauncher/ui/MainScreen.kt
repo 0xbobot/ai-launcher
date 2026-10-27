@@ -55,6 +55,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.bobot.ailauncher.ui.island.IslandToastHost
 import com.bobot.ailauncher.data.AppCatalog
+import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.OtaUpdater
@@ -81,6 +82,7 @@ import com.bobot.ailauncher.ui.home.MAX_QUICK_SEGS
 import com.bobot.ailauncher.ui.pet.QuickActionAddFlow
 import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
 import com.bobot.ailauncher.ui.pet.GuideManager
+import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -329,10 +331,23 @@ private fun HomeHost(
     // P0-1 尚未落地，文案会先于行为承诺，合入顺序上 P0-1 应先于或同于本引导。
     LaunchedEffect(homeResumed, dockState, intentInputMode) {
         if (homeResumed && (dockState == DockState.D1 || dockState == DockState.D2) &&
-            !intentInputMode &&
-            GuideManager.tryShowFirstDiscovery(context)
+            !intentInputMode
         ) {
-            PetRepository.say(GuideManager.FIRST_DISCOVERY_TEXT)
+            // 引导批（2026-10-27）：权限缺失提示一次，优先级高于首次发现引导——
+            // 缺内容时先解释缺失（去设置 → 权限补开），否则用户只看到“没有那块
+            // 内容”却不知道为什么；每项每用户仅一次（GuideManager 门禁），此后
+            // 不再打扰。判定顺序：日历 → 消息提醒 → 首次发现（say 会覆盖前一条，
+            // 故三者互斥；首次发现的门禁未被消费时，下一轮满足条件时再说）。
+            when {
+                !CalendarRepository.hasCalendarPermission(context) &&
+                    GuideManager.tryShow(context, GuideManager.Id.CALENDAR_MISSING) ->
+                    PetRepository.say(GuideManager.CALENDAR_MISSING_TEXT)
+                !isNotificationAccessGranted(context) &&
+                    GuideManager.tryShow(context, GuideManager.Id.NOTIFICATION_MISSING) ->
+                    PetRepository.say(GuideManager.NOTIFICATION_MISSING_TEXT)
+                GuideManager.tryShowFirstDiscovery(context) ->
+                    PetRepository.say(GuideManager.FIRST_DISCOVERY_TEXT)
+            }
         }
     }
 

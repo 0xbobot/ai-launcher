@@ -15,6 +15,10 @@ object GuideManager {
     object Id {
         const val P0_REPLY = "p0_reply"             // 首次出现 P0 需回复消息
         const val PET_LONGPRESS = "pet_longpress"   // 首次发现引导：首次长按前提示一次（P1-8）
+        // 引导批（2026-10-27）：权限缺失提示一次——引导里跳过/拒绝后，首页对应
+        // 内容优雅缺失（没有那块内容），七仔气泡提示一次去向，此后不再打扰。
+        const val CALENDAR_MISSING = "calendar_missing"         // 首页无会议行时提示一次
+        const val NOTIFICATION_MISSING = "notification_missing" // 首页无消息区时提示一次
         // 2026-10-26 宠物重构 D：死 id 删除（全仓 grep 仅定义、无调用方）——
         // EDIT_MODE（编辑模式引导）、VERSION_UPDATE（版本更新引导）、
         // QUICK_ACTIONS（v0.65.0 旧引导，已废弃）、QUICK_PANEL（v0.65.2 快捷面板引导，面板已无调用方）。
@@ -46,6 +50,10 @@ object GuideManager {
 
     /** 首次发现引导文案（评审 P1-8）：点按 = 问、长按 = 表演。 */
     const val FIRST_DISCOVERY_TEXT = "点我可以直接问，长按可以看我表演"
+
+    /** 权限缺失提示文案（引导批）：只讲去向（设置 → 权限常驻页），不讲机制。 */
+    const val CALENDAR_MISSING_TEXT = "没看到今天的会？在设置 → 权限里打开日历就行"
+    const val NOTIFICATION_MISSING_TEXT = "没看到要回的消息？在设置 → 权限里打开消息提醒就行"
 
     /**
      * 首次发现引导：每用户仅一次，门禁复用 PET_LONGPRESS（与 tryShow 同一

@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
@@ -82,6 +83,15 @@ import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
+import com.bobot.ailauncher.ui.onboarding.OnGrantedTransition
+import com.bobot.ailauncher.ui.onboarding.isCalendarGranted
+import com.bobot.ailauncher.ui.onboarding.isDefaultLauncher
+import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
+import com.bobot.ailauncher.ui.onboarding.openHomeSettings
+import com.bobot.ailauncher.ui.onboarding.openNotificationSettings
+import com.bobot.ailauncher.ui.onboarding.rememberCalendarPermissionOpener
+import com.bobot.ailauncher.ui.onboarding.rememberPermissionState
+import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
@@ -240,6 +250,72 @@ fun SettingsScreen(
                     color = AILauncherColors.current.Title
                 )
             }
+        }
+
+        // 引导批（2026-10-27）：设置 → 权限常驻页——引导里跳过/拒绝后随时
+        // 可补授权（最后一页承诺了“以后随时可在设置 → 权限里设”，不做这页
+        // 承诺就落空）。复用引导第 2 屏同一套状态行与跳转逻辑（ON_RESUME
+        // 重读、日历授权框、通知监听设置页、默认桌面系统设置页）；不新增
+        // 其他设置项。
+        item {
+            val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
+            val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
+            val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
+            val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
+            OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.padding(horizontal = 20.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "权限",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = AILauncherColors.current.Title
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "首页要看到日程和消息、按 Home 键回来，需要这几项。随时能改。",
+                        fontSize = 13.sp,
+                        color = AILauncherColors.current.Hint,
+                        lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    SettingsPermissionRow(
+                        title = "默认桌面",
+                        desc = "按 Home 键回到 AI 桌面",
+                        granted = defaultGranted.value,
+                        doneText = "已设为默认",
+                        todoText = "尚未设为默认",
+                        actionText = "去设置",
+                        onOpen = { openHomeSettings(context) }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    SettingsPermissionRow(
+                        title = "日历",
+                        desc = "首页显示今天的会、开会前提醒、点一下加入",
+                        granted = calendarGranted.value,
+                        doneText = "已开启",
+                        todoText = "尚未开启",
+                        actionText = "去开启",
+                        onOpen = openCalendar
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    SettingsPermissionRow(
+                        title = "消息提醒",
+                        desc = "要回的消息整理到首页，不漏掉",
+                        granted = notificationGranted.value,
+                        doneText = "已开启",
+                        todoText = "尚未开启",
+                        actionText = "去开启",
+                        onOpen = { openNotificationSettings(context) }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
         // 让七仔更聪明（收起一层）
@@ -768,6 +844,68 @@ fun SettingsScreen(
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+/**
+ * 设置 → 权限的一行：标题＋好处＋状态行＋去开启（已开启时只显示状态，
+ * 不再给无意义的按钮；触控走 TextButton，热区 ≥48dp）。
+ */
+@Composable
+private fun SettingsPermissionRow(
+    title: String,
+    desc: String,
+    granted: Boolean,
+    doneText: String,
+    todoText: String,
+    actionText: String,
+    onOpen: () -> Unit
+) {
+    val view = LocalView.current
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = desc,
+                    fontSize = 13.sp,
+                    color = AILauncherColors.current.Hint,
+                    lineHeight = 18.sp
+                )
+            }
+            if (!granted) {
+                TextButton(onClick = { view.tickHaptic(); onOpen() }) {
+                    Text(
+                        text = actionText,
+                        fontSize = 14.sp,
+                        color = AILauncherColors.current.Accent
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = null,
+                tint = if (granted) AILauncherColors.current.Success else AILauncherColors.current.Hint,
+                modifier = Modifier
+                    .size(16.dp)
+                    .semantics { invisibleToUser() }
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = if (granted) doneText else todoText,
+                fontSize = 13.sp,
+                color = if (granted) AILauncherColors.current.Success else AILauncherColors.current.Hint
+            )
         }
     }
 }

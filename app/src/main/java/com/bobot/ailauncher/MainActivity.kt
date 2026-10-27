@@ -103,6 +103,8 @@ class MainActivity : FragmentActivity() {
             AILauncherTheme {
                 var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
                 // v0.36.2：首次启动主动询问是否开启低电量保护
+                // 引导批（2026-10-27）：不再叠在引导屏上——只在引导完成后、
+                // 第一次回到桌面时再问（onboarded 门禁；KEY_BATTERY_ASKED 语义不变）
                 var showBatteryPrompt by remember {
                     mutableStateOf(!prefs.getBoolean(KEY_BATTERY_ASKED, false))
                 }
@@ -124,7 +126,9 @@ class MainActivity : FragmentActivity() {
                         })
                     }
                     // v0.36.2：首次启动询问低电量保护
-                    if (showBatteryPrompt) {
+                    // 引导批（2026-10-27）：引导进行中不叠弹窗，引导完成后
+                    // 第一次回到桌面（onboarded 翻为 true 的那次组合）再问
+                    if (onboarded && showBatteryPrompt) {
                         androidx.compose.material3.AlertDialog(
                             onDismissRequest = { },
                             title = {
