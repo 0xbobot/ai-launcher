@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,10 +69,20 @@ fun DeckExamplesRow(
     onPick: (SlotTemplate) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    // 2026-10-27 设计精致化 P0-1：推荐行文字坐稳局部底色上（不只给字加亮）——
+    // 素行本身无容器，但整行套一层与胶囊同色系的弱衬底：玻璃＋花纹壁纸下
+    // 对比度不再随壁纸走；圆角裁剪、卡片边缘仍透玻璃，整卡不改黑。
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
+            .clip(RoundedCornerShape(14.dp))
+            .background(intentContentScrim())
+    ) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         examples.forEach { t ->
@@ -100,4 +112,16 @@ fun DeckExamplesRow(
         }
         Spacer(modifier = Modifier.width(16.dp))
     }
+    }
 }
+
+/**
+ * 意图卡片内容区弱衬底（2026-10-27 设计精致化 P0-1）：推荐行、结果条、
+ * 查找态文字共用的局部底色——卡片玻璃＋壁纸透过来时文字对比度不再随壁纸
+ * 走；只盖文字区、卡片边缘仍透玻璃，整卡不改黑。浅色白 0.60、深色卡色 0.65。
+ */
+@Composable
+internal fun intentContentScrim(): Color =
+    if (AILauncherColors.current.isDark) AILauncherColors.current.Card.copy(alpha = 0.65f)
+    else AILauncherColors.current.Card.copy(alpha = 0.60f)
+

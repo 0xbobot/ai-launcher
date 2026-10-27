@@ -9,6 +9,7 @@ import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -365,6 +366,9 @@ fun IntentCapsuleField(
     // Card 色——深色模式下 Card 是近黑 0xFF2A2723，实拍（40,39,35）证实
     // 实心黑 pill 压在半透明玻璃卡片上打架；现改走卡片同一套玻璃
     // （STRONG + dockLight，与面板逐项对齐），与卡片同材质同色调。
+    // 2026-10-27 设计精致化 P1-3：上段玻璃口径作废——面板已是强玻璃，胶囊
+    // 再套强玻璃＋方向高光即玻璃套玻璃打架；现改平底（见 solidBackground 分支），
+    // 靠明度差＋光标表达可输入。
     solidBackground: Boolean = false,
     // 应用中心升级（Bob 2026-10-24 定稿②）：箭头 = 确认本地搜索——
     // 调用方传此回调时，箭头钮走它（仅收键盘 + 定格结果）；不传时箭头
@@ -395,16 +399,15 @@ fun IntentCapsuleField(
             .clip(RoundedCornerShape(28.dp))
             .then(
                 if (solidBackground) {
-                    // 首页变体：卡片同款玻璃（见 solidBackground 注释），不另套新材质；
-                    // 与面板同一引擎同一参数同一背景源，渲染色调与卡片一致。
-                    Modifier.glassSurface(
-                        kind = GlassSurfaceKind.STRONG,
-                        cornerRadius = 28.dp,
-                        tintColor = AILauncherColors.current.Card,
-                        fallbackColor = AILauncherColors.current.GlassCard,
-                        tintBoost = 0f,
-                        shape = RoundedCornerShape(28.dp),
-                        dockLight = DockLightParams()
+                    // 首页变体（2026-10-27 设计精致化 P1-3：弱化玻璃套玻璃）：
+                    // 面板已是强玻璃，胶囊不再套第二层强玻璃＋方向高光（两层打架），
+                    // 改平底：仅明度差（比面板玻璃更实一档）＋金色光标＋占位文案
+                    // 表达可输入；金色发送键仍是唯一强强调。应用中心变体不动。
+                    // 平底不透明度 0.72：高于面板玻璃（约 0.55）形成明度台阶，又
+                    // 低于实心卡色，避开 2026-10-25 实心黑 pill 压玻璃的旧问题。
+                    Modifier.background(
+                        AILauncherColors.current.Card.copy(alpha = 0.72f),
+                        RoundedCornerShape(28.dp)
                     )
                 } else {
                     Modifier.background(AILauncherColors.current.Card.copy(alpha = 0.88f))
@@ -849,6 +852,25 @@ fun IntentEntry(
     // 点按行为不动：释放焦点 + onRequestExitInput + 打开应用（见槽位内）。
     val showDeckApps = localResults.isNotEmpty()
 
+    // 2026-10-27 设计精致化 P1-6：查找态——索引是打字后才在 IO 线程建，
+    // 建好前与真无匹配此前都显示空白、用户只能猜。needsSearching 为真
+    // （打字中、索引未建）时延迟 300ms 出“正在查找应用”（快建好则不闪）；
+    // 一旦 needsSearching 翻 false（索引建好／改文本／提交）即复位；打字
+    // 中途 needsSearching 恒真、effect 不重启，条子不闪烁。
+    val needsSearching = idleOrEditing &&
+        committedKeys.literal.isNotBlank() &&
+        committedKeys.literal != submittedText &&
+        localIndex == null
+    var showSearching by remember { mutableStateOf(false) }
+    LaunchedEffect(needsSearching) {
+        if (needsSearching) {
+            delay(300)
+            showSearching = true
+        } else {
+            showSearching = false
+        }
+    }
+
     // ---- 意图卡片统一（2026-10-25，Bob 拍板） ----
     // 面板实测高：只用于宠物/清单的锚定偏移，不参与面板自身布局——
     // 首帧估 96dp（胶囊 56 + 间距 12 + 内边距 28），实测到即纠正；动作
@@ -1201,11 +1223,29 @@ fun IntentEntry(
                         )
                     }
                     else -> {
-                        // 零打字呈现已迁到胶囊上方甲板（R-2）：本槽位在
-                        // Idle/Editing 且无本地结果时保持空——建议面
-                        // （SuggestionsBar）就此退役，其封面职责到此为止；
-                        // 会议行随之消失，简报会行是会议的唯一呈现
-                        // （.93 去重契约由「甲板不出会议行」天然满足）。
+                        // 2026-10-27 设计精致化 P1-6：打字中槽位不再空白——
+                        // 索引未建（延迟 300ms 后）出“正在查找应用”，索引建好
+                        // 且确无匹配出“没找到，可以继续输入一句话交给七仔”；
+                        // 提交后抑制态（keys == submittedText）与确认态不在此列。
+                        // 零打字呈现已迁到胶囊上方甲板（R-2）——无文本时本槽位
+                        // 仍保持空（建议面 SuggestionsBar 退役口径不变）。
+                        // 判序先 index：索引建好即确无结果（showSearching 残留
+                        // 帧不抢位）；索引未建且延迟已到才出查找中。
+                        if (idleOrEditing && committedKeys.literal.isNotBlank() &&
+                            committedKeys.literal != submittedText
+                        ) {
+                            if (localIndex != null) {
+                                SlotStatusLine(
+                                    text = "没找到，可以继续输入一句话交给七仔",
+                                    testTag = "intent_no_results"
+                                )
+                            } else if (showSearching) {
+                                SlotStatusLine(
+                                    text = "正在查找应用",
+                                    testTag = "intent_searching"
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1216,6 +1256,7 @@ fun IntentEntry(
         // 卡片内底边之上，悬浮／停靠键盘都不盖住它（面板整体坐键盘顶
         // 之上）；竖屏／横屏同款（面板 Column 共用）；热区 ≥48dp、走
         // 同一退出入口 onExitFocusRequest；TalkBack 读“收起”。
+    // 2026-10-27 设计精致化 P1-4：胶囊底已去（见下透明 Row），热区／位置／入口／TalkBack 不动。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1224,24 +1265,25 @@ fun IntentEntry(
                 .clickable { onExitFocusRequest() },
             contentAlignment = Alignment.Center
         ) {
+            // 2026-10-27 设计精致化 P1-4：收起减重——深色实心 pill 比结果还
+            // 抢眼，改透明底小下箭头＋弱化文字；外层 Box 热区 48dp、位置、
+            // testTag、退出入口、TalkBack 一字不动（文字保留，纯箭头不易发现）。
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(AILauncherColors.current.Divider)
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Icon(
                     imageVector = Icons.Filled.KeyboardArrowDown,
                     contentDescription = null,
-                    tint = AILauncherColors.current.Title,
-                    modifier = Modifier.size(20.dp)
+                    tint = AILauncherColors.current.Body,
+                    modifier = Modifier.size(18.dp)
                 )
                 Text(
                     text = "收起",
                     fontSize = 13.sp,
-                    color = AILauncherColors.current.Title
+                    color = AILauncherColors.current.Body
                 )
             }
         }
@@ -1414,22 +1456,29 @@ private fun LocalResultsBar(
 ) {
     // 保底高度构成：固定部分 69dp = 容器上下内边距 16 + 结果行上距 6
     // + 结果项（上下内边距 8 + 图标 36 + 标签上距 3）；文字部分 = 标题行高 15sp
-    // + 标签行高 13sp（按 sp 换算，fontScale 多大都完整算入）；另加 4dp 余量
+    // + 标签行高 15sp（P1-5 名称 12sp，按 sp 换算，fontScale 多大都完整算入）；另加 4dp 余量
     // （R4 dump 实测 TextView 高度比 lineHeight 多约 2.6dp，字体内边距关不干净）。
     val density = LocalDensity.current
-    val minBarHeight = 73.dp + with(density) { 15.sp.toDp() + 13.sp.toDp() }
+    val minBarHeight = 73.dp + with(density) { 15.sp.toDp() + 15.sp.toDp() }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            // F 批：面板内透明——面板已提供统一背景，本条不再自带卡片底
+            // 2026-10-27 设计精致化 P0-1：结果区坐稳局部底色（与推荐行同源），
+            // 玻璃＋花纹壁纸下标题与名称对比度不再随壁纸走；只盖本条、卡片
+            // 边缘仍透玻璃。F 批“面板内透明”口径就此让位给局部衬底。
+            .clip(RoundedCornerShape(16.dp))
+            .background(intentContentScrim())
             .requiredHeightIn(min = minBarHeight, max = RESULT_BAR_MAX_HEIGHT)
             .verticalScroll(rememberScrollState())
             // R3-C 无障碍：结果一出现 TalkBack 礼貌播报（标题+应用名），不用手动找焦点
             .semantics { liveRegion = LiveRegionMode.Polite }
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            // 2026-10-27 设计精致化 P1-5：内容左轴对齐输入文字——胶囊内边距
+            // 18dp＋图标 18dp＋间距 10dp＝46dp，标题与首项左缘与之一致。
+            .padding(start = 46.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
     ) {
         Text(
-            text = "七仔找到了这些，点一下打开",
+            // 2026-10-27 设计精致化 P1-5：说明缩成“应用 · N 个”，更紧更好扫。
+            text = "应用 · ${apps.size} 个",
             fontSize = 12.sp,
             // 2026-10-27 暗黑可读：深色 Hint 在深色玻璃上近隐形，改 Body；浅色不动。
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Body else AILauncherColors.current.Hint,
@@ -1438,10 +1487,14 @@ private fun LocalResultsBar(
                 platformStyle = PlatformTextStyle(includeFontPadding = false)
             )
         )
+        // 2026-10-27 设计精致化 P0-2：结果行可横滚——固定 64dp 一项在窄屏
+        // （320dp）放不下 4 项且 Row 无换行、末项会出界；横滚后任何可用宽、
+        // 任何字号档都不出界，4 项全部可达。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp),
+                .horizontalScroll(rememberScrollState())
+                .padding(top = 6.dp, end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             apps.forEach { app ->
@@ -1476,14 +1529,15 @@ fun ResultAppItem(
         )
         Text(
             text = app.label.toString(),
-            fontSize = 11.sp,
+            // 2026-10-27 设计精致化 P1-5：名称 11sp→12sp，更好扫。
+            fontSize = 12.sp,
             // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             style = TextStyle(
-                lineHeight = 13.sp,
+                lineHeight = 15.sp,
                 platformStyle = PlatformTextStyle(includeFontPadding = false)
             ),
             modifier = Modifier
@@ -1504,6 +1558,30 @@ private fun launchLocalApp(context: Context, app: AppInfo) {
         else IslandToasts.show("无法打开「${app.label}」")
     } catch (_: Exception) {
         IslandToasts.show("「${app.label}」暂不可用")
+    }
+}
+
+/**
+ * 结果槽位短时状态行（2026-10-27 设计精致化 P1-6）：查找中／没找到——
+ * 与结果条同源弱衬底、同左轴（46dp），不另起卡片；TalkBack 礼貌播报。
+ */
+@Composable
+private fun SlotStatusLine(text: String, testTag: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(intentContentScrim())
+            .semantics { liveRegion = LiveRegionMode.Polite }
+            .testTag(testTag)
+            .padding(start = 46.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = text,
+            fontSize = 13.sp,
+            color = AILauncherColors.current.Body
+        )
     }
 }
 
