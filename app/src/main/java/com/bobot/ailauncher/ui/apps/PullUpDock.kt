@@ -55,6 +55,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -509,6 +511,12 @@ fun PullUpDock(
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         // v0.68.73（Bob）：横屏时 Dock 收拢，不横贯全屏
         val isLandscapeDock = maxWidth > maxHeight
+        // 横屏 Dock 右锚定（2026-10-27）：右边缘让 cutoutRight（CUTOUT_SPEC
+        // 规则 3，读 live inset、不写死数值；无挖孔时为 0，12dp 设计边距
+        // 不变；旋转后挖孔换边，inset 跟着换，两向都清）。
+        val cutoutRightDp = with(density) {
+            WindowInsets.displayCutout.getRight(density, LayoutDirection.Ltr).toDp()
+        }
         // v0.68.101：面板可用高（坐姿七仔紧配置判定用；内层 AnimatedVisibility
         // 作用域里隐式 receiver 不可达，故在此提升为局部值）
         val dockAvailableHeight = maxHeight
@@ -561,8 +569,10 @@ fun PullUpDock(
                     .align(
                         if (isLandscapeDock) Alignment.BottomEnd else Alignment.BottomCenter
                     )
-                    // v0.68.78：横屏时右侧留边，不贴边
-                    .let { if (isLandscapeDock) it.padding(end = 12.dp) else it },
+                    // v0.68.78：横屏时右侧留边，不贴边；2026-10-27 右锚定：
+                    // 再让 live cutoutRight（挖孔在右时卡片不顶挖孔区，
+                    // 无挖孔时仍是 12dp，一字不写死数值）
+                    .let { if (isLandscapeDock) it.padding(end = 12.dp + cutoutRightDp) else it },
                 enter = if (isLandscapeDock) {
                     // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：聚焦退出
                     // 回场时只淡入、不滑动（上一帧仍在聚焦 → fade-only）；正常
@@ -1063,7 +1073,14 @@ fun PullUpDock(
                         tailDown = true,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
+                            // 横屏 Dock 右锚定（2026-10-27，根因）：气泡宿主此前
+                            // fillMaxWidth，在横屏包内容外层盒里把盒子撑满全宽，
+                            // 面板与宠物的 BottomCenter 对齐随之落到屏幕中央——
+                            // 即 Bob 报的“横屏 Dock 居中”。横屏改包内容（宿主
+                            // Column 本就 CenterHorizontally，尾巴仍指宠物中轴；
+                            // 气泡宽于面板时盒子随气泡宽、整组仍右锚定）；
+                            // 竖屏 fillMaxWidth 口径不动。
+                            .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
                             .offset(
                                 x = dragHeadXdp,
                                 y = -(panelHGeo + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp) - dragHeadRiseDp + dragHeadSinkDp
