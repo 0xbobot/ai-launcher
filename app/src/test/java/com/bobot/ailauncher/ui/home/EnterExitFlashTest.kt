@@ -13,10 +13,13 @@ import org.junit.Test
  * 多腿复核，不在本文件伪造运行时断言。
  *
  *  ① 垫高跳变补偿 jumpCompensationShift：进出翻转时权重 Spacer
- *     出现／消失致整列瞬移，绘制位移先钉回旧位再滑向新位。
- *  ② Dock 宠物挂载门 dockPetVisible：退出 funnel 进行中 Dock 宠物
- *     不挂载，落地后才与意图宠物同位置溶解，不出现两只不同高度
- *     的宠物（70% 翻转点双影）。
+ *     出现／消失致整列瞬移，绘制位移先钉回旧位再滑向新位
+ *     （竖屏区块切换后仅横屏沿用）。
+ *  ② Dock 宠物挂载门 dockPetVisible：退出进行中 Dock 宠物不挂载
+ *     （横屏场景换先出后进；竖屏离散切换不置退出位、翻转即挂载）。
+ *  ③ 聚焦槽位可见门 focusSlotVisible（竖屏区块切换，2026-10-27）：
+ *     竖屏可见性即 mode——离散切换无退态滞留挂载；横屏沿用
+ *     mode && 进场延迟走完（先出后进）。
  */
 class EnterExitFlashTest {
 
@@ -63,13 +66,52 @@ class EnterExitFlashTest {
 
     @Test
     fun dockPet_exitFunnelInFlight_isHidden() {
-        // 关键回归锁：70% 翻转点 mode 已回 false，但 funnel 未完成
-        // （isExiting）时 Dock 宠物仍不挂载，否则与在途意图宠物双影。
+        // 关键回归锁：横屏退出进行中（isExiting）时 Dock 宠物仍不挂载，
+        // 否则与在途意图宠物双影；竖屏离散切换不置此位。
         assertFalse(dockPetVisible(intentInputMode = false, exitInProgress = true))
     }
 
     @Test
     fun dockPet_focusAndExit_isHidden() {
         assertFalse(dockPetVisible(intentInputMode = true, exitInProgress = true))
+    }
+
+    // ---- ③ 聚焦槽位可见门：竖屏离散、横屏先出后进 ----
+
+    @Test
+    fun focusSlot_portrait_visibleIsExactlyMode() {
+        // 竖屏：可见性即 mode，无退态滞留挂载——退出翻转当帧槽位即
+        // 消失（旧口径 mode || isExiting 会让槽位在退态中滞留、与回场
+        // 的信息区／Dock 区半透明重叠）。
+        assertTrue(
+            focusSlotVisible(intentInputMode = true, isLandscape = false, landscapeSlotReady = false)
+        )
+        assertTrue(
+            focusSlotVisible(intentInputMode = true, isLandscape = false, landscapeSlotReady = true)
+        )
+        assertFalse(
+            focusSlotVisible(intentInputMode = false, isLandscape = false, landscapeSlotReady = false)
+        )
+        assertFalse(
+            focusSlotVisible(intentInputMode = false, isLandscape = false, landscapeSlotReady = true)
+        )
+    }
+
+    @Test
+    fun focusSlot_landscape_needsModeAndReady() {
+        // 横屏：家场景先出、聚焦场景后进——mode 为真且进场延迟走完
+        // 才挂载；任一不满足即不挂载。
+        assertTrue(
+            focusSlotVisible(intentInputMode = true, isLandscape = true, landscapeSlotReady = true)
+        )
+        assertFalse(
+            focusSlotVisible(intentInputMode = true, isLandscape = true, landscapeSlotReady = false)
+        )
+        assertFalse(
+            focusSlotVisible(intentInputMode = false, isLandscape = true, landscapeSlotReady = true)
+        )
+        assertFalse(
+            focusSlotVisible(intentInputMode = false, isLandscape = true, landscapeSlotReady = false)
+        )
     }
 }

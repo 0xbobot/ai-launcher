@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -359,10 +361,9 @@ fun PullUpDock(
     petActionsVisible: Boolean = false,
     onPetActionsVisibleChange: (Boolean) -> Unit = {},
     intentInputMode: Boolean = false,
-    // 竖屏切换闪烁修复（2026-10-27）：退出 funnel 进行中（HomeScreen
-    // 经 MainScreen 上报的 perchTransition.isExiting）——Dock 宠物压到
-    // 落地后才挂载，否则与在途意图宠物在不同高度同时在场（70% 翻转
-    // 点双影）；落地交接的意图宠物 alpha 淡出见 HomeScreen 落地段。
+    // 退出进行中（HomeScreen 经 MainScreen 上报的 perchTransition.isExiting；
+    // 横屏退出分支置位，竖屏离散切换不置位）——横屏 Dock 宠物在退出完成
+    // 前不挂载（场景换先出后进）；竖屏 mode 翻转即挂载。
     exitInProgress: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -529,7 +530,10 @@ fun PullUpDock(
         // （SideEffect 在组合后才更新，故翻转当帧仍持旧值 true → fade-only；
         // 正常回场时上一帧为 false → 沿用滑动＋淡入）。退出方向直接读当帧
         // intentInputMode（翻转当帧已为 true → fade-only；D3／状态变化离场
-        // 时为 false → 沿用滑动＋淡出）。竖屏一字不动。
+        // 时为 false → 沿用滑动＋淡出）。竖屏区块切换（2026-10-27）：
+        // 聚焦进出方向同理取信号、走 None（整块显隐、不滑动、不淡入淡出，
+        // 与信息区／意图区同帧离散切换）；D3／状态变化离场／回场沿用
+        // 滑动＋淡入淡出（不属本批）。
         var prevIntentInputMode by remember { mutableStateOf(intentInputMode) }
         androidx.compose.runtime.SideEffect { prevIntentInputMode = intentInputMode }
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
@@ -589,6 +593,10 @@ fun PullUpDock(
                             tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
                         )
                     }
+                } else if (prevIntentInputMode) {
+                    // 竖屏区块切换：聚焦退出回场时整块重现，不滑动、不淡入；
+                    // 与信息区／意图区同帧离散切换，不半透明重叠。
+                    EnterTransition.None
                 } else {
                     slideInVertically(
                         animationSpec = PetMotion.DockEnter
@@ -615,6 +623,10 @@ fun PullUpDock(
                             tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)
                         )
                     }
+                } else if (intentInputMode) {
+                    // 竖屏区块切换：进聚焦离场时整块消失，不滑动、不淡出；
+                    // D3／状态变化离场仍沿用滑动＋淡出。
+                    ExitTransition.None
                 } else {
                     slideOutVertically(
                         animationSpec = PetMotion.DockExit
@@ -1314,9 +1326,9 @@ internal fun dockCardFocusSwapIsFadeOnly(isLandscape: Boolean, inFocusSignal: Bo
     isLandscape && inFocusSignal
 
 /**
- * 竖屏切换闪烁修复（2026-10-27）：Dock 宠物挂载门（纯函数，单测锁死）。
- * 输入态让位意图宠物；退出 funnel 进行中仍让位——Dock 宠物只在落地
- * （finishExit）后挂载，否则与在途意图宠物在不同高度同时在场。
+ * Dock 宠物挂载门（纯函数，单测锁死）。输入态让位意图宠物；退出进行中
+ * 仍让位——横屏 Dock 宠物只在退出完成（finishExit）后挂载；竖屏离散切换
+ * 不置退出位，mode 翻转即挂载。
  */
 internal fun dockPetVisible(intentInputMode: Boolean, exitInProgress: Boolean): Boolean =
     !intentInputMode && !exitInProgress
