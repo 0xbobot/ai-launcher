@@ -329,4 +329,36 @@ class IntentInputModeTest {
             assertTrue("container ${w}dp -> card $card must stay > 0", card > 0.dp)
         }
     }
+
+    // ---- intentBackStep（返回键落点，2026-10-27 真机报障） ----
+
+    @Test
+    fun `返回落点 - 规划中走真取消`() {
+        org.junit.Assert.assertEquals(
+            IntentBackStep.CancelPlanning,
+            intentBackStep(IntentUiState.Planning("导航去机场"))
+        )
+    }
+
+    @Test
+    fun `返回落点 - 其余在场态走内层 dismiss`() {
+        busyStates.filterNot { it is IntentUiState.Planning }.forEach {
+            org.junit.Assert.assertEquals(
+                "$it 应先关内层",
+                IntentBackStep.DismissInner,
+                intentBackStep(it)
+            )
+        }
+    }
+
+    @Test
+    fun `返回落点 - 空闲与编辑直接退出意图`() {
+        freeStates.forEach {
+            org.junit.Assert.assertEquals(
+                "$it 应直接退出",
+                IntentBackStep.ExitIntent,
+                intentBackStep(it)
+            )
+        }
+    }
 }

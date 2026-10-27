@@ -196,8 +196,9 @@ fun HomeScreen(
     val perchScope = rememberCoroutineScope()
     val reduceMotionHome = rememberReduceMotion()
     val exitIntentInputLatest by rememberUpdatedState(onExitIntentInput)
-    // IME 底部高度提前到此处（下方 BackHandler 复用同一值）：退态第①步
-    // 等它归零才起步行程，WindowInsets.ime 变化会触发重组、值随之更新。
+    // IME 底部高度提前到此处（横屏退态等待循环与垫高计算同源）：横屏退态
+    // 第①步等它归零才起步行程（竖屏离散切换不等键盘），WindowInsets.ime
+    // 变化会触发重组、值随之更新。
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     val imeBottomLatest by rememberUpdatedState(imeBottomPx)
     // 点外退出走 pointerInput(Unit)（首帧闭包常驻）：护栏不能读参数原值
@@ -896,16 +897,24 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(focusBottomPad))
             }
         }
-        // v0.68.99：返回退出输入态——IME 在场时不启用（那一按归输入法收键盘，
-        // 与既有「BACK 先收键盘」口径一致，冒烟 §9/§10 依赖此序）；有在场状态
-        // 时也不启用（思考/回复不被 Back 打断，走各自收起路径）。
-        // imeBottomPx 复用顶部已提升的值（退态第①步的 IME 归零等待同源）。
+        // v0.68.166（2026-10-27，Bob 真机报障）：返回退出输入态——意图专注态
+        // 在场即启用，不以键盘可见性为门。旧 v0.68.99 的 imeBottomPx == 0 门
+        // 使键盘收起后 imeBottom 未归零时返回无路、卡片滞留屏中无锚点；
+        // 键盘在场时第一按仍归输入法收键盘（Android 平台行为：输入法优先
+        // 消费返回键），键盘收起后的滞留态下一按即退卡片。
+        // 在场状态先关内层、再退意图（落点见 intentBackStep）：直接退出会
+        // 与 MainScreen 的在场自动带起 effect 打架。
         // Back 进行中重复按下由 requestExitFocus 的 isExiting 护栏挡下，
         // 故此处不另加 isExiting 到 enabled（禁用会把 Back 交给系统，危险）。
         androidx.activity.compose.BackHandler(
-            enabled = intentInputMode && imeBottomPx == 0 &&
-                !intentStateHoldsInput(intentState)
-        ) { onExitFocusRequest() }
+            enabled = intentInputMode
+        ) {
+            when (intentBackStep(intentState)) {
+                IntentBackStep.CancelPlanning -> onIntentCancelPlanning()
+                IntentBackStep.DismissInner -> onIntentDismiss()
+                IntentBackStep.ExitIntent -> onExitFocusRequest()
+            }
+        }
         // v0.36.0：无障碍权限引导卡
         panelGuideMode?.let { mode ->
             PanelPermissionGuide(
@@ -1009,6 +1018,25 @@ internal fun intentStateHoldsInput(
     is com.bobot.ailauncher.core.intent.IntentUiState.Error -> true
     is com.bobot.ailauncher.core.intent.IntentUiState.Idle,
     is com.bobot.ailauncher.core.intent.IntentUiState.Editing -> false
+}
+
+/**
+ * v0.68.166（2026-10-27，Bob 真机报障）：返回键在意图专注态的落点（纯函数，
+ * 单测锁死）。在场状态先关内层、再退意图——直接退出会在场状态下打架
+ * （MainScreen 的在场自动带起 effect 会在下一次状态变化时把 mode 翻回
+ * true，卡片刚关又弹回）；Planning 必须走真取消（代际 bump＋Job cancel，
+ * 见 cancelIntentPlanning），只 dismiss 会留下在途规划、迟到落地复活旧态；
+ * 其余在场态走协调器 dismiss（清 pending 回编辑／Idle，与各条自身 ✕ 同款）。
+ */
+internal enum class IntentBackStep { CancelPlanning, DismissInner, ExitIntent }
+
+internal fun intentBackStep(
+    state: com.bobot.ailauncher.core.intent.IntentUiState
+): IntentBackStep = when {
+    state is com.bobot.ailauncher.core.intent.IntentUiState.Planning ->
+        IntentBackStep.CancelPlanning
+    intentStateHoldsInput(state) -> IntentBackStep.DismissInner
+    else -> IntentBackStep.ExitIntent
 }
 
 /**
