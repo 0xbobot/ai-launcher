@@ -1300,7 +1300,7 @@ fun IntentEntry(
                 modifier = Modifier
                     .clip(RoundedCornerShape(14.dp))
                     .background(intentContentScrim())
-                    .padding(horizontal = 12.dp, top = 4.dp, bottom = 8.dp),
+                    .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
