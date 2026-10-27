@@ -51,9 +51,10 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * 2026-10-24 20:31：猜你想问行删除），tagPrefix 参数随之退役，主行
  * 固定用 deck_example_*。
  *
- * 输入态专注 D：行尾留白增至 64dp——卡片角 ✕（48dp 热区）以覆盖层
- * 浮于行尾上方，末项须能完整滚出 ✕ 覆盖区再点；64dp = ✕ 48dp + 16dp
- * 间隙（原 v6 的 16dp 留白即此间隙部分，不另设禁区）。
+ * 2026-10-27：卡片角 ✕ 已移到底部收起，行尾留白回到 v6 的 16dp
+ * （末项完整滚入视野，不再为 ✕ 覆盖区留禁区）。
+ * 2026-10-27 暗黑可读：深色下示例文字与琥珀点不再降 alpha（玻璃＋
+ * 壁纸上发虚），浅色仍 0.65／0.6。
  *
  * 2026-10-25 示例弱化（Bob 23:18：推荐问法还是需要的、只是弱化一点
  * 不要抢戏）：行保留原位原功能，只降视觉权重——字号 14sp→13sp、
@@ -86,17 +87,17 @@ fun DeckExamplesRow(
                     modifier = Modifier
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(AILauncherColors.current.Accent.copy(alpha = 0.6f))
+                        .background(if (AILauncherColors.current.isDark) AILauncherColors.current.Accent else AILauncherColors.current.Accent.copy(alpha = 0.6f))
                 )
                 Text(
                     text = t.exampleFillText(),
                     fontSize = 13.sp,
-                    color = AILauncherColors.current.Body.copy(alpha = 0.65f),
+                    color = if (AILauncherColors.current.isDark) AILauncherColors.current.Body else AILauncherColors.current.Body.copy(alpha = 0.65f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
-        Spacer(modifier = Modifier.width(64.dp))
+        Spacer(modifier = Modifier.width(16.dp))
     }
 }
