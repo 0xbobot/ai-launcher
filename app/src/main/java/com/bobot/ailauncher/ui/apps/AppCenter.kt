@@ -584,7 +584,7 @@ fun AppCenterContent(
                 ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
             if (intent != null) context.startActivity(intent)
         } catch (_: Exception) {
-            IslandToasts.show("「${app.label}」暂不可用")
+            IslandToasts.show("无法打开「${app.label}」")
         }
     }
 
@@ -603,7 +603,7 @@ fun AppCenterContent(
     fun unlockHiddenApps() {
         val activity = context as? FragmentActivity
         if (activity == null) {
-            IslandToasts.show("无法启动验证")
+            IslandToasts.show("无法启动身份验证")
             return
         }
         if (!BiometricAuth.canAuthenticate(context)) {
@@ -912,7 +912,7 @@ fun AppCenterContent(
                         item(key = "search-empty") {
                             Text(
                                 // 应用中心升级：索引缺失与真无匹配区分文案
-                                text = if (catalog == null) "正在加载应用索引，请稍后再试"
+                                text = if (catalog == null) "应用列表还没准备好，请稍后再试"
                                     else "没有找到「${filterQuery.trim()}」相关的应用",
                                 fontSize = 14.sp,
                                 color = AILauncherColors.current.Hint,

@@ -170,7 +170,7 @@ internal fun launchQuickAction(context: Context, item: QuickActionItem) {
             else PetRepository.say("打不开这个应用，可能已卸载")
         }
     } catch (_: Exception) {
-        PetRepository.say("打不开这个，快检查一下应用还在不在")
+        PetRepository.say("打不开这个应用，可能已卸载")
     }
 }
 

@@ -273,7 +273,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "填上大模型 Key，七仔能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
+                                text = "填上大模型 API Key，七仔能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
                                 fontSize = 13.sp,
                                 color = AILauncherColors.current.Hint,
                                 lineHeight = 18.sp
@@ -291,7 +291,7 @@ fun SettingsScreen(
                         OutlinedTextField(
                             value = apiKey,
                             onValueChange = { apiKey = it; persist() },
-                            label = { Text("大模型 Key") },
+                            label = { Text("大模型 API Key") },
                             placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
@@ -322,7 +322,7 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
                         )
                         Text(
-                            text = "填你 Key 对应的模型名，比如 deepseek-flash",
+                            text = "填你 API Key 对应的模型名，比如 deepseek-flash",
                             fontSize = 12.sp,
                             color = AILauncherColors.current.Hint,
                             modifier = Modifier.padding(top = 4.dp)
@@ -335,7 +335,7 @@ fun SettingsScreen(
                                 view.confirmHaptic()
                                 persist()
                                 if (apiKey.isBlank()) {
-                                    IslandToasts.show("请先填写大模型 Key")
+                                    IslandToasts.show("请先填写大模型 API Key")
                                     return@Button
                                 }
                                 testing = true
@@ -367,14 +367,14 @@ fun SettingsScreen(
                                 modifier = Modifier.padding(top = 10.dp)
                             ) {
                                 Text(
-                                    text = "本机密钥库异常，API Key 现在是明文存储",
+                                    text = "加密出了点问题，你的 Key 现在没有加密保存",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.error
                                 )
                                 Text(
                                     text = "重启手机后回到这里，Key 会自动尝试恢复加密；" +
-                                        "仍不行的话，删掉 Key 重新粘贴保存一次。",
+                                        "仍不行的话，删掉 API Key 重新粘贴保存一次。",
                                     fontSize = 12.sp,
                                     color = AILauncherColors.current.Hint,
                                     lineHeight = 17.sp,
@@ -586,14 +586,14 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "接收测试版更新",
+                            text = "加入测试计划",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.current.Title
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "开启后可收到测试版推送，适合尝鲜；默认只收正式版",
+                            text = "加入后可提前收到测试版本，适合尝鲜；默认只收正式版",
                             fontSize = 13.sp,
                             color = AILauncherColors.current.Hint
                         )

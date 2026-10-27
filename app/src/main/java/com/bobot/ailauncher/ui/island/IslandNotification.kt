@@ -12,19 +12,24 @@ import androidx.core.app.NotificationCompat
  * 用 setTimeoutAfter(2500) 让系统 2.5 秒后自动撤掉，无需自己 handler。
  */
 object IslandNotification {
-    private const val CHANNEL_ID = "island_toast"
+    // 渠道重建：旧渠道名改了老用户仍见旧名，故改 id 并删旧渠道，新用户直接见新名。
+    private const val CHANNEL_ID = "island_toast_v2"
+    private const val LEGACY_CHANNEL_ID = "island_toast"
     private const val NOTIF_ID = 0x1A4D  // 固定 ID：新 toast 覆盖旧的，不堆积
 
     private fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (manager.getNotificationChannel(LEGACY_CHANNEL_ID) != null) {
+                manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+            }
             if (manager.getNotificationChannel(CHANNEL_ID) == null) {
                 val channel = NotificationChannel(
                     CHANNEL_ID,
-                    "灵动岛提示",
+                    "顶部提示",
                     NotificationManager.IMPORTANCE_HIGH  // HIGH 才能 heads-up 弹出
                 ).apply {
-                    description = "应用内提示以系统胶囊形式显示"
+                    description = "提示以顶部横条形式显示"
                     setShowBadge(false)
                 }
                 manager.createNotificationChannel(channel)

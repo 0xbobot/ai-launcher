@@ -1557,7 +1557,7 @@ private fun launchLocalApp(context: Context, app: AppInfo) {
         if (intent != null) context.startActivity(intent)
         else IslandToasts.show("无法打开「${app.label}」")
     } catch (_: Exception) {
-        IslandToasts.show("「${app.label}」暂不可用")
+        IslandToasts.show("无法打开「${app.label}」")
     }
 }
 
@@ -1668,7 +1668,7 @@ private fun PlanningStrip(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "七仔想想中…",
+            text = "七仔思考中",
             fontSize = 13.sp,
             // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,

@@ -159,7 +159,7 @@ fun PetActionList(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "曜仔动作",
+                        text = "七仔动作",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = bodyColor,

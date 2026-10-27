@@ -127,7 +127,7 @@ object OtaUpdater {
             versionName = json.optString("versionName", ""),
             apkUrl = apkUrl,
             changelog = json.optString("changelog", "")
-                .ifBlank { "常规更新与问题修复" },
+                .ifBlank { "修复了一些问题，体验更顺了" },
             forceUpdate = json.optBoolean("forceUpdate", false),
             prerelease = json.optBoolean("prerelease", false),
             sha256 = json.optString("sha256", "")

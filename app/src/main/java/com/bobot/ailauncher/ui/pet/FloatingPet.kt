@@ -772,7 +772,7 @@ fun FloatingPet(
                 // 与旧 DockPetPerch 一致：contentDescription + 可点语义，
                 // TalkBack 即识别为可点按钮。点按 = 问（2026-10-26 起说真话，
                 // 不再是开清单）；长按动作经 onLongClickLabel 提示。
-                contentDescription = "问曜仔"
+                contentDescription = "问七仔"
             }
             .combinedClickable(
                 interactionSource = petInteractionSource,

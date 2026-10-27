@@ -157,7 +157,8 @@ class IntentCoordinator(
             if (_state.value is IntentUiState.Planning) dismiss()
             throw e
         } catch (e: Exception) {
-            PlanOutcome.Err("请求失败：${e.message.orEmpty().ifBlank { "未知错误" }}")
+            android.util.Log.w("IntentCoordinator", "plan failed", e)
+            PlanOutcome.Err("请求失败，请稍后再试")
         }
         // F-06：规划途中被用户取消——迟到结果直接丢弃（状态已被 cancelPlanning
         // 收回 Idle），不回复、不执行、不追问。
@@ -207,7 +208,7 @@ class IntentCoordinator(
         // 风险级别只信注册表：find 不到（非法 id / 注册表未含）直接失败，绝不执行
         val cap = capabilities.find(action.capabilityId)
         if (cap == null) {
-            fail("找不到这个能力，无法执行")
+            fail("这个我还不会做")
             return
         }
         val request = ActionRequest(
@@ -260,7 +261,7 @@ class IntentCoordinator(
             val cap = capabilities.find(merged.capabilityId)
             if (cap == null) {
                 pendingInput = null
-                fail("找不到这个能力，无法执行")
+                fail("这个我还不会做")
                 return
             }
             askForInput(cap, merged, rest)
@@ -300,6 +301,6 @@ class IntentCoordinator(
 
     companion object {
         const val DEFAULT_TIMEOUT_MILLIS = 15_000L
-        const val NO_KEY_MESSAGE = "先在设置里配置大模型 Key，才能理解这句话"
+        const val NO_KEY_MESSAGE = "先在设置里填上大模型 API Key，七仔才能理解这句话"
     }
 }

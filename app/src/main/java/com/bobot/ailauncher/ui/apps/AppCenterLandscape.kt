@@ -439,7 +439,7 @@ fun AppCenterLandscape(
                             item(key = "search-empty") {
                                 Text(
                                     // 应用中心升级：索引缺失与真无匹配区分文案
-                                    text = if (indexLoading) "正在加载应用索引，请稍后再试"
+                                    text = if (indexLoading) "应用列表还没准备好，请稍后再试"
                                         else "没有找到「${searchFieldValue.text.trim()}」相关的应用",
                                     fontSize = 14.sp,
                                     color = AILauncherColors.current.Hint,

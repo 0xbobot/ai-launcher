@@ -60,8 +60,8 @@ class OtaUpdaterTest {
 
     @Test
     fun `blank changelog falls back to default text`() {
-        assertEquals("常规更新与问题修复", available(manifest(changelog = "")).changelog)
-        assertEquals("常规更新与问题修复", available(manifest(changelog = null)).changelog)
+        assertEquals("修复了一些问题，体验更顺了", available(manifest(changelog = "")).changelog)
+        assertEquals("修复了一些问题，体验更顺了", available(manifest(changelog = null)).changelog)
     }
 
     @Test

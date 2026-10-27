@@ -115,24 +115,22 @@ object AppClassifier {
                 JSONObject(rawBody).optJSONObject("error")?.optString("message").orEmpty()
             } catch (_: Exception) { "" }
             if (envelopeErr.isNotBlank()) {
-                return ClassifyResult.Err("服务端错误：$envelopeErr".take(300))
+                return ClassifyResult.Err("请求失败，请稍后再试")
             }
             val content = extractContent(rawBody)
                 ?: return ClassifyResult.Err(
-                    "模型返回无法解析" + rawBody.take(200).let {
-                        if (it.isBlank()) "" else "，原始返回：$it"
-                    }
+                    "七仔没听懂，换个说法再试"
                 )
             val parsed = parseMapping(content)
-                ?: return ClassifyResult.Err("模型返回的 JSON 无法解析")
+                ?: return ClassifyResult.Err("七仔没听懂，换个说法再试")
             val validIds = GROUPS.map { it.first }.toSet()
             val filtered = parsed.filter { (pkg, gid) ->
                 pkg.isNotBlank() && gid in validIds
             }
-            if (filtered.isEmpty()) return ClassifyResult.Err("模型没有返回有效分类")
+            if (filtered.isEmpty()) return ClassifyResult.Err("七仔没听懂，换个说法再试")
             ClassifyResult.Ok(filtered, filtered.size)
         } catch (e: Exception) {
-            ClassifyResult.Err("请求失败：${e.message.orEmpty().ifBlank { "未知错误" }}")
+            ClassifyResult.Err("请求失败，请稍后再试")
         }
     }
 

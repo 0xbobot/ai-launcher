@@ -32,12 +32,12 @@ object ActionEngine {
 
         // 2) 能力存在性
         val cap = CapabilityRegistry.find(request.capabilityId)
-            ?: return fail(request, "找不到这个能力（${request.capabilityId}）")
+            ?: return fail(request, "这个我还不会做")
 
         // 3) 权限检查（PRD §三十：缺权限要解释用途，不静默失败）
         cap.permission?.let { perm ->
             if (ContextCompat.checkSelfPermission(context, perm) != PackageManager.PERMISSION_GRANTED) {
-                return ActionResult.NeedsPermission(perm, "执行「${cap.label}」需要该权限")
+                return ActionResult.NeedsPermission(perm, permissionReason(perm, cap.label))
             }
         }
 
@@ -46,9 +46,9 @@ object ActionEngine {
         val outcome = try {
             when (cap.executionMethod) {
                 ExecutionMethod.APP_FUNCTION ->
-                    return fail(request, "「${cap.label}」需要 App Functions，当前应用暂不支持")
+                    return fail(request, "「${cap.label}」需要应用支持，现在还不支持")
                 ExecutionMethod.ACCESSIBILITY ->
-                    return fail(request, "「${cap.label}」需要无障碍操作，暂不提供")
+                    return fail(request, "「${cap.label}」需要无障碍操作，暂时还做不了")
                 else ->
                     CapabilityRegistry.launchCapability(context, cap, request.params)
             }
@@ -69,6 +69,30 @@ object ActionEngine {
             CapabilityRegistry.LaunchOutcome.Failed ->
                 fail(request, "没能打开「${cap.label}」，换个说法试试")
         }
+    }
+
+    /**
+     * 缺权限原因句：按权限写成人话（用来干嘛），不说“该权限”。
+     * 能力配置目前没有哪项带 permission，本映射是文案兜底，行为不变。
+     */
+    private fun permissionReason(perm: String, label: String): String = when (perm) {
+        "android.permission.READ_CALENDAR", "android.permission.WRITE_CALENDAR" ->
+            "需要使用日历，才能查看你的日程"
+        "android.permission.READ_CONTACTS" ->
+            "需要读取联系人，才能找到你要找的人"
+        "android.permission.CALL_PHONE" ->
+            "需要拨打电话权限，才能帮你打电话"
+        "android.permission.SEND_SMS" ->
+            "需要发送短信权限，才能帮你发消息"
+        "android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION" ->
+            "需要位置权限，才能帮你找附近的东西"
+        "android.permission.CAMERA" ->
+            "需要相机权限，才能帮你拍照或扫码"
+        "android.permission.RECORD_AUDIO" ->
+            "需要麦克风权限，才能听你说话"
+        "android.permission.POST_NOTIFICATIONS" ->
+            "需要通知权限，才能把提醒发给你"
+        else -> "「$label」需要先开启相关权限，去设置里打开后就能继续"
     }
 
     private fun fail(request: ActionRequest, reason: String): ActionResult.Failed {

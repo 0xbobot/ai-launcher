@@ -244,10 +244,10 @@ class MainActivity : FragmentActivity() {
                     // 简单起见，发一个本地事件让 MainScreen 显示
                     checkUpdateResult.value = info
                 } else {
-                    IslandToasts.show("已是最新版本")
+                    IslandToasts.show("已经是最新版本了")
                 }
             } catch (_: Exception) {
-                IslandToasts.show("检查失败，请稍后重试")
+                IslandToasts.show("检查失败，请稍后再试")
             }
         }
     }

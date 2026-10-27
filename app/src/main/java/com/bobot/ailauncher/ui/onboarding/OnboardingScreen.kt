@@ -340,7 +340,7 @@ private fun StepDone(onFinish: () -> Unit) {
             // F-11：旧文案宣称「能力视图都已准备好」——能力页早在 v0.14 单页化时
             // 已移除，引导在介绍不存在的功能；按现行表面重写（审计定案口径：
             // 意图入口 + TODAY 简报 + 应用中心）
-            text = "意图入口、TODAY 简报、应用中心都已准备好。\n按 Home 键，随时回到你的 AI 空间。",
+            text = "问七仔、TODAY 简报、应用中心都已准备好。\n按 Home 键，随时回到你的 AI桌面。",
             fontSize = 16.sp,
             color = AILauncherColors.current.Body,
             textAlign = TextAlign.Center
