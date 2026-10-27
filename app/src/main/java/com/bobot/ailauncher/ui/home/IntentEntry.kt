@@ -6,12 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -462,7 +459,8 @@ fun IntentCapsuleField(
                             // 下深色 Hint 中灰约 0xFF6B6560 在其上对比度仅约 1.1:1、
                             // 几乎看不见），占位改 Title 降 alpha——深浅两档在玻璃
                             // 上都可读；应用中心变体（实心底）沿用 Hint，一字不动。
-                            color = if (solidBackground) AILauncherColors.current.Title.copy(alpha = 0.6f)
+                            // 2026-10-27 暗黑可读：深色 Title 只降到 0.85（0.6 在玻璃上发虚），浅色仍 0.6。
+                            color = if (solidBackground) AILauncherColors.current.Title.copy(alpha = if (AILauncherColors.current.isDark) 0.85f else 0.6f)
                             else AILauncherColors.current.Hint,
                             // R3-A：大字体下占位文案单行省略，不溢出胶囊
                             maxLines = 1,
@@ -628,8 +626,8 @@ fun IntentEntry(
     // HomeScreen 持有的同一过渡状态与单一退出入口。传 perchTransition
     // 时宠物位移／alpha／影子走共享 Animatable（进出同一弹簧、退态复用
     // 进态冻结位移量）；不传时走本函数内旧的本地 Animatable（独立使用
-    // 时行为与 355 一致）。onExitFocusRequest 是卡片角 ✕ 一键退出（D）
-    // 也要调的唯一入口：✕ 只调它，不自写退出动画、不直接改
+    // 时行为与 355 一致）。onExitFocusRequest 是底部收起一键退出（D）
+    // 也要调的唯一入口：收起只调它，不自写退出动画、不直接改
     // intentInputMode、不清焦点不收键盘（收键盘／翻转／复位全归
     // 该入口一路）；HomeScreen 传入 C 的退出入口实现，默认回落到
     // onRequestExitInput。
@@ -1097,22 +1095,17 @@ fun IntentEntry(
         // 位置由流式布局保证，不再依赖胶囊实测高。七仔仍栖坐卡片上沿
         // （见面板外覆盖层，与 Dock 上沿同一套坐法），打字后示例让位、
         // 七仔仍在场；胶囊本体行为不动。
-        // 示例行淡出（设计 §5 打字态）：开始输入（showExamplesRow 翻 false）
-        // 即淡出动画——家族 FadeQuick 150ms＋EaseOutCubic：进场 fadeIn、
-        // 出场 fadeOut + shrinkVertically 同步一次完成，退场后行移除、
-        // 不留空带、不留占位跳变第二步；
-        // 淡出只动示例行本身，不动面板 Shape/肩线（B 的活）、不动进态路径
-        // （面板进出仍由 HomeScreen 的 fade-only 承担，310 教训不变）。
-        // 点按仍为整句填入输入框、不直接提交（见 pickExample）；示例与
-        // 结果共用输入框下方槽位心智、互斥不并列（showDeck 与结果槽位
-        // 的互斥规则见上，专注态只是把它收进卡片内）。
+        // 示例行↔命中应用离散切换（2026-10-27 区块原则）：两区各为整体、
+        // 同帧离散切换——打字即 showDeck 翻 false、showDeckApps 翻 true，
+        // 同一组合帧内示例行整行移除、结果槽位整块出现，无动画、无重叠、
+        // 无间隙；旧 fadeIn／fadeOut＋shrinkVertically 150ms 是闪烁根因
+        // （示例半透明淡出＋高度动画期间结果已出现、卡片高度逐帧变化，
+        // 逐字打字时动画反复启停致抖动），已删。卡片高度随切换同帧单步
+        // 变化（无中间高度、无动画 resize）。点按仍为整句填入输入框、
+        // 不直接提交（见 pickExample）；示例与结果互斥不并列（showDeck
+        // 与结果槽位的互斥规则见上，专注态只是把它收进卡片内）。
         val showExamplesRow = showDeck && showDeckExamples && deckExamples.isNotEmpty()
-        AnimatedVisibility(
-            visible = showExamplesRow,
-            enter = fadeIn(tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)),
-            exit = fadeOut(tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)) +
-                shrinkVertically(tween(PetMotion.FadeQuick, easing = MotionTokens.Easing))
-        ) {
+        if (showExamplesRow) {
             // 推荐问主行：从面板内容左缘起横滚；滤空时整行隐藏（按已装能力
             // 过滤后池子可能为空，不留空白占位）
             DeckExamplesRow(
@@ -1217,6 +1210,40 @@ fun IntentEntry(
             }
         }
         } // 结果槽位 Column
+        // ---- 意图区底部收起（2026-10-27，Bob：卡片角 ✕ 太硬、挤示例行） ----
+        // 角 ✕ 已删，收起改到底部居中软胶囊＋下箭头；面板 Column 末项、
+        // 卡片内底边之上，悬浮／停靠键盘都不盖住它（面板整体坐键盘顶
+        // 之上）；竖屏／横屏同款（面板 Column 共用）；热区 ≥48dp、走
+        // 同一退出入口 onExitFocusRequest；TalkBack 读“收起”。
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag("intent_focus_exit")
+                .clickable { onExitFocusRequest() },
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(AILauncherColors.current.Divider)
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = AILauncherColors.current.Title,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = "收起",
+                    fontSize = 13.sp,
+                    color = AILauncherColors.current.Title
+                )
+            }
+        }
       } // 一体化面板 Column
       // ---- 覆盖层：接触影 + 宠物 + 动作清单（面板之后画、前面图层，不 clip） ----
       // 图层顺序即绘制顺序：面板 → 接触影 → 宠物 → 动作清单。覆盖层用
@@ -1321,39 +1348,6 @@ fun IntentEntry(
                     )
             )
         }
-        // ---- 输入态专注 D·✕ 一键退出（卡片角，48dp 热区） ----
-        // 落位：覆盖层 TopEnd、顶边下 14dp（= 面板内容顶边距），圆心落在
-        // 示例行高度中心，与接合原型图“卡片角 ✕”同位；前面图层最后画、
-        // 恒在最上，不被示例行/宠物盖住。视觉沿用 StatusStrip 关闭钮同款
-        // （48dp 外框可点、内 32dp 圆、16dp ✕ 图标），不新发明样式。
-        // 点按只调单一退出入口 onExitFocusRequest：不自写退出动画、不直接
-        // 改 intentInputMode、不清焦点、不收键盘——收键盘／翻转／复位全归
-        // 该入口一路（竖屏即时翻转、横屏场景换）。注意：示例行横滚末段会从 ✕ 下方
-        // 经过，行尾留白已在 DeckExamplesRow 加到 64dp（✕ 48dp + 16dp
-        // 间隙），末项可完整滚出 ✕ 覆盖区再点。
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(y = 14.dp)
-                .size(48.dp)
-                .testTag("intent_focus_exit")
-                .clickable { onExitFocusRequest() },
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = "退出输入",
-                    tint = AILauncherColors.current.Hint,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
       }
       } // 外层 Box（面板 + 前面图层宠物 + 动作清单）
     }
@@ -1436,7 +1430,8 @@ private fun LocalResultsBar(
         Text(
             text = "七仔找到了这些，点一下打开",
             fontSize = 12.sp,
-            color = AILauncherColors.current.Hint,
+            // 2026-10-27 暗黑可读：深色 Hint 在深色玻璃上近隐形，改 Body；浅色不动。
+            color = if (AILauncherColors.current.isDark) AILauncherColors.current.Body else AILauncherColors.current.Hint,
             style = TextStyle(
                 lineHeight = 15.sp,
                 platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -1481,7 +1476,8 @@ fun ResultAppItem(
         Text(
             text = app.label.toString(),
             fontSize = 11.sp,
-            color = AILauncherColors.current.Body,
+            // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
+            color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
@@ -1530,7 +1526,8 @@ private fun StatusStrip(
         Text(
             text = text,
             fontSize = 13.sp,
-            color = AILauncherColors.current.Body,
+            // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
+            color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             // 短时小条：最多 3 行，超长截断，保证结果条高度有上限（见 RESULT_BAR_MAX_HEIGHT）
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
@@ -1594,7 +1591,8 @@ private fun PlanningStrip(
         Text(
             text = "七仔想想中…",
             fontSize = 13.sp,
-            color = AILauncherColors.current.Body,
+            // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
+            color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
@@ -1693,14 +1691,16 @@ private fun PermissionExplainCard(
         Text(
             text = message,
             fontSize = 13.sp,
-            color = AILauncherColors.current.Body
+            // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
+            color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
         ) {
             TextButton(onClick = onDismiss) {
-                Text(text = "暂不", color = AILauncherColors.current.Hint, fontSize = 13.sp)
+                // 2026-10-27 暗黑可读：深色 Hint 在深色玻璃上近隐形，改 Body；浅色不动。
+                Text(text = "暂不", color = if (AILauncherColors.current.isDark) AILauncherColors.current.Body else AILauncherColors.current.Hint, fontSize = 13.sp)
             }
             TextButton(onClick = onGoSettings) {
                 Text(
