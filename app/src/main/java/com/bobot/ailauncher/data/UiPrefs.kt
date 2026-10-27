@@ -8,7 +8,6 @@ object UiPrefs {
     private const val PREFS = "ui_prefs"
     private const val KEY_DOCK_ROWS = "dock_rows"
     private const val KEY_DOCK_VISIBLE = "dock_visible"
-    private const val KEY_DOCK_HIDE_WARNED = "dock_hide_warned"
     private const val KEY_DOCK_SMART_SORT = "dock_smart_sort"
     private const val KEY_DOCK_PINNED = "dock_pinned"
     private const val KEY_ROW_ACTIONS_GUIDE_SEEN = "row_actions_guide_seen"
@@ -52,7 +51,7 @@ object UiPrefs {
             .edit().putInt(KEY_DOCK_ROWS, rows.coerceIn(1, 2)).apply()
     }
 
-    /** Dock 是否显示（v0.16：隐藏的唯一入口是 D1 右滑+确认框，恢复走设置页开关） */
+    /** Dock 是否显示（2026-10-27 手势清理起隐藏手势入口已删除，恢复走首页上滑叫回） */
     fun getDockVisible(context: Context): Boolean {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_DOCK_VISIBLE, true)
@@ -61,17 +60,6 @@ object UiPrefs {
     fun setDockVisible(context: Context, visible: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_DOCK_VISIBLE, visible).apply()
-    }
-
-    /** 是否已勾选"隐藏 Dock 不再提醒" */
-    fun getDockHideWarned(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_DOCK_HIDE_WARNED, false)
-    }
-
-    fun setDockHideWarned(context: Context, warned: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_DOCK_HIDE_WARNED, warned).apply()
     }
 
     /**

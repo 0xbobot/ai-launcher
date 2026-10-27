@@ -133,14 +133,14 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  *
  * 手势签名（全 App 统一，v0.14 纠正）：左滑 = 更多，右滑 = 更少
  * - D1 —提拉宠物↑→ D2（2026-10-27 提拉换档：边提边膨胀、过阈值才切，
- *   可中途取消；横屏仍走左拖，见面板手势）；D2 —左滑→ D3（中途触发，不动）；
- *   D3 —右滑→ D2 —右滑→ D1
- * - D2 —提拉宠物↓→ D1（提拉换档；横屏仍走右拖）；D1 右滑 → 隐藏确认（入口之一，不动）
- * - v0.16：隐藏的唯一入口是 D1 右滑（弹确认框，"不再提醒"可记）；D1 下滑不再隐藏；
- *   点按卡片外部不再隐藏（D2→D1 收一档，D1 无动作）
+ *   可中途取消；横竖屏同语义）；D3 —右滑→ 记住的行数
+ * - D2 —提拉宠物↓→ D1（提拉换档；横竖屏同语义）
  * - 上滑：隐藏→记住的行数（首页上滑）；D1/D2→D3（直接全屏）
  * - 下滑：D3→D2→D1（逐级收回）；点按卡片外部 → D2 收回 D1
- * - v0.57.0 长按 Dock → 隐藏（与 D1 右滑并存），拖拽批不动（隐藏入口，不是切换触发）
+ * - 2026-10-27 手势清理（Bob 12:20 确认）：Dock 面板长按、左右滑逻辑
+ *   全部删除——长按面板不再出隐藏确认、D1 右滑不再出隐藏确认、
+ *   D2 左滑不再进 D3（D3 只剩上滑进）；隐藏手势入口就此没有，
+ *   已隐藏的 Dock 仍可由首页上滑叫回。
  */
 enum class DockState { Hidden, D1, D2, D3 }
 
@@ -342,7 +342,6 @@ fun PullUpDock(
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
     onD3SwipeUpToHome: () -> Unit,
-    onHideDockRequest: () -> Unit,
     onOpenSettings: () -> Unit,
     // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页并提交协调器（HomeHost 提供）
     onAskQizai: (String) -> Unit = {},
@@ -372,7 +371,6 @@ fun PullUpDock(
     val onStateChangeState = rememberUpdatedState(onStateChange)
     val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
     val onD3SwipeUpToHomeState = rememberUpdatedState(onD3SwipeUpToHome)
-    val onHideDockRequestState = rememberUpdatedState(onHideDockRequest)
     val onAskQizaiState = rememberUpdatedState(onAskQizai)
 
     // v0.68.95（F-03）：清单改挂 AppCatalog 仓库快照——此前无 key 的 remember{}
@@ -626,22 +624,12 @@ fun PullUpDock(
                 },
                 label = "dockCard"
             ) {
-                val hThreshPx = with(density) { 48.dp.toPx() }
                 val vThreshPx = with(density) { 72.dp.toPx() }
-                // D1/D2 横拖跟手量（2026-10-27 拖拽代滑动批，提拉换档批起
-                // 仅横屏生效）：内容跟手量（px），卡片本体与宠物栖坐不动，
-                // 只平移 AnimatedContent；松手弹簧回落到 0。
-                // 跟手钳制 32dp（阻尼 0.8，见 DockDragSwitch）。竖屏跟手恒 0
-                // （横拖已删，换档走提拉 morph，见 LiftTierSwitch）。
-                val tierFollowClampPx = with(density) { 32.dp.toPx() }
-                val tierDragScope = rememberCoroutineScope()
-                val tierFollowAnim = remember { Animatable(0f) }
                 // v0.16.1：底部系统手势区高度（导航条/手势区），落在该区域内的拖拽起点不抢——
                 // 让系统处理底部左右滑（切最近应用）、底部上滑（回桌面/最近任务）
                 val sysGestureBottomPx = systemGestureBottomPx()  // 批B ⑧：收口到 Insets helper（原内联读 WindowInsets.systemGestures）
                 val dockBottomPadPx = with(density) { 16.dp.toPx() }
                 // v0.27.1：去底（Bob 选一）——图标直接浮在壁纸上，无卡片无阴影
-                // v0.57.0：长按 Dock → 隐藏（与 D1 右滑并存）
                 // v0.68.58（Bob）：Dock 默认无背景——按压时才显示圆角底（触摸反馈）
                 val dockPressSource = remember { MutableInteractionSource() }
                 val dockPressed by dockPressSource.collectIsPressedAsState()
@@ -715,13 +703,13 @@ fun PullUpDock(
                 } else {
                     dockPanelHeight
                 }
-                // 提拉换档接线（2026-10-27）：dragBody 字段为普通 var，
-                // 此处赋值幂等、不触发重组；横屏门禁（横屏仍走横拖，
-                // 见面板手势）与基底档取最新值（rememberUpdatedState）。
+                // 提拉换档接线（2026-10-27；2026-10-27 手势清理起横竖屏
+                // 一致、横屏门禁已删除，横屏提拉与竖屏同语义）：dragBody
+                // 字段为普通 var，此处赋值幂等、不触发重组；基底档取最新值
+                //（rememberUpdatedState）。
                 val stateLatest = rememberUpdatedState(state)
-                val isLandscapeLatest = rememberUpdatedState(isLandscapeDock)
                 dragBody.onLiftStart = {
-                    if (!isLandscapeLatest.value) liftState.onDragStart(stateLatest.value)
+                    liftState.onDragStart(stateLatest.value)
                 }
                 dragBody.onLiftMove = { up, down -> liftState.onDragMove(up, down) }
                 dragBody.onLiftEnd = {
@@ -823,45 +811,21 @@ fun PullUpDock(
                             // 面板空白点按：平时无动作；表演清单打开时点空白
                             // 即关闭清单（点外关闭的 Dock 侧一半，另一半是
                             // 外层透明层；图标点按是子节点 clickable，不走这里）。
-                            onClick = { if (petActionsVisible) onPetActionsVisibleChange(false) },
-                            onLongClick = { onHideDockRequestState.value() }
+                            onClick = { if (petActionsVisible) onPetActionsVisibleChange(false) }
                         )
                         .pointerInput(state, sysGestureBottomPx, dockBottomPadPx) {
                             var accumX = 0f
                             var accumY = 0f
                             var fired = false
                             var inSysGestureZone = false
-                            // D1/D2 横拖切换（2026-10-27 拖拽代滑动批，2026-10-27
-                            // 提拉换档批起仅横屏保留）：水平方向一旦确立即锁定，
-                            // 本次手势不再判竖直；拖拽中只跟手、不触发，松手再确认。
-                            // 竖屏 D1↔D2 横拖已删除（改走提拉宠物，见 LiftTierSwitch），
-                            // 本段竖屏下不锁定、不跟手、不确认。
-                            var horizontalLocked = false
-                            fun resetFollow() {
-                                tierDragScope.launch { tierFollowAnim.snapTo(0f) }
-                            }
-                            fun updateFollow() {
-                                val follow = dragTierFollowPx(state, accumX, tierFollowClampPx)
-                                tierDragScope.launch { tierFollowAnim.snapTo(follow) }
-                            }
-                            fun springBack() {
-                                tierDragScope.launch {
-                                    tierFollowAnim.animateTo(
-                                        0f,
-                                        animationSpec = spring(
-                                            stiffness = Spring.StiffnessMediumLow,
-                                            dampingRatio = 0.9f
-                                        )
-                                    )
-                                }
-                            }
+                            // 面板手势（2026-10-27 手势清理后）：只剩上滑／下滑；
+                            // 长按与左右滑逻辑全部删除（长按面板、D1 右滑、D2 左滑
+                            // 均无动作；D1↔D2 换档走提拉宠物，见 LiftTierSwitch）。
                             detectDragGestures(
                                 onDragStart = { start ->
                                     accumX = 0f
                                     accumY = 0f
                                     fired = false
-                                    horizontalLocked = false
-                                    resetFollow()
                                     // 起点在底部系统手势区内（卡片底部 dockBottomPadPx 之上、
                                     // 屏幕底部 sysGestureBottomPx 之内）→ 本次不消费、不触发，交还系统
                                     val dangerPx = sysGestureBottomPx - dockBottomPadPx
@@ -874,11 +838,6 @@ fun PullUpDock(
                                     accumX += dragAmount.x
                                     accumY += dragAmount.y
                                     if (fired) return@detectDragGestures
-                                    // 已锁定水平：只更新跟手，不再判竖直（防斜拖中途跳 D3）。
-                                    if (horizontalLocked) {
-                                        updateFollow()
-                                        return@detectDragGestures
-                                    }
                                     val ax = abs(accumX)
                                     val ay = abs(accumY)
                                     val go = onStateChangeState.value
@@ -886,51 +845,15 @@ fun PullUpDock(
                                     //（Bob：任何时候从底部上滑都要能回桌面主页）
                                     if (ay > vThreshPx && accumY < 0) {
                                         fired = true
-                                        resetFollow()
                                         if (state == DockState.D3) onD3SwipeUpToHomeState.value()
                                         else go(DockState.D3)
-                                    } else if (ax > hThreshPx && ax >= ay) {
-                                        // 水平方向确立：D2 左滑 → D3、D1 右滑 → 隐藏确认
-                                        // 仍沿用旧的中途触发（非 D1/D2 切换，不动）；
-                                        // D1↔D2 横拖仅横屏保留（见 DockDragSwitch），
-                                        // 竖屏改走提拉宠物（LiftTierSwitch）：本分支竖屏
-                                        // 下不锁定、不跟手——面板横拖不再切换档位。
-                                        if (state == DockState.D2 && accumX < 0) {
-                                            fired = true
-                                            resetFollow()
-                                            go(DockState.D3)
-                                        } else if (state == DockState.D1 && accumX > 0) {
-                                            fired = true
-                                            resetFollow()
-                                            onHideDockRequestState.value()
-                                        } else if (isLandscapeLatest.value) {
-                                            horizontalLocked = true
-                                            updateFollow()
-                                        }
                                     } else if (ay > vThreshPx && ay > ax) {
                                         fired = true
-                                        resetFollow()
                                         // 下滑 → 收一档（D1 下滑不再隐藏）
                                         if (state == DockState.D2) go(DockState.D1)
-                                    } else {
-                                        // 方向未确立：横屏水平倾向时先跟手（竖直倾向不跟手，
-                                        // 防竖拖带水平抖动）；竖屏不跟手（横拖已删）；
-                                        // 松手时低于阈值即回落。
-                                        if (ax >= ay && isLandscapeLatest.value) updateFollow() else resetFollow()
                                     }
                                 },
-                                onDragEnd = {
-                                    // 拖拽松手确认：仅水平锁定且净位移过阈值才切换；
-                                    // 低于阈值、拖回原方向一律回落（可中途取消）。
-                                    if (horizontalLocked) {
-                                        val target = resolveDragTierTarget(state, accumX, hThreshPx)
-                                        if (target != null) onStateChangeState.value(target)
-                                    }
-                                    springBack()
-                                },
-                                onDragCancel = {
-                                    springBack()
-                                }
+                                // 手势清理后松手无动作（横拖跟手与松手确认已随横拖删除）
                             )
                         },
                     // 横屏首页修：D2 网格盒（270dp）比面板内容宽（312dp）窄，横屏下在面板内居中；
@@ -943,8 +866,8 @@ fun PullUpDock(
                     // 一二档内容：静止期 crossfade + scale，卡片高度弹簧跟随；
                     // 提拉换档会话期改走 morph 覆盖层（DockLiftMorph），
                     // AnimatedContent 不上场、故提交时无二次 crossfade。
-                    // 横拖跟手（仅横屏）：只平移内容（卡片本体与宠物栖坐不动，
-                    // 不碰布局尺寸）；松手弹簧回落到 0，切换本身仍走 crossfade。
+                    // 横拖跟手已随横拖删除（2026-10-27 手势清理）；内容切换
+                    // 只走静止期 crossfade + scale，提拉期走 morph 覆盖层。
                     if (liftState.sessionActive) {
                         DockLiftMorph(
                             progress = liftState.progress,
@@ -960,9 +883,6 @@ fun PullUpDock(
                         )
                     } else {
                     AnimatedContent(
-                        modifier = Modifier.graphicsLayer {
-                            translationX = tierFollowAnim.value
-                        },
                         targetState = state,
                         transitionSpec = {
                             (fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
@@ -1262,7 +1182,8 @@ private fun DockGrid10(
  * 即内层内容盒高：面板 16dp 底边距＋内层 32dp 竖直边距已扣）；
  * Row4 自然尺寸淡出、Grid10 从 contentH/136 缩放淡入——两布局始终
  * 贴合 morph 高、无裁剪、无新增元素；静止期不渲染（走 AnimatedContent）。
- * 横屏不启动会话（接线门禁），isLandscape 仅作对称透传。
+ * 横竖屏一致（2026-10-27 手势清理起横屏提拉与竖屏同语义）：
+ * isLandscape 只决定内容盒宽度（横屏包内容、竖屏满宽）。
  */
 @Composable
 private fun DockLiftMorph(

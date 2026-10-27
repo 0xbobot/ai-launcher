@@ -14,10 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.Color
@@ -119,12 +116,11 @@ fun MainScreen() {
         }
         // 首页：不做事（消费掉返回键）
     }
-    var showHideDockDialog by remember { mutableStateOf(false) }
-
     // v0.15.1：Dock 状态机统一出口
-    // - 记住行数：D1 左滑→D2 时记 2，D2 右滑→D1 时记 1
+    // - 记住行数：D1 提拉→D2 时记 2，D2 提拉→D1 时记 1
     // - 隐藏上滑唤出 / D3 右滑返回 → 直接回到记住的行数（D1/D2）
-    // - v0.16：隐藏的唯一入口是 D1 右滑（经 requestHideDock 确认）；D1 下滑/点按外部不再隐藏
+    // - 2026-10-27 手势清理：隐藏手势入口全部删除（长按面板、D1 右滑）；
+    //   D1 下滑/点按外部不再隐藏；恢复走首页上滑叫回
     // （v0.12 的首次 peek 引导已删除：默认显示，不需要了）
     fun goDock(requested: DockState, fromD3SwipeRight: Boolean = false) {
         val cur = dockState
@@ -136,17 +132,6 @@ fun MainScreen() {
         if (cur == DockState.D1 && target == DockState.D2) UiPrefs.setDockRows(context, 2)
         if (cur == DockState.D2 && target == DockState.D1) UiPrefs.setDockRows(context, 1)
         dockState = target
-    }
-
-    fun doHideDock() {
-        UiPrefs.setDockVisible(context, false)
-        dockVisible = false
-        dockState = DockState.Hidden
-    }
-
-    fun requestHideDock() {
-        if (UiPrefs.getDockHideWarned(context)) doHideDock()
-        else showHideDockDialog = true
     }
 
     // v0.16：设置页"显示 Dock"开关 → 恢复到记住的行数
@@ -187,15 +172,7 @@ fun MainScreen() {
                         dockState = DockState.Hidden
                     }
                 },
-                onHideDockRequest = { requestHideDock() },
                 onOpenSettings = { navController.navigate("settings") },
-                showHideDockDialog = showHideDockDialog,
-                onHideDockDialogDismiss = { showHideDockDialog = false },
-                onHideDockConfirm = { noRemind ->
-                    if (noRemind) UiPrefs.setDockHideWarned(context, true)
-                    showHideDockDialog = false
-                    doHideDock()
-                }
             )
         }
         composable("settings") {
@@ -217,11 +194,7 @@ private fun HomeHost(
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
     onD3SwipeUpToHome: () -> Unit,
-    onHideDockRequest: () -> Unit,
-    onOpenSettings: () -> Unit,
-    showHideDockDialog: Boolean,
-    onHideDockDialogDismiss: () -> Unit,
-    onHideDockConfirm: (Boolean) -> Unit
+    onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
     // R2 UI（10-21 新规格）：意图协调器提到 HomeHost 持有——首页胶囊与应用中心「问七仔」
@@ -433,7 +406,6 @@ private fun HomeHost(
             onD3SwipeRight = onD3SwipeRight,
             onD3SwipeUpToHome = onD3SwipeUpToHome,
             modifier = Modifier.graphicsLayer { alpha = dockAlpha },
-            onHideDockRequest = onHideDockRequest,
             onOpenSettings = onOpenSettings,
             // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页 + 提交协调器
             onAskQizai = onAskQizai,
@@ -643,40 +615,8 @@ private fun HomeHost(
                 com.bobot.ailauncher.MainActivity.checkUpdateResult.value = null
             })
         }
-        // v0.16：D1 右滑隐藏确认框（"不再提醒"可记）
-        if (showHideDockDialog) {
-            var noRemind by remember { mutableStateOf(false) }
-            AlertDialog(
-                onDismissRequest = onHideDockDialogDismiss,
-                title = { Text("隐藏 Dock", fontSize = 16.sp) },
-                text = {
-                    Column {
-                        Text(
-                            text = "隐藏后，在首页上滑就能把它叫回来。",
-                            fontSize = 14.sp,
-                            color = AILauncherColors.current.Body
-                        )
-                        Spacer(modifier = Modifier.padding(top = 8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = noRemind,
-                                onCheckedChange = { noRemind = it }
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "不再提醒", fontSize = 13.sp, color = AILauncherColors.current.Body)
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { onHideDockConfirm(noRemind) }) {
-                        Text("隐藏", color = AILauncherColors.current.Accent)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = onHideDockDialogDismiss) { Text("取消") }
-                }
-            )
-        }
+        // 2026-10-27 手势清理：隐藏确认框随隐藏手势入口一并删除
+        //（长按面板、D1 右滑两个触发均已删除，弹窗就此无调用方）。
         // v0.68.32：盲操扇形——临时操作层级最高，在 MainScreen 最顶层绘制（盖住 Dock/卡片/弹窗）
         // v0.68.42：Dismissing（收起 120ms 内收+淡出）共用顶层
         // 2026-10-27 fan-quick-services 批：PhotoFlash 应用内快门闪作废（拍照直开系统相机）
