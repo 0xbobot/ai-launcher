@@ -94,6 +94,19 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * 先弹 App 内说明卡（讲清为什么需要这个权限），再放"去开启"跳系统设置；
  * 看过一次后不再弹整卡；点了去开启仍没授权，下次再轻提醒一次，之后回落到 Toast，不死缠。
  */
+/**
+ * v0.68.169（盲操扇形找回）：盲操手势仲裁谓词——手势起点落在意图卡片
+ * 矩形或 Dock 矩形内时不转发盲操。纯函数，单测锁死。374 批的教训：
+ * 谓词本身没错，错的是传入的 Dock 矩形——PullUpDock 外层 modifier 根为
+ * fillMaxSize，捕获的整屏矩形使本谓词对一切起点都返回 true、扇形全屏失效。
+ */
+internal fun blindStartExcluded(
+    start: androidx.compose.ui.geometry.Offset,
+    intentRect: androidx.compose.ui.geometry.Rect?,
+    dockRect: androidx.compose.ui.geometry.Rect?,
+): Boolean =
+    (intentRect?.contains(start) == true) || (dockRect?.contains(start) == true)
+
 @Composable
 fun HomeScreen(
     onOpenAppDrawer: () -> Unit,
@@ -576,8 +589,7 @@ fun HomeScreen(
                             b.bottom - rootPosInRoot.y
                         )
                     }
-                    return (intentLocal?.contains(start) == true) ||
-                        (dockLocal?.contains(start) == true)
+                    return blindStartExcluded(start, intentLocal, dockLocal)
                 }
                 detectDragGestures(
                     onDragStart = { start ->

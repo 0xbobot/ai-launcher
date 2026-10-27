@@ -42,8 +42,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.input.pointer.pointerInput
@@ -281,6 +279,9 @@ private fun HomeHost(
     // v0.68.165（瘦条批）：Dock 精确 bounds（boundsInRoot）——供 HomeScreen
     // 盲操手势仲裁：Dock 区内起始手势不转发盲操；D3 时置 null（应用中心
     // 全屏自有手势层，HomeScreen 根手势本就接不到事件，null 更稳妥）。
+    // v0.68.169（盲操扇形找回）：bounds 来源改单元回调——旧外层 modifier
+    // 的 onGloballyPositioned 挂在 fillMaxSize 根上，捕获整屏矩形，致仲裁
+    // 全屏排除、扇形失效；单元 Box（面板＋宠物）矩形才是 Dock 区。
     var dockBoundsInRoot by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     // v0.68.35：旧自定义标签已作废——段列表自带于 Selecting.segments
     // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位），收起后恢复
@@ -412,12 +413,15 @@ private fun HomeHost(
             onStateChange = onStateChange,
             onD3SwipeRight = onD3SwipeRight,
             onD3SwipeUpToHome = onD3SwipeUpToHome,
-            modifier = Modifier.graphicsLayer { alpha = dockAlpha }
-                .onGloballyPositioned {
-                    dockBoundsInRoot =
-                        if (dockState == DockState.D1 || dockState == DockState.D2) it.boundsInRoot()
-                        else null
-                },
+            modifier = Modifier.graphicsLayer { alpha = dockAlpha },
+            // v0.68.169（盲操扇形找回）：Dock bounds 改由单元回调上报——
+            // 旧外层 modifier 的 onGloballyPositioned 挂在 fillMaxSize 根上，
+            // 捕获的是整屏矩形，致仲裁全屏排除、扇形失效。D3 显式 null
+            // 的旧规则保留（单元卸载时回调本身也会报 null，双保险）。
+            onDockUnitBoundsChange = {
+                dockBoundsInRoot =
+                    if (dockState == DockState.D1 || dockState == DockState.D2) it else null
+            },
             onOpenSettings = onOpenSettings,
             // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页 + 提交协调器
             onAskQizai = onAskQizai,
