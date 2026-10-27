@@ -42,6 +42,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.input.pointer.pointerInput
@@ -276,6 +278,10 @@ private fun HomeHost(
     var blindFanState by remember { mutableStateOf<BlindUiState>(BlindUiState.Hidden) }
     // v0.68.64：controller 引用（HomeScreen 上报；退出编辑态时调 exitEditMode 清钉住）
     var blindCtlRef by remember { mutableStateOf<BlindCaptureController?>(null) }
+    // v0.68.165（瘦条批）：Dock 精确 bounds（boundsInRoot）——供 HomeScreen
+    // 盲操手势仲裁：Dock 区内起始手势不转发盲操；D3 时置 null（应用中心
+    // 全屏自有手势层，HomeScreen 根手势本就接不到事件，null 更稳妥）。
+    var dockBoundsInRoot by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     // v0.68.35：旧自定义标签已作废——段列表自带于 Selecting.segments
     // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位），收起后恢复
     val dockAlpha by animateFloatAsState(
@@ -378,6 +384,7 @@ private fun HomeHost(
             },
             // v0.68.64：拿 controller 引用（退出编辑态时清钉住）
             onBlindController = { blindCtlRef = it },
+            dockBoundsInRoot = dockBoundsInRoot,
             blindDockZoneDp = when (dockState) {
                 DockState.D1 -> 112f
                 DockState.D2 -> 144f
@@ -405,7 +412,12 @@ private fun HomeHost(
             onStateChange = onStateChange,
             onD3SwipeRight = onD3SwipeRight,
             onD3SwipeUpToHome = onD3SwipeUpToHome,
-            modifier = Modifier.graphicsLayer { alpha = dockAlpha },
+            modifier = Modifier.graphicsLayer { alpha = dockAlpha }
+                .onGloballyPositioned {
+                    dockBoundsInRoot =
+                        if (dockState == DockState.D1 || dockState == DockState.D2) it.boundsInRoot()
+                        else null
+                },
             onOpenSettings = onOpenSettings,
             // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页 + 提交协调器
             onAskQizai = onAskQizai,

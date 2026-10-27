@@ -106,6 +106,10 @@ fun HomeScreen(
     onBlindController: (BlindCaptureController) -> Unit = {},
     // v0.68.32：底部 Dock 区高度（dp），用于扇形圆心钳制
     blindDockZoneDp: Float = 0f,
+    // v0.68.165（瘦条批）：Dock 精确 bounds（MainScreen 侧 onGloballyPositioned
+    // 捕获，D3 时传 null）——盲操手势仲裁用：Dock 是前景 UI 不是主页背景，
+    // 其区内起始的手势不转发盲操（Dock 横滑已随 370 删除，扇形不再认 Dock 区）。
+    dockBoundsInRoot: androidx.compose.ui.geometry.Rect? = null,
     // R2 UI：意图入口"去设置"导航（无 Key 时引导去配大模型 Key）
     onOpenSettings: () -> Unit = {},
     // R2 UI（10-21 新规格）：意图状态与回调——协调器由 HomeHost 持有（应用中心「问七仔」共用），
@@ -472,14 +476,49 @@ fun HomeScreen(
             .pointerInput(blindCtl) {
                 var totalX = 0f
                 var totalY = 0f
+                // v0.68.165（瘦条批）：盲操手势仲裁——盲操只认主页背景。
+                // 意图卡片区／Dock 区内起始的手势不转发盲操：示例行横滚、
+                // 卡片内点滑、Dock 区手势都不再弹扇形／直开相机；纵向
+                // fallback（上滑 D3／下滑通知）不受影响，仍按原逻辑走。
+                // 注意：pointerInput key 只有 blindCtl、块不重启，故参数原值
+                // 会 stale——意图挂载门读 intentInputModeLatest（见 201 行
+                // rememberUpdatedState），bounds／尺寸读 remember 态本身。
+                // 意图区挂载门与槽位可见性同口径（竖屏即 mode，横屏加
+                // landscapeSlotReady），防止退态滞留 bounds 误拦主页背景手势。
+                var gestureExcludedFromBlind = false
+                fun blindExclusionContains(start: androidx.compose.ui.geometry.Offset): Boolean {
+                    val intentMounted = intentInputModeLatest &&
+                        (homeSize.width <= homeSize.height || landscapeSlotReady)
+                    val intentLocal = if (intentMounted) intentBoundsInRoot?.let { b ->
+                        androidx.compose.ui.geometry.Rect(
+                            b.left - rootPosInRoot.x,
+                            b.top - rootPosInRoot.y,
+                            b.right - rootPosInRoot.x,
+                            b.bottom - rootPosInRoot.y
+                        )
+                    } else null
+                    val dockLocal = dockBoundsInRoot?.let { b ->
+                        androidx.compose.ui.geometry.Rect(
+                            b.left - rootPosInRoot.x,
+                            b.top - rootPosInRoot.y,
+                            b.right - rootPosInRoot.x,
+                            b.bottom - rootPosInRoot.y
+                        )
+                    }
+                    return (intentLocal?.contains(start) == true) ||
+                        (dockLocal?.contains(start) == true)
+                }
                 detectDragGestures(
-                    onDragStart = {
+                    onDragStart = { start ->
                         totalX = 0f; totalY = 0f
-                        blindCtl.onStart()
+                        gestureExcludedFromBlind = blindExclusionContains(start)
+                        if (!gestureExcludedFromBlind) blindCtl.onStart()
                     },
                     onDragEnd = {
-                        // v0.68.0：盲操消费掉的手势不再走纵向逻辑
-                        if (!blindCtl.onEnd()) {
+                        // v0.68.0：盲操消费掉的手势不再走纵向逻辑；仲裁排除的
+                        // 手势未起 blind 跟踪，不调 onEnd（恒按未消费走纵向逻辑）。
+                        val blindConsumed = !gestureExcludedFromBlind && blindCtl.onEnd()
+                        if (!blindConsumed) {
                             when {
                                 // 上滑 → D3（y 为负是上滑）
                                 totalY < -swipeThresholdPx -> {
@@ -506,13 +545,17 @@ fun HomeScreen(
                             }
                         }
                     },
-                    onDragCancel = { blindCtl.onCancel() },
+                    onDragCancel = { if (!gestureExcludedFromBlind) blindCtl.onCancel() },
                     onDrag = { change, dragAmount ->
-                        change.consume()
                         totalX += dragAmount.x
                         totalY += dragAmount.y
-                        // v0.68.17：盲操跟踪（首页背景左滑/右滑直接触发扇形，右滑为镜像）
-                        blindCtl.onMove(change, dragAmount, totalX, totalY, size)
+                        if (!gestureExcludedFromBlind) {
+                            change.consume()
+                            // v0.68.17：盲操跟踪（首页背景左滑/右滑直接触发扇形，右滑为镜像）
+                            blindCtl.onMove(change, dragAmount, totalX, totalY, size)
+                        }
+                        // 仲裁排除时不 consume：示例行横滚由行自身消费，
+                        // 卡片内点滑不受父层干扰。
                     }
                 )
             }
