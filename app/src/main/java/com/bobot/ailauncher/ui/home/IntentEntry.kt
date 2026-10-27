@@ -817,7 +817,7 @@ fun IntentEntry(
     // 事实源与路由器 hints 同源（CapabilityRegistry.executableCapabilities，
     // epoch 缓存：装/卸应用时 installedEpoch 变化触发重算，不轮询、
     // 不每帧重查 PackageManager）。注意不用 validIds() 全集——全集不过滤。
-    // 滤空兜底：空池时推荐行整行隐藏（见下 showDeck 条件），不留空白占位。
+    // 滤空兜底：空池时推荐行整行隐藏（见下 showSlimExamples 条件），不留空白占位。
     val deckExamples = remember(deckExamplePool, installedEpoch) {
         val executableIds = CapabilityRegistry.executableCapabilities(context).map { it.id }.toSet()
         SlotTemplates.filterExecutable(deckExamplePool, executableIds)
@@ -825,8 +825,8 @@ fun IntentEntry(
 
     // F 批·点选填充：点示例 = 把模板整句（exampleFillText：有默认值代入
     // 默认值、无默认值的槽位以 label 原文呈现）写入输入框，光标落文末、
-    // 焦点留在胶囊可继续编辑；文本变非空后甲板按 showDeck 规则让位给
-    // 本地结果（与现行衔接，不另设状态）。
+    // 焦点留在胶囊可继续编辑；瘦条常驻、本地结果在其下方出现
+    // （2026-10-27 瘦条批，不再以空文本隐藏推荐行）。
     fun pickExample(t: SlotTemplate) {
         val sentence = t.exampleFillText()
         onFieldValueChange(
@@ -835,13 +835,11 @@ fun IntentEntry(
     }
 
     val idleOrEditing = state is IntentUiState.Idle || state is IntentUiState.Editing
-    // 甲板可见：仅在聚焦 + 空文本时（打字后本地结果接管下方槽位，甲板
-    // 让位）。状态须为编辑系——思考/回复/追问/权限态在场时甲板收起，
-    // 不与结果槽位抢呈现。
-    // 竖屏一拍（本批）：推荐行与面板同门——showDeck 不再挂 sessionFocused
-    // （胶囊实际获得焦点才翻 true 的另一拍）；打字非空与非 idle／editing
-    // 态仍隐藏。sessionFocused 本身保留供其他用途。
-    val showDeck = idleOrEditing && text.isEmpty()
+    // 瘦条可见（2026-10-27 瘦条批，Bob：推荐问法要矮、贴输入框、打字
+    // 不隐藏）：编辑系（Idle／Editing）即常驻，不再以空文本为条件——
+    // 打字时瘦条仍在胶囊下方，命中应用在其下方离散出现（无动画）；
+    // 思考／回复／追问／权限态在场时瘦条收起，不与结果槽位抢呈现。
+    // sessionFocused 本身保留供其他用途。
     // 输入态专注 D·甲板应用行判定（2026-10-26 设计 §1：专注态默认隐藏，
     // 搜索命中时才显示）：甲板应用面即卡片内结果槽位的本地结果条
     // （DeckAppsBlock 已于 2026-10-25 随意图卡片统一整段删除，不恢复）。
@@ -1085,45 +1083,48 @@ fun IntentEntry(
         // 剩下的只有下方推荐问主行（能力问题，做事型推荐，不是应用推荐，
         // 不动）+ 胶囊 + 结果槽位。
 
-        // ---- 卡片内顺序（输入态专注设计 §3，D 接线）：示例行 → 12dp →
-        // 输入框（56dp pill、28dp 圆角，见 IntentCapsuleField）→ 结果槽位
-        // （12dp 间距、有内容时才出现）。面板 Column 的 spacedBy(12.dp)
-        // 即此两处 12dp，不另设间距。旧带盒（input_pet_band：示例行以
-        // -(capsuleHeight+8) 负偏移叠在胶囊上方、带高随行在场与否伸缩）
-        // 就此退役：它与 12dp 口径不符（行底距胶囊顶是 8dp），且负偏移
-        // 曾在 346 把行推出面板裁剪区；示例行改为面板 Column 的直排子项，
-        // 位置由流式布局保证，不再依赖胶囊实测高。七仔仍栖坐卡片上沿
-        // （见面板外覆盖层，与 Dock 上沿同一套坐法），打字后示例让位、
-        // 七仔仍在场；胶囊本体行为不动。
-        // 示例行↔命中应用离散切换（2026-10-27 区块原则）：两区各为整体、
-        // 同帧离散切换——打字即 showDeck 翻 false、showDeckApps 翻 true，
-        // 同一组合帧内示例行整行移除、结果槽位整块出现，无动画、无重叠、
-        // 无间隙；旧 fadeIn／fadeOut＋shrinkVertically 150ms 是闪烁根因
-        // （示例半透明淡出＋高度动画期间结果已出现、卡片高度逐帧变化，
-        // 逐字打字时动画反复启停致抖动），已删。卡片高度随切换同帧单步
-        // 变化（无中间高度、无动画 resize）。点按仍为整句填入输入框、
-        // 不直接提交（见 pickExample）；示例与结果互斥不并列（showDeck
-        // 与结果槽位的互斥规则见上，专注态只是把它收进卡片内）。
-        val showExamplesRow = showDeck && showDeckExamples && deckExamples.isNotEmpty()
-        if (showExamplesRow) {
-            // 推荐问主行：从面板内容左缘起横滚；滤空时整行隐藏（按已装能力
-            // 过滤后池子可能为空，不留空白占位）
-            DeckExamplesRow(
-                examples = deckExamples,
-                onPick = { pickExample(it) }
+        // ---- 卡片内顺序（2026-10-27 瘦条批，改输入态专注 §3 旧顺序）：
+        // 输入框（56dp pill、28dp 圆角，见 IntentCapsuleField）→ 8dp →
+        // 瘦条（推荐问法行）→ 12dp → 结果槽位（有内容时才出现）。胶囊与
+        // 瘦条包进内层 Column（8dp 间距）：瘦条不再是面板顶部的独立一节，
+        // 而是贴在输入框下方、看上去像输入框的一部分。旧带盒退役口径不变
+        // （见 git 历史：负偏移曾在 346 把行推出面板裁剪区）。七仔仍栖坐
+        // 卡片上沿（见面板外覆盖层，与 Dock 上沿同一套坐法）；胶囊本体行为不动。
+        // 瘦条常驻＋命中离散出现（2026-10-27 瘦条批，取代 372 的“示例↔命中
+        // 互斥切换”）：瘦条编辑系即显示（不论空文本），命中应用在其下方
+        // 离散出现／消失（无动画，承接 372 离散口径；372 删掉的
+        // fadeIn／fadeOut＋shrinkVertically 150ms 仍是禁区）。点按仍为整句
+        // 填入输入框、不直接提交（见 pickExample）。
+        // “矮”的取舍如实记：瘦条视觉只是一行 13sp 文字＋琥珀点、无底色，
+        // 但布局高仍是 48dp——触控底线不缩水；矮靠贴合（8dp）与去 section
+        // 感实现，不是靠压热区；再矮只能压热区，需 Bob 另定。
+        // 卡片总高预算：打字态卡片比 372 多瘦条 48dp＋8dp 间距（约 56dp），
+        // 满结果 180dp＋收起 60dp 时顶缘风险见紧配置复核（本批未验真机）。
+        val showSlimExamples = idleOrEditing && showDeckExamples && deckExamples.isNotEmpty()
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // 胶囊本体（与应用中心同一组件；面板语境用卡片同款玻璃，见上）
+            IntentCapsuleField(
+                value = fieldValue,
+                onValueChange = { nv -> onFieldValueChange(nv) },
+                onSubmit = { submitIfReady() },
+                planning = planning,
+                requestFocusOnMount = requestFocusOnMount,
+                onFocusChanged = { capsuleFocused = it },
+                solidBackground = true,
+                modifier = Modifier.fillMaxWidth()
             )
+            if (showSlimExamples) {
+                // 推荐问主行：从面板内容左缘起横滚；滤空时整行隐藏（按已装能力
+                // 过滤后池子可能为空，不留空白占位）
+                DeckExamplesRow(
+                    examples = deckExamples,
+                    onPick = { pickExample(it) }
+                )
+            }
         }
-        // 胶囊本体（与应用中心同一组件；面板语境用卡片同款玻璃，见上）
-        IntentCapsuleField(
-            value = fieldValue,
-            onValueChange = { nv -> onFieldValueChange(nv) },
-            onSubmit = { submitIfReady() },
-            planning = planning,
-            requestFocusOnMount = requestFocusOnMount,
-            onFocusChanged = { capsuleFocused = it },
-            solidBackground = true,
-            modifier = Modifier.fillMaxWidth()
-        )
 
         // ---- v6 后调整（Bob 2026-10-24 20:31）：胶囊下方「猜你想问」行
         // 整行删除（标签 + 后续推荐素行）；面板 Column 的 spacedBy(12.dp)
