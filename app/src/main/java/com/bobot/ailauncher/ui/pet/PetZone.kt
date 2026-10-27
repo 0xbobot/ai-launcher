@@ -459,7 +459,11 @@ fun PetZone(
                     palette = briefingPalette,
                     accent = briefingAccent,
                     onJoin = { e -> joinMeeting(e) },
-                    modifier = Modifier.fillMaxWidth(coverLeftFrac)
+                    modifier = Modifier.fillMaxWidth(coverLeftFrac),
+                    // v0.68.164：标签时间取 PetZone 已有的分钟 ticker，与色板
+                    // 同一口径；选会时间取 TodaySection 的 ticker，两者均为
+                    // 分钟对齐，标签与选会至多在同一分钟边界内先后翻转。
+                    nowMillis = coverNowMillis
                 )
             }
         }

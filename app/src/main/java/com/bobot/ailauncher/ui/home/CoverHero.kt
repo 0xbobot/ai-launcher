@@ -512,11 +512,16 @@ fun CoverHeroLandscape(
  * v0.68.99（主页重构 R-1，Bob 拍板「简报即主页」）：简报会行——下一场会
  * 直接长在简报里，取代退役的 NextUp 独立卡（NextUpStrip 已删）。
  *
- * 形态：无卡片、无玻璃——分隔线 + 金色「接下来 · HH:mm」标签 + 宋体标题
+ * 形态：无卡片、无玻璃——分隔线 + 金色状态标签 + 宋体标题
  * + 「加入」动作，整行可点走既有 joinCalendarEvent 路径（TODAY 铁律：
  * 信息必须配用户最可能的下一步动作）。呈现即登记：本行呈现的事件由
  * 调用方（PetZone）同步写入 TodayEventsHolder.presentedNextEventId，
  * 建议面去重契约（.93）不变——会议信息全场只在这一处呈现。
+ *
+ * v0.68.164（过期日程修复 A）：标签不再写死“接下来”——按 nowMillis 派生
+ * 状态：未来为「接下来 · HH:mm」，进行中为「进行中 · HH:mm–HH:mm」
+ * （起止都显示）。调用方须传入分钟 ticker 时间（PetZone 的 coverNowMillis），
+ * 标签随分钟推进自动翻转，不依赖边界 effect。
  *
  * testTag 沿用 today_nextup：冒烟（nextup_tap_flow / 去重断言）与横屏
  * 几何断言的语义等价迁移到本行。
@@ -527,10 +532,23 @@ fun BriefMeetingRow(
     palette: CoverPalette,
     accent: androidx.compose.ui.graphics.Color,
     onJoin: (CalEvent) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    nowMillis: Long
 ) {
     val timeText = remember(event.begin) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(event.begin))
+    }
+    val endTimeText = remember(event.end) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(event.end))
+    }
+    // v0.68.164：状态由调用方传入的 nowMillis 派生；已结束的会由选会层
+    // （TodaySection 派生 nextEvent）过滤，本行不再收到 end <= now 的事件，
+    // ENDED 分支仅作防御（仍渲染“接下来”文案，不擅自改语义）。
+    val status = com.bobot.ailauncher.ui.pet.meetingStatus(event.begin, event.end, nowMillis)
+    val labelText = if (status == com.bobot.ailauncher.ui.pet.MeetingStatus.ONGOING) {
+        "进行中 · $timeText–$endTimeText"
+    } else {
+        "接下来 · $timeText"
     }
     val title = event.title.ifBlank { "日程" }
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 28.dp)) {
@@ -547,7 +565,7 @@ fun BriefMeetingRow(
                 // 不合并语义：标题文本节点须独立存在（冒烟按标题文本定位本行、
                 // 去重断言按文本节点计数）；行自身挂整句 contentDescription
                 .semantics {
-                    contentDescription = "接下来 $timeText 的会议：$title，点按加入"
+                    contentDescription = "$labelText 的会议：$title，点按加入"
                 }
                 .clip(RoundedCornerShape(12.dp))
                 .clickable { onJoin(event) }
@@ -556,7 +574,7 @@ fun BriefMeetingRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 TrackedText(
-                    text = "接下来 · $timeText",
+                    text = labelText,
                     fontSize = 12.sp,
                     tracking = 3.dp,
                     color = accent
