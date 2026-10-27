@@ -55,7 +55,7 @@ App 是 edge-to-edge（`decorFitsSystemWindows=false`，见 `ui/theme/Insets.kt`
 | 灵动岛 Toast | **本批修**：宿主加 displayCutout 两侧（顶部早有 statusBarsTopPadding + 8dp，pill 居中） |
 | 引导页 | **本批修**：StepScaffold 加 displayCutout 两侧（顶部 32dp 本就高于标准状态栏） |
 | 输入态（胶囊 / 推荐行） | 通过：主页胶囊在根容器内（随本批横屏避让走）；窗口 adjustResize，键盘弹出不盖胶囊；应用中心键盘布局 324 批已做 |
-| Dock 面板 | 通过：横屏居中 344dp 定宽，左右挖孔区够不到；底部 16dp + 手势区拖拽避让，与状态栏无关 |
+| Dock 面板 | 横屏右锚定 344dp 定宽（2026-10-27 修：此前气泡宿主 fillMaxWidth 把横屏包内容盒撑满全宽、面板与宠物随 BottomCenter 落到屏幕中央；现横屏宿主改包内容、右边缘再让 live cutoutRight）；底部 16dp + 手势区拖拽避让，与状态栏无关 |
 | 弹窗 / 对话框（更新 / 权限引导 / 隐藏 Dock 确认 / 快捷添加） | 通过：居中 + 水平 margin ≥ 32dp，不贴边 |
 | 盲操扇形 | 通过：全屏手势层，无贴边可读内容；右边缘豁免区已有处理 |
 
