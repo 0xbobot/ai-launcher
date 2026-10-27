@@ -38,6 +38,7 @@ import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.lerp
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalView
@@ -63,6 +64,7 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -365,6 +367,13 @@ fun PullUpDock(
     // 横屏退出分支置位，竖屏离散切换不置位）——横屏 Dock 宠物在退出完成
     // 前不挂载（场景换先出后进）；竖屏 mode 翻转即挂载。
     exitInProgress: Boolean = false,
+    // v0.68.169（盲操扇形找回）：Dock 视觉单元（面板＋宠物）精确 bounds
+    // ——供 MainScreen→HomeScreen 盲操手势仲裁。374 批误用 PullUpDock 外层
+    // modifier 的 onGloballyPositioned，其根为 fillMaxSize，捕获的是整屏
+    // 矩形，致所有主页手势都被判为 Dock 区内、扇形全屏失效。本回调挂在
+    // 单元 Box 自身上报真实单元矩形；内容卸载（D3／意图态）时经
+    // DisposableEffect 报 null。
+    onDockUnitBoundsChange: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -373,6 +382,9 @@ fun PullUpDock(
     val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
     val onD3SwipeUpToHomeState = rememberUpdatedState(onD3SwipeUpToHome)
     val onAskQizaiState = rememberUpdatedState(onAskQizai)
+    // v0.68.169：单元 bounds 回调最新态（DisposableEffect(Unit) 不重启，
+    // 卸载时报 null 须调最新回调，不读首帧闭包）。
+    val onDockUnitBoundsChangeLatest by rememberUpdatedState(onDockUnitBoundsChange)
 
     // v0.68.95（F-03）：清单改挂 AppCatalog 仓库快照——此前无 key 的 remember{}
     // 进程内只算一次，新装应用永不进 Dock、卸载的点开只剩 toast。现与 .88 同源：
@@ -747,7 +759,15 @@ fun PullUpDock(
                     modifier = Modifier
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
                         .height(panelHGeo + floatPetHeight + shoulderRise - petPress + shoulderPeakDp.dp + dragHeadRiseDp)
+                        // v0.68.169：单元真实矩形上报仲裁（面板＋宠物，
+                        // 非外层 fillMaxSize 根的整屏矩形）。
+                        .onGloballyPositioned { onDockUnitBoundsChangeLatest(it.boundsInRoot()) }
                 ) {
+                // 单元卸载（D3／意图态卡片让位）时报 null，仲裁不再拿
+                // stale 矩形拦背景手势。
+                DisposableEffect(Unit) {
+                    onDispose { onDockUnitBoundsChangeLatest(null) }
+                }
                 Column(
                     modifier = Modifier
                         // v0.68.97（布局普查批）：冒烟几何断言锚点（Dock 面板整体）
