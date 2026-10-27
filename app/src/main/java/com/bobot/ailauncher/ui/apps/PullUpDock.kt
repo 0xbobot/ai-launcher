@@ -35,6 +35,7 @@ import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalView
@@ -129,9 +130,10 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * - D3：不透明整屏替换（App 底色），顶部常用横滑一行 + 全部应用 A-Z 列表 + 弧形 A-Z 导航
  *
  * 手势签名（全 App 统一，v0.14 纠正）：左滑 = 更多，右滑 = 更少
- * - D1 —左拖→ D2（2026-10-27 拖拽代滑动：跟手＋松手确认，可中途取消）；
- *   D2 —左滑→ D3（中途触发，不动）；D3 —右滑→ D2 —右滑→ D1
- * - D2 —右拖→ D1（拖拽代滑动）；D1 右滑 → 隐藏确认（入口之一，不动）
+ * - D1 —提拉宠物↑→ D2（2026-10-27 提拉换档：边提边膨胀、过阈值才切，
+ *   可中途取消；横屏仍走左拖，见面板手势）；D2 —左滑→ D3（中途触发，不动）；
+ *   D3 —右滑→ D2 —右滑→ D1
+ * - D2 —提拉宠物↓→ D1（提拉换档；横屏仍走右拖）；D1 右滑 → 隐藏确认（入口之一，不动）
  * - v0.16：隐藏的唯一入口是 D1 右滑（弹确认框，"不再提醒"可记）；D1 下滑不再隐藏；
  *   点按卡片外部不再隐藏（D2→D1 收一档，D1 无动作）
  * - 上滑：隐藏→记住的行数（首页上滑）；D1/D2→D3（直接全屏）
@@ -406,6 +408,14 @@ fun PullUpDock(
     // remember（不在 AnimatedVisibility 内容里），visibility 切换不丢态；
     // 只透传给 Dock 的 HybridPet → FloatingPet，意图侧不传（旧行为）。
     val dragBody = remember { DragBodyState(shoulderScope) }
+    // 提拉换档会话（2026-10-27）：顶层 remember（与 dragBody 同款，
+    // visibility 切换不丢态）；接线在卡片作用域里（需 isLandscapeDock）。
+    val liftState = remember { LiftTierState(shoulderScope) }
+    // 会话 hygiene：进输入态时宠物卸载（挂载门），中途会话须关、
+    // 不残留 morph 覆盖层。
+    LaunchedEffect(intentInputMode) {
+        if (intentInputMode) liftState.cancelSession()
+    }
     val shoulderPeakAnim = remember { Animatable(0f) }
     val shoulderPeakDp by shoulderPeakAnim.asState()
     // 肩线协同（2026-10-26 入口子项，评审 P1-6 口径统一）：
@@ -517,7 +527,7 @@ fun PullUpDock(
         var prevIntentInputMode by remember { mutableStateOf(intentInputMode) }
         androidx.compose.runtime.SideEffect { prevIntentInputMode = intentInputMode }
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
-        // D2→D1 改由下滑/拖拽手势触发（2026-10-27：右滑触发改为右拖确认）
+        // D2→D1 改由下滑/提拉手势触发（2026-10-27 提拉换档：竖屏下压宠物，横屏仍走右拖）
         // 点外关闭层（2026-10-26 入口子项，仅清单打开时存在，与 v0.27.4
         // 删除的常驻层不同）：透明全屏 Box，画在 D1/D2 盒之下、简报之上——
         // 简报 / 背景区的点按落到它身上即关闭清单；Dock 面板与宠物在其
@@ -608,9 +618,11 @@ fun PullUpDock(
             ) {
                 val hThreshPx = with(density) { 48.dp.toPx() }
                 val vThreshPx = with(density) { 72.dp.toPx() }
-                // D1/D2 拖拽切换（2026-10-27）：内容跟手量（px），卡片本体与
-                // 宠物栖坐不动，只平移 AnimatedContent；松手弹簧回落到 0。
-                // 跟手钳制 32dp（阻尼 0.8，见 DockDragSwitch）。
+                // D1/D2 横拖跟手量（2026-10-27 拖拽代滑动批，提拉换档批起
+                // 仅横屏生效）：内容跟手量（px），卡片本体与宠物栖坐不动，
+                // 只平移 AnimatedContent；松手弹簧回落到 0。
+                // 跟手钳制 32dp（阻尼 0.8，见 DockDragSwitch）。竖屏跟手恒 0
+                // （横拖已删，换档走提拉 morph，见 LiftTierSwitch）。
                 val tierFollowClampPx = with(density) { 32.dp.toPx() }
                 val tierDragScope = rememberCoroutineScope()
                 val tierFollowAnim = remember { Animatable(0f) }
@@ -659,6 +671,10 @@ fun PullUpDock(
                 val seatCompact = density.fontScale >= 1.3f ||
                     dockAvailableHeight < 400.dp
                 var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
+                // 提拉换档 morph 用实测档位高（首帧估值 D1 136 / D2 184，
+                // 实测到即纠正；morph 期间不写，避免强制高污染实测）。
+                var d1PanelH by remember { mutableStateOf(136.dp) }
+                var d2PanelH by remember { mutableStateOf(184.dp) }
                 val dockPetSize = dockPanelHeight * 0.52f * (if (seatCompact) 0.8f else 1f)
                 val floatPetWidth = dockPetSize * 1.224f
                 val floatPetHeight = floatPetWidth * (1318f / 1043f)
@@ -679,6 +695,33 @@ fun PullUpDock(
                 val dragHeadSinkDp = with(density) { dragBody.headSinkPx.toDp() }
                 val dragShoulderRiseDp = with(density) { dragBody.shoulderRisePx.toDp() }
                 val dragRise = shoulderRise + dragShoulderRiseDp
+                // 提拉换档 morph 期几何：面板高取两档实测高之间的 morph
+                // 插值，宠物偏移同量跟进——相对几何一字不动（头底压入肩峰
+                // 5dp 恒定），身体整体长高、不分离；静止期用实测高。
+                // 宠物尺寸仍取冻结的 dockPanelHeight（morph 期不写实测），
+                // 故 morph 中宠物不缩放、只随面板顶上移。
+                val panelHGeo = if (liftState.sessionActive) {
+                    lerp(d1PanelH, d2PanelH, liftState.progress)
+                } else {
+                    dockPanelHeight
+                }
+                // 提拉换档接线（2026-10-27）：dragBody 字段为普通 var，
+                // 此处赋值幂等、不触发重组；横屏门禁（横屏仍走横拖，
+                // 见面板手势）与基底档取最新值（rememberUpdatedState）。
+                val stateLatest = rememberUpdatedState(state)
+                val isLandscapeLatest = rememberUpdatedState(isLandscapeDock)
+                dragBody.onLiftStart = {
+                    if (!isLandscapeLatest.value) liftState.onDragStart(stateLatest.value)
+                }
+                dragBody.onLiftMove = { up, down -> liftState.onDragMove(up, down) }
+                dragBody.onLiftEnd = {
+                    liftState.onDragEnd(
+                        onCommit = { target -> onStateChangeState.value(target) },
+                        onSettled = { target ->
+                            dockPanelHeight = if (target == DockState.D2) d2PanelH else d1PanelH
+                        }
+                    )
+                }
                 // 圆肩轮廓（弦长 = 宠物宽 + 两侧各 35dp）；shape 只影响
                 // 绘制（clip / 玻璃 / 高光 / 内晕），不改变布局尺寸，故
                 // dockPanelHeight 回写不会引起布局循环。
@@ -693,7 +736,7 @@ fun PullUpDock(
                 Box(
                     modifier = Modifier
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                        .height(dockPanelHeight + floatPetHeight + shoulderRise - petPress + shoulderPeakDp.dp + dragHeadRiseDp)
+                        .height(panelHGeo + floatPetHeight + shoulderRise - petPress + shoulderPeakDp.dp + dragHeadRiseDp)
                 ) {
                 Column(
                     modifier = Modifier
@@ -709,7 +752,13 @@ fun PullUpDock(
                         .let { if (isLandscapeDock) it.width(344.dp) else it.fillMaxWidth() }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .onGloballyPositioned { coords ->
-                            with(density) { dockPanelHeight = coords.size.height.toDp() }
+                            // morph 期不写实测高（强制高会污染档位实测）；
+                            // 原点与宽度照常更新（涟漪中心用当前原点）。
+                            if (!liftState.sessionActive) {
+                                with(density) { dockPanelHeight = coords.size.height.toDp() }
+                                if (state == DockState.D1) d1PanelH = dockPanelHeight
+                                else if (state == DockState.D2) d2PanelH = dockPanelHeight
+                            }
                             dockPanelOrigin = coords.positionInWindow()
                             dockPanelWidthPx = coords.size.width.toFloat()
                         }
@@ -772,8 +821,11 @@ fun PullUpDock(
                             var accumY = 0f
                             var fired = false
                             var inSysGestureZone = false
-                            // D1/D2 拖拽切换（2026-10-27）：水平方向一旦确立即锁定，
+                            // D1/D2 横拖切换（2026-10-27 拖拽代滑动批，2026-10-27
+                            // 提拉换档批起仅横屏保留）：水平方向一旦确立即锁定，
                             // 本次手势不再判竖直；拖拽中只跟手、不触发，松手再确认。
+                            // 竖屏 D1↔D2 横拖已删除（改走提拉宠物，见 LiftTierSwitch），
+                            // 本段竖屏下不锁定、不跟手、不确认。
                             var horizontalLocked = false
                             fun resetFollow() {
                                 tierDragScope.launch { tierFollowAnim.snapTo(0f) }
@@ -830,9 +882,9 @@ fun PullUpDock(
                                     } else if (ax > hThreshPx && ax >= ay) {
                                         // 水平方向确立：D2 左滑 → D3、D1 右滑 → 隐藏确认
                                         // 仍沿用旧的中途触发（非 D1/D2 切换，不动）；
-                                        // D1↔D2 改走拖拽：锁定水平、只跟手，松手再确认，
-                                        // 旧的中途触发分支就此删除（拖拽覆盖完整才删的条件已满足，
-                                        // 见 DockDragSwitch：两方向＋阈值＋回落均已覆盖）。
+                                        // D1↔D2 横拖仅横屏保留（见 DockDragSwitch），
+                                        // 竖屏改走提拉宠物（LiftTierSwitch）：本分支竖屏
+                                        // 下不锁定、不跟手——面板横拖不再切换档位。
                                         if (state == DockState.D2 && accumX < 0) {
                                             fired = true
                                             resetFollow()
@@ -841,7 +893,7 @@ fun PullUpDock(
                                             fired = true
                                             resetFollow()
                                             onHideDockRequestState.value()
-                                        } else {
+                                        } else if (isLandscapeLatest.value) {
                                             horizontalLocked = true
                                             updateFollow()
                                         }
@@ -851,9 +903,10 @@ fun PullUpDock(
                                         // 下滑 → 收一档（D1 下滑不再隐藏）
                                         if (state == DockState.D2) go(DockState.D1)
                                     } else {
-                                        // 方向未确立：水平倾向时先跟手（竖直倾向不跟手，
-                                        // 防竖拖带水平抖动）；松手时低于阈值即回落。
-                                        if (ax >= ay) updateFollow() else resetFollow()
+                                        // 方向未确立：横屏水平倾向时先跟手（竖直倾向不跟手，
+                                        // 防竖拖带水平抖动）；竖屏不跟手（横拖已删）；
+                                        // 松手时低于阈值即回落。
+                                        if (ax >= ay && isLandscapeLatest.value) updateFollow() else resetFollow()
                                     }
                                 },
                                 onDragEnd = {
@@ -877,9 +930,25 @@ fun PullUpDock(
                     // pet-hybrid-float：漂浮宠物已移出面板 Column——面板之后画的
                     // HybridPet 兄弟节点（见面板 Column 闭合后的调用），
                     // 面板不再 clip 它，漂浮高度才放得下。
-                    // 一二档内容：crossfade + scale，卡片高度弹簧跟随
-                    // D1/D2 拖拽跟手：只平移内容（卡片本体与宠物栖坐不动，
+                    // 一二档内容：静止期 crossfade + scale，卡片高度弹簧跟随；
+                    // 提拉换档会话期改走 morph 覆盖层（DockLiftMorph），
+                    // AnimatedContent 不上场、故提交时无二次 crossfade。
+                    // 横拖跟手（仅横屏）：只平移内容（卡片本体与宠物栖坐不动，
                     // 不碰布局尺寸）；松手弹簧回落到 0，切换本身仍走 crossfade。
+                    if (liftState.sessionActive) {
+                        DockLiftMorph(
+                            progress = liftState.progress,
+                            contentH = panelHGeo - 48.dp,
+                            top4 = top4,
+                            top10 = top10,
+                            popupApp = popupApp,
+                            onLaunch = ::launchApp,
+                            onLongPress = { popupApp = it },
+                            onDismissMenu = { popupApp = null },
+                            isLandscape = isLandscapeDock,
+                            onIconPositioned = { pkg, center -> dockIconCenters[pkg] = center }
+                        )
+                    } else {
                     AnimatedContent(
                         modifier = Modifier.graphicsLayer {
                             translationX = tierFollowAnim.value
@@ -935,6 +1004,7 @@ fun PullUpDock(
                         }
                         }
                     }
+                    }
                 }
                 // 圆肩批：连接混合宠物（面板之后画、前面图层；面板底锚
                 // 不变，宠物只向上长）。单宠物原则（2026-10-26，Bob 22:57
@@ -958,7 +1028,7 @@ fun PullUpDock(
                         dragBodyState = dragBody,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress))
+                            .offset(y = -(panelHGeo + shoulderRise + shoulderPeakDp.dp - petPress))
                             .testTag("dock_pet_cell")
                     )
                 }
@@ -972,7 +1042,7 @@ fun PullUpDock(
                         onDismiss = { onPetActionsVisibleChange(false) },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .offset(y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp + dragHeadRiseDp))
+                            .offset(y = -(panelHGeo + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp + dragHeadRiseDp))
                             .testTag("pet_action_list")
                     )
                 }
@@ -996,7 +1066,7 @@ fun PullUpDock(
                             .fillMaxWidth()
                             .offset(
                                 x = dragHeadXdp,
-                                y = -(dockPanelHeight + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp) - dragHeadRiseDp + dragHeadSinkDp
+                                y = -(panelHGeo + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp) - dragHeadRiseDp + dragHeadSinkDp
                             )
                     )
                 }
@@ -1163,6 +1233,77 @@ private fun DockGrid10(
                             onIconPositioned = onIconPositioned
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 提拉换档 morph 覆盖层（2026-10-27）：会话期替代 AnimatedContent。
+ * 面板高已由 panelHGeo 插值（调用方传 contentH = panelHGeo - 48.dp，
+ * 即内层内容盒高：面板 16dp 底边距＋内层 32dp 竖直边距已扣）；
+ * Row4 自然尺寸淡出、Grid10 从 contentH/136 缩放淡入——两布局始终
+ * 贴合 morph 高、无裁剪、无新增元素；静止期不渲染（走 AnimatedContent）。
+ * 横屏不启动会话（接线门禁），isLandscape 仅作对称透传。
+ */
+@Composable
+private fun DockLiftMorph(
+    progress: Float,
+    contentH: Dp,
+    top4: List<AppInfo>,
+    top10: List<AppInfo>,
+    popupApp: AppInfo?,
+    onLaunch: (AppInfo) -> Unit,
+    onLongPress: (AppInfo) -> Unit,
+    onDismissMenu: () -> Unit,
+    isLandscape: Boolean,
+    onIconPositioned: (String, Offset) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .let { if (isLandscape) it.wrapContentSize() else it.fillMaxWidth() }
+            .padding(vertical = 16.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .height(contentH)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            // 命中门：alpha ≤ 0.01 即不组合（graphicsLayer alpha 不关命中，
+            // 全透明图标仍可点；0.01 以下肉眼不可见，撤组合无视觉跳变）。
+            if (progress < 0.99f) {
+                Box(Modifier.graphicsLayer { alpha = 1f - progress }) {
+                    DockRow4(
+                        apps = top4,
+                        onLaunch = onLaunch,
+                        menuApp = popupApp,
+                        onLongPress = onLongPress,
+                        onDismissMenu = onDismissMenu,
+                        isLandscape = isLandscape,
+                        onIconPositioned = onIconPositioned
+                    )
+                }
+            }
+            if (progress > 0.01f) {
+                val gridScale = (contentH / 136.dp).coerceIn(0f, 1f)
+                Box(
+                    Modifier.graphicsLayer {
+                        alpha = progress
+                        scaleX = gridScale
+                        scaleY = gridScale
+                    }
+                ) {
+                    DockGrid10(
+                        apps = top10,
+                        onLaunch = onLaunch,
+                        menuApp = popupApp,
+                        onLongPress = onLongPress,
+                        onDismissMenu = onDismissMenu,
+                        isLandscape = isLandscape,
+                        onIconPositioned = onIconPositioned
+                    )
                 }
             }
         }

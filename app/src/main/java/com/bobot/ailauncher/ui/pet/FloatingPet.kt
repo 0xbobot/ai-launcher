@@ -695,6 +695,7 @@ fun FloatingPet(
                     onDragStart = {
                         longPressFired = false
                         dragBody?.onDragStart()
+                        dragBody?.onLiftStart?.invoke()
                         dragTravelPx = Offset.Zero
                         PetRepository.onDragStart()
                         PetRepository.say("借过借过~")
@@ -724,6 +725,10 @@ fun FloatingPet(
                                     minOf(downDp, 40f).dp.toPx()
                                 },
                             )
+                            // 提拉换档（2026-10-27）：竖向净行程顺带报给
+                            // Dock 的 LiftTierState（意图侧实例无观察字段，
+                            // 本调用恒为 no-op）；横向不报（换档只认竖向）。
+                            dragBody.onLiftMove?.invoke(upDp, downDp)
                         } else {
                             // 意图路径：旧行为一字不动（40dp 半径内跟手）。
                             val newX = dragOffset.x + dragAmount.x
@@ -744,6 +749,7 @@ fun FloatingPet(
                             dragBody.onDragEnd(
                                 with(density) { dragBody.headRisePx.toDp().value }
                             )
+                            dragBody.onLiftEnd?.invoke()
                         } else {
                             dragOffset = Offset.Zero
                         }
@@ -754,6 +760,7 @@ fun FloatingPet(
                             dragBody.onDragEnd(
                                 with(density) { dragBody.headRisePx.toDp().value }
                             )
+                            dragBody.onLiftEnd?.invoke()
                         } else {
                             dragOffset = Offset.Zero
                         }

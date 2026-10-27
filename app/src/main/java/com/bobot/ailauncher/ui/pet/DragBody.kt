@@ -114,6 +114,16 @@ class DragBodyState(private val scope: CoroutineScope) {
     var dragging by mutableStateOf(false)
         private set
 
+    /**
+     * 提拉换档观察（2026-10-27）：仅 Dock 侧 PullUpDock 设置，
+     * FloatingPet 在 Dock 拉伸路径里顺带回调（起拖／竖向行程／松手）。
+     * 意图侧实例恒为 null = 纯拉伸，不受换档影响。
+     * 普通 var（非 State）：接线方在组合里赋值幂等、不触发重组。
+     */
+    var onLiftStart: (() -> Unit)? = null
+    var onLiftMove: ((upDp: Float, downDp: Float) -> Unit)? = null
+    var onLiftEnd: (() -> Unit)? = null
+
     /** 松手时头升（dp）：供过冲压扁分母用。 */
     var releaseStartRiseDp by mutableFloatStateOf(0f)
         private set
