@@ -193,7 +193,7 @@ internal fun intentHasResultContent(
     showDeckApps: Boolean,
     idleOrEditing: Boolean,
     committedLiteral: String,
-    submittedText: String,
+    submittedText: String?,
     localIndexReady: Boolean,
     showSearching: Boolean,
 ): Boolean = when (state) {
