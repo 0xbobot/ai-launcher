@@ -7,8 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -126,11 +126,18 @@ fun DeckExamplesRow(
     // 右缘渐隐（不拦截点按：本 Box 无 clickable，事件落到下层横滚行）：
     // 24dp 内从透明过渡到卡片实色，溢出项呈现为“字＋渐隐”而非半字硬切；
     // 内容未溢出时渐隐区只盖空衬底（同色系，无可见变化）。
+    // 2026-10-29 意图页设计评审第 3 轮（撑高根因修复）：此处此前用
+    // fillMaxHeight，父 Box 经面板 Column、PetZone 槽位一路向上吃到窗口高
+    // 约束，渐隐盒把行高撑到窗口高、面板跟随撑满（382 实拍面板 736dp、
+    // 面板顶压到 32dp、宠物截断 85% 皆由此来）。改行高约束：行高恒为
+    // 48dp（项 heightIn 下限 48dp、单行 13sp 字高在任何字号档下均小于
+    // 48dp），渐隐盒定高 48dp 即与行同高，不再向上传播窗口高约束；
+    // 此后任何子树改动都不得再给渐隐盒加 fillMaxHeight／fillMaxSize。
     Box(
         modifier = Modifier
             .align(Alignment.CenterEnd)
             .width(24.dp)
-            .fillMaxHeight()
+            .height(48.dp)
             .background(
                 Brush.horizontalGradient(
                     colors = listOf(Color.Transparent, AILauncherColors.current.Card)

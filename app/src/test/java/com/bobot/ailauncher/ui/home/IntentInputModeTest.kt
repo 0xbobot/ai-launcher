@@ -206,6 +206,35 @@ class IntentInputModeTest {
     }
 
     @Test
+    fun `底边垫高 - 键盘落下态空输入卡片留在屏底垫导航垫`() {
+        // 2026-10-29 意图页设计评审第 3 轮·落下态规则锁：键盘已收起且意图态
+        // 仍在场（imeBottom 归零、窗口未收缩、在场预期不成立）→ 垫＝导航栏
+        // clearance；权重 Spacer 把卡片推到窗口底边，修撑高后面板内容定高
+        // （空输入态竖屏 158dp），底边可见、不悬空。卡片去留不由本函数定：
+        // 376 适用时跟随自动收起，不适用时留在屏底等返回键／点外（见
+        // resolveFocusBottomPad 与 IntentEntry 退出兜底注释）。数值口径与
+        // “键盘收起与结果态垫导航垫”同款，此测试以落下态语义单独锁定，
+        // 防后续重构把落下态误并入悬浮 50% 兜底或垫 0。
+        org.junit.Assert.assertEquals(
+            padNav,
+            resolveFocusBottomPad(
+                imeBottom = 0.dp, windowResized = false, keyboardExpected = false,
+                isPortrait = true, windowHeight = padWindow, navClearance = padNav
+            )
+        )
+        // 落下态的另一信号组合：窗口已收缩后键盘落下（imeBottom 归零）同样
+        // 不悬空——收缩分支垫 0，卡片坐窗口底边即屏底（与落下态规则一致，
+        // 只是底边贴合方式不同：收缩时窗口底边即屏底，无需导航垫）。
+        org.junit.Assert.assertEquals(
+            0.dp,
+            resolveFocusBottomPad(
+                imeBottom = 0.dp, windowResized = true, keyboardExpected = false,
+                isPortrait = true, windowHeight = 400.dp, navClearance = padNav
+            )
+        )
+    }
+
+    @Test
     fun `底边垫高 - 键盘收起与结果态垫导航垫`() {
         // 键盘收起／结果态（在场预期不成立）：沿用 356 原口径
         org.junit.Assert.assertEquals(
