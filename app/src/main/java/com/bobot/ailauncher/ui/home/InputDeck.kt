@@ -75,6 +75,9 @@ fun DeckExamplesRow(
     // 衬底降到 0.50 后深色 Body 在亮蓝壁纸取样上复测仅 3.76:1、不过 4.5，
     // 故深色示例文字改 Title（同衬底上 7.08:1）；浅色文字 alpha 0.65→0.90、
     // 琥珀点 alpha 0.6→1.0（浅色衬底上推导 5.28:1）；琥珀点径 6dp→8dp；
+    // 2026-10-28 意图页设计评审第 2 轮 P1-8 重开：浅色实拍蜜桃色底上
+    // 0.90 推导不成立（实测 3.76～3.93:1），浅色示例文字改全 alpha Body
+    // （仍弱于 Title，弱化层级不动），与浅色衬底 0.75 合起来约 5.66:1。
     // 行内边 12dp→32dp（点轴 48dp、文字轴 62dp，与胶囊／结果轴一线）；
     // 项距 20dp→16dp；行右缘加 24dp 渐隐，行尾 16dp Spacer 保留。
     // 2026-10-27 设计精致化 P0-1：推荐行文字坐稳局部底色上（不只给字加亮）——
@@ -112,7 +115,7 @@ fun DeckExamplesRow(
                 Text(
                     text = t.exampleFillText(),
                     fontSize = 13.sp,
-                    color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body.copy(alpha = 0.90f),
+                    color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -145,9 +148,14 @@ fun DeckExamplesRow(
  * 深色 0.65／浅色 0.60 → 两档同值 0.50（胶囊平底另取 0.55，高一档）；
  * 衬底降后深色 Body 不过线，故同衬底上的深色正文一律改 Title（见
  * DeckExamplesRow、结果标签、SlotStatusLine），不把衬底加回去。
+ * 2026-10-28 意图页设计评审第 2 轮 P1-8 重开：浅色实拍（蜜桃色壁纸）
+ * 上示例 3.76～3.93:1＜4.5，第 1 轮推导 5.28:1 的近白底前提不成立；
+ * 浅色衬底 0.50→0.75（深色档不动，仍 0.50——深色 Title 在其上已 7.08:1），
+ * 并与浅色示例文字全 alpha（见 DeckExamplesRow）合起来复测：同类蜜桃色
+ * 底上示例 Body 约 5.66:1、结果标签／状态行 Body 约 5.66:1，均过 4.5。
  */
 @Composable
 internal fun intentContentScrim(): Color =
     if (AILauncherColors.current.isDark) AILauncherColors.current.Card.copy(alpha = 0.50f)
-    else AILauncherColors.current.Card.copy(alpha = 0.50f)
+    else AILauncherColors.current.Card.copy(alpha = 0.75f)
 

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -179,6 +180,35 @@ internal fun intentCardShapeRiseDp(baseRiseDp: Float, dragShoulderRiseDp: Float)
 /** 意图宠物盒偏移 Y：面板高＋基底 rise－压入；拖拽不改盒位（见上）。 */
 internal fun intentPetBoxOffsetYDp(panelHeightDp: Float, baseRiseDp: Float, pressDp: Float): Float =
     -(panelHeightDp + baseRiseDp - pressDp)
+
+/**
+ * 意图结果槽位是否有内容（2026-10-28 意图页设计评审第 2 轮，纯函数、单测锁定）：
+ * 必须与 IntentEntry 内结果槽位 when() 的渲染条件逐项镜像——槽位渲染什么，
+ * 本函数就返回 true；槽位空渲染（无文本、无结果、无状态条）就返回 false。
+ * 调用方据此决定：true → 槽位＋并入的收起一并渲染；false → 两者都不渲染，
+ * 面板只剩胶囊＋示例，高度严格跟内容走。改槽位条件时须同步改这里与单测。
+ */
+internal fun intentHasResultContent(
+    state: IntentUiState,
+    showDeckApps: Boolean,
+    idleOrEditing: Boolean,
+    committedLiteral: String,
+    submittedText: String,
+    localIndexReady: Boolean,
+    showSearching: Boolean,
+): Boolean = when (state) {
+    is IntentUiState.NeedsPermission -> true
+    is IntentUiState.NeedsInput -> true
+    is IntentUiState.Planning -> true
+    else -> if (showDeckApps && state !is IntentUiState.NeedsConfirmation) true
+    else when (state) {
+        is IntentUiState.Reply -> true
+        is IntentUiState.Error -> true
+        else -> idleOrEditing && committedLiteral.isNotBlank() &&
+            committedLiteral != submittedText &&
+            (localIndexReady || showSearching)
+    }
+}
 
 /** 意图气泡总偏移 Y：基底（面板高＋基底 rise＋宠物高－压入＋8dp）＋头跟随（－头升＋头沉）＋进态滑入 travelDeltaY×(1－travel)。 */
 internal fun intentBubbleOffsetYDp(
@@ -481,7 +511,10 @@ fun IntentCapsuleField(
                             // 几乎看不见），占位改 Title 降 alpha——深浅两档在玻璃
                             // 上都可读；应用中心变体（实心底）沿用 Hint，一字不动。
                             // 2026-10-27 暗黑可读：深色 Title 只降到 0.85（0.6 在玻璃上发虚），浅色仍 0.6。
-                            color = if (solidBackground) AILauncherColors.current.Title.copy(alpha = if (AILauncherColors.current.isDark) 0.85f else 0.6f)
+                            // 2026-10-28 意图页设计评审第 2 轮 P2-2（与 P1-8 同根因）：
+                            // 浅色占位在蜜桃色底实测约 3.87:1＜4.5，浅色亦抬到 0.85
+                            // （与深色同值、仍弱于正文 Title 全 alpha），同底复测约 7.47:1。
+                            color = if (solidBackground) AILauncherColors.current.Title.copy(alpha = 0.85f)
                             else AILauncherColors.current.Hint,
                             // R3-A：大字体下占位文案单行省略，不溢出胶囊
                             maxLines = 1,
@@ -1069,6 +1102,12 @@ fun IntentEntry(
         val cardPadding = androidx.compose.foundation.layout.PaddingValues(
             horizontal = resolveCardHorizontalPadding(containerWidth)
         )
+        // 2026-10-28 意图页设计评审第 2 轮：空输入态底边发丝线宽度——
+        // 面板体宽＋两侧外延（竖屏各 20dp，横屏无外延），线压在卡片底边
+        // 全宽上，见覆盖层内空输入态分支。
+        val panelBottomEdgeWidth =
+            containerWidth - resolveCardHorizontalPadding(containerWidth) * 2 +
+                if (isLandscapeCard) 0.dp else 40.dp
     Column(modifier = Modifier.fillMaxWidth().padding(cardPadding)) {
       // ---- 外层 Box：面板 + 前面图层宠物 + 动作清单（Dock 外层 Box 同款结构） ----
       // 外层 Box 高 = 面板高（面板是唯一决定尺寸的孩子）；宠物与清单放在
@@ -1086,6 +1125,30 @@ fun IntentEntry(
               if (petAnchorTop != top) petAnchorTop = top
           }
       }) {
+      // ---- 2026-10-28 意图页设计评审第 2 轮（修正版规格，优先于结构方案文档） ----
+      // 内容定高结构契约：面板高度严格跟内容走——结果槽位只在有内容时
+      // 占位、收起只在结果在场时以并入形态出现、空输入态不留任何无内容
+      // 段。hasResultContent 必须与下方结果槽位 when() 的渲染条件逐项
+      // 镜像（权限／追问／思考／本地结果／回复／错误／查找中／没找到），
+      // 改槽位条件时须同步改这里，否则收起并入与槽位会错位。
+      // 空输入态（false）：面板只含胶囊＋示例行（＋示例隐藏时只含胶囊），
+      // 不硬放收起行——没什么可收起，硬放是用功能控件当视觉锚；底边
+      // 本身可见由覆盖层底边发丝线承担（见下方空输入态分支）。
+      // 结果在场（true）：收起并入结果条底边——与结果槽位包进同一 wrapper、
+      // 之间 0 间距，收起仍保留箭头＋“收起”字＋48dp 热区、同一退出入口；
+      // 字形→卡底由 60dp 压到 42dp（竖屏：热区居中后字形下沿 10dp＋面板
+      // 底垫 8dp＋外延 24dp；再压需动 48dp 热区或外延，硬约束不允许）。
+      // 退出兜底（空输入态无收起行时）：返回键、键盘自动收起（376）、
+      // 点外退出（HomeScreen 单一入口）三路均不依赖收起行，不存在无路可退。
+      val hasResultContent: Boolean = intentHasResultContent(
+          state = state,
+          showDeckApps = showDeckApps,
+          idleOrEditing = idleOrEditing,
+          committedLiteral = committedKeys.literal,
+          submittedText = submittedText,
+          localIndexReady = localIndex != null,
+          showSearching = showSearching
+      )
       // ---- F 批·一体化面板：输入区（胶囊 + 推荐行）+ 结果槽位同处一面 ----
       // 样式与 Dock 卡片同一套（2026-10-25 意图卡片统一）：玻璃引擎 STRONG +
       // 肩线＋圆角外延轮廓（IntentCardShape：顶缘复用 Dock 肩线、底部 24dp
@@ -1146,7 +1209,9 @@ fun IntentEntry(
         // 但布局高仍是 48dp——触控底线不缩水；矮靠贴合（8dp）与去 section
         // 感实现，不是靠压热区；再矮只能压热区，需 Bob 另定。
         // 卡片总高预算：打字态卡片比 372 多瘦条 48dp＋8dp 间距（约 56dp），
-        // 满结果 180dp＋收起 60dp 时顶缘风险见紧配置复核（本批未验真机）。
+        // 满结果 180dp＋收起 48dp 时顶缘风险见紧配置复核（本批未验真机；
+        // 2026-10-28 第 2 轮起收起并入结果条底边、面板间距 12dp 已省，
+        // 满结果面板竖屏 398dp、横屏 374dp，见第 2 轮实现收据量测表）。
         val showSlimExamples = idleOrEditing && showDeckExamples && deckExamples.isNotEmpty()
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -1189,6 +1254,11 @@ fun IntentEntry(
         // 现状；结果态沿用“提交即收键盘”；追问、权限（优先序最高）沿用现状；
         // 高风险确认是全链路唯一弹窗例外，专注态不另起弹窗；气泡锚点随
         // perch 走（卡片宠物上方 8dp）。
+        // 结果在场时槽位与收起包进同一 wrapper（wrapper 内 0 间距）：
+        // 收起即结果条底边，不再是面板末项的独立一节；空输入态整段不渲染，
+        // 面板只剩胶囊＋示例，高度严格跟内容走（见上方第 2 轮结构契约）。
+        if (hasResultContent) {
+        Column(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.testTag("intent_result_slot").heightIn(max = RESULT_BAR_MAX_HEIGHT).verticalScroll(rememberScrollState())) {
         when (val s = state) {
             is IntentUiState.NeedsPermission -> {
@@ -1276,25 +1346,22 @@ fun IntentEntry(
             }
         }
         } // 结果槽位 Column
-        // ---- 意图区底部收起（2026-10-27，Bob：卡片角 ✕ 太硬、挤示例行） ----
-        // 角 ✕ 已删，收起改到底部居中软胶囊＋下箭头；面板 Column 末项、
-        // 卡片内底边之上，悬浮／停靠键盘都不盖住它（面板整体坐键盘顶
-        // 之上）；竖屏／横屏同款（面板 Column 共用）；热区 ≥48dp、走
-        // 同一退出入口 onExitFocusRequest；TalkBack 读“收起”。
-        // 2026-10-27 设计精致化 P1-4：角 ✕ 已删，收起在面板 Column 末项；
-        // 2026-10-28 意图页设计评审第 1 轮 P0-1＋P1-4＋P1-10：透明底收起在亮壁纸
-    // 上实测仅 1.90:1，恢复与结果条同源的 intentContentScrim() 底托
-    // （Row 级、圆角 14dp）、文字与箭头改 Title（同衬底上 7.08:1）；
-    // Box 改顶对齐、Row 顶距 4dp（结果→字形 12dp 间距＋4dp＝16dp）；
-    // 字号 13sp→12sp、箭头 18dp→16dp，收起读成一条安静的底栏；
-    // 热区 48dp、位置、testTag、同一退出入口、TalkBack 一字不动。
+        // ---- 收起并入结果条底边（2026-10-28 意图页设计评审第 2 轮） ----
+        // 不再是面板末项独立一节（旧形态：12dp 面板间距＋48dp 顶对齐盒，
+        // 字形→卡底 60dp 尾巴的成因）；现为 wrapper 末项、与结果槽位 0 间距，
+        // 收起即结果条底边。Row 本身不动（底托 pill、箭头＋“收起”字、
+        // Title、12sp／16dp）；Box 由顶对齐改居中——48dp 热区不动，
+        // 字形下沿由盒内 28dp 压到 10dp，字形→卡底 60dp→42dp（竖屏）。
+        // 竖屏／横屏同款；热区 ≥48dp、同一退出入口、TalkBack 一字不动。
+        // 旧口径存档：2026-10-27 角 ✕ 改底部居中软胶囊；第 1 轮 P0-1 恢复
+        // 底托＋Title（亮壁纸 1.90:1→7.08:1）、P1-10 字阶收敛，均沿用。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
                 .testTag("intent_focus_exit")
                 .clickable { onExitFocusRequest() },
-            contentAlignment = Alignment.TopCenter
+            contentAlignment = Alignment.Center
         ) {
             Row(
                 modifier = Modifier
@@ -1317,6 +1384,8 @@ fun IntentEntry(
                 )
             }
         }
+        } // 结果＋收起 wrapper
+        } // if (hasResultContent)：空输入态无槽位、无收起，面板只剩胶囊＋示例
       } // 一体化面板 Column
       // ---- 覆盖层：接触影 + 宠物 + 动作清单（面板之后画、前面图层，不 clip） ----
       // 图层顺序即绘制顺序：面板 → 接触影 → 宠物 → 动作清单。覆盖层用
@@ -1332,6 +1401,24 @@ fun IntentEntry(
       // 意图旧胶囊接触影已按 22:02 verdict 整个摘除（黑 0.14、宽 72%、
       // 高 10dp、晚 90ms 的那枚），不再有影子跟随段。
       Box(modifier = Modifier.matchParentSize()) {
+        // ---- 空输入态底边发丝线（2026-10-28 意图页设计评审第 2 轮修正版） ----
+        // 空输入态不硬放收起行，卡片底边本身必须可见：仅在空输入态画
+        // 一条 1dp 底边线，压在卡片底边全宽上（体宽＋两侧外延，横屏无外延）。
+        // 手段说明（修正版契约 3，不先禁描边／阴影）：结果在场时底边由并入
+        // 的收起 pill 立住、不另画线；空输入态无 pill 可立，1dp 弱描边是
+        // 玻璃材质的正常组成部分、不是新语言——也不是整圈描边（351 去边框
+        // 决策不动），只画底边一线。颜色取 Title 0.25（深浅两档同值：浅色
+        // 下为暗线、深色下为亮线），不拦截点按、不占布局（覆盖层内）。
+        if (!hasResultContent) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .width(panelBottomEdgeWidth)
+                    .height(1.dp)
+                    .background(AILauncherColors.current.Title.copy(alpha = 0.25f))
+                    .testTag("intent_empty_bottom_edge")
+            )
+        }
         // 宠物：Dock 宠物本体（HybridPet，同一组件、同一活感引擎、同一动
         // 作状态机），只是换了个 perch——坐法与 Dock 上沿同一套：前面图
         // 层、居中、脚底压进卡片肩峰 INTENT_PET_PRESS（峰顶 = 面板顶缘 − rise）、接触不断；手势
