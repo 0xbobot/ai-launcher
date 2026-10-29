@@ -31,6 +31,18 @@ class IntentInputModeTest {
         ),
         IntentUiState.NeedsPermission("android.permission.CALL_PHONE", "需要电话权限"),
         IntentUiState.NeedsInput("去哪儿？", "nav.go", "destination", "导航"),
+        // 意图页优化（2026-10-30，Bob 已批 §二 B2/B3）：理解预告与正在
+        // 执行同样是在场状态——输入态不因此退出、返回键先关内层。
+        IntentUiState.Understood(
+            ActionRequest(
+                intent = "打车去机场",
+                capabilityId = "dache",
+                params = mapOf("to" to "机场"),
+                riskLevel = RiskLevel.LOW_RISK
+            ),
+            "打车 · 机场"
+        ),
+        IntentUiState.Executing("打车 · 机场"),
         IntentUiState.Reply("已为你打开地图"),
         IntentUiState.Error("网络不可用")
     )

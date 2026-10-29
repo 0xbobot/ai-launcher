@@ -357,6 +357,9 @@ fun AppCenterLandscape(
                         onValueChange = onSearchFieldChange,
                         onSubmit = onSearchSubmit,
                         onArrowSubmit = onSearchArrowSubmit,
+                        // 意图页优化（2026-10-30，Bob 已批 §二 A1 连带）：与竖屏
+                        // 同款——横屏箭头同样是确认本地搜索，不走 AI。
+                        submitContentDescription = "确认本地搜索",
                         // 应用中心变体（同竖屏）：✕ 一键清空、清空后列流恢复全量
                         showClearButton = true,
                         onFocusChanged = onSearchFocusChanged,

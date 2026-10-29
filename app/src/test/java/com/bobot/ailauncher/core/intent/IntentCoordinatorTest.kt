@@ -116,8 +116,12 @@ class IntentCoordinatorTest {
 
     private class FakeSpeaker : IntentSpeaker {
         val said = mutableListOf<String>()
+        var doneCount = 0
         override fun say(text: String) {
             said += text
+        }
+        override fun onTaskDone() {
+            doneCount++
         }
     }
 
@@ -202,15 +206,27 @@ class IntentCoordinatorTest {
         val planner = FakePlanner(PlanOutcome.Action("dache", mapOf("to" to "机场"), null))
         val caps = FakeCapabilities(mapOf("dache" to cap("dache", RiskLevel.READ)))
         val executor = FakeExecutor()
-        val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+        val speaker = FakeSpeaker()
+        val c = coordinator(planner = planner, capabilities = caps, executor = executor, speaker = speaker)
 
         c.submit("打车去机场")
-        assertEquals(1, executor.submitted.size)
-        val req = executor.submitted.single()
+        // 意图页优化（B2）：低风险不再规划完立即执行——先停在理解预告，
+        // 用户看一眼、点“就这样办”才真执行；执行器此时一次都没碰。
+        val preview = c.state.value
+        assertTrue(preview is IntentUiState.Understood)
+        preview as IntentUiState.Understood
+        assertEquals("打车 · 机场", preview.summary)
+        assertTrue(executor.submitted.isEmpty())
+        val req = preview.request
         assertEquals("dache", req.capabilityId)
         // 用注册表的 READ，而不是任何模型侧字段（模型结果里根本没有风险字段）
         assertEquals(RiskLevel.READ, req.riskLevel)
         assertEquals("机场", req.params["to"])
+
+        c.confirmUnderstood(req)
+        assertEquals(1, executor.submitted.size)
+        assertEquals(1, executor.realExecutions)
+        assertEquals(1, speaker.doneCount)
         assertTrue(c.state.value is IntentUiState.Reply)
     }
 
@@ -264,18 +280,23 @@ class IntentCoordinatorTest {
             assertTrue(c.state.value is IntentUiState.Error)
             assertTrue(executor.submitted.isEmpty())
         }
-        // 7b 未安装：执行器如实 Failed → Error，不进 Reply
+        // 7b 未安装：理解预告确认后，执行器如实 Failed → Error，不进 Reply
         run {
             val planner = FakePlanner(PlanOutcome.Action("dache", emptyMap(), null))
             val caps = FakeCapabilities(mapOf("dache" to cap("dache", RiskLevel.LOW_RISK)))
             val executor = FakeExecutor(
                 forcedResult = ActionResult.Failed("本机没有安装支持「打车」的应用")
             )
-            val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+            val speaker = FakeSpeaker()
+            val c = coordinator(planner = planner, capabilities = caps, executor = executor, speaker = speaker)
             c.submit("帮我打车")
+            val preview = c.state.value
+            assertTrue(preview is IntentUiState.Understood)
+            c.confirmUnderstood((preview as IntentUiState.Understood).request)
             val s = c.state.value
             assertTrue(s is IntentUiState.Error)
             assertEquals("本机没有安装支持「打车」的应用", (s as IntentUiState.Error).message)
+            assertEquals(0, speaker.doneCount)
         }
         // 7c deep link 失败：同样如实 Error，不报成功
         run {
@@ -286,6 +307,9 @@ class IntentCoordinatorTest {
             )
             val c = coordinator(planner = planner, capabilities = caps, executor = executor)
             c.submit("帮我打车去机场")
+            val preview = c.state.value
+            assertTrue(preview is IntentUiState.Understood)
+            c.confirmUnderstood((preview as IntentUiState.Understood).request)
             assertTrue(c.state.value is IntentUiState.Error)
         }
     }
@@ -401,13 +425,21 @@ class IntentCoordinatorTest {
         assertEquals(1, planner.calls)
 
         c.submit("机场")
-        // 补参不重新规划；合并后执行一次，参数就是用户补的这句
+        // 补参不重新规划；补齐后先停理解预告（与正常提交同路），
+        // 用户点“就这样办”才合并执行一次，参数就是用户补的这句
         assertEquals(1, planner.calls)
-        assertEquals(1, executor.submitted.size)
-        val req = executor.submitted.single()
+        assertTrue(executor.submitted.isEmpty())
+        val preview = c.state.value
+        assertTrue(preview is IntentUiState.Understood)
+        preview as IntentUiState.Understood
+        assertEquals("导航 · 机场", preview.summary)
+        val req = preview.request
         assertEquals("daohang", req.capabilityId)
         assertEquals("机场", req.params["to"])
         assertEquals("导航", req.intent)
+
+        c.confirmUnderstood(req)
+        assertEquals(1, executor.submitted.size)
         assertEquals(1, executor.realExecutions)
         assertTrue(c.state.value is IntentUiState.Reply)
     }
@@ -442,6 +474,13 @@ class IntentCoordinatorTest {
         assertTrue(executor.submitted.isEmpty())
 
         c.submit("121.5")
+        // 齐了先停理解预告：摘要里两个补齐值都在，用户能一次看全
+        val preview = c.state.value
+        assertTrue(preview is IntentUiState.Understood)
+        preview as IntentUiState.Understood
+        assertEquals("打车 · 31.2 · 121.5", preview.summary)
+        assertTrue(executor.submitted.isEmpty())
+        c.confirmUnderstood(preview.request)
         assertEquals(1, executor.submitted.size)
         val req = executor.submitted.single()
         assertEquals("31.2", req.params["lat"])
@@ -572,5 +611,65 @@ class IntentCoordinatorTest {
         // Reply 态点取消：不得把已呈现的回复误清掉
         c.cancelPlanning()
         assertEquals(IntentUiState.Reply("第二句的回复"), c.state.value)
+    }
+
+    // ---------- 18. 意图页优化（B2/B3）：理解摘要与预告守卫 ----------
+
+    @Test
+    fun `summarizeAction joins label and nonblank values only`() {
+        assertEquals("导航 · 机场", summarizeAction("导航", mapOf("to" to "机场")))
+        assertEquals("音乐", summarizeAction("音乐", emptyMap()))
+        assertEquals("导航 · 机场", summarizeAction("导航", mapOf("to" to "机场", "note" to "  ")))
+        assertEquals("导航", summarizeAction("导航", mapOf("to" to "   ")))
+    }
+
+    @Test
+    fun `confirmUnderstood twice executes only once and wrong request ignored`() = runTest {
+        val planner = FakePlanner(PlanOutcome.Action("dache", mapOf("to" to "机场"), null))
+        val caps = FakeCapabilities(mapOf("dache" to cap("dache", RiskLevel.LOW_RISK)))
+        val executor = FakeExecutor()
+        val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+
+        c.submit("打车去机场")
+        val preview = c.state.value as IntentUiState.Understood
+
+        // 不是同一单（旧条迟到回调/冒充）：挡下，预告态保持、零执行
+        c.confirmUnderstood(preview.request.copy(intent = "别的事"))
+        assertEquals(0, executor.realExecutions)
+        assertTrue(c.state.value is IntentUiState.Understood)
+
+        c.confirmUnderstood(preview.request)
+        // 连点第二次：预告态已离开（一次性守卫），不得重复执行
+        c.confirmUnderstood(preview.request)
+        assertEquals(1, executor.realExecutions)
+        assertEquals(1, executor.submitted.size)
+        assertTrue(c.state.value is IntentUiState.Reply)
+    }
+
+    @Test
+    fun `dismiss from understood returns to editing with original text`() = runTest {
+        val planner = FakePlanner(PlanOutcome.Action("dache", mapOf("to" to "机场"), null))
+        val caps = FakeCapabilities(mapOf("dache" to cap("dache", RiskLevel.LOW_RISK)))
+        val executor = FakeExecutor()
+        val c = coordinator(planner = planner, capabilities = caps, executor = executor)
+
+        c.submit("打车去机场")
+        assertTrue(c.state.value is IntentUiState.Understood)
+        // “改一下”走 dismiss：回编辑态、带回原话、零执行
+        c.dismiss()
+        assertEquals(IntentUiState.Editing("打车去机场"), c.state.value)
+        assertTrue(executor.submitted.isEmpty())
+    }
+
+    @Test
+    fun `chat outcomes skip understood preview entirely`() = runTest {
+        val planner = FakePlanner(PlanOutcome.Chat("今天晴天"))
+        val executor = FakeExecutor()
+        val c = coordinator(planner = planner, executor = executor)
+
+        c.submit("今天天气怎么样")
+        // 纯查询直接出结果，不多一道确认
+        assertEquals(IntentUiState.Reply("今天晴天"), c.state.value)
+        assertTrue(executor.submitted.isEmpty())
     }
 }
