@@ -61,6 +61,26 @@ interface IntentActionExecutor {
 /** 七仔发声（生产实现 = PetRepository.say） */
 interface IntentSpeaker {
     fun say(text: String)
+
+    /**
+     * 意图页优化（2026-10-30，Bob 已批 §二 B3）：任务执行成功时的
+     * “办成了”回音（生产实现 = 宠物 HAPPY 短暂表情，复用已有动作，
+     * 不新增身体、不新增表情）。默认空实现：旧的 speaker 实现不改
+     * 也能编过；只有生产 PetSpeaker 接线。
+     */
+    fun onTaskDone() {}
+}
+
+/**
+ * 意图页优化（2026-10-30，Bob 已批 §二 B2）：理解摘要（纯函数，单测锁定）。
+ * 只拼“能力名 ＋ 关键参数值”，不编能力没有的动词、不拼参数名——
+ * 参数值本身就是用户说出的目的地／对象，用户一眼能判对错。
+ * 无参数值时只剩能力名（如“我想听歌”→“音乐”），不留空后缀。
+ */
+internal fun summarizeAction(capabilityLabel: String, params: Map<String, String>): String {
+    val values = params.values.map { it.trim() }.filter { it.isNotBlank() }
+    return if (values.isEmpty()) capabilityLabel
+    else "$capabilityLabel · ${values.joinToString(" · ")}"
 }
 
 /**
@@ -178,8 +198,28 @@ class IntentCoordinator(
         val pending = _state.value as? IntentUiState.NeedsConfirmation ?: return
         if (pending.request != request) return
         // 先离开确认态再执行：执行期间的第二次 confirm 必然落空，不会重复执行。
-        _state.value = IntentUiState.Planning(request.intent)
+        // 意图页优化（B3）：确认后进 Executing 而非 Planning——用户点的是
+        // “执行”，不是“再想想”；思考／执行／完成三段就此分开。
+        _state.value = IntentUiState.Executing(
+            summarizeAction(
+                capabilities.find(request.capabilityId)?.label ?: request.capabilityId,
+                request.params
+            )
+        )
         execute(request.copy(confirmed = true), isConfirm = true)
+    }
+
+    /**
+     * 意图页优化（2026-10-30，Bob 已批 §二 B2）：用户在理解预告条上点了
+     * “就这样办”。一次性守卫同 confirm：只认当前正挂起的这一单，连点、
+     * 迟到回调一律忽略；“改一下”不走这里，走 dismiss（回编辑态改原话，
+     * 输入框里原话还在，见 IntentEntry 的 Editing 同步）。
+     */
+    fun confirmUnderstood(request: ActionRequest) {
+        val pending = _state.value as? IntentUiState.Understood ?: return
+        if (pending.request != request) return
+        _state.value = IntentUiState.Executing(pending.summary)
+        execute(request, isConfirm = false)
     }
 
     /**
@@ -224,7 +264,27 @@ class IntentCoordinator(
             askForInput(cap, request, missing)
             return
         }
-        execute(request, isConfirm = false)
+        proceedToExecuteOrPreview(cap, request)
+    }
+
+    /**
+     * 意图页优化（2026-10-30，Bob 已批 §二 B2）：参数齐了之后的分流，
+     * submitAction 与 fillPending（追问补齐）共用同一条——
+     * - 中／高风险：仍走 execute（引擎安全门回确认弹窗，原路径不动）；
+     * - 低风险：先停在 Understood 理解预告条，用户看一眼、点
+     *   “就这样办”才真执行；此前低风险是规划完立即执行，用户连
+     *   七仔理解成了什么都看不到，理解错了只能等办错了再挽回。
+     * 纯查询（Chat）不走这里，直接出结果，不多一道确认。
+     */
+    private fun proceedToExecuteOrPreview(cap: Capability, request: ActionRequest) {
+        if (request.needsConfirmation) {
+            execute(request, isConfirm = false)
+            return
+        }
+        _state.value = IntentUiState.Understood(
+            request,
+            summarizeAction(cap.label, request.params)
+        )
     }
 
     /** 进入/推进追问态：保存 pending，七仔在结果条里问出 [missing] 的第一个 */
@@ -268,12 +328,24 @@ class IntentCoordinator(
             return
         }
         pendingInput = null
-        execute(merged, isConfirm = false)
+        // 追问补齐后与正常提交同路：低风险同样先停理解预告（用户能看到
+        // 补齐后的完整理解），中／高风险仍走确认弹窗。
+        val cap = capabilities.find(merged.capabilityId)
+        if (cap == null) {
+            fail("这个我还不会做")
+            return
+        }
+        proceedToExecuteOrPreview(cap, merged)
     }
 
     private fun execute(request: ActionRequest, isConfirm: Boolean) {
         when (val result = executor.submit(request)) {
-            is ActionResult.Done -> reply(result.message)
+            is ActionResult.Done -> {
+                reply(result.message)
+                // 意图页优化（B3）：办成了的宠物回音——复用已有 HAPPY
+                // 短暂表情（生产 speaker 接线；测试 fake 默认空实现）。
+                speaker.onTaskDone()
+            }
             is ActionResult.NeedsConfirmation -> {
                 if (isConfirm) {
                     // 已确认过还要求确认：不再循环，明确失败（不声称已完成）

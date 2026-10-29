@@ -58,6 +58,20 @@ class IntentResultContentTest {
     }
 
     @Test
+    fun `理解预告与正在执行同样占结果槽位`() {
+        // 意图页优化（2026-10-30，Bob 已批 §二 B2/B3）：两新态必须判
+        // true，否则槽位不渲染、收起并入的退出入口一并丢失。
+        val req = ActionRequest(
+            intent = "打车去机场",
+            capabilityId = "dache",
+            params = mapOf("to" to "机场"),
+            riskLevel = RiskLevel.LOW_RISK
+        )
+        assertTrue(has(IntentUiState.Understood(req, "打车 · 机场")))
+        assertTrue(has(IntentUiState.Executing("打车 · 机场")))
+    }
+
+    @Test
     fun `打字无结果时按索引与查找中判定`() {
         // 索引建好且确无匹配 → “没找到”行在场。
         assertTrue(has(IntentUiState.Editing("不存在的应用"), committed = "不存在的应用", indexReady = true))

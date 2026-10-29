@@ -772,6 +772,10 @@ fun AppCenterContent(
                         focusManager.clearFocus()
                         keyboardController?.hide()
                     },
+                    // 意图页优化（2026-10-30，Bob 已批 §二 A1 连带）：应用中心
+                    // 箭头 = 确认本地搜索，不走 AI——无障碍文案不能沿用首页
+                    // 的“交给七仔去办”，否则 TalkBack 会说错动作。
+                    submitContentDescription = "确认本地搜索",
                     // 应用中心变体专属（10-21 Bob 批准）：✕ 一键清空，清空后网格恢复全量；
                     // 首页胶囊不开启，保持原设计。
                     showClearButton = true,

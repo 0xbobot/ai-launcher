@@ -132,6 +132,9 @@ fun HomeScreen(
     intentState: com.bobot.ailauncher.core.intent.IntentUiState,
     onIntentSubmit: (String) -> Unit,
     onIntentConfirm: (com.bobot.ailauncher.core.action.ActionRequest) -> Unit,
+    // 意图页优化（2026-10-30，Bob 已批 §二 B2）：理解预告条“就这样办”
+    // 的回调（协调器 confirmUnderstood），与弹窗确认分开透传。
+    onIntentConfirmUnderstood: (com.bobot.ailauncher.core.action.ActionRequest) -> Unit = {},
     onIntentDismiss: () -> Unit,
     // v0.68.98（F-06）：Planning 态取消（宿主真取消在途 Job），透传给 IntentEntry
     onIntentCancelPlanning: () -> Unit,
@@ -945,6 +948,7 @@ fun HomeScreen(
                                 state = intentState,
                                 onSubmit = onIntentSubmitWrapped,
                                 onConfirm = onIntentConfirm,
+                                onConfirmUnderstood = onIntentConfirmUnderstood,
                                 onDismiss = onIntentDismiss,
                                 onCancelPlanning = onIntentCancelPlanning,
                                 onOpenSettings = onOpenSettings,
@@ -1096,6 +1100,11 @@ internal fun intentStateHoldsInput(
     is com.bobot.ailauncher.core.intent.IntentUiState.NeedsConfirmation,
     is com.bobot.ailauncher.core.intent.IntentUiState.NeedsPermission,
     is com.bobot.ailauncher.core.intent.IntentUiState.NeedsInput,
+    // 意图页优化（2026-10-30，Bob 已批 §二 B2/B3）：理解预告与正在
+    // 执行同样是在场状态——输入态不因此退出、返回键先关内层（经
+    // intentBackStep 的 DismissInner，与其他在场态同款）。
+    is com.bobot.ailauncher.core.intent.IntentUiState.Understood,
+    is com.bobot.ailauncher.core.intent.IntentUiState.Executing,
     is com.bobot.ailauncher.core.intent.IntentUiState.Reply,
     is com.bobot.ailauncher.core.intent.IntentUiState.Error -> true
     is com.bobot.ailauncher.core.intent.IntentUiState.Idle,

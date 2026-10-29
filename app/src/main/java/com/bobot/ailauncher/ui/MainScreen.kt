@@ -412,6 +412,7 @@ private fun HomeHost(
             intentState = intentState,
             onIntentSubmit = { t -> submitIntent(t) },
             onIntentConfirm = { req -> intentCoordinator.confirm(req) },
+            onIntentConfirmUnderstood = { req -> intentCoordinator.confirmUnderstood(req) },
             onIntentDismiss = { intentCoordinator.dismiss() },
             onIntentCancelPlanning = { cancelIntentPlanning() },
             // v0.68.99（R-1）：输入态（进入 = 点 Dock 坐姿七仔，v0.68.101 起

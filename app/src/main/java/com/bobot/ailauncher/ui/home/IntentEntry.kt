@@ -200,6 +200,10 @@ internal fun intentHasResultContent(
     is IntentUiState.NeedsPermission -> true
     is IntentUiState.NeedsInput -> true
     is IntentUiState.Planning -> true
+    // 意图页优化（2026-10-30，Bob 已批 §二 B2/B3）：理解预告与正在
+    // 执行同样占结果槽位——判 false 会丢掉收起并入的退出入口。
+    is IntentUiState.Understood -> true
+    is IntentUiState.Executing -> true
     else -> if (showDeckApps && state !is IntentUiState.NeedsConfirmation) true
     else when (state) {
         is IntentUiState.Reply -> true
@@ -409,7 +413,11 @@ fun IntentCapsuleField(
     // 应用中心升级（Bob 2026-10-24 定稿②）：箭头 = 确认本地搜索——
     // 调用方传此回调时，箭头钮走它（仅收键盘 + 定格结果）；不传时箭头
     // 沿旧走 onSubmit（首页不动）；IME Done 恒走 onSubmit，不受此影响
-    onArrowSubmit: (() -> Unit)? = null
+    onArrowSubmit: (() -> Unit)? = null,
+    // 意图页优化（2026-10-30，Bob 已批 §二 A1）：提交钮的无障碍文案——
+    // 首页默认“交给七仔去办”（点它就是把这句话交给七仔办，不是下一页、
+    // 不是搜一下）；应用中心箭头语义不同（确认本地搜索），调用方另传。
+    submitContentDescription: String = "交给七仔去办"
 ) {
     val focusRequester = remember { FocusRequester() }
     // v0.68.102（310 冻结修复二轮）：key 改为 requestFocusOnMount 本身——
@@ -497,7 +505,11 @@ fun IntentCapsuleField(
                 fontSize = 15.sp,
                 color = AILauncherColors.current.Title
             ),
-            cursorBrush = SolidColor(AILauncherColors.current.Accent),
+            // 意图页优化（2026-10-30，Bob 已批 §二 A4）：光标不再用金色——
+            // 整页金色只留给提交主操作（§四光标例外本次不批准）；光标改
+            // Title 色（与输入文字同色，仍一眼可辨），深浅两档同款。
+            // 本组件首页与应用中心共用，光标口径随之统一，不另分叉。
+            cursorBrush = SolidColor(AILauncherColors.current.Title),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { if (canSubmit) onSubmit() }),
             decorationBox = { innerTextField ->
@@ -585,7 +597,7 @@ fun IntentCapsuleField(
                 } else {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "提交",
+                        contentDescription = submitContentDescription,
                         // 2026-10-28 意图页设计评审第 1 轮 P1-3：白箭头 on 金盘
                         // 仅 2.42:1，改主题 onPrimary 深色字 #1F1D1A（同金盘
                         // 6.94:1；Light.Title 即该字面值，与深浅主题无关，
@@ -661,6 +673,10 @@ fun IntentEntry(
     state: IntentUiState,
     onSubmit: (String) -> Unit,
     onConfirm: (ActionRequest) -> Unit,
+    // 意图页优化（2026-10-30，Bob 已批 §二 B2）：理解预告条上
+    // “就这样办”的回调（协调器 confirmUnderstood）；与弹窗确认
+    // （onConfirm）分开——两单各有一次性守卫，不共用。
+    onConfirmUnderstood: (ActionRequest) -> Unit = {},
     onDismiss: () -> Unit,
     // v0.68.98（F-06）：Planning 态取消——宿主 cancel 在途 Job + 协调器作废结果，
     // 与 onDismiss（关反馈条）语义不同，故单列
@@ -830,13 +846,27 @@ fun IntentEntry(
     // 物姿态。PetRepository 的 intentPose 覆盖层随之删除（唯一消费者已无）。
     // 但思考标志保留：眼睛批（344）以 intentThinking 驱动专注眼形，故
     // Planning 态仍写入、离场清零——姿态退役不得砍掉眼睛引擎的输入。
-    LaunchedEffect(planning) { PetRepository.setIntentThinking(planning) }
+    // 意图页优化（2026-10-30，Bob 已批 §二 B3）：执行中同样是专注眼形——
+    // 思考与执行共用“正在办事”的眼神，办成时改走 HAPPY 短暂表情
+    // （协调器 Done 路径经 speaker.onTaskDone 触发，见 IntentCoordinator）；
+    // 视频层处应急关闭态，故执行态不另起新表情片，只用已有眼睛＋HAPPY。
+    val executing = state is IntentUiState.Executing
+    LaunchedEffect(planning, executing) { PetRepository.setIntentThinking(planning || executing) }
     DisposableEffect(Unit) {
         onDispose { PetRepository.setIntentThinking(false) }
     }
 
     // 回复小条短时呈现：5 秒后自动收起（协调器 dismiss 回编辑态，原话不丢）
     LaunchedEffect(state) {
+        // 意图页优化（2026-10-30，Bob 已批 §二 B2“改一下”）：dismiss 回
+        // Editing 时，输入框必须真回到原话——否则“改一下”只是口号：
+        // 直接提交路径下框里本就是原话（守卫跳过）；追问路径下框里是
+        // 最后补的参数（NeedsInput 入场时已清空），须把原话写回去、
+        // 光标落文末，用户改字即改原句。只在文本不同时写，不扰动
+        // 用户正在敲的字（Editing 只由 dismiss 产生，不在打字中出现）。
+        if (state is IntentUiState.Editing && fieldValue.text != state.text) {
+            onFieldValueChange(TextFieldValue(state.text, TextRange(state.text.length)))
+        }
         // 追问态（意图改进二批）：清空输入框等用户补参数——原话由协调器保存，
         // 关掉追问条 dismiss 时带回；文本清空后本地层也不会拿原话再出结果。
         if (state is IntentUiState.NeedsInput) {
@@ -1235,10 +1265,15 @@ fun IntentEntry(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // 胶囊本体（与应用中心同一组件；面板语境用卡片同款玻璃，见上）
+            // 意图页优化（2026-10-30，Bob 已批 §二 A1）：首页占位文案点明
+            // 提交的含义——“想办什么？交给七仔”，配金色提交钮与“交给七仔
+            // 去办”的无障碍文案，没用过这页的人也能一眼看懂点它就是把
+            // 这句话交给七仔去办。应用中心占位不动（其箭头是确认本地搜索）。
             IntentCapsuleField(
                 value = fieldValue,
                 onValueChange = { nv -> onFieldValueChange(nv) },
                 onSubmit = { submitIfReady() },
+                placeholder = "想办什么？交给七仔",
                 planning = planning,
                 requestFocusOnMount = requestFocusOnMount,
                 onFocusChanged = { capsuleFocused = it },
@@ -1248,9 +1283,14 @@ fun IntentEntry(
             if (showSlimExamples) {
                 // 推荐问主行：从面板内容左缘起横滚；滤空时整行隐藏（按已装能力
                 // 过滤后池子可能为空，不留空白占位）
+                // 意图页优化（2026-10-30，Bob 已批 §二 B1）：本地结果在场时
+                // 示例行弱化（dimmed）——胶囊与结果是主角，示例不抢空间；
+                // 只降视觉权重，不隐藏、不压高、不动 48dp 热区（打字时
+                // 常驻的 2026-10-27 决定不动；命中后让位是 §四项，本次不做）。
                 DeckExamplesRow(
                     examples = deckExamples,
-                    onPick = { pickExample(it) }
+                    onPick = { pickExample(it) },
+                    dimmed = showDeckApps
                 )
             }
         }
@@ -1302,6 +1342,21 @@ fun IntentEntry(
             is IntentUiState.Planning -> {
                 PlanningStrip(onCancel = onCancelPlanning)
             }
+            // 意图页优化（2026-10-30，Bob 已批 §二 B2/B3）：理解预告与
+            // 正在执行——同一结果槽位内的两个新分支，不新开容器、不另起列：
+            // 理解预告条先摊开理解（办什么＋关键参数值），用户点“就这样办”
+            // 才执行、点“改一下”回编辑态改原话；执行条只呈现“正在办”，
+            // 同步深链交接下极短即被回复／失败取代（状态机上三段已分开）。
+            is IntentUiState.Understood -> {
+                UnderstoodStrip(
+                    summary = s.summary,
+                    onConfirm = { onConfirmUnderstood(s.request) },
+                    onEdit = onDismiss
+                )
+            }
+            is IntentUiState.Executing -> {
+                ExecutingStrip(summary = s.summary)
+            }
             else -> {
                 if (showDeckApps &&
                     state !is IntentUiState.NeedsConfirmation
@@ -1320,8 +1375,13 @@ fun IntentEntry(
                     )
                 } else when (s) {
                     is IntentUiState.Reply -> {
+                        // 意图页优化（2026-10-30，Bob 已批 §二 A2）：回复条
+                        // 带“七仔：”归属前缀——与本地结果条的“本机应用”
+                        // 标题对仗，用户一眼分清哪边是本机匹配、哪边是
+                        // 七仔办完事的回音；前缀是弱说明，不承载关键信息。
                         StatusStrip(
                             text = s.text,
+                            attribution = "七仔：",
                             onClose = onDismiss
                         )
                     }
@@ -1553,7 +1613,10 @@ fun IntentEntry(
                 TextButton(onClick = { onConfirm(state.request) }) {
                     Text(
                         text = "执行",
-                        color = AILauncherColors.current.Accent,
+                        // 意图页优化（2026-10-30，Bob 已批 §二 A4）：弹窗
+                        // 里的执行也不再用金色——整页金色只留胶囊提交盘；
+                        // 改 Title 色，浅色底上 16.81:1，比金色字更易读。
+                        color = AILauncherColors.current.Title,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -1612,7 +1675,10 @@ private fun LocalResultsBar(
     ) {
         Text(
             // 2026-10-27 设计精致化 P1-5：说明缩成“应用 · N 个”，更紧更好扫。
-            text = "应用 · ${apps.size} 个",
+            // 意图页优化（2026-10-30，Bob 已批 §二 A2）：标题点明归属——
+            // “本机应用 · N 个”，与七仔回复条的“七仔：”前缀对仗，打字
+            // 结果与七仔回答不再混在同一个无名条里。
+            text = "本机应用 · ${apps.size} 个",
             fontSize = 12.sp,
             // 2026-10-28 意图页设计评审第 1 轮 P1-6：标签深色 Body 实测
             // 4.43:1、浅色 Hint 推导 3.75:1，双双不过线——深色改 Title
@@ -1749,6 +1815,9 @@ private fun StatusStrip(
     text: String,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    // 意图页优化（2026-10-30，Bob 已批 §二 A2）：归属前缀（如“七仔：”），
+    // 只在既有行内出现，不新开容器；为 null 时不渲染、不占位。
+    attribution: String? = null,
     onClose: () -> Unit
 ) {
     Row(
@@ -1760,6 +1829,18 @@ private fun StatusStrip(
             .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (attribution != null) {
+            Text(
+                text = attribution,
+                fontSize = 12.sp,
+                // 弱说明色：归属不是关键信息，不用 Title 抢眼；浅色
+                // Body 在面板玻璃上约 7.06:1，深色 Body 在深色衬底
+                // 上约 7.06:1（与正文同口径，见 §一对比表）。
+                color = AILauncherColors.current.Body,
+                maxLines = 1,
+                modifier = Modifier.padding(end = 6.dp)
+            )
+        }
         Text(
             text = text,
             fontSize = 13.sp,
@@ -1774,7 +1855,10 @@ private fun StatusStrip(
             TextButton(onClick = onAction) {
                 Text(
                     text = actionLabel,
-                    color = AILauncherColors.current.Accent,
+                    // 意图页优化（2026-10-30，Bob 已批 §二 A4）：去设置
+                    // 不再用金色——金色只留提交主操作；改 Title 色，
+                    // 浅色底上 16.81:1，比金盘字 2.42:1 更易读。
+                    color = AILauncherColors.current.Title,
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp
                 )
@@ -1801,6 +1885,102 @@ private fun StatusStrip(
                 )
             }
         }
+    }
+}
+
+/**
+ * 意图页优化（2026-10-30，Bob 已批 §二 B2）：理解预告条——规划落地后、
+ * 执行前，把理解摊开给用户看。同一结果槽位、同一条语言（面板内透明、
+ * 左轴与回复条一致），不新开容器、不另起列：
+ * - 主文案一句话说清理解（“七仔理解成：导航 · 机场”），用户一眼判对错；
+ * - “就这样办”才真执行（协调器一次性守卫，连点不重复执行）；
+ * - “改一下”回编辑态改原话（输入框同步回原句，见 LaunchedEffect(state)）；
+ * - 纯查询（Chat）不走这里，直接出结果，不多一道确认；
+ * - 中／高风险动作不走这里，仍走确认弹窗（原安全门）。
+ * 常驻不自动收起；下方收起 pill 照常是退出入口。触控：两钮均为真
+ * TextButton（与思考条取消钮同口径），另加 testTag 供冒烟定位。
+ */
+@Composable
+private fun UnderstoodStrip(
+    summary: String,
+    onConfirm: () -> Unit,
+    onEdit: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
+            .semantics { liveRegion = LiveRegionMode.Polite }
+            .testTag("understood_strip")
+            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = "七仔理解成：$summary",
+            fontSize = 13.sp,
+            color = AILauncherColors.current.Title,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(
+                onClick = onEdit,
+                modifier = Modifier.testTag("understood_edit")
+            ) {
+                Text(
+                    text = "改一下",
+                    // 次要动作：Body 色，不抢“就这样办”。
+                    color = AILauncherColors.current.Body,
+                    fontSize = 13.sp
+                )
+            }
+            TextButton(
+                onClick = onConfirm,
+                modifier = Modifier.testTag("understood_confirm")
+            ) {
+                Text(
+                    text = "就这样办",
+                    // A4：本条的主动作也不用金色——整页金色只留胶囊
+                    // 提交盘；改 Title 色＋Medium 字重，仍是条内最显眼的钮。
+                    color = AILauncherColors.current.Title,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.sp
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 意图页优化（2026-10-30，Bob 已批 §二 B3）：正在执行条——与思考条
+ * 同款 Row（面板内透明、TalkBack 礼貌播报），只呈现“正在办”，无钮：
+ * 执行已交出，取消已无意义；同步深链交接下本条极短即被回复／失败
+ * 取代，但思考／执行／完成在状态机与槽位呈现上就此分开。失败时
+ * 走 Error 条明说原因，绝不报假成功（协调器原口径不动）。
+ */
+@Composable
+private fun ExecutingStrip(summary: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = RESULT_BAR_MAX_HEIGHT)
+            .semantics { liveRegion = LiveRegionMode.Polite }
+            .testTag("executing_strip")
+            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "七仔正在办：$summary",
+            fontSize = 13.sp,
+            color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
@@ -1840,7 +2020,9 @@ private fun PlanningStrip(
         ) {
             Text(
                 text = "取消",
-                color = AILauncherColors.current.Accent,
+                // 意图页优化（2026-10-30，Bob 已批 §二 A4）：取消是次要
+                // 动作，不再用金色抢眼，改 Body 色。
+                color = AILauncherColors.current.Body,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp
             )
@@ -1942,7 +2124,9 @@ private fun PermissionExplainCard(
             TextButton(onClick = onGoSettings) {
                 Text(
                     text = "去开启",
-                    color = AILauncherColors.current.Accent,
+                    // 意图页优化（2026-10-30，Bob 已批 §二 A4）：去开启
+                    // 不再用金色——金色只留提交主操作；改 Title 色。
+                    color = AILauncherColors.current.Title,
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp
                 )

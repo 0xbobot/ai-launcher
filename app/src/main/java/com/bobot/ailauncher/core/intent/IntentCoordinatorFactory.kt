@@ -88,5 +88,10 @@ object IntentCoordinatorFactory {
 
     private object PetSpeaker : IntentSpeaker {
         override fun say(text: String) = PetRepository.say(text)
+
+        // 意图页优化（2026-10-30，Bob 已批 §二 B3）：任务办成时宠物
+        // 复用已有 HAPPY 短暂表情（1.2 秒后自回 IDLE），同一只宠物、
+        // 同一套动作，不新增身体、不新增表情。
+        override fun onTaskDone() = PetRepository.setMoodHappyBrief()
     }
 }

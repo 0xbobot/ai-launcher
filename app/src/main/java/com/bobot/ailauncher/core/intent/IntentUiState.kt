@@ -37,6 +37,23 @@ sealed interface IntentUiState {
         val originalText: String
     ) : IntentUiState
 
+    /**
+     * 意图页优化（2026-10-30，Bob 已批 §二 B2）：规划已落地、尚未执行的
+     * 理解预告——低风险动作执行前先把理解摊开给用户看（办什么事、
+     * 关键参数值），用户点“就这样办”才执行、点“改一下”回编辑态改原话。
+     * 只在结果槽位里呈现（与思考／追问／回复同一槽位），不新开容器。
+     * 中／高风险动作不走这里：它们仍走确认弹窗（原安全门，一字不动）。
+     */
+    data class Understood(val request: ActionRequest, val summary: String) : IntentUiState
+
+    /**
+     * 意图页优化（2026-10-30，Bob 已批 §二 B3）：正在执行——用户已确认
+     * 理解、执行已交出。同步深链交接下本态极短（下一帧即被回复／失败
+     * 取代），但状态机上思考／执行／完成三段就此分开；UI 在同一结果
+     * 槽位里以“正在办”呈现，不另起容器。
+     */
+    data class Executing(val summary: String) : IntentUiState
+
     /** 纯文本回复（含动作执行成功文案），走七仔气泡呈现 */
     data class Reply(val text: String) : IntentUiState
 
