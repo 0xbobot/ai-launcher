@@ -89,12 +89,18 @@ fun DeckExamplesRow(
             .clip(RoundedCornerShape(14.dp))
             .background(intentContentScrim())
     ) {
+    // 2026-10-29 意图页设计评审第 4 轮 P1-5（示例行内局部几何，只动间距与渐隐宽度）：
+    // 383 实拍第三项圆点恰落在渐隐起点上、露出仅约 1–4dp，读成硬切。
+    // 项距 16dp→8dp 使第三项左移 16dp（两道间隙），渐隐宽 24dp→12dp 使
+    // 渐隐起点右移 12dp；合计第三项在渐隐起点前的露出从约 4dp 增至约 32dp
+    // （360dp 屏、实拍前两项文案量测：圆点＋首字完整在渐隐起点左侧，
+    // 第二字起进渐隐透明段，仍可辨认；行高、热区、终点色一字不动）。
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 32.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         examples.forEach { t ->
             Row(
@@ -106,11 +112,14 @@ fun DeckExamplesRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // 2026-10-29 意图页设计评审第 4 轮 P1-2（只改本圆点颜色值）：
+                // 琥珀点改与示例字同色（深色 Title／浅色 Body），不再用金色；
+                // 提交箭头保留唯一金色 accent（IntentEntry.kt 提交圆盘不动）。
                 Box(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(AILauncherColors.current.Accent)
+                        .background(if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body)
                 )
                 Text(
                     text = t.exampleFillText(),
@@ -124,7 +133,10 @@ fun DeckExamplesRow(
         Spacer(modifier = Modifier.width(16.dp))
     }
     // 右缘渐隐（不拦截点按：本 Box 无 clickable，事件落到下层横滚行）：
-    // 24dp 内从透明过渡到卡片实色，溢出项呈现为“字＋渐隐”而非半字硬切；
+    // 第 4 轮 P1-5：渐隐宽 24dp→12dp（起点右移 12dp，与项距收窄合计
+    // 第三项露出约 32dp）；终点色仍为 Card 实色，不动；高度仍为 48dp
+    // 定高，严禁改回 fillMaxHeight／fillMaxSize（第 3 轮根因禁令仍有效）。
+    // 12dp 内从透明过渡到卡片实色，溢出项呈现为“字＋渐隐”而非半字硬切；
     // 内容未溢出时渐隐区只盖空衬底（同色系，无可见变化）。
     // 2026-10-29 意图页设计评审第 3 轮（撑高根因修复）：此处此前用
     // fillMaxHeight，父 Box 经面板 Column、PetZone 槽位一路向上吃到窗口高
@@ -136,7 +148,7 @@ fun DeckExamplesRow(
     Box(
         modifier = Modifier
             .align(Alignment.CenterEnd)
-            .width(24.dp)
+            .width(12.dp)
             .height(48.dp)
             .background(
                 Brush.horizontalGradient(
