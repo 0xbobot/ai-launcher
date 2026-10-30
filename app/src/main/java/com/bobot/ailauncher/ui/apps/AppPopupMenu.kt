@@ -212,8 +212,10 @@ fun AppShortcutInline(
 
     Column(modifier = modifier.fillMaxWidth()) {
         // v0.68.179：应用管理行（与 Dock 长按菜单标题行右侧 ⓘ 同一入口：
-        // 系统应用信息页）。放顶部，与 Dock 的 ⓘ 位置层级一致；行内菜单
-        // 本身无头（v0.68.53 定），不重复图标＋标题，只加图标＋文字行。
+        // 系统应用信息页）。放顶部，单独一行；v0.68.180 起图标放右侧，
+        // 与 Dock 标题行（文字左、ⓘ 右）的布局一致（Bob 10-30 纠正：
+        // 左侧图标不符合 Dock 的右侧惯例）。
+        // 行内菜单本身无头（v0.68.53 定），不重复图标＋标题。
         // 纵向 14dp 内边：14sp 字行约 20dp，行高 48dp，触控达标。
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -225,6 +227,14 @@ fun AppShortcutInline(
                 }
                 .padding(horizontal = 20.dp, vertical = 14.dp)
         ) {
+            Text(
+                text = "应用管理",
+                fontSize = 14.sp,
+                color = AILauncherColors.current.Title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
             Icon(
                 imageVector = Icons.Outlined.Info,
                 // 体检批D ⑨：装饰（行文字「应用管理」已表达）标装饰语义
@@ -233,14 +243,6 @@ fun AppShortcutInline(
                 modifier = Modifier
                     .size(22.dp)
                     .semantics { invisibleToUser() }
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = "应用管理",
-                fontSize = 14.sp,
-                color = AILauncherColors.current.Title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
             )
         }
         // 金线分隔（与行内容区分，但同一张卡）
