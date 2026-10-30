@@ -47,6 +47,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1440,11 +1441,14 @@ fun IntentEntry(
                 .clickable { onExitFocusRequest() },
             contentAlignment = Alignment.Center
         ) {
+            // 收起简洁化（2026-10-30，Bob 385 实拍 verdict：收起按钮太臃肿、
+            // 占用位置大）：去底托填充、改紧凑 chevron＋文字——视觉从
+            // 68×33dp 实心 pill 收为约 60dp 宽无底色文字；触控框一律不动
+            // （上方 Box 整宽 × min 48dp），可见＜热区是背景 inset 于
+            // 热区内，不压触控。
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(intentContentScrim())
-                    .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
+                    .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -1630,6 +1634,10 @@ fun IntentEntry(
     }
 }
 
+/** 结果行滚动复位 key：包名串——结果集一变 key 即变，行重建归零。 */
+internal fun localResultsScrollKey(packageNames: List<String>): String =
+    packageNames.joinToString(separator = "|")
+
 /**
  * 七仔结果条·本地直达：打字时实时出的本地应用匹配（图标+名称，最多 4 个）。
  * 与回复/错误小条同一槽位、同一 Card 语言；文案以七仔口吻呈现——结果是七仔端出来的。
@@ -1694,7 +1702,14 @@ private fun LocalResultsBar(
         // 任何字号档都不出界，4 项全部可达。
         // 2026-10-28 意图页设计评审第 1 轮 P1-5：结果行同理加右缘 24dp
         // 渐隐（示例行同款，不拦截点按），溢出时呈现为“图标＋渐隐”。
+        // 对齐修复（2026-10-30，385 实拍）：横滚行 rememberScrollState
+        // 在结果变化时不复位——旧偏移残留会把首项顶出左缘裁切（实拍：
+        // 行右移约 34dp，首图标左缺约 20dp、标签只剩“sApp”）。以包名
+        // 串为 key：结果集一变整行重建、滚动归零，首项永远完整可见；
+        // 同一结果集内用户手动滑动不受影响（key 不变）。
+        val resultsScrollKey = localResultsScrollKey(apps.map { it.packageName })
         Box(modifier = Modifier.fillMaxWidth()) {
+        key(resultsScrollKey) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1705,6 +1720,7 @@ private fun LocalResultsBar(
             apps.forEach { app ->
                 ResultAppItem(app = app, onOpen = onOpen)
             }
+        }
         }
         Box(
             modifier = Modifier

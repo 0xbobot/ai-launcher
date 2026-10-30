@@ -116,7 +116,10 @@ fun DeckExamplesRow(
             fontSize = 13.sp,
             color = exampleTextColor,
             maxLines = 1,
-            modifier = Modifier.padding(start = 32.dp, end = 8.dp)
+            // 对齐修复（2026-10-30，385 实拍）：标签左缘须与胶囊文字／
+            // 结果标题同一左轴（面板内容左缘＋46dp）；385 时为 32dp，
+            // 实拍量测标签左缘比轴线左偏约 14dp。
+            modifier = Modifier.padding(start = 46.dp, end = 8.dp)
         )
         Box(modifier = Modifier.weight(1f)) {
             // 2026-10-29 意图页设计评审第 4 轮 P1-5（示例行内局部几何，只动间距与渐隐宽度）：
@@ -125,8 +128,9 @@ fun DeckExamplesRow(
             // 渐隐起点右移 12dp；合计第三项在渐隐起点前的露出从约 4dp 增至约 32dp
             // （360dp 屏、实拍前两项文案量测：圆点＋首字完整在渐隐起点左侧，
             // 第二字起进渐隐透明段，仍可辨认；行高、热区、终点色一字不动）。
-            // 本批只把行左内边 32dp 让给固定标签（横滚区左内边归零），
-            // 项距、渐隐宽、行尾留白一字不动。
+            // 本批只把行左内边 46dp 让给固定标签（横滚区左内边归零；385
+            // 时为 32dp，实拍量测标签左缘比胶囊／结果轴线左偏约 14dp，本批
+            // 对齐到 46dp 轴线），项距、渐隐宽、行尾留白一字不动。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
