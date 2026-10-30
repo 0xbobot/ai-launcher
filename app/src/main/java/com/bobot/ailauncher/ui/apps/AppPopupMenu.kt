@@ -211,38 +211,9 @@ fun AppShortcutInline(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        // v0.68.179：应用管理行（与 Dock 长按菜单标题行右侧 ⓘ 同一入口：
-        // 系统应用信息页）。放顶部，与 Dock 的 ⓘ 位置层级一致；行内菜单
-        // 本身无头（v0.68.53 定），不重复图标＋标题，只加图标＋文字行。
-        // 纵向 14dp 内边：14sp 字行约 20dp，行高 48dp，触控达标。
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable {
-                    openAppDetailsPage(context, app.packageName)
-                    onDismiss()
-                }
-                .padding(horizontal = 20.dp, vertical = 14.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Info,
-                // 体检批D ⑨：装饰（行文字「应用管理」已表达）标装饰语义
-                contentDescription = null,
-                tint = AILauncherColors.current.Hint,
-                modifier = Modifier
-                    .size(22.dp)
-                    .semantics { invisibleToUser() }
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = "应用管理",
-                fontSize = 14.sp,
-                color = AILauncherColors.current.Title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+        // v0.68.180（Bob 纠正）：387 的单独「应用管理」行已删——不要单独一行；
+        // 入口改到应用行本身最右边（见 AppRow showInfoIcon），与 Dock 标题行
+        // （图标左、名字中、ⓘ 右）一致，展开时才出现。
         // 金线分隔（与行内容区分，但同一张卡）
         androidx.compose.material3.HorizontalDivider(
             modifier = Modifier.padding(horizontal = 20.dp),

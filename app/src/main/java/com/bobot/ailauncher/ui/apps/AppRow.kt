@@ -37,7 +37,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -92,7 +94,12 @@ internal fun AppRow(
     onHideVisibleChange: (Boolean) -> Unit = {},
     // 应用中心升级：紧凑行——搜索态 / 键盘弹出时纵向 padding 12→8dp
     // （行高 64→56dp），仅调用方传参，默认行不动
-    compact: Boolean = false
+    compact: Boolean = false,
+    // v0.68.180（Bob）：长按菜单展开时，行尾出 ⓘ（与 Dock 标题行图标左、
+    // 名字中、ⓘ 右一致；不要单独加一行菜单）。点 ⓘ 走 onInfoClick
+    // （系统应用信息页），不触发行点按；收起时 ⓘ 消失。
+    showInfoIcon: Boolean = false,
+    onInfoClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -318,8 +325,28 @@ internal fun AppRow(
                     fontSize = 16.sp,
                     color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    // 只在出 ⓘ 时占满剩余宽，把 ⓘ 顶到行尾；收起时布局一字不动
+                    modifier = if (showInfoIcon && onInfoClick != null) Modifier.weight(1f) else Modifier
                 )
+                // v0.68.180：展开态行尾 ⓘ（Dock 标题行同款位置与图标）。
+                // IconButton 自带 48dp 触控框；内层 clickable 消费点按，不触发行点按。
+                if (showInfoIcon && onInfoClick != null) {
+                    IconButton(
+                        onClick = onInfoClick,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            // 体检批D ⑨：装饰（展开态的菜单语境已表达入口）标装饰语义
+                            contentDescription = null,
+                            tint = AILauncherColors.current.Hint,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .semantics { invisibleToUser() }
+                        )
+                    }
+                }
             }
 
             // 蒙层：透明全行覆盖，中央并排双钮；点空白处复原
