@@ -950,6 +950,11 @@ fun AppCenterContent(
                                         hapticView.confirmHaptic()
                                         popupApp = app
                                     },
+                                    showInfoIcon = isPopupExpanded,
+                                    onInfoClick = {
+                                        openAppDetailsPage(context, app.packageName)
+                                        popupApp = null
+                                    },
                                     onHide = ::hideApp,
                                     actionsVisible = expandedActionsPkg == app.packageName,
                                     onActionsVisibleChange = { expanded ->
@@ -1048,6 +1053,11 @@ fun AppCenterContent(
                                 onLongClick = {
                                     hapticView.confirmHaptic()
                                     popupApp = app
+                                },
+                                showInfoIcon = isPopupExpandedX,
+                                onInfoClick = {
+                                    openAppDetailsPage(context, app.packageName)
+                                    popupApp = null
                                 },
                                 onHide = ::hideApp,
                                 actionsVisible = expandedActionsPkg == app.packageName,
@@ -1203,6 +1213,11 @@ fun AppCenterContent(
                                     hapticView.confirmHaptic()
                                     popupApp = app
                                 },
+                                showInfoIcon = isPopupExpandedX,
+                                onInfoClick = {
+                                    openAppDetailsPage(context, app.packageName)
+                                    popupApp = null
+                                },
                                 onHide = ::hideApp,
                                 actionsVisible = expandedActionsPkg == app.packageName,
                                 onActionsVisibleChange = { expanded ->
@@ -1321,6 +1336,11 @@ fun AppCenterContent(
                                     onLongClick = {
                                         hapticView.confirmHaptic()
                                         popupApp = app
+                                    },
+                                    showInfoIcon = isPopupExpandedX,
+                                    onInfoClick = {
+                                        openAppDetailsPage(context, app.packageName)
+                                        popupApp = null
                                     },
                                     onHide = {}, // 隐藏分组内：右滑=取消隐藏
                                     onUnhide = ::unhideApp,
