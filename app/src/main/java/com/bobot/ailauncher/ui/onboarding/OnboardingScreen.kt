@@ -2,7 +2,13 @@
 
 package com.bobot.ailauncher.ui.onboarding
 
+import android.graphics.Bitmap
+import android.graphics.drawable.Drawable
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
@@ -20,8 +27,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -39,7 +48,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -51,6 +63,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -203,39 +217,37 @@ private fun GuideCard(
     }
 }
 
-/** 好处行：金点＋一句好处（含跟在后面的用法，不单开教学页） */
-@Composable
-private fun BenefitLine(text: String) {
-    // 批B ③同款：颜色在组合上下文先读出再带进 Canvas（DrawScope 非组合上下文，
-    // 里面读 AILauncherColors.current 会编不过）
-    val dotColor = AILauncherColors.current.Accent
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top
-    ) {
-        Canvas(modifier = Modifier.padding(top = 8.dp).size(8.dp)) {
-            drawCircle(
-                color = dotColor,
-                radius = size.minDimension / 2
-            )
-        }
-        Spacer(modifier = Modifier.width(10.dp))
-        Text(
-            text = text,
-            fontSize = 16.sp,
-            lineHeight = 23.sp,
-            color = AILauncherColors.current.Body
-        )
-    }
+/** 引导第 1 屏演示三态：初始／思考／结果（脚本化 mock，不调真实意图管线） */
+private enum class DemoState { Idle, Thinking, Result }
+
+/** Drawable → ImageBitmap（QuickActions 同款画法，不引 core-ktx） */
+private fun Drawable.toDemoImageBitmap(): ImageBitmap {
+    val w = intrinsicWidth.takeIf { it > 0 } ?: 96
+    val h = intrinsicHeight.takeIf { it > 0 } ?: 96
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    setBounds(0, 0, w, h)
+    draw(canvas)
+    return bmp.asImageBitmap()
 }
 
-/** 第 1 屏：欢迎——只讲这个启动器独特的优点（Bob 23:11 方向），常规项不写 */
+/** 第 1 屏：欢迎——可玩演示（Bob 2026-10-31 点选 B 方向，3 条好处行删掉换演示） */
 @Composable
 private fun StepWelcome(onNext: () -> Unit, onSkip: () -> Unit) {
+    val view = LocalView.current
+    var demo by remember { mutableStateOf(DemoState.Idle) }
+    // 思考态约 900ms 后出结果；状态一切换或离屏，延时自动取消
+    LaunchedEffect(demo) {
+        if (demo == DemoState.Thinking) {
+            delay(900)
+            demo = DemoState.Result
+        }
+    }
     StepScaffold(step = 0, onSkip = onSkip) {
         GuideCard(petWidth = GuidePetWidth) {
             Text(
-                text = "说句话，手机就帮你干活",
+                // 显式换行：两行断句，读着像设计不是断坏；字号／字体／颜色不动
+                text = "说句话，\n手机就帮你干活",
                 fontFamily = FontFamily.Serif,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
@@ -243,15 +255,160 @@ private fun StepWelcome(onNext: () -> Unit, onSkip: () -> Unit) {
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(20.dp))
-            // 每行好处后面直接跟一句怎么用（Bob 23:42 方向：穿插使用介绍，
-            // 不单开一页教使用；“今天要干的事”有工作感，描述要更通用，23:14）
-            BenefitLine("七仔就坐在桌面上，会看你、眨眼、跟你说话，点一下就能直接问它。")
-            Spacer(modifier = Modifier.height(12.dp))
-            BenefitLine("想干什么，点一下首页胶囊、说一声就到，不用翻应用找图标。")
-            Spacer(modifier = Modifier.height(12.dp))
-            BenefitLine("首页只有你想看的，每件都能一键接着干——消息点一下直接回，会议点一下直接加入。")
+            // 演示胶囊：简化版，预置文案＋首页同款金色提交盘（48dp 触控框＋
+            // 40dp 金盘＋20dp 深色箭头）；点盘只推演示状态，不启动应用、
+            // 不联网、不申请权限、不调真实意图／搜索代码
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(AILauncherColors.current.AccentSoft)
+                    .padding(start = 20.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "帮我打开微信",
+                    fontSize = 16.sp,
+                    color = AILauncherColors.current.Body,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clickable {
+                            // 思考中忽略点按（防重复计时）；结果态再点即重播
+                            if (demo != DemoState.Thinking) {
+                                view.tickHaptic()
+                                demo = DemoState.Thinking
+                            }
+                        }
+                        .semantics { contentDescription = "试试演示" },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(AILauncherColors.current.Accent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = AILauncherColors.Light.Title,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            // 演示结果区：下限 72dp，初始／思考态不跳布局；结果卡按内容长高
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 72.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                when (demo) {
+                    DemoState.Idle -> Text(
+                        text = "点一下右边的金色圆钮试试",
+                        fontSize = 14.sp,
+                        color = AILauncherColors.current.Hint
+                    )
+                    DemoState.Thinking -> Text(
+                        text = "七仔正在找…",
+                        fontSize = 14.sp,
+                        color = AILauncherColors.current.Hint
+                    )
+                    DemoState.Result -> DemoResultCard()
+                }
+            }
             Spacer(modifier = Modifier.height(28.dp))
+            // “开始”常在：演示不设门槛，不玩也能直接开始／跳过
             PrimaryButton(text = "开始", onClick = onNext)
+        }
+    }
+}
+
+/**
+ * 演示结果卡（mock，到此为止）：微信图标 tile＋“微信”＋副文案＋右上角
+ * “演示”角标。图标优先取 com.tencent.mm 真图标，取不到画绿底圆角方块＋
+ * 白色“微”字，不引新图片资产；整卡不设点按动作，不假装能打开。
+ */
+@Composable
+private fun DemoResultCard() {
+    val context = LocalContext.current
+    val iconBitmap = remember {
+        try {
+            context.packageManager.getApplicationIcon("com.tencent.mm")?.toDemoImageBitmap()
+        } catch (_: Exception) {
+            null
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(AILauncherColors.current.Card)
+            .border(1.dp, AILauncherColors.current.Divider, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (iconBitmap != null) {
+            Image(
+                bitmap = iconBitmap,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF07C160)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "微",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "微信",
+                fontSize = 16.sp,
+                color = AILauncherColors.current.Title
+            )
+            Text(
+                text = "演示：正式用时点一下就打开",
+                fontSize = 14.sp,
+                color = AILauncherColors.current.Body
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        // 右上角“演示”角标（行尾顶对齐，不压文字；装饰语义）
+        Box(
+            modifier = Modifier
+                .align(Alignment.Top)
+                .clip(RoundedCornerShape(8.dp))
+                .background(AILauncherColors.current.AccentSoft)
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+                .semantics { invisibleToUser() }
+        ) {
+            Text(
+                text = "演示",
+                fontSize = 11.sp,
+                color = AILauncherColors.current.Accent
+            )
         }
     }
 }
@@ -288,7 +445,7 @@ private fun StepPermissions(onNext: () -> Unit, onSkip: () -> Unit) {
             }
             Spacer(modifier = Modifier.height(20.dp))
             PermissionItem(
-                benefit = "日历：首页能显示今天的会，开会前提醒你，点一下就能加入。",
+                benefit = "首页显示今天的会，点一下就能加入。",
                 granted = calendarGranted.value,
                 doneText = "日历已开启",
                 todoText = "尚未开启",
@@ -296,7 +453,7 @@ private fun StepPermissions(onNext: () -> Unit, onSkip: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(20.dp))
             PermissionItem(
-                benefit = "消息提醒：要回的消息整理到首页，点一下就能直接回，重要的事不漏掉。",
+                benefit = "要回的消息整理到首页，点一下就能直接回。",
                 granted = notificationGranted.value,
                 doneText = "消息提醒已开启",
                 todoText = "尚未开启",
@@ -375,24 +532,9 @@ private fun StepFinish(onFinish: () -> Unit) {
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(16.dp))
+            // 第 3 屏减字：三段正文压成一句话；按钮与脚注一字不动
             Text(
-                text = "说句话就能找应用、办事——点胶囊或点七仔，说出你想干嘛。",
-                fontSize = 16.sp,
-                lineHeight = 23.sp,
-                color = AILauncherColors.current.Body,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = "首页只有你想看的，每件都能一键接着干。",
-                fontSize = 16.sp,
-                lineHeight = 23.sp,
-                color = AILauncherColors.current.Body,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = "以后改主意，随时去设置 → 权限里开关。",
+                text = "说句话就能找应用、办事；首页只有你想看的。",
                 fontSize = 16.sp,
                 lineHeight = 23.sp,
                 color = AILauncherColors.current.Body,
