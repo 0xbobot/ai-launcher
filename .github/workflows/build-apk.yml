@@ -42,3 +42,36 @@ jobs:
           name: ai-launcher-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
 
+
+  # 设计 token 门禁（轻量独立 job）：只看本次提交/PR 的新增行，不装 JDK/Gradle，
+  # 约 20 秒出结果。刻意不并入上面的 build job——publish-ota 只认 build job 结论，
+  # 且 smoke-test 以本 workflow 整体结论为触发条件，所以此 job 暂为非阻塞报告
+  # （continue-on-error，口径同 pet-walkthrough 的 P0 报告）；
+  # 想升级为强门禁时删掉下一行 continue-on-error 即可。
+  design-lint:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve base ref
+        id: base
+        run: |
+          ZERO=0000000000000000000000000000000000000000
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+          else
+            BEFORE="${{ github.event.before }}"
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != "$ZERO" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              BASE="$BEFORE"
+            else
+              BASE="origin/main"
+            fi
+          fi
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Check new lines against design tokens
+        run: scripts/lint-design-tokens.sh "${{ steps.base.outputs.base }}"
