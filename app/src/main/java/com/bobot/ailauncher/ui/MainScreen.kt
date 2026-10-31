@@ -82,7 +82,7 @@ import com.bobot.ailauncher.ui.home.MAX_QUICK_SEGS
 import com.bobot.ailauncher.ui.pet.QuickActionAddFlow
 import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
 import com.bobot.ailauncher.ui.pet.GuideManager
-import com.bobot.ailauncher.ui.onboarding.isNotificationAccessGranted
+import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import com.bobot.ailauncher.ui.theme.AILauncherColors
