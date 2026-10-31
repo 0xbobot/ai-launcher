@@ -1,6 +1,8 @@
 package com.bobot.ailauncher.ui.home
 
 import android.view.View
+import android.os.Handler
+import android.os.Looper
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -353,14 +355,34 @@ class BlindCaptureController(
     private var centerX = 0f
     private var centerY = 0f
     private var modeIndex = -1
-    // v0.68.62：扇形内长按删除——某快捷段停留 500ms 即 arm，松手进 Editing 钉住
-    // v0.68.64：500ms arm 作废，改 800ms 整扇钉住进完整编辑模式（见 enterEditMode）
+    // 2026-11-01 Bob 定（取代 2026-10-27 两阶段防误触）：扇形展开后，
+    // 手指在固定位置停留满 800ms 就直接进编辑模式——不用松手、不分段。
+    // 两阶段 arm（停留只 arm、松手落同段才进编辑）就此作废。
+    // 定时器用主线程 Handler：手指完全不动时 onMove 不会再回调，
+    // 只靠移动事件判断停留会在真静止时永远不触发，故必须靠定时器到期进编辑。
     private var dwellStartMs = 0L
-    // 2026-10-27 fan-quick-services 批：防误触两阶段——停留 800ms 只 arm
-    // （语音 + tick 提示），松手仍落在同一快捷段才进编辑；滑走 / 松手落别处
-    // 一律不进编辑（落别处只收扇形、不触发任何段）。arm 只认快捷段：
-    // 拍照段钉死、空槽位有点入路径、死区无段，停留再久也不 arm。
-    private var editArmedIdx = -1
+    private var dwellAnchorX = 0f
+    private var dwellAnchorY = 0f
+    private val dwellHandler = Handler(Looper.getMainLooper())
+    private var dwellRunnable: Runnable? = null
+
+    private fun cancelDwellTimer() {
+        dwellRunnable?.let { dwellHandler.removeCallbacks(it) }
+        dwellRunnable = null
+    }
+
+    private fun scheduleDwellTimer() {
+        cancelDwellTimer()
+        val r = Runnable {
+            dwellRunnable = null
+            if (tracking && triggered && !editPinned) {
+                enterEditMode(openAddSheet = false)
+                Log.d(TAG, "diag: edit(dwell 800ms 直接进入)")
+            }
+        }
+        dwellRunnable = r
+        dwellHandler.postDelayed(r, 800L)
+    }
     /** v0.68.64：编辑钉住时手势层移交扇形自身（点×/＋/拖拽由 MainScreen 侧处理），
      * controller 不再接管 down/move/up（HomeScreen 侧 LaunchedEffect 同步） */
     var editPinned = false
@@ -372,10 +394,10 @@ class BlindCaptureController(
      * 替代瞬间消失），动画播完 UI 回调 onDismissFinished；未展开直接 Hidden。
      */
     private fun dismissFan() {
+        cancelDwellTimer()
         val wasTriggered = triggered
         tracking = false
         triggered = false
-        editArmedIdx = -1
         modeIndex = -1
         if (wasTriggered) {
             setUi(BlindUiState.Dismissing(centerX, centerY, fanDir, segments))
@@ -391,10 +413,10 @@ class BlindCaptureController(
 
     /** v0.68.64：MainScreen 侧退出编辑（点扇形外）时调用——清钉住并同步双端状态 */
     fun exitEditMode() {
+        cancelDwellTimer()
         editPinned = false
         tracking = false
         triggered = false
-        editArmedIdx = -1
         modeIndex = -1
         setUi(BlindUiState.Hidden)
     }
@@ -442,34 +464,42 @@ class BlindCaptureController(
 
     /** v0.68.64：进编辑模式——整扇钉住，手势层移交扇形自身（editPinned） */
     private fun enterEditMode(openAddSheet: Boolean) {
+        cancelDwellTimer()
         tracking = false
         triggered = false
         modeIndex = -1
         editPinned = true
         hapticView.confirmHaptic()
-        guideEditOnce()
+        // 2026-11-01：停留直接进编辑后，进编辑本身就是反馈点——首次说完整
+        // 引导，之后每次只说“编辑模式”，不能只靠震动（盲操靠语音确认状态）。
+        if (!guideEditOnce()) {
+            PetRepository.say("编辑模式")
+        }
         setUi(BlindUiState.Editing(centerX, centerY, fanDir, buildEditSegments(), openAddSheet))
         Log.d(TAG, "diag: editMode(openAddSheet=$openAddSheet)")
     }
 
-    /** v0.68.64：编辑模式引导（只说一次） */
-    private fun guideEditOnce() {
-        try {
+    /** v0.68.64：编辑模式引导（只说一次）；返回是否说了完整引导 */
+    private fun guideEditOnce(): Boolean {
+        return try {
             val prefs = context.getSharedPreferences("blind_prefs", Context.MODE_PRIVATE)
             if (!prefs.getBoolean("fan_edit_guided", false)) {
                 prefs.edit().putBoolean("fan_edit_guided", true).apply()
                 PetRepository.say("编辑模式，拖动换位，点×删除，点+添加")
+                true
+            } else {
+                false
             }
-        } catch (_: Exception) { }
+        } catch (_: Exception) { false }
     }
 
     /** 手势开始：无条件跟踪（组件已消费的手势到不了这里） */
     fun onStart() {
         // v0.68.64：编辑钉住时新手势不接管（扇形自身处理交互）
         if (editPinned) return
+        cancelDwellTimer()
         tracking = true
         triggered = false
-        editArmedIdx = -1
         modeIndex = -1
         maxLeftPx = 0f
         maxRightPx = 0f
@@ -543,6 +573,9 @@ class BlindCaptureController(
                 modeIndex = -1
                 setUi(BlindUiState.Selecting(centerX, centerY, -1, fanDir, segments))
                 dwellStartMs = change.uptimeMillis
+                dwellAnchorX = pos.x
+                dwellAnchorY = pos.y
+                scheduleDwellTimer()
                 hapticView.confirmHaptic()
                 if (isZeroQuick) guideZeroQuickOnce()
                 else PetRepository.say("拍点什么？")
@@ -564,28 +597,32 @@ class BlindCaptureController(
         }
         val idx = sectorForIndex(pos.x - centerX, pos.y - centerY, deadZonePx, sweeps, fanDir)
         if (idx != modeIndex) {
-            // 换段即解 arm：滑走再滑回须重新停留满 800ms 才再 arm，不闪进编辑
-            editArmedIdx = -1
+            // 换段即重新计时：滑走再滑回须重新停留满 800ms 才进编辑。
             modeIndex = idx
             dwellStartMs = change.uptimeMillis
+            dwellAnchorX = pos.x
+            dwellAnchorY = pos.y
+            scheduleDwellTimer()
             setUi(BlindUiState.Selecting(centerX, centerY, idx, fanDir, segments))
             if (idx >= 0) {
                 hapticView.tickHaptic()
                 PetRepository.say(segmentLabel(idx))
                 Log.d(TAG, "diag: sector=${segmentLabel(idx)}")
             }
-        } else if (change.uptimeMillis - dwellStartMs >= 800L) {
-            // 2026-10-27 fan-quick-services 批：停留 800ms 只 arm，不直接进编辑
-            // （取代 v0.68.64 的停留即钉住——盲操靠停留听段名，停留即进编辑最
-            // 容易误触）。arm 只认快捷段，拍照段 / 空槽位 / 死区一律不 arm；
-            // 进编辑须松手仍落在同一快捷段（见 onEnd 的 armed 分支）。
-            val seg = segments.getOrNull(idx)
-            if (seg is FanSegment.Quick && editArmedIdx != idx) {
-                editArmedIdx = idx
-                hapticView.tickHaptic()
-                PetRepository.say("松手进入编辑")
-                Log.d(TAG, "diag: editArmed=$idx")
+        } else {
+            // 同段内大幅移动也算“没停住”，重新计时；手指微颤（12dp 内）
+            // 不打断计时——否则真机上几乎永远等不满 800ms。
+            val dx = pos.x - dwellAnchorX
+            val dy = pos.y - dwellAnchorY
+            val tolerancePx = 12f * density
+            if (dx * dx + dy * dy > tolerancePx * tolerancePx) {
+                dwellStartMs = change.uptimeMillis
+                dwellAnchorX = pos.x
+                dwellAnchorY = pos.y
+                scheduleDwellTimer()
             }
+            // 800ms 到期由 Handler 定时器直接进编辑（不限段、不用松手），
+            // 这里不再靠移动事件判断停留——完全不动时本分支根本不会回调。
         }
     }
 
@@ -608,22 +645,10 @@ class BlindCaptureController(
     fun onEnd(): Boolean {
         if (editPinned) return true
         if (!tracking) return false
-        // 2026-10-27 fan-quick-services 批：armed 两阶段收尾——松手落在
-        // 同一快捷段才进编辑；落别处只收扇形，不触发任何段（含拍照），
-        // 防止“停留听段名后手指一滑就拍照 / 进编辑”的误触。armed 优先于
-        // 快滑：arm 态下甩手也不拍照（快滑直拍只在未 arm 时生效）。
-        if (editArmedIdx >= 0) {
-            val armed = editArmedIdx
-            editArmedIdx = -1
-            if (modeIndex == armed) {
-                enterEditMode(openAddSheet = false)
-                Log.d(TAG, "diag: edit(armed 松手进入)")
-            } else {
-                dismissFan()
-                Log.d(TAG, "diag: editArmed 落别处只收扇形")
-            }
-            return true
-        }
+        // 2026-11-01：两阶段 arm 已删——松手前若已满 800ms，定时器早已
+        // 直接进了编辑（editPinned 分支在上），到不了这里；未满 800ms
+        // 松手就是正常触发，不再有“松手进编辑”这一路。
+        cancelDwellTimer()
         val wasTriggered = triggered
         val idx = modeIndex
         val flingPhoto = try {
