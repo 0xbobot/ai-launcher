@@ -125,6 +125,7 @@ import com.bobot.ailauncher.ui.pet.PetActionList
 import com.bobot.ailauncher.ui.pet.PetSpeechBubbleHost
 import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.MotionTokens
 import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
@@ -1933,7 +1934,7 @@ private fun UnderstoodStrip(
     ) {
         Text(
             text = "七仔理解成：$summary",
-            fontSize = 13.sp,
+            fontSize = AILauncherType.Footnote.fontSize,
             color = AILauncherColors.current.Title,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
@@ -1951,7 +1952,7 @@ private fun UnderstoodStrip(
                     text = "改一下",
                     // 次要动作：Body 色，不抢“就这样办”。
                     color = AILauncherColors.current.Body,
-                    fontSize = 13.sp
+                    fontSize = AILauncherType.Footnote.fontSize
                 )
             }
             TextButton(
@@ -1964,7 +1965,7 @@ private fun UnderstoodStrip(
                     // 提交盘；改 Title 色＋Medium 字重，仍是条内最显眼的钮。
                     color = AILauncherColors.current.Title,
                     fontWeight = FontWeight.Medium,
-                    fontSize = 13.sp
+                    fontSize = AILauncherType.Footnote.fontSize
                 )
             }
         }
@@ -1991,7 +1992,7 @@ private fun ExecutingStrip(summary: String) {
     ) {
         Text(
             text = "七仔正在办：$summary",
-            fontSize = 13.sp,
+            fontSize = AILauncherType.Footnote.fontSize,
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -2023,7 +2024,7 @@ private fun PlanningStrip(
     ) {
         Text(
             text = "七仔思考中",
-            fontSize = 13.sp,
+            fontSize = AILauncherType.Footnote.fontSize,
             // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             maxLines = 1,
@@ -2040,7 +2041,7 @@ private fun PlanningStrip(
                 // 动作，不再用金色抢眼，改 Body 色。
                 color = AILauncherColors.current.Body,
                 fontWeight = FontWeight.Medium,
-                fontSize = 13.sp
+                fontSize = AILauncherType.Footnote.fontSize
             )
         }
     }
@@ -2070,7 +2071,7 @@ private fun NeedsInputStrip(
     ) {
         Text(
             text = question,
-            fontSize = 13.sp,
+            fontSize = AILauncherType.Footnote.fontSize,
             color = AILauncherColors.current.Title,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
@@ -2119,13 +2120,13 @@ private fun PermissionExplainCard(
     ) {
         Text(
             text = "需要开启一个权限",
-            fontSize = 14.sp,
+            fontSize = AILauncherType.Callout.fontSize,
             fontWeight = FontWeight.SemiBold,
             color = AILauncherColors.current.Title
         )
         Text(
             text = message,
-            fontSize = 13.sp,
+            fontSize = AILauncherType.Footnote.fontSize,
             // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body
         )
@@ -2135,7 +2136,7 @@ private fun PermissionExplainCard(
         ) {
             TextButton(onClick = onDismiss) {
                 // 2026-10-27 暗黑可读：深色 Hint 在深色玻璃上近隐形，改 Body；浅色不动。
-                Text(text = "暂不", color = if (AILauncherColors.current.isDark) AILauncherColors.current.Body else AILauncherColors.current.Hint, fontSize = 13.sp)
+                Text(text = "暂不", color = if (AILauncherColors.current.isDark) AILauncherColors.current.Body else AILauncherColors.current.Hint, fontSize = AILauncherType.Footnote.fontSize)
             }
             TextButton(onClick = onGoSettings) {
                 Text(
@@ -2144,7 +2145,7 @@ private fun PermissionExplainCard(
                     // 不再用金色——金色只留提交主操作；改 Title 色。
                     color = AILauncherColors.current.Title,
                     fontWeight = FontWeight.Medium,
-                    fontSize = 13.sp
+                    fontSize = AILauncherType.Footnote.fontSize
                 )
             }
         }
