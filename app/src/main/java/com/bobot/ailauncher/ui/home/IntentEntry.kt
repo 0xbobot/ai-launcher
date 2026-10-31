@@ -34,7 +34,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
@@ -84,7 +83,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -372,7 +370,7 @@ internal fun resolveEnterTravelDelta(
 /**
  * 意图胶囊输入行（2026-10-21 新规格：胶囊与应用中心搜索合二为一的同一组件）。
  *
- * 首页与应用中心共用这一行：✨ + 输入框 + 金色提交按钮，无麦克风。
+ * 首页与应用中心共用这一行：输入框 + 金色提交按钮，无麦克风。
  * 组件本身只管输入与提交；"打字时出什么"由宿主决定——
  * 首页在胶囊下方结果条出本地应用直达，应用中心用同一文本过滤网格。
  *
@@ -469,23 +467,11 @@ fun IntentCapsuleField(
                 }
             )
             .clickable { focusRequester.requestFocus() }
-            .padding(horizontal = 18.dp),
+            // 去 AI 味（2026-10-31）：星标图标已删；start padding 18→46dp（原 18dp 内边＋18dp 图标＋10dp 间隙），
+            // 胶囊文字左缘仍落在 386 轴线（内容左缘＋46dp）上，不左移。
+            .padding(start = 46.dp, end = 18.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = Icons.Filled.AutoAwesome,
-            // 体检批D ⑨：装饰图标（输入框用途由占位文案表达）——明确标装饰语义，
-            // 不进无障碍树，避免 TalkBack 在输入框旁多读一个无名节点
-            contentDescription = null,
-            // 2026-10-28 意图页设计评审第 1 轮 P1-2：星标 tint Accent→Body——
-            // 它在代码中已是装饰语义（invisibleToUser），不承担信息职能，
-            // 金色只留提交盘＋示例点两处。
-            tint = AILauncherColors.current.Body,
-            modifier = Modifier
-                .size(18.dp)
-                .semantics { invisibleToUser() }
-        )
-        Spacer(modifier = Modifier.width(10.dp))
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
