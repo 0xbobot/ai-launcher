@@ -2,24 +2,16 @@
 
 package com.bobot.ailauncher
 
-import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Surface
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.bobot.ailauncher.core.brain.AiBrain
 import com.bobot.ailauncher.core.context.ContextEngine
@@ -28,18 +20,12 @@ import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.MainScreen
-import com.bobot.ailauncher.ui.onboarding.OnboardingNav
 import com.bobot.ailauncher.ui.theme.AILauncherTheme
 import kotlinx.coroutines.launch
 import com.bobot.ailauncher.ui.island.IslandToasts
 
 class MainActivity : FragmentActivity() {
 
-
-    // v0.36.1：低电量守护的通知权限申请
-    private val notifPermissionLauncher = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { /* 用户拒绝就安静失败 */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,7 +66,6 @@ class MainActivity : FragmentActivity() {
         com.bobot.ailauncher.data.BatteryGuard.ensureStarted(this)
         // OTA：版本变化后清理旧安装包，避免"直接安装"命中旧包
         OtaUpdater.onAppUpgraded(this)
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
 
         // v0.41.12：DownloadManager 已换成 App 内 OkHttp（OtaDownloader），下载完成由
         // OtaDownloader 直接弹安装，不再需要系统下载广播。onResume 保留兜底。
@@ -101,15 +86,6 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             AILauncherTheme {
-                var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
-                // v0.36.2：首次启动主动询问是否开启低电量保护
-                // 引导批（2026-10-27）：不再叠在引导屏上——只在引导完成后、
-                // 第一次回到桌面时再问（onboarded 门禁；KEY_BATTERY_ASKED 语义不变）
-                var showBatteryPrompt by remember {
-                    mutableStateOf(!prefs.getBoolean(KEY_BATTERY_ASKED, false))
-                }
-                // v0.38.0：全屏 intent 权限引导（被关掉会降级成普通通知）
-                var showFullScreenGuide by remember { mutableStateOf(false) }
                 // v0.37.2：系统壁纸直接透出（windowShowWallpaper），不再手动绘制
                 Box(modifier = Modifier
                     .fillMaxSize()
@@ -117,87 +93,7 @@ class MainActivity : FragmentActivity() {
                     // 供冒烟脚本语义定位（semantics 修饰不影响布局与长相）
                     .semantics { testTagsAsResourceId = true }
                 ) {
-                    if (onboarded) {
-                        MainScreen()
-                    } else {
-                        OnboardingNav(onFinish = {
-                            prefs.edit().putBoolean(KEY_ONBOARDED, true).apply()
-                            onboarded = true
-                        })
-                    }
-                    // v0.36.2：首次启动询问低电量保护
-                    // 引导批（2026-10-27）：引导进行中不叠弹窗，引导完成后
-                    // 第一次回到桌面（onboarded 翻为 true 的那次组合）再问
-                    if (onboarded && showBatteryPrompt) {
-                        androidx.compose.material3.AlertDialog(
-                            onDismissRequest = { },
-                            title = {
-                                androidx.compose.material3.Text("开启低电量保护？")
-                            },
-                            text = {
-                                androidx.compose.material3.Text(
-                                    "电量低时七仔会温和提醒你（10% 和 5% 各一次），只提醒、不做任何自动操作。"
-                                )
-                            },
-                            confirmButton = {
-                                androidx.compose.material3.TextButton(
-                                    onClick = {
-                                        prefs.edit().putBoolean(KEY_BATTERY_ASKED, true).apply()
-                                        showBatteryPrompt = false
-                                        com.bobot.ailauncher.data.BatteryGuardPrefs.setEnabled(this@MainActivity, true)
-                                        // 主动申请通知权限
-                                        if (Build.VERSION.SDK_INT >= 33 &&
-                                            ContextCompat.checkSelfPermission(
-                                                this@MainActivity,
-                                                android.Manifest.permission.POST_NOTIFICATIONS
-                                            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-                                        ) {
-                                            notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                                        }
-                                        com.bobot.ailauncher.data.BatteryGuard.setEnabled(this@MainActivity, true)
-                                        // v0.38.0：全屏 intent 被关掉会降级成普通通知，引导去开
-                                        if (!com.bobot.ailauncher.data.BatteryFullScreen.canUse(this@MainActivity)) {
-                                            showFullScreenGuide = true
-                                        }
-                                    }
-                                ) { androidx.compose.material3.Text("开启") }
-                            },
-                            dismissButton = {
-                                androidx.compose.material3.TextButton(
-                                    onClick = {
-                                        prefs.edit().putBoolean(KEY_BATTERY_ASKED, true).apply()
-                                        showBatteryPrompt = false
-                                        com.bobot.ailauncher.data.BatteryGuardPrefs.setEnabled(this@MainActivity, false)
-                                    }
-                                ) { androidx.compose.material3.Text("不用") }
-                            }
-                        )
-                    }
-                    // v0.38.0：全屏 intent 权限引导
-                    if (showFullScreenGuide) {
-                        androidx.compose.material3.AlertDialog(
-                            onDismissRequest = { showFullScreenGuide = false },
-                            title = { androidx.compose.material3.Text("让七仔直接弹到最前面？") },
-                            text = {
-                                androidx.compose.material3.Text(
-                                    "电量低时，七仔可以直接弹到屏幕最上层（看视频会自动暂停），不用先点通知。\n\n需要在系统设置里允许「全屏通知」。小米/华为/OPPO/vivo 用户还需开启「后台弹出界面」。"
-                                )
-                            },
-                            confirmButton = {
-                                androidx.compose.material3.TextButton(
-                                    onClick = {
-                                        showFullScreenGuide = false
-                                        com.bobot.ailauncher.data.BatteryFullScreen.openSettings(this@MainActivity)
-                                    }
-                                ) { androidx.compose.material3.Text("去开启") }
-                            },
-                            dismissButton = {
-                                androidx.compose.material3.TextButton(
-                                    onClick = { showFullScreenGuide = false }
-                                ) { androidx.compose.material3.Text("以后再说") }
-                            }
-                        )
-                    }
+                    MainScreen()
                 }
             }
         }
@@ -261,9 +157,6 @@ class MainActivity : FragmentActivity() {
     }
 
     companion object {
-        private const val PREFS = "ai_launcher"
-        private const val KEY_ONBOARDED = "onboarded"
-        private const val KEY_BATTERY_ASKED = "battery_asked"
         /** v0.32.3：快捷方式检查更新结果，MainScreen 观察后弹对话框 */
         val checkUpdateResult = androidx.compose.runtime.mutableStateOf<com.bobot.ailauncher.data.OtaInfo?>(null)
     }

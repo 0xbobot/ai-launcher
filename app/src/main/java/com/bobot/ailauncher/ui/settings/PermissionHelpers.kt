@@ -1,4 +1,4 @@
-package com.bobot.ailauncher.ui.onboarding
+package com.bobot.ailauncher.ui.settings
 
 import android.Manifest
 import android.app.Activity
