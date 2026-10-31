@@ -504,7 +504,7 @@ fun IntentCapsuleField(
             enabled = !planning,
             singleLine = true,
             textStyle = TextStyle(
-                fontSize = 15.sp,
+                fontSize = AILauncherType.Body.fontSize,
                 color = AILauncherColors.current.Title
             ),
             // 意图页优化（2026-10-30，Bob 已批 §二 A4）：光标不再用金色——
@@ -519,7 +519,7 @@ fun IntentCapsuleField(
                     if (value.text.isEmpty()) {
                         Text(
                             text = placeholder,
-                            fontSize = 15.sp,
+                            fontSize = AILauncherType.Body.fontSize,
                             // 2026-10-25 胶囊去深色连带：玻璃胶囊是中间调（深色模式
                             // 下深色 Hint 中灰约 0xFF6B6560 在其上对比度仅约 1.1:1、
                             // 几乎看不见），占位改 Title 降 alpha——深浅两档在玻璃
@@ -1461,7 +1461,7 @@ fun IntentEntry(
                 )
                 Text(
                     text = "收起",
-                    fontSize = 12.sp,
+                    fontSize = AILauncherType.Caption.fontSize,
                     color = AILauncherColors.current.Title
                 )
             }
@@ -1602,7 +1602,7 @@ fun IntentEntry(
             title = {
                 Text(
                     text = "确认执行？",
-                    fontSize = 17.sp,
+                    fontSize = AILauncherType.Headline.fontSize,
                     fontWeight = FontWeight.SemiBold,
                     color = AILauncherColors.current.Title
                 )
@@ -1610,7 +1610,7 @@ fun IntentEntry(
             text = {
                 Text(
                     text = state.message,
-                    fontSize = 14.sp,
+                    fontSize = AILauncherType.Callout.fontSize,
                     color = AILauncherColors.current.Body
                 )
             },
@@ -1688,7 +1688,7 @@ private fun LocalResultsBar(
             // “本机应用 · N 个”，与七仔回复条的“七仔：”前缀对仗，打字
             // 结果与七仔回答不再混在同一个无名条里。
             text = "本机应用 · ${apps.size} 个",
-            fontSize = 12.sp,
+            fontSize = AILauncherType.Caption.fontSize,
             // 2026-10-28 意图页设计评审第 1 轮 P1-6：标签深色 Body 实测
             // 4.43:1、浅色 Hint 推导 3.75:1，双双不过线——深色改 Title
             // （同衬底上 7.08:1）、浅色改 Body（对白约 7.06:1），字号 12sp 不动。
@@ -1767,7 +1767,7 @@ fun ResultAppItem(
             // 2026-10-28 意图页设计评审第 1 轮 P2-3：名称 12sp→13sp，与
             // 标签 12sp 拉开字阶；行高仍钉 15sp，故条保底高公式与 180dp
             // 上限、单项高（4＋36＋3＋15）一字不动，不溢出。
-            fontSize = 13.sp,
+            fontSize = AILauncherType.Footnote.fontSize,
             // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             maxLines = 1,
@@ -1816,7 +1816,7 @@ private fun SlotStatusLine(text: String, testTag: String) {
     ) {
         Text(
             text = text,
-            fontSize = 13.sp,
+            fontSize = AILauncherType.Footnote.fontSize,
             // 2026-10-28 意图页设计评审第 1 轮 P1-1 连带：本行坐 intentContentScrim
             // 上，衬底降到 0.50 后深色 Body 复测仅 3.76:1，故深色改 Title
             // （同衬底上 7.08:1；与回复／思考条的深色 Title 口径一致），
@@ -1849,7 +1849,7 @@ private fun StatusStrip(
         if (attribution != null) {
             Text(
                 text = attribution,
-                fontSize = 12.sp,
+                fontSize = AILauncherType.Caption.fontSize,
                 // 弱说明色：归属不是关键信息，不用 Title 抢眼；浅色
                 // Body 在面板玻璃上约 7.06:1，深色 Body 在深色衬底
                 // 上约 7.06:1（与正文同口径，见 §一对比表）。
@@ -1860,7 +1860,7 @@ private fun StatusStrip(
         }
         Text(
             text = text,
-            fontSize = 13.sp,
+            fontSize = AILauncherType.Footnote.fontSize,
             // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             // 短时小条：最多 3 行，超长截断，保证结果条高度有上限（见 RESULT_BAR_MAX_HEIGHT）
@@ -1877,7 +1877,7 @@ private fun StatusStrip(
                     // 浅色底上 16.81:1，比金盘字 2.42:1 更易读。
                     color = AILauncherColors.current.Title,
                     fontWeight = FontWeight.Medium,
-                    fontSize = 13.sp
+                    fontSize = AILauncherType.Footnote.fontSize
                 )
             }
         }
