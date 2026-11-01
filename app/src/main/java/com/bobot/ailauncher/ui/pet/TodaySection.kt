@@ -11,9 +11,9 @@ import androidx.compose.ui.platform.LocalContext
 import com.bobot.ailauncher.data.AiInsight
 import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.data.CalendarRepository
+import com.bobot.ailauncher.data.FiledMessages
 import com.bobot.ailauncher.data.PetCat
 import com.bobot.ailauncher.data.PetItem
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.isWithinWindow
 import com.bobot.ailauncher.ui.rememberNowMillis
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +34,6 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 internal fun TodaySection(
-    // 会议提醒回调（省电原则：一次性任务；实际提醒逻辑在 PetZone 的 remindMeeting）
-    onMeetingRemind: (CalEvent, String) -> Unit = { _, _ -> },
     // 简报标题/下个会议上抛（封面 hero / NextUp 紧凑条用）
     onSummaryChange: (String) -> Unit = {},
     onNextEventChange: (CalEvent?) -> Unit = {},
@@ -78,30 +76,9 @@ internal fun TodaySection(
             allEvents = events.filter { !it.allDay }
         }
     }
-    // v0.67.6：会议提醒一次性任务（省电原则：不轮询）
-    // 日历数据变化（加载/边界刷新）时取消旧任务重算；
-    // 在"开会前30分钟"和"前15分钟"各提醒一次；已进入 30 分钟窗口则立即提醒
-    // 实际提醒走 onMeetingRemind（PetZone 的 remindMeeting：七仔说话 + 去重）
-    LaunchedEffect(allEvents) {
-        val now = System.currentTimeMillis()
-        val upcoming = allEvents.firstOrNull { !it.allDay && it.begin > now }
-            ?: return@LaunchedEffect
-        // 30 分钟前提醒
-        val d30 = upcoming.begin - 30 * 60 * 1000L - System.currentTimeMillis()
-        if (d30 > 0) delay(d30)
-        if (System.currentTimeMillis() >= upcoming.begin - 30 * 60 * 1000L) {
-            onMeetingRemind(upcoming, "30")
-        }
-        // 15 分钟前提醒
-        val d15 = upcoming.begin - 15 * 60 * 1000L - System.currentTimeMillis()
-        if (d15 > 0) delay(d15)
-        if (System.currentTimeMillis() >= upcoming.begin - 15 * 60 * 1000L) {
-            onMeetingRemind(upcoming, "15")
-        }
-    }
 
     // 消息数据（简报标题的需回复计数来源）：3 小时窗 + 行动优先级排序
-    val filed by PetRepository.filed.collectAsState()
+    val filed by FiledMessages.filed.collectAsState()
     // v0.68.95（F-05）：3 小时窗的 now 从分钟 ticker 派生并纳入 remember
     // key——此前 now 在组合期一次性捕获，旧消息会滞留在已超时的窗口里。
     // nowMillis 在本函数顶部声明（选会派生与消息窗共用同一 ticker）。
@@ -122,22 +99,6 @@ internal fun TodaySection(
     // AI 简报式：P0 需回复消息计数进简报标题
     val replyMsgs = remember(recentMsgs) {
         recentMsgs.filter { AiInsight.analyzeReplyNeed(it.title, it.text).needsReply }
-    }
-    // v0.64.5：首次出现 P0 需回复消息 → 七仔引导（只一次）。
-    // 气泡子项：P0 回复配下一步动作“打开会话”（contentIntent 直达会话，
-    // 兜底按包名开应用），点后气泡关闭；文案本身不改。
-    LaunchedEffect(replyMsgs.isNotEmpty()) {
-        if (replyMsgs.isNotEmpty() && GuideManager.tryShow(context, GuideManager.Id.P0_REPLY)) {
-            val first = replyMsgs.first()
-            PetRepository.say(
-                "红色的是要回复的，点进去看看",
-                action = PetRepository.SpeechAction(
-                    PetRepository.SpeechActionKind.OPEN_SESSION, "打开会话",
-                    sessionPendingIntent = first.pendingIntent,
-                    appPackage = first.packageName
-                )
-            )
-        }
     }
     // v0.67.5：已结束的会议不计入，避免 stale "1 个会要开"。
     // v0.68.164：nextEvent 已是 ticker 派生（end > nowMillis 才入选），

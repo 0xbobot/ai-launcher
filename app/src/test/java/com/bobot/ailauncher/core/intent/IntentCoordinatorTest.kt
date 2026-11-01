@@ -114,17 +114,6 @@ class IntentCoordinatorTest {
         }
     }
 
-    private class FakeSpeaker : IntentSpeaker {
-        val said = mutableListOf<String>()
-        var doneCount = 0
-        override fun say(text: String) {
-            said += text
-        }
-        override fun onTaskDone() {
-            doneCount++
-        }
-    }
-
     private fun cap(
         id: String,
         risk: RiskLevel,
@@ -144,10 +133,9 @@ class IntentCoordinatorTest {
         planner: IntentPlanner,
         capabilities: FakeCapabilities = FakeCapabilities(emptyMap()),
         executor: FakeExecutor = FakeExecutor(),
-        speaker: FakeSpeaker = FakeSpeaker(),
         contextProvider: suspend () -> String = { "" }
     ) = IntentCoordinator(
-        config, planner, capabilities, executor, speaker,
+        config, planner, capabilities, executor,
         contextProvider = contextProvider
     )
 
@@ -168,15 +156,13 @@ class IntentCoordinatorTest {
     fun `no key goes to recoverable error state`() = runTest {
         val config = FakeConfig(key = false)
         val planner = FakePlanner(PlanOutcome.Chat("你好呀"))
-        val speaker = FakeSpeaker()
-        val c = coordinator(config = config, planner = planner, speaker = speaker)
+        val c = coordinator(config = config, planner = planner)
 
         c.submit("你好")
         val s = c.state.value
         assertTrue(s is IntentUiState.Error)
         assertEquals(IntentCoordinator.NO_KEY_MESSAGE, (s as IntentUiState.Error).message)
         assertEquals(0, planner.calls)
-        assertTrue(speaker.said.contains(IntentCoordinator.NO_KEY_MESSAGE))
 
         // 可恢复：配好 Key 后同一协调器可直接重提成功
         config.key = true
@@ -190,12 +176,10 @@ class IntentCoordinatorTest {
     fun `chat replies without executing any action`() = runTest {
         val planner = FakePlanner(PlanOutcome.Chat("今天晴天"))
         val executor = FakeExecutor()
-        val speaker = FakeSpeaker()
-        val c = coordinator(planner = planner, executor = executor, speaker = speaker)
+        val c = coordinator(planner = planner, executor = executor)
 
         c.submit("今天天气怎么样")
         assertEquals(IntentUiState.Reply("今天晴天"), c.state.value)
-        assertTrue(speaker.said.contains("今天晴天"))
         assertTrue(executor.submitted.isEmpty())
     }
 
@@ -206,8 +190,7 @@ class IntentCoordinatorTest {
         val planner = FakePlanner(PlanOutcome.Action("dache", mapOf("to" to "机场"), null))
         val caps = FakeCapabilities(mapOf("dache" to cap("dache", RiskLevel.READ)))
         val executor = FakeExecutor()
-        val speaker = FakeSpeaker()
-        val c = coordinator(planner = planner, capabilities = caps, executor = executor, speaker = speaker)
+        val c = coordinator(planner = planner, capabilities = caps, executor = executor)
 
         c.submit("打车去机场")
         // 意图页优化（B2）：低风险不再规划完立即执行——先停在理解预告，
@@ -226,7 +209,6 @@ class IntentCoordinatorTest {
         c.confirmUnderstood(req)
         assertEquals(1, executor.submitted.size)
         assertEquals(1, executor.realExecutions)
-        assertEquals(1, speaker.doneCount)
         assertTrue(c.state.value is IntentUiState.Reply)
     }
 
@@ -287,8 +269,7 @@ class IntentCoordinatorTest {
             val executor = FakeExecutor(
                 forcedResult = ActionResult.Failed("本机没有安装支持「打车」的应用")
             )
-            val speaker = FakeSpeaker()
-            val c = coordinator(planner = planner, capabilities = caps, executor = executor, speaker = speaker)
+            val c = coordinator(planner = planner, capabilities = caps, executor = executor)
             c.submit("帮我打车")
             val preview = c.state.value
             assertTrue(preview is IntentUiState.Understood)
@@ -296,7 +277,6 @@ class IntentCoordinatorTest {
             val s = c.state.value
             assertTrue(s is IntentUiState.Error)
             assertEquals("本机没有安装支持「打车」的应用", (s as IntentUiState.Error).message)
-            assertEquals(0, speaker.doneCount)
         }
         // 7c deep link 失败：同样如实 Error，不报成功
         run {
@@ -379,8 +359,7 @@ class IntentCoordinatorTest {
                 mapOf("daohang" to cap("daohang", RiskLevel.LOW_RISK, listOf(navParam)))
             )
             val executor = FakeExecutor()
-            val speaker = FakeSpeaker()
-            val c = coordinator(planner = planner, capabilities = caps, executor = executor, speaker = speaker)
+            val c = coordinator(planner = planner, capabilities = caps, executor = executor)
 
             c.submit("导航")
             val s = c.state.value
@@ -390,9 +369,8 @@ class IntentCoordinatorTest {
             assertEquals("daohang", s.capabilityId)
             assertEquals("to", s.paramName)
             assertEquals("导航", s.originalText)
-            // 一次都没碰执行器——假成功从源头断掉；七仔把问题说出来了
+            // 一次都没碰执行器——假成功从源头断掉；问题已进卡片状态
             assertTrue(executor.submitted.isEmpty())
-            assertTrue(speaker.said.contains("导航去哪儿？"))
         }
         // 模型给了空串参数：同样算缺失（旧链路会抹占位符开空目的地）
         run {
@@ -540,8 +518,7 @@ class IntentCoordinatorTest {
     @Test
     fun `cancel planning returns to idle and drops late reply`() = runTest {
         val planner = SwitchableBlockingPlanner()
-        val speaker = FakeSpeaker()
-        val c = coordinator(planner = planner, speaker = speaker)
+        val c = coordinator(planner = planner)
 
         val inFlight = async { c.submit("打开微信") }
         runCurrent()
@@ -551,11 +528,10 @@ class IntentCoordinatorTest {
         // 立即收回 Idle（结果条收起），不等 planner 回来
         assertEquals(IntentUiState.Idle, c.state.value)
 
-        // planner 的迟到结果到达：不得上屏、不得让七仔说出来
+        // planner 的迟到结果到达：不得上屏
         planner.gate.complete(PlanOutcome.Chat("迟到的回复"))
         inFlight.await()
         assertEquals(IntentUiState.Idle, c.state.value)
-        assertTrue(speaker.said.isEmpty())
     }
 
     // ---------- 16. 取消（F-06）：迟到的动作结果被丢弃，执行器一次都不碰 ----------

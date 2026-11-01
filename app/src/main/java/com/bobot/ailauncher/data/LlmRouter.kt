@@ -342,7 +342,7 @@ object LlmRouter {
                 }
                 val parsed = parseResult(resp.body?.string().orEmpty(), validIds)
                 if (parsed != null) LlmCallResult.Ok(parsed)
-                else LlmCallResult.Err("七仔没听懂，换个说法再试")
+                else LlmCallResult.Err("没听懂，换个说法再试")
             }
         } catch (e: IOException) {
             LlmCallResult.Err("网络超时，请检查网络")
@@ -403,7 +403,7 @@ object LlmRouter {
             } catch (_: Exception) {
                 ""
             }
-            if (text.isBlank()) LlmChatResult.Err("七仔没回话，请重试")
+            if (text.isBlank()) LlmChatResult.Err("没回话，请重试")
             else LlmChatResult.Ok(text)
         } catch (e: Exception) {
             android.util.Log.w("LlmRouter", "llm chat failed", e)
@@ -512,13 +512,13 @@ object LlmRouter {
                     .trim().removePrefix("```json").removePrefix("```")
                     .removeSuffix("```").trim()
             } catch (_: Exception) {
-                return@withContext PlanResult.Err("七仔没回话，请重试")
+                return@withContext PlanResult.Err("没回话，请重试")
             }
             try {
                 val obj = JSONObject(clean)
                 obj.optJSONObject("action")?.let { a ->
                     val id = a.optString("capability_id", "")
-                    if (id !in validIds) return@withContext PlanResult.Err("七仔没听懂，换个说法再试")
+                    if (id !in validIds) return@withContext PlanResult.Err("没听懂，换个说法再试")
                     val params = mutableMapOf<String, String>()
                     a.optJSONObject("params")?.keys()?.forEach { k ->
                         params[k] = a.optJSONObject("params")!!.optString(k, "")
@@ -530,9 +530,9 @@ object LlmRouter {
                 obj.optString("chat", "").ifBlank { null }?.let {
                     return@withContext PlanResult.Chat(it)
                 }
-                PlanResult.Err("七仔没听懂，换个说法再试")
+                PlanResult.Err("没听懂，换个说法再试")
             } catch (_: Exception) {
-                PlanResult.Err("七仔没听懂，换个说法再试")
+                PlanResult.Err("没听懂，换个说法再试")
             }
         } catch (e: Exception) {
             android.util.Log.w("LlmRouter", "plan failed", e)

@@ -127,12 +127,12 @@ private fun BatteryGuardDialog(
 ) {
     // 暖色系：低电量用暖橙，紧急用深橙（不用刺眼的警告红）
     val accent = if (critical) Color(0xFFE8734A) else Color(0xFFF0A24A)
-    val title = if (critical) "七仔快要睡着了…"
-    else "七仔快没能量了"
+    val title = if (critical) "电量快耗尽了…"
+    else "快没能量了"
     val message = when {
-        critical -> "电量掉到 $pct% 了，再不充电它就要关机了"
-        powerSaveMode -> "电量只剩 $pct%，已经在省电模式了，充个电帮它回血吧"
-        else -> "电量只剩 $pct%，充个电帮它回血吧？也可以开省电模式"
+        critical -> "电量掉到 $pct% 了，再不充电就要关机了"
+        powerSaveMode -> "电量只剩 $pct%，已经在省电模式了，充个电回回血吧"
+        else -> "电量只剩 $pct%，充个电回回血吧？也可以开省电模式"
     }
 
     Box(

@@ -16,8 +16,7 @@ import androidx.compose.ui.unit.IntOffset
  * 不在家族里的，一律不动：
  * - 生理微动（眨眼、扫视、呼吸、瞳孔缩放）：生理时间尺度，改了就不像活物；
  * - 手动动作引擎的编排弹簧（摇摆、点头、下压等）：动作编排，不是宏观节奏；
- * - 头弹簧的值：canonical 在此处（[HeadSoft]），AliveLogic.HeadSpring
- *   只剩注视范围（RANGE_X/Y），弹簧参数不再两处各存一份。
+ * - 头弹簧的值：canonical 在此处（[HeadSoft]），弹簧参数只此一处。
  * 影子已无：接触影（Dock 活感层与意图卡片旧层）按 Bob 22:02 verdict
  * 全部摘除，家族里不再有影子条目（原 550ms＋90ms 延迟作废）。
  */

@@ -107,7 +107,6 @@ import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.apps.appendShoulderArch
 import com.bobot.ailauncher.ui.components.AppIconImage
@@ -117,15 +116,10 @@ import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.data.CapabilityRegistry
-import com.bobot.ailauncher.ui.pet.DragBodyState
-import com.bobot.ailauncher.ui.pet.HybridPet
-import com.bobot.ailauncher.ui.pet.PetActionList
-import com.bobot.ailauncher.ui.pet.PetSpeechBubbleHost
 import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.MotionTokens
-import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -138,17 +132,6 @@ import kotlinx.coroutines.withContext
 /** 结果条槽位高度上限：三种内容（本地结果/回复错误/权限卡）共用，超限不挤压 Dock。 */
 private val RESULT_BAR_MAX_HEIGHT = 180.dp
 
-/**
- * 意图卡片宠物（2026-10-25 意图卡片统一，Bob 拍板）：与 Dock 宠物同一只、
- * 同一套组件——Dock D1 档宠物宽固定，不跟意图面板高度走（面板高随
- * 结果槽位伸缩，宠物跟高走会忽大忽小）；压入量 5dp 与 Dock 肩峰压入同值。
- * 盒高按玻璃头长宽比（1043×1318）算，与 FloatingPet 内部口径一致。
- * B2+A 定稿（2026-10-26，Bob 点选 B2+A mock 档）：与 Dock D1 同步 ×0.8
- * （原 108dp → 86.4dp，与 Dock D1 的 86.6dp 仅面板估算舍入差）；接触影
- * （宽 ×0.72）与盒高均由此常量派生，自动跟随。
- */
-private val INTENT_PET_WIDTH = 108.dp * 0.8f
-private val INTENT_PET_PRESS = 5.dp
 
 /**
  * 意图卡片肩线（输入态专注，2026-10-26 设计 §2）：弦 156.4dp、rise 18.0dp、
@@ -157,29 +140,12 @@ private val INTENT_PET_PRESS = 5.dp
  * 2026-10-28 意图页设计评审第 1 轮 P1-9：18dp 浅肩峰托 86.4dp 宽的头
  * 接触弦显窄、视觉像贴纸，弦 156.4dp→175dp、rise 18.0dp→21.0dp
  * （报告区间弦 170～180dp、rise 20～22dp 内取中值），压入 5dp 不动，
- * 单宠物结构（前面图层、一只 HybridPet）一字不动。
+ * 卡片顶缘圆肩一字不动。
  */
 private val INTENT_SHOULDER_CHORD = 175.dp
 private val INTENT_SHOULDER_RISE = 21.0.dp
 
-/**
- * 意图拖拽几何（纯 dp 函数，可单测；量全部取自 DragBody 同一套映射，
- * 故意图拖拽与 Dock 逐项同值）。坐标：面板底为原点、向上为负。
- *
- * 压入不变量：宠物盒偏移一字不动（Dock 侧同款构造，PullUpDock 注释
- * “宠物 offset 公式一字不动”）——盒不动、头在盒内升 headRise、卡片
- * 肩形升 dragShoulder（FloatingPet 锁定 headRise 1:1），头底与肩峰
- * 压入 5dp 全程恒定。盒再升 dragShoulder 会双倍计数：头顶出肩峰
- * (dragShoulder − press) 的缝，违背“任何拖拽帧都不许头身分开”。
- * 气泡／清单跟随头升（不跟肩升）：头跟随已含头升，肩升另由形状承担，
- * 双加同样顶出缝。
- */
-internal fun intentCardShapeRiseDp(baseRiseDp: Float, dragShoulderRiseDp: Float): Float =
-    baseRiseDp + dragShoulderRiseDp
 
-/** 意图宠物盒偏移 Y：面板高＋基底 rise－压入；拖拽不改盒位（见上）。 */
-internal fun intentPetBoxOffsetYDp(panelHeightDp: Float, baseRiseDp: Float, pressDp: Float): Float =
-    -(panelHeightDp + baseRiseDp - pressDp)
 
 /**
  * 意图结果槽位是否有内容（2026-10-28 意图页设计评审第 2 轮，纯函数、单测锁定）：
@@ -214,33 +180,8 @@ internal fun intentHasResultContent(
     }
 }
 
-/** 意图气泡总偏移 Y：基底（面板高＋基底 rise＋宠物高－压入＋8dp）＋头跟随（－头升＋头沉）＋进态滑入 travelDeltaY×(1－travel)。 */
-internal fun intentBubbleOffsetYDp(
-    panelHeightDp: Float,
-    baseRiseDp: Float,
-    petHeightDp: Float,
-    pressDp: Float,
-    headRiseDp: Float,
-    headSinkDp: Float,
-    travelDeltaYDp: Float,
-    travel: Float,
-): Float =
-    -(panelHeightDp + baseRiseDp + petHeightDp - pressDp + 8f) - headRiseDp + headSinkDp +
-        travelDeltaYDp * (1f - travel)
 
-/** 意图气泡总偏移 X：头横移＋进态滑入 travelDeltaX×(1－travel)。 */
-internal fun intentBubbleOffsetXDps(headXDps: Float, travelDeltaXDps: Float, travel: Float): Float =
-    headXDps + travelDeltaXDps * (1f - travel)
 
-/** 意图清单总偏移 Y（Dock 同款：只跟头升）：基底＋头升。 */
-internal fun intentListOffsetYDp(
-    panelHeightDp: Float,
-    baseRiseDp: Float,
-    petHeightDp: Float,
-    pressDp: Float,
-    headRiseDp: Float,
-): Float =
-    -(panelHeightDp + baseRiseDp + petHeightDp - pressDp + 8f + headRiseDp)
 
 /** 意图卡片底部圆角外延区高度（2026-10-26 Bob 点选圆角外延，设计附录）。 */
 private val INTENT_FLARE_HEIGHT = 24.dp
@@ -330,42 +271,6 @@ internal class IntentCardShape(
     }
 }
 
-/**
- * perch 位移起点估算（只读引用 PullUpDock 的 D1 静态几何，不改动它）：
- * Dock 宠物脚底距屏底 = 面板高 136dp + 肩 rise 18.1dp（弦 156.6dp × 18/156，
- * B2+A 定稿）− 压入 5dp ≈ 149.1dp。横屏 Dock 卡宽 344dp、右留边 12dp，
- * 故横屏 Dock 宠物中心 X = 屏宽 − 12dp − 172dp。
- * 估算只决定位移起点的落点，不决定终态：终态恒为面板肩峰压入 5dp
- * （峰顶 = 面板顶缘 − 18dp rise，见 IntentCardShape）；
- * D2（面板 184dp / rise 21.6dp）时起点估高约 48dp——Dock 卡正在退场、
- * 宠物本体已随卡片滑出淡出，48dp 的起点偏差只影响起步那一帧的落点，
- * 不影响“从 Dock 方向连续滑上来”的读感；要像素级精确须把 DockState
- * 经 HomeScreen 透传进来（HomeScreen / PullUpDock 不在本批文件范围，
- * 故此处不做，见集成注意点）。
- * 兜底：首帧未量到面板位置时起点取面板下方 320dp（典型竖屏下与
- * 实测起点差一个面板高以内），宠物仍从 Dock 方向滑入，不留空窗。
- */
-private val PERCH_TRAVEL_DOCK_FOOT_FROM_BOTTOM = 149.1.dp
-private val PERCH_TRAVEL_FALLBACK_Y = 320.dp
-
-/**
- * 进态位移量（纯函数，单测锁死）。横屏场景切换（2026-10-26，Bob 22:57
- * 最终口径）：切换不移头，横屏位移恒为零（与锚点无关）；竖屏：锚点未量到
- * 时返回 null（调用方保持 remember 初值——残值或兜底，原行为），
- * 量到时按脚底落差公式（钳制 0..屏高；横向恒为零，横屏横移公式已随本批
- * 删除）。返回 Pair（横向，纵向）。
- */
-internal fun resolveEnterTravelDelta(
-    isLandscape: Boolean,
-    anchorTop: Dp?,
-    dockFootY: Dp,
-    intentFootY: Dp,
-    screenHeightDp: Dp
-): Pair<Dp, Dp>? {
-    if (isLandscape) return 0.dp to 0.dp
-    if (anchorTop == null) return null
-    return 0.dp to (dockFootY - intentFootY).coerceIn(0.dp, screenHeightDp)
-}
 
 /**
  * 意图胶囊输入行（2026-10-21 新规格：胶囊与应用中心搜索合二为一的同一组件）。
@@ -394,9 +299,9 @@ fun IntentCapsuleField(
     placeholder: String = "想做什么？",
     planning: Boolean = false,
     showClearButton: Boolean = false,
-    // R3-C：焦点变化回调（首页用来驱动七仔倾听姿态；应用中心不传，保持纯过滤）
+    // R3-C：焦点变化回调（首页用来驱动胶囊焦点状态；应用中心不传，保持纯过滤）
     onFocusChanged: (Boolean) -> Unit = {},
-    // v0.68.99（主页重构 R-1）：挂载即聚焦——首页输入态由「点七仔格/讲述者」
+    // v0.68.99（主页重构 R-1）：挂载即聚焦——首页输入态由「点意图胶囊」
     // 进入，用户点一次就应能打字（键盘随聚焦弹起）；应用中心不传，保持点按
     // 聚焦的原行为；「问七仔」自动带起的思考/回复呈现也不传（不弹键盘）。
     requestFocusOnMount: Boolean = false,
@@ -415,9 +320,9 @@ fun IntentCapsuleField(
     // 沿旧走 onSubmit（首页不动）；IME Done 恒走 onSubmit，不受此影响
     onArrowSubmit: (() -> Unit)? = null,
     // 意图页优化（2026-10-30，Bob 已批 §二 A1）：提交钮的无障碍文案——
-    // 首页默认“交给七仔去办”（点它就是把这句话交给七仔办，不是下一页、
+    // 首页默认“交给助手去办”（点它就是把这句话交给助手办，不是下一页、
     // 不是搜一下）；应用中心箭头语义不同（确认本地搜索），调用方另传。
-    submitContentDescription: String = "交给七仔去办"
+    submitContentDescription: String = "交给助手去办"
 ) {
     val focusRequester = remember { FocusRequester() }
     // v0.68.102（310 冻结修复二轮）：key 改为 requestFocusOnMount 本身——
@@ -482,10 +387,10 @@ fun IntentCapsuleField(
                 .testTag("intent_input")
                 .focusRequester(focusRequester)
                 .onFocusChanged { onFocusChanged(it.isFocused) }
-                // R3-C 无障碍：Planning 时给 TalkBack 一个状态说明（"七仔思考中"），
+                // R3-C 无障碍：Planning 时给 TalkBack 一个状态说明（"思考中"），
                 // 不必等结果条出现才知道提交已受理
                 .semantics {
-                    if (planning) stateDescription = "七仔思考中"
+                    if (planning) stateDescription = "思考中"
                 },
             enabled = !planning,
             singleLine = true,
@@ -603,7 +508,7 @@ fun IntentCapsuleField(
  * R2 UI（文档二 P0 + 2026-10-21 新规格）：首页意图入口——封面与 TODAY 紧凑条之间。
  *
  * 一个入口、两层响应：
- * - 本地直达层：打字时在胶囊下方「七仔结果条」实时出本地应用匹配
+ * - 本地直达层：打字时在胶囊下方「本地结果条」实时出本地应用匹配
  *   （复用应用中心同一套 AppSearchIndex 匹配与同一应用数据源），只展示、点选才打开，
  *   绝不自动执行；提交后本地结果收起，用户再改文本才重新出。
  * - 意图层：提交（按钮/IME Done）走 [IntentCoordinator]，与本地层互不干扰。
@@ -619,7 +524,7 @@ fun IntentCapsuleField(
  * v0.68.93（布局与交互 Loop 一批①·Bob 真机点名的 bug）：点胶囊外释放焦点。
  *
  * 根因：Compose 没有「点外部自动清焦」——[IntentEntry] 的 releaseInputFocus 只在
- * 提交/点结果/回复呈现时从内部调，点首页空白、七仔、Dock 时没有任何一层清焦，
+ * 提交/点结果/回复呈现时从内部调，点首页空白、Dock 时没有任何一层清焦，
  * 键盘收不掉，用户被困在编辑态（系统 Back 之外无路可退）。
  *
  * 宿主把这个观察者挂在根容器上：它在 Initial pass 只观察按下位置、从不消费
@@ -679,33 +584,14 @@ fun IntentEntry(
     // 区间（TextFieldValue）语义不变，下游沿用。
     fieldValue: TextFieldValue,
     onFieldValueChange: (TextFieldValue) -> Unit,
-    // 进入输入态时是否挂载即聚焦（点坐姿七仔 = 要打字，true；
+    // 进入输入态时是否挂载即聚焦（点意图胶囊 = 要打字，true；
     // 协调器在场状态自动带起的呈现 = false，不弹键盘）
     requestFocusOnMount: Boolean = false,
     // v0.68.101（D-2）：显式退出输入态请求——点本地结果/建议应用打开 App
     // 是「事办完了」的明确动作，由宿主收起输入态（文本保留）。原先靠
     // 「失焦→退出」的边沿推断，IME 抖动会误伤，现已拆除（见 HomeScreen）。
     onRequestExitInput: () -> Unit = {},
-    // 输入态专注·进出过渡 C（2026-10-26，见 PetPerchTransition.kt）：
-    // HomeScreen 持有的同一过渡状态与单一退出入口。传 perchTransition
-    // 时宠物位移／alpha／影子走共享 Animatable（进出同一弹簧、退态复用
-    // 进态冻结位移量）；不传时走本函数内旧的本地 Animatable（独立使用
-    // 时行为与 355 一致）。onExitFocusRequest 是底部收起一键退出（D）
-    // 也要调的唯一入口：收起只调它，不自写退出动画、不直接改
-    // intentInputMode、不清焦点不收键盘（收键盘／翻转／复位全归
-    // 该入口一路）；HomeScreen 传入 C 的退出入口实现，默认回落到
-    // onRequestExitInput。
-    perchTransition: PetPerchTransitionState? = null,
-    // 进态会话号（2026-10-27 闪烁修复，横屏沿用）：宿主 mode 一变真
-    // 即递增；进态 effect 改以它为 key，横屏退出进行中重进（槽位不卸载）
-    // 也能重跑进态动画（旧 LaunchedEffect(Unit) 永不重跑是缺口）。
-    // 竖屏离散切换无进态动画可重启，会话号在竖屏是 no-op。
-    enterSession: Int = 0,
     onExitFocusRequest: () -> Unit = onRequestExitInput,
-    // 输入态专注·集成：专注态气泡挂载开关——PetZone 列尾宿主在专注态
-    // 不挂载时，气泡改挂本卡片覆盖层（卡片宠物上方）；退态翻转后由
-    // HomeScreen 关掉（列尾宿主接回），全程单挂载点。
-    focusBubbleActive: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -714,7 +600,7 @@ fun IntentEntry(
     // 已提交的文本：与当前文本相同期间不再出本地结果（提交后清掉本地层）
     var submittedText by remember { mutableStateOf<String?>(null) }
     val planning = state is IntentUiState.Planning
-    // R3-C：胶囊焦点（驱动七仔倾听姿态）
+    // R3-C：胶囊焦点（驱动胶囊焦点状态）
     var capsuleFocused by remember { mutableStateOf(false) }
 
     // F 批（槽位 UX 退役）：R-2 的模板/槽位状态（templateFill /
@@ -824,25 +710,7 @@ fun IntentEntry(
     val densityNow = LocalDensity.current
     val showDeckExamples = densityNow.fontScale <= 1.15f
 
-    // 2026-10-25 意图卡片统一（Bob 拍板：宠物事件动作全部复用同一套）：
-    // 旧意图宠物（InputPetCompanion → PetView 姿态图）的 R3-C 反应管线
-    // （倾听 FETCH / 思考 SORTING+头顶点点 / 呈现 HAPPY）随旧宠物块整段
-    // 退役——意图卡片上的宠物就是 Dock 宠物本体（HybridPet → FloatingPet
-    // 活感引擎：呼吸、眨眼、转头注视、手动表演动作），行为与 Dock 那只
-    // 完全一致，不另维护一套姿态。会话状态的传达仍由槽位内容本身承担
-    // （PlanningStrip「想想中」/ LocalResultsBar / StatusStrip），不经宠
-    // 物姿态。PetRepository 的 intentPose 覆盖层随之删除（唯一消费者已无）。
-    // 但思考标志保留：眼睛批（344）以 intentThinking 驱动专注眼形，故
-    // Planning 态仍写入、离场清零——姿态退役不得砍掉眼睛引擎的输入。
-    // 意图页优化（2026-10-30，Bob 已批 §二 B3）：执行中同样是专注眼形——
-    // 思考与执行共用“正在办事”的眼神，办成时改走 HAPPY 短暂表情
-    // （协调器 Done 路径经 speaker.onTaskDone 触发，见 IntentCoordinator）；
-    // 视频层处应急关闭态，故执行态不另起新表情片，只用已有眼睛＋HAPPY。
     val executing = state is IntentUiState.Executing
-    LaunchedEffect(planning, executing) { PetRepository.setIntentThinking(planning || executing) }
-    DisposableEffect(Unit) {
-        onDispose { PetRepository.setIntentThinking(false) }
-    }
 
     // 回复小条短时呈现：5 秒后自动收起（协调器 dismiss 回编辑态，原话不丢）
     LaunchedEffect(state) {
@@ -946,152 +814,19 @@ fun IntentEntry(
         }
     }
 
-    // ---- 意图卡片统一（2026-10-25，Bob 拍板） ----
-    // 面板实测高：只用于宠物/清单的锚定偏移，不参与面板自身布局——
-    // 首帧估 96dp（胶囊 56 + 间距 12 + 内边距 28），实测到即纠正；动作
-    // 清单开关与 Dock 宠物同款语义（点宠物开关清单）；意图搜索在清单
-    // 2 级，意图语境下点它仅收起（本来就在意图搜索里，不再重进）。
-    var panelHeight by remember { mutableStateOf(96.dp) }
-    var petActionsVisible by remember { mutableStateOf(false) }
-    // ---- 同一只宠物在意图卡片上（宠物交互重构 P0-3，2026-10-26；
-    // 2026-10-27 竖屏区块切换重做） ----
-    // 1500ms 延迟挂载 + 占位盒已删除：意图宠物随 IntentEntry 挂载即在场，
-    // 不再有 1.5 秒空窗。竖屏离散切换：宠物随意图区同帧出现、终态锚定，
-    // 无滑入、无淡入、无弹簧（“从 Dock 方向连续滑过去”的旧口径已删除，
-    // 见下方进态 effect 竖屏分支与渲染门）；横屏场景换：位移恒为零，
-    // travel／travelAlpha 走进态弹簧与 180ms 淡入（先出后进）：
-    //  - 宠物本体：全程同一 HybridPet / 同一活感引擎；终态锚定偏移
-    //    之上叠加位移附加量 travelDelta × (1 − travel)，横屏进态冻结
-    //    在进态那一刻不重算，面板高变化（结果槽位伸缩）时终态锚定
-    //    照常跟随；竖屏附加量恒为零；
-    //  - 落回带回弹过冲：仅横屏（位移走弹簧 damping 0.75，终点附近轻微
-    //    越过再回落）；影子已无（22:02 摘除），不再有“影子跟在身体
-    //    后面”的时序；
-    //  - 交接淡入：仅横屏（宠物 alpha 180ms 内 0→1，Dock 退场 fade
-    //    在先、槽位后挂，先出后进）；竖屏离散切换无淡入（alpha 首帧
-    //    即 1），不出现两只实体的静止并存；
-    //  - 尺寸：全程保持 INTENT_PET_WIDTH 不变（Dock D1 86.6dp →
-    //    意图 86.4dp 差 0.2dp，插值无意义；D2 117.1dp → 86.4dp 的台阶
-    //    不猜 DockState 做假插值，见文件头常量注释与集成注意点）；
-    //  - 减动效：横屏位移直接 snap 到终态，不播弹簧；竖屏离散切换
-    //    本身无动画，减动效同一行为；
-    //  - 退态（退出输入态）：竖屏离散切换即时翻转、无反向位移；
-    //    横屏仅 beginExit／finishExit 守卫与复位（见 PetPerchTransition.kt）。
-    //    旧口径“退场由 HomeScreen fadeOut＋Dock 卡片重进承担”与竖屏
-    //    funnel 四步时序均已废掉，不许再各自保留一套 fade。
-    // 面板在根坐标的位置（外层 Box 回写，取整 dp 防抖动重组）。
-    // 横屏横移公式已随 22:57 口径删除，中心 X 不再采集。
-    var petAnchorTop by remember { mutableStateOf<Int?>(null) }
-    // 位移向量（dp）：横屏进态那一刻冻结，之后面板位置变化不再重算。
-    // 竖屏离散切换（2026-10-27）不冻结、不读（渲染门按 travel=1 计，
-    // 附加量恒为零；此处残值无害）。
-    var travelDeltaX by remember { mutableStateOf(perchTransition?.travelDeltaX ?: 0.dp) }
-    var travelDeltaY by remember { mutableStateOf(perchTransition?.travelDeltaY ?: PERCH_TRAVEL_FALLBACK_Y) }
-    // 过渡 C：共享状态在场时位移／alpha 走 HomeScreen 持有的同一组
-    // Animatable（退态：竖屏不反向驱动、横屏仅守卫与复位）；否则走
-    // 本地组（355 行为）。本地组恒创建（廉价），只在无共享状态时使用。
-    // 影子通道已随 22:02 摘除作废，不再有 shadowTravel。
-    val legacyTravel = remember { Animatable(0f) }
-    val legacyTravelAlpha = remember { Animatable(0f) }
-    val petTravel = perchTransition?.travel ?: legacyTravel
-    val petTravelAlpha = perchTransition?.travelAlpha ?: legacyTravelAlpha
-    val reduceMotion = rememberReduceMotion()
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
-    // 横屏判定（卡片形状、外延 shader 共用同一值；进态位移横屏恒为零，
-    // 见上方 resolveEnterTravelDelta 横屏分支）。
+    // 横屏判定（卡片形状、外延 shader 共用同一值）。
     val isLandscapeCard = screenWidthDp > screenHeightDp
-    LaunchedEffect(enterSession) {
-        if (!isLandscapeCard) {
-            // 竖屏区块切换（2026-10-27）：离散切换无滑入、无淡入——
-            // travel／travelAlpha 直接置为聚焦终态（供横竖屏旋转时横屏
-            // 渲染读一致值），不等待锚点、不冻结位移量、不启动弹簧、
-            // 不先行 alpha 动画；渲染侧亦按 travel=1 计（见下方宠物
-            // offset／alpha 门），故首帧即终态。减动效同一行为。
-            if (perchTransition != null) {
-                perchTransition.travel.snapTo(1f)
-                perchTransition.travelAlpha.snapTo(1f)
-            } else {
-                petTravel.snapTo(1f)
-                petTravelAlpha.snapTo(1f)
-            }
-            return@LaunchedEffect
-        }
-        // 横屏进态：宠物 alpha 不另等锚点——在锚点等待之前立即
-        // 起步（FadeHandoff，与面板同门），随后退态等待＋冻结
-        // delta＋animateEnter 接续（animateTo 从当前值到 1，不冲突；
-        // 共享路径下 animateEnter 内会再起一次同目标同规格的 alpha 动画，
-        // 从当前值续跑、无跳变）。减动效路径不动（snap 本就一拍）。
-        if (!reduceMotion) {
-            launch {
-                petTravelAlpha.animateTo(
-                    1f,
-                    tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
-                )
-            }
-        }
-        val anchorTop = petAnchorTop?.dp
-        // 脚底在肩峰上：峰顶 = 面板顶缘 − rise，脚底压进峰顶 5dp。
-        val delta = resolveEnterTravelDelta(
-            isLandscape = isLandscapeCard,
-            anchorTop = anchorTop,
-            dockFootY = screenHeightDp - PERCH_TRAVEL_DOCK_FOOT_FROM_BOTTOM,
-            intentFootY = if (anchorTop != null)
-                anchorTop - INTENT_SHOULDER_RISE + INTENT_PET_PRESS else 0.dp,
-            screenHeightDp = screenHeightDp
-        )
-        // 横屏位移恒为零（resolveEnterTravelDelta 横屏分支）；竖屏锚点未量到
-        // 时 delta 为 null，保持 remember 初值（残值或兜底，原行为）。
-        if (delta != null) {
-            travelDeltaX = delta.first
-            travelDeltaY = delta.second
-        }
-        if (perchTransition != null) {
-            // 过渡 C（横屏）：上一轮退态未收尾时先等它收尾（封顶 ~1s），
-            // 再冻结本轮位移量——避免新冻结值中途改写在途退态的附加
-            // offset（退态渲染仍在读同一份冻结量）。随后进态走共享状态
-            // （同一弹簧／时序）。
-            var waitedExit = 0
-            while (perchTransition.isExiting && waitedExit < 60) {
-                delay(16)
-                waitedExit++
-            }
-            perchTransition.freezeDelta(travelDeltaX, travelDeltaY)
-            perchTransition.animateEnter(reduceMotion)
-        } else if (reduceMotion) {
-            petTravel.snapTo(1f)
-            petTravelAlpha.snapTo(1f)
-        } else {
-            // 本地路径：位移走家族弹簧；alpha 已在 effect 起步时先行，
-            // 此处不再重起（同 Animatable 重起亦无跳变，但无必要）。
-            launch { petTravel.animateTo(1f, PetMotion.EnterStandard) }
-        }
-    }
-    val intentPetHeight = INTENT_PET_WIDTH * (1318f / 1043f)
-    // 意图覆盖层专属拖拽状态机（2026-10-27 意图拖拽复用）：与 Dock 的
-    // PullUpDock:399 实例绝不共用——两 perch 各自独立实例，动效走同一套
-    // DragBody 纯函数与家族弹簧，故逐项同值。remember 无 key：面板组合
-    // 内稳定；FloatingPet 的 pointerInput(Unit) 捕获同一实例。
-    // 传给 HybridPet 后意图宠物即走一体拉伸全套（tanh 上拉／0.8×横移／
-    // 下压沉入／肩 1:1＋横移滞后／倾角 5°／松手弹簧＋过冲压扁），旧
-    // head-only 跟手分支不再走；点按空操作／长按开清单／slop 仲裁
-    // 全在 FloatingPet 手势层，一字不动。
-    val intentDragScope = rememberCoroutineScope()
-    val intentDragBody = remember { DragBodyState(intentDragScope) }
-    val intentDragHeadRiseDp = with(densityNow) { intentDragBody.headRisePx.toDp() }
-    val intentDragHeadXdp = with(densityNow) { intentDragBody.headXPx.toDp() }
-    val intentDragHeadSinkDp = with(densityNow) { intentDragBody.headSinkPx.toDp() }
-    val intentDragShoulderRiseDp = with(densityNow) { intentDragBody.shoulderRisePx.toDp() }
     // 意图卡片轮廓（输入态专注·圆角外延）：顶缘复用 Dock 肩线、底部外延，
     // 参数常量见文件头。横屏整体（本批）：横屏纯圆角 28dp、无外延
     // （flare 0、extent 0——IntentCardShape 在 flare=0 时走真圆角底边，
     // 无外延残留、无退化贝塞尔凸起）；竖屏保留 24dp 外延＋20dp 外扩。
-    // remember keyed on isLandscapeCard（横竖屏切换时形状重建）＋拖拽肩升
-    // （Dock 同款：shape 随 dragShoulderRiseDp 逐帧重建，肩形与头升同频）。
-    val intentCardShape = remember(isLandscapeCard, intentDragShoulderRiseDp) {
+    // remember keyed on isLandscapeCard（横竖屏切换时形状重建）。
+    val intentCardShape = remember(isLandscapeCard) {
         IntentCardShape(
             chordDp = INTENT_SHOULDER_CHORD,
-            riseDp = INTENT_SHOULDER_RISE + intentDragShoulderRiseDp,
+            riseDp = INTENT_SHOULDER_RISE,
             cornerDp = 28.dp,
             flareDp = if (isLandscapeCard) 0.dp else INTENT_FLARE_HEIGHT,
             flareExtentDp = if (isLandscapeCard) 0.dp else 20.dp,
@@ -1132,17 +867,7 @@ fun IntentEntry(
       // matchParentSize 覆盖层里、用 BottomCenter + 负偏移锚到面板顶缘上方，
       // 不占布局、不推面板——面板在流中的位置与改前一致，只短了旧宠物带
       // （胶囊带高从胶囊+宠物回到胶囊本身）。
-      // 锚点回写（供 perch 位移起点估算）：面板在根坐标的顶缘与中心 X，
-      // 取整 dp、变化才写，避免布局抖动引发重组风暴。
-      Box(modifier = Modifier.fillMaxWidth().onGloballyPositioned { coords ->
-          // 本仓 Compose 版本无 positionInRoot（编译已证实），用 HomeScreen
-          // 同款 boundsInRoot：top = 面板顶缘。
-          val bounds = coords.boundsInRoot()
-          with(densityNow) {
-              val top = bounds.top.toDp().value.toInt()
-              if (petAnchorTop != top) petAnchorTop = top
-          }
-      }) {
+      Box(modifier = Modifier.fillMaxWidth()) {
       // ---- 2026-10-28 意图页设计评审第 2 轮（修正版规格，优先于结构方案文档） ----
       // 内容定高结构契约：面板高度严格跟内容走——结果槽位只在有内容时
       // 占位、收起只在结果在场时以并入形态出现、空输入态不留任何无内容
@@ -1208,9 +933,6 @@ fun IntentEntry(
                 dockLight = DockLightParams(),
                 flareShader = panelFlareShader
             )
-            .onGloballyPositioned { coords ->
-                with(densityNow) { panelHeight = coords.size.height.toDp() }
-            }
             // 底垫 8dp 在外延区之上：竖屏总底垫 = 8dp + 24dp 外延区，
             // 全部内容（示例行、输入框、结果槽位）收在外延区之上，不压
             // 外延曲线；横屏无外延区，总底垫 = 8dp。
@@ -1233,8 +955,7 @@ fun IntentEntry(
         // 瘦条（推荐问法行）→ 12dp → 结果槽位（有内容时才出现）。胶囊与
         // 瘦条包进内层 Column（8dp 间距）：瘦条不再是面板顶部的独立一节，
         // 而是贴在输入框下方、看上去像输入框的一部分。旧带盒退役口径不变
-        // （见 git 历史：负偏移曾在 346 把行推出面板裁剪区）。七仔仍栖坐
-        // 卡片上沿（见面板外覆盖层，与 Dock 上沿同一套坐法）；胶囊本体行为不动。
+        // （见 git 历史：负偏移曾在 346 把行推出面板裁剪区）。胶囊本体行为不动。
         // 瘦条常驻＋命中离散出现（2026-10-27 瘦条批，取代 372 的“示例↔命中
         // 互斥切换”）：瘦条编辑系即显示（不论空文本），命中应用在其下方
         // 离散出现／消失（无动画，承接 372 离散口径；372 删掉的
@@ -1254,14 +975,14 @@ fun IntentEntry(
         ) {
             // 胶囊本体（与应用中心同一组件；面板语境用卡片同款玻璃，见上）
             // 意图页优化（2026-10-30，Bob 已批 §二 A1）：首页占位文案点明
-            // 提交的含义——“想办什么？交给七仔”，配金色提交钮与“交给七仔
+            // 提交的含义——“想办什么？交给助手”，配金色提交钮与“交给助手
             // 去办”的无障碍文案，没用过这页的人也能一眼看懂点它就是把
-            // 这句话交给七仔去办。应用中心占位不动（其箭头是确认本地搜索）。
+            // 这句话交给助手去办。应用中心占位不动（其箭头是确认本地搜索）。
             IntentCapsuleField(
                 value = fieldValue,
                 onValueChange = { nv -> onFieldValueChange(nv) },
                 onSubmit = { submitIfReady() },
-                placeholder = "想办什么？交给七仔",
+                placeholder = "想办什么？交给助手",
                 planning = planning,
                 requestFocusOnMount = requestFocusOnMount,
                 onFocusChanged = { capsuleFocused = it },
@@ -1364,12 +1085,12 @@ fun IntentEntry(
                 } else when (s) {
                     is IntentUiState.Reply -> {
                         // 意图页优化（2026-10-30，Bob 已批 §二 A2）：回复条
-                        // 带“七仔：”归属前缀——与本地结果条的“本机应用”
+                        // 带“助手：”归属前缀——与本地结果条的“本机应用”
                         // 标题对仗，用户一眼分清哪边是本机匹配、哪边是
                         // 七仔办完事的回音；前缀是弱说明，不承载关键信息。
                         StatusStrip(
                             text = s.text,
-                            attribution = "七仔：",
+                            attribution = "助手：",
                             onClose = onDismiss
                         )
                     }
@@ -1385,7 +1106,7 @@ fun IntentEntry(
                     else -> {
                         // 2026-10-27 设计精致化 P1-6：打字中槽位不再空白——
                         // 索引未建（延迟 300ms 后）出“正在查找应用”，索引建好
-                        // 且确无匹配出“没找到，可以继续输入一句话交给七仔”；
+                        // 且确无匹配出“没找到，可以继续输入一句话交给助手”；
                         // 提交后抑制态（keys == submittedText）与确认态不在此列。
                         // 零打字呈现已迁到胶囊上方甲板（R-2）——无文本时本槽位
                         // 仍保持空（建议面 SuggestionsBar 退役口径不变）。
@@ -1396,7 +1117,7 @@ fun IntentEntry(
                         ) {
                             if (localIndex != null) {
                                 SlotStatusLine(
-                                    text = "没找到，可以继续输入一句话交给七仔",
+                                    text = "没找到，可以继续输入一句话交给助手",
                                     testTag = "intent_no_results"
                                 )
                             } else if (showSearching) {
@@ -1487,97 +1208,8 @@ fun IntentEntry(
                     .testTag("intent_empty_bottom_edge")
             )
         }
-        // 宠物：Dock 宠物本体（HybridPet，同一组件、同一活感引擎、同一动
-        // 作状态机），只是换了个 perch——坐法与 Dock 上沿同一套：前面图
-        // 层、居中、脚底压进卡片肩峰 INTENT_PET_PRESS（峰顶 = 面板顶缘 − rise）、接触不断；手势
-        // 语义与 Dock 宠物同一套（集成时统一，协调方决策）：点按在意
-        // 图态已无“问”可进，故为空操作（不与胶囊聚焦、点外退出打
-        // 架）；动作清单只挂长按，与 Dock 侧一致，不许点按再开清单。
-        // 位移：终态锚定偏移（面板高 ＋ rise − 压入，脚底压进肩峰 5dp）之上叠加位移附加量
-        // travelDelta × (1 − travel)，横屏 travel 弹簧到 1（轻微过冲回落
-        // 即落回回弹）；减动效时 travel 已 snap 到 1，附加量为零。
-        // 竖屏区块切换（2026-10-27）：竖屏渲染门按 travel=1 计（见下方
-        // offset／alpha 门），附加量恒为零、alpha 恒为 1，首帧即终态。
-        // 真机待验：卡片顶缘坐姿、压入量是否自然（位移全程待验项已随
-        // 竖屏离散切换删除）。
-        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏意图宠物亦挂载
-        // （左侧卡片承载身体，坐法与竖屏同款：前面图层、居中、脚底压进
-        // 卡片肩峰；进态位移横屏恒为零，见上方 LaunchedEffect 横屏分支；
-        // travel／travelAlpha 照常跑进态弹簧与淡入）。
-        // 拖拽复用（2026-10-27）：传意图专属 intentDragBody 后走一体拉伸全套。
-        // 盒偏移一字不动（Dock 同款构造）：盒不动、头在盒内升、肩形升锁定
-        // 头升，压入 5dp 全程恒定；盒再升肩升会双倍计数顶出缝（见文件头
-        // 压入不变量）。抬起 32dp 的头不 clip：覆盖层 Box 无 clip 修饰、
-        // 面板的 .clip(intentCardShape) 在兄弟面板列上不在覆盖层、
-        // HomeScreen 全仓无 .clip()，静止宠物本就向上探出、拖拽只沿同方向
-        // 多探 32dp；屏顶是唯一物理极限（与动作清单同款既有 caveat）。
-        HybridPet(
-            petWidth = INTENT_PET_WIDTH,
-            onPetTap = { /* 意图态已在问，点按空操作；清单只挂长按 */ },
-            onPetLongPress = { petActionsVisible = true },
-            dragBodyState = intentDragBody,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                // 走纯函数（单测锁定）：值与旧式一字相同（面板高＋基底
-                // rise－压入），拖拽不改盒位（见文件头压入不变量）。
-                .offset(y = intentPetBoxOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, INTENT_PET_PRESS.value).dp)
-                .offset(
-                    // 竖屏区块切换：竖屏附加量恒为零（travel 按 1 计），
-                    // 首帧即终态；横屏沿用滑入附加量。
-                    x = if (isLandscapeCard) travelDeltaX * (1f - petTravel.value) else 0.dp,
-                    y = if (isLandscapeCard) travelDeltaY * (1f - petTravel.value) else 0.dp
-                )
-                .graphicsLayer { alpha = if (isLandscapeCard) petTravelAlpha.value else 1f }
-                .testTag("pet_qizai")
-        )
-        // 动作清单：与 Dock 宠物上方同款（PetActionList 同一组件、同一清单、
-        // 同一状态机；气泡底距宠物顶 8dp、尾巴朝下指向宠物）。单层 8 行，
-        // 无 2 级；关闭靠气泡内 ✕，退出输入态时随面板一并消失。
-        // 真机待验：意图面板上方空间有限（紧凑简报 + 状态栏），气泡顶部
-        // 在小屏/横屏可能探出屏顶——若实测被裁，另起一单定清单落点。
-        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏意图宠物已挂载，
-        // 清单亦挂载（与竖屏同款：长按卡片宠物开清单；否则长按置 local
-        // petActionsVisible=true 后无清单可关、且专注气泡被 !petActionsVisible
-        // 门持续隐藏成卡死态）。先前 wart（横屏聚焦时长按 Dock 宠物置
-        // MainScreen petActionsVisible、清单须退出聚焦后才现形）已随 Dock
-        // 隐藏＋宠物上卡片而消除（触发条件不再存在）。
-        if (petActionsVisible) {
-            PetActionList(
-                onDismiss = { petActionsVisible = false },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    // 拖拽跟头（Dock 同款，PullUpDock:900）：清单在宠物头上方，
-                    // 头升多少清单跟多少（只跟头升，不跟横移／头沉——清单只在
-                    // 静止时长按打开，拖拽中 longPressFired 门禁）。走纯函数
-                    // （单测锁定）。
-                    .offset(y = intentListOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, intentPetHeight.value, INTENT_PET_PRESS.value, intentDragHeadRiseDp.value).dp)
-                    .testTag("pet_action_list")
-            )
-        }
-        // ---- 输入态专注·集成：专注态气泡（覆盖层，不推卡片） ----
-        // 与动作清单同位（卡片宠物上方 8dp、尾巴朝下指宠物），本体 +
-        // 动作钮与列尾宿主同款；清单打开时气泡让位（关闭后宿主重挂即
-        // 复现，speech 状态在仓储里不丢），避免两气泡在宠物上方重叠。
-        if (focusBubbleActive && !petActionsVisible) {
-            PetSpeechBubbleHost(
-                tailDown = true,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    // 拖拽跟头（2026-10-27 气泡跟头）：基底不动，跟随量取复用后
-                    // 的同一组 DragBody 量（头横移、－头升＋头沉），另加进态滑入
-                    // travelDelta×(1－petTravel) 让气泡随宠物滑入；竖屏区块切换
-                    // 时 travel 按 1 计、滑入项为零（气泡首帧即终态）；不加肩升
-                    // （头跟随已含头升，见文件头压入不变量）。走纯函数
-                    // （单测锁定）。
-                    .offset(
-                        x = intentBubbleOffsetXDps(intentDragHeadXdp.value, travelDeltaX.value, if (isLandscapeCard) petTravel.value else 1f).dp,
-                        y = intentBubbleOffsetYDp(panelHeight.value, INTENT_SHOULDER_RISE.value, intentPetHeight.value, INTENT_PET_PRESS.value, intentDragHeadRiseDp.value, intentDragHeadSinkDp.value, travelDeltaY.value, if (isLandscapeCard) petTravel.value else 1f).dp
-                    )
-            )
-        }
       }
-      } // 外层 Box（面板 + 前面图层宠物 + 动作清单）
+      } // 外层 Box（面板）
     }
     } // BoxWithConstraints 闭合（容器相对卡片宽；AlertDialog 仍属 IntentEntry）
 
@@ -1671,7 +1303,7 @@ private fun LocalResultsBar(
         Text(
             // 2026-10-27 设计精致化 P1-5：说明缩成“应用 · N 个”，更紧更好扫。
             // 意图页优化（2026-10-30，Bob 已批 §二 A2）：标题点明归属——
-            // “本机应用 · N 个”，与七仔回复条的“七仔：”前缀对仗，打字
+            // “本机应用 · N 个”，与七仔回复条的“助手：”前缀对仗，打字
             // 结果与七仔回答不再混在同一个无名条里。
             text = "本机应用 · ${apps.size} 个",
             fontSize = AILauncherType.Caption.fontSize,
@@ -1818,7 +1450,7 @@ private fun StatusStrip(
     text: String,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
-    // 意图页优化（2026-10-30，Bob 已批 §二 A2）：归属前缀（如“七仔：”），
+    // 意图页优化（2026-10-30，Bob 已批 §二 A2）：归属前缀（如“助手：”），
     // 只在既有行内出现，不新开容器；为 null 时不渲染、不占位。
     attribution: String? = null,
     onClose: () -> Unit
@@ -1895,7 +1527,7 @@ private fun StatusStrip(
  * 意图页优化（2026-10-30，Bob 已批 §二 B2）：理解预告条——规划落地后、
  * 执行前，把理解摊开给用户看。同一结果槽位、同一条语言（面板内透明、
  * 左轴与回复条一致），不新开容器、不另起列：
- * - 主文案一句话说清理解（“七仔理解成：导航 · 机场”），用户一眼判对错；
+ * - 主文案一句话说清理解（“理解成：导航 · 机场”），用户一眼判对错；
  * - “就这样办”才真执行（协调器一次性守卫，连点不重复执行）；
  * - “改一下”回编辑态改原话（输入框同步回原句，见 LaunchedEffect(state)）；
  * - 纯查询（Chat）不走这里，直接出结果，不多一道确认；
@@ -1919,7 +1551,7 @@ private fun UnderstoodStrip(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            text = "七仔理解成：$summary",
+            text = "理解成：$summary",
             fontSize = AILauncherType.Footnote.fontSize,
             color = AILauncherColors.current.Title,
             maxLines = 3,
@@ -1977,7 +1609,7 @@ private fun ExecutingStrip(summary: String) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "七仔正在办：$summary",
+            text = "正在办：$summary",
             fontSize = AILauncherType.Footnote.fontSize,
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,
             maxLines = 2,
@@ -2009,7 +1641,7 @@ private fun PlanningStrip(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "七仔思考中",
+            text = "思考中",
             fontSize = AILauncherType.Footnote.fontSize,
             // 2026-10-27 暗黑可读：深色 Body 在玻璃＋壁纸上发虚，改 Title；浅色不动。
             color = if (AILauncherColors.current.isDark) AILauncherColors.current.Title else AILauncherColors.current.Body,

@@ -21,8 +21,8 @@ import org.json.JSONObject
 /**
  * 能力参数声明（意图改进二批）：与 deeplinkTemplate 里的 {占位符} 一一对应，
  * 是「模型该提取什么 / 执行前必须有什么」的唯一事实源。
- * - [required] 为 true 且执行时缺失/空白 → 不执行，由七仔按 [ask] 追问补参；
- * - [ask] 是缺参时七仔的问句，缺省由协调器按「label 需要 name」拼兜底问句。
+ * - [required] 为 true 且执行时缺失/空白 → 不执行，按 [ask] 追问补参；
+ * - [ask] 是缺参时的问句，缺省由协调器按「label 需要 name」拼兜底问句。
  */
 data class CapabilityParam(
     val name: String,

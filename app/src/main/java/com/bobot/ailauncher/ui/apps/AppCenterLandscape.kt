@@ -403,7 +403,7 @@ fun AppCenterLandscape(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "问七仔：「${searchFieldValue.text.trim()}」",
+                            text = "问助手：「${searchFieldValue.text.trim()}」",
                             fontSize = 13.sp,
                             color = AILauncherColors.current.Title.copy(alpha = 0.75f),
                             fontWeight = FontWeight.Medium,

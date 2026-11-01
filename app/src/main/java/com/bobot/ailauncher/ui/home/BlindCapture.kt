@@ -80,7 +80,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.apps.loadShortcutIcon
 import com.bobot.ailauncher.ui.glass.BackdropKind
 import com.bobot.ailauncher.ui.glass.DockLightParams
@@ -104,15 +103,15 @@ import kotlin.math.sqrt
  *
  * 去掉：边缘区要求、120ms 停留激活、导航后 800ms 冷却。
  * 新触发：首页背景任何左滑直接触发（组件已消费的手势除外：
- * 七仔拖拽、应用行横扫等优先）。
+ * 拖拽、应用行横扫等优先）。
  *
  * 扇形选择器：
  * 1. 左滑/右滑触发 → 以触发点为圆心展开扇形菜单（左扇朝左/右扇朝右镜像）
  * 2. v0.68.38：所有段等宽 36°（Bob 拍板：不用大角度，拍照只占最顺手的位置）；
  *    段从上到下：录像 / 拍照 / 快捷装备段（动态，最多 2 段，
- *    取七仔装备排序前两位）/ 录音（固定最下方）；总角度 108°/144°/180°；
+ *    取快捷段排序前两位）/ 录音（固定最下方）；总角度 108°/144°/180°；
  *    拍照锚定正中方向（左扇 180° / 右扇 0°）+ 边界 ±10° 磁吸——最容易触发
- * 3. 手指滑入某段 → 伸长高亮 + 震动 tick + 七仔报段名（七仔从段外缘探出）
+ * 3. 手指滑入某段 → 伸长高亮 + 震动 tick + 播报段名（从段外缘探出）
  * 4. 松手 → 启动高亮段；无选择松手 → 拍照（零决策）；快滑（甩）→ 拍照（忽略选择）；
  *    滑回 → 取消
  *
@@ -120,15 +119,15 @@ import kotlin.math.sqrt
  * 图标+文字排版；拍照为最默认操作。
  *
  * v0.68.28：右滑镜像——首页背景右滑也触发，扇形朝右展开，
- * 角度/伸长动效/取消/圆心钳制全部镜像；七仔中心 mini 不动。
+ * 角度/伸长动效/取消/圆心钳制全部镜像；中心 mini 不动。
  *
- * v0.68.29 方案C「选中探出」：中心七仔 mini 移除，换成触摸涟漪（极淡圆环）；
- * 手指滑入某段 → 七仔从该段外缘+36dp 处探出（64dp，scale spring+淡入）；
- * 换段 → 七仔位移动画跳到新段外缘；滑出 → 缩回；位置钳制防出屏；左右扇共用镜像逻辑。
+ * v0.68.29 方案C「选中探出」：中心 mini 移除，换成触摸涟漪（极淡圆环）；
+ * 手指滑入某段 → 从该段外缘+36dp 处探出（64dp，scale spring+淡入）；
+ * 换段 → 位移动画跳到新段外缘；滑出 → 缩回；位置钳制防出屏；左右扇共用镜像逻辑。
  *
- * v0.68.35：旧"自定义☆"固定槽位作废——快捷段直连七仔装备（QuickActionsPrefs），
- * 增删复用七仔装备长按/+ 流程；整体缩小（外半径 120dp）；毛玻璃质感段底 +
- * 1px 高光描边；展开 stagger（25ms/段）；七仔分模式姿态（拍照jump/录像wave/
+ * v0.68.35：旧"自定义☆"固定槽位作废——快捷段直连快捷段（QuickActionsPrefs），
+ * 增删复用快捷段长按/+ 流程；整体缩小（外半径 120dp）；毛玻璃质感段底 +
+ * 1px 高光描边；展开 stagger（25ms/段）；分模式姿态（拍照jump/录像wave/
  * 录音hold/快捷main）+ 旋转探出 + 钻回。
  *
  * v0.68.36：拍照最容易触发——拍照段 60°→84°（正中方向上下各 42°）；边界磁吸
@@ -136,9 +135,9 @@ import kotlin.math.sqrt
  * （离拍照最远）；快滑覆盖（松手速度超 4500px/s 直接=拍照，忽略段选择）。
  *
  * v0.68.37：窄段标题竖排（<40° 的录音/快捷段，中文标签 upright 沿径向堆叠；
- * 非中文或超 4 字 fallback 小一号字号 + 省略）；选中反馈改图标（删除方案C七仔
+ * 非中文或超 4 字 fallback 小一号字号 + 省略）；选中反馈改图标（删除方案C
  * 探出——选中段外缘+36dp 跟一枚 32dp 线稿小图标，淡入淡出 + 轻微 scale；
- * 快捷段用装备自己的图标，无图标显示标签首字小圆章）；保留七仔语音报段名、
+ * 快捷段用装备自己的图标，无图标显示标签首字小圆章）；保留语音播报报段名、
  * 段伸长动效、震动、中心涟漪。
  *
  * v0.68.38：等宽 36°——拍照 84° 收掉，所有段等宽，拍照只锚定最顺手的位置
@@ -146,14 +145,14 @@ import kotlin.math.sqrt
  * 保留磁吸 ±10°、快滑 4500px/s 直拍、毛玻璃+高光、stagger、选中图标、涟漪、语音。
  *
  * v0.68.40（Bob 拍板）：系统只默认放相机——扇形 = 拍照（唯一系统预设，
- * 36°，锚定正中）+ 快捷装备段（36°/段，最多 4 段，取七仔装备排序前 4，
+ * 36°，锚定正中）+ 快捷装备段（36°/段，最多 4 段，取快捷段排序前 4，
  * 顺序 下方1/上方1/下方2/上方2）；录像/录音预设段作废；语音胶囊全家桶删除
  * （VoiceCapsule.kt、BlindAudioRecorder、QuickMemoStore、转文字）；
- * 0 装备时左滑/右滑直接拍照（不展开扇形），七仔引导一次；
+ * 0 装备时左滑/右滑直接拍照（不展开扇形），引导一次；
  * 段标签外移到外圈约 95dp（v0.68.41：14sp，拍照 15sp 加粗；径向旋转，
  * 文字方向跟扇形同角度）。
  *
- * 保留：三重反馈（震动/七仔语音/视觉高亮）。
+ * 保留：三重反馈（震动/语音播报/视觉高亮）。
  */
 
 /** 扇形段：拍照（系统唯一预设）+ 用户快捷装备段 + 空槽位 */
@@ -330,6 +329,18 @@ class BlindCaptureController(
         private const val TAG = "BlindCapture"
     }
 
+    /**
+     * 中性播报（删宠物批 adaptation）：原 PetRepository.say 只发气泡文本、
+     * 无 TTS；盲操的段名/状态确认本就靠 TalkBack 读出。改走 View 的
+     * announceForAccessibility：无气泡、无角色名，TalkBack 开启时直接朗读，
+     * 扇形本身已有段名视觉呈现，视觉用户不丢信息。
+     */
+    private fun announce(text: String) {
+        try {
+            hapticView.announceForAccessibility(text)
+        } catch (_: Exception) { }
+    }
+
     private val density = context.resources.displayMetrics.density
     // 死区半径 = 内圈半径（与视觉一致）：圆心附近无扇区
     private val deadZonePx = FAN_R_INNER_DP * density
@@ -341,7 +352,7 @@ class BlindCaptureController(
     private var triggered = false
     // v0.68.28：扇形方向（左滑=朝左，右滑=朝右镜像）
     private var fanDir = FanDirection.LEFT
-    // v0.68.35：本次手势的动态段列表 + 角度（触发时从七仔装备读最新列表）
+    // v0.68.35：本次手势的动态段列表 + 角度（触发时从快捷段读最新列表）
     private var segments: List<FanSegment> = emptyList()
     private var sweeps: FloatArray = fanSweeps(0)
     // v0.68.32：手势开始以来的最大左行/右行位移（正值）——方向按主导者判定，
@@ -423,7 +434,7 @@ class BlindCaptureController(
 
     /**
      * v0.68.40：本次手势的扇形段 = 拍照（系统唯一预设）+ 快捷装备
-     * （七仔装备排序前 4，槽位顺序 下方1/上方1/下方2/上方2）。
+     * （快捷段排序前 4，槽位顺序 下方1/上方1/下方2/上方2）。
      * 每次触发时读最新装备列表。
      */
     private fun buildSegments(): List<FanSegment> {
@@ -442,7 +453,7 @@ class BlindCaptureController(
             val prefs = context.getSharedPreferences("blind_prefs", Context.MODE_PRIVATE)
             if (!prefs.getBoolean("zero_quick_guided", false)) {
                 prefs.edit().putBoolean("zero_quick_guided", true).apply()
-                PetRepository.say("点+把你常用的放进来")
+                announce("点+把你常用的放进来")
             }
         } catch (_: Exception) { }
     }
@@ -473,7 +484,7 @@ class BlindCaptureController(
         // 2026-11-01：停留直接进编辑后，进编辑本身就是反馈点——首次说完整
         // 引导，之后每次只说“编辑模式”，不能只靠震动（盲操靠语音确认状态）。
         if (!guideEditOnce()) {
-            PetRepository.say("编辑模式")
+            announce("编辑模式")
         }
         setUi(BlindUiState.Editing(centerX, centerY, fanDir, buildEditSegments(), openAddSheet))
         Log.d(TAG, "diag: editMode(openAddSheet=$openAddSheet)")
@@ -485,7 +496,7 @@ class BlindCaptureController(
             val prefs = context.getSharedPreferences("blind_prefs", Context.MODE_PRIVATE)
             if (!prefs.getBoolean("fan_edit_guided", false)) {
                 prefs.edit().putBoolean("fan_edit_guided", true).apply()
-                PetRepository.say("编辑模式，拖动换位，点×删除，点+添加")
+                announce("编辑模式，拖动换位，点×删除，点+添加")
                 true
             } else {
                 false
@@ -535,10 +546,10 @@ class BlindCaptureController(
             if (leftSwipe || rightSwipe) {
                 triggered = true
                 fanDir = if (leftSwipe) FanDirection.LEFT else FanDirection.RIGHT
-                // v0.68.40：读最新七仔装备，构建本次手势的动态段 + 角度
+                // v0.68.40：读最新快捷段，构建本次手势的动态段 + 角度
                 segments = buildSegments()
                 // v0.68.64：0 装备——展开两段扇形（拍照 + ⊕），不再直接拍照；
-                // 快滑仍直拍（onEnd 的 flingPhoto 分支）；七仔引导一次
+                // 快滑仍直拍（onEnd 的 flingPhoto 分支）；引导一次
                 val isZeroQuick = segments.size == 1
                 if (isZeroQuick) {
                     segments = listOf(FanSegment.Photo, FanSegment.AddSlot)
@@ -578,7 +589,7 @@ class BlindCaptureController(
                 scheduleDwellTimer()
                 hapticView.confirmHaptic()
                 if (isZeroQuick) guideZeroQuickOnce()
-                else PetRepository.say("拍点什么？")
+                else announce("拍点什么？")
                 Log.d(TAG, "diag: fan展开")
                 Log.d(TAG, "triggered dir=$fanDir center=($centerX, $centerY)")
             }
@@ -606,7 +617,7 @@ class BlindCaptureController(
             setUi(BlindUiState.Selecting(centerX, centerY, idx, fanDir, segments))
             if (idx >= 0) {
                 hapticView.tickHaptic()
-                PetRepository.say(segmentLabel(idx))
+                announce(segmentLabel(idx))
                 Log.d(TAG, "diag: sector=${segmentLabel(idx)}")
             }
         } else {
@@ -739,10 +750,10 @@ class BlindCaptureController(
             if (intent.resolveActivity(context.packageManager) != null) {
                 context.startActivity(intent)
             } else {
-                PetRepository.say("没找到相机应用")
+                announce("没找到相机应用")
             }
         } catch (_: Exception) {
-            PetRepository.say("打不开相机")
+            announce("打不开相机")
         }
     }
 
@@ -764,7 +775,7 @@ private fun findSystemCameraPackageName(context: Context, action: String): Strin
     } catch (_: Exception) { null }
 }
 
-/** v0.68.37：选中段外缘跟随的线稿小图标（替代方案C七仔探出）
+/** v0.68.37：选中段外缘跟随的线稿小图标（替代方案C探出）
  * v0.68.40：拍照用 Material Outlined 相机线稿（深暖灰）；快捷段用装备自己的图标，
  * 无图标时显示标签首字小圆章。
  * v0.68.41：拍照改用本机相机 App 的真实图标（拿不到时 fallback 线稿）。 */
@@ -940,7 +951,7 @@ fun BlindCaptureFan(
         animationSpec = tween(120),
         label = "dismissT"
     )
-    // v0.68.29 方案C：中心触摸涟漪（呼吸感圆环，替代七仔 mini）
+    // v0.68.29 方案C：中心触摸涟漪（呼吸感圆环，替代 mini）
     val ripple = rememberInfiniteTransition(label = "ripple")
     val rippleR by ripple.animateFloat(
         initialValue = 0.82f,
@@ -969,7 +980,7 @@ fun BlindCaptureFan(
     val onAddSlotState = rememberUpdatedState(onAddSlot)
     val onEditReorderState = rememberUpdatedState(onEditReorder)
     val onEditTapOutsideState = rememberUpdatedState(onEditTapOutside)
-    // v0.68.29 方案C：探出七仔位置钳制需要屏幕尺寸
+    // v0.68.29 方案C：探出位置钳制需要屏幕尺寸
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
     // 2026-10-27 fan-quick-services 批：扇形 Box 的窗口坐标——扇形中心所在
     // 背景带（tintAlpha 取档）按 Dock 同款公式算（窗口 Y − 背景原点 Y）/ 背景高
@@ -1292,7 +1303,7 @@ fun BlindCaptureFan(
                 style = Stroke(width = 2.dp.toPx())
             )
         }
-        // v0.68.37：选中反馈改图标（替代方案C七仔探出）——选中段外缘+36dp 处跟一枚
+        // v0.68.37：选中反馈改图标（替代方案C探出）——选中段外缘+36dp 处跟一枚
         // 32dp 线稿小图标，随选中段出现/切换/消失（淡入淡出 + 轻微 scale）；
         // 位置钳制防出屏；左右扇镜像共用
         val hasSel = selectedIndex in segments.indices

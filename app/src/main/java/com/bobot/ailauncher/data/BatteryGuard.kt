@@ -22,7 +22,7 @@ import com.bobot.ailauncher.ui.battery.BatteryOverlayService
  * 本 App 是桌面，进程基本常驻（开机自启、按 Home 回来），足够覆盖提醒场景。
  *
  * 逻辑与原来一致：10%/5% 两档温和提醒，只提醒、不做任何自动操作；
- * 充电中或回升到 15% 以上重置；电池状态同步给七仔省电模式。
+ * 充电中或回升到 15% 以上重置；电池状态同步给省电模式。
  */
 object BatteryGuard {
     private const val ALERT_ID = 0xBA71
@@ -49,7 +49,7 @@ object BatteryGuard {
             val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
                     status == BatteryManager.BATTERY_STATUS_FULL
 
-            // 电池状态同步给七仔省电模式
+            // 电池状态同步给省电模式
             BatteryState.update(pct, charging)
 
             // 充电中或回升到安全线以上：重置，下轮再提醒；归还音频焦点；关悬浮窗
@@ -146,9 +146,9 @@ object BatteryGuard {
             context, if (critical) 2 else 1, overlayGuide,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val title = if (critical) "七仔快要睡着了…" else "七仔快没能量了"
+        val title = if (critical) "电量快耗尽了…" else "快没能量了"
         val text = if (critical) "电量掉到 $pct% 了，再不充电就关机了"
-        else "充个电帮它回血吧"
+        else "充个电回回血吧"
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERT)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)

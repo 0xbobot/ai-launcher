@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 
 package com.bobot.ailauncher.ui.pet
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 import android.content.Context
 import android.content.Intent
@@ -62,7 +63,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.bobot.ailauncher.data.AppInfo
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.apps.loadAppShortcuts
 import com.bobot.ailauncher.ui.apps.loadShortcutIcon
@@ -78,7 +78,7 @@ import org.json.JSONObject
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 
 /**
- * v0.65.2：快捷操作从 TODAY 卡片移到七仔气泡（旧面板已退役，见下）。
+ * v0.65.2：快捷操作从 TODAY 卡片移到悬浮面板（旧面板已退役，见下）。
  * - 2026-10-26 宠物重构 D：旧快捷面板本体在 354 基线里已无独立 Composable
  *   （全仓 grep 仅剩本文件头注释提及），面板期图标 helper QuickActionIcon
  *   与其专属 helper appIconOrNull 零调用方，已删除；数据层 QuickActionsPrefs、
@@ -87,7 +87,7 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * - 面板底部小 "+ 添加"（虚线圆）→ 三步添加流程（选应用→选快捷方式→输标签）
  * - 长按图标 → 删除（震动+确认）
  * - 数据层 QuickActionsPrefs 复用不动
- * - 首次点七仔时七仔引导："点图标直达，+ 可以添加常用按钮"（旧面板口径，已随面板退役）
+ * - 首次点开时引导："点图标直达，+ 可以添加常用按钮"（旧面板口径，已随面板退役）
  */
 
 // ============ 数据（v0.65.0，不动） ============
@@ -167,10 +167,10 @@ internal fun launchQuickAction(context: Context, item: QuickActionItem) {
                 .getLaunchIntentForPackage(item.packageName)
                 ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             if (intent != null) context.startActivity(intent)
-            else PetRepository.say("打不开这个应用，可能已卸载")
+            else IslandToasts.show("打不开这个应用，可能已卸载")
         }
     } catch (_: Exception) {
-        PetRepository.say("打不开这个应用，可能已卸载")
+        IslandToasts.show("打不开这个应用，可能已卸载")
     }
 }
 
@@ -401,7 +401,7 @@ internal fun QuickActionAddFlow(
                                 onClick = {
                                     val app = pickedApp ?: return@TextButton
                                     if (label.isBlank()) {
-                                        PetRepository.say("起个名字吧")
+                                        IslandToasts.show("起个名字吧")
                                         return@TextButton
                                     }
                                     onSaved(

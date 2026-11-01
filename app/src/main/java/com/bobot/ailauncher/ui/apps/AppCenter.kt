@@ -773,7 +773,7 @@ fun AppCenterContent(
                     },
                     // 意图页优化（2026-10-30，Bob 已批 §二 A1 连带）：应用中心
                     // 箭头 = 确认本地搜索，不走 AI——无障碍文案不能沿用首页
-                    // 的“交给七仔去办”，否则 TalkBack 会说错动作。
+                    // 的“交给助手去办”，否则 TalkBack 会说错动作。
                     submitContentDescription = "确认本地搜索",
                     // 应用中心变体专属（10-21 Bob 批准）：✕ 一键清空，清空后网格恢复全量；
                     // 首页胶囊不开启，保持原设计。
@@ -798,7 +798,7 @@ fun AppCenterContent(
                     )
                 }
             }
-            // R2 UI（10-21 新规格）：「问七仔」行——有输入时出现，整句交给七仔理解（回首页提交协调器）
+            // R2 UI（10-21 新规格）：「问七仔」行——有输入时出现，整句交给助手理解（回首页提交协调器）
             // 意图改进一批：本行跟随原始文本即时出现（不等防抖落定），文案与提交都用原句
             // 应用中心升级：去 Card 底降重——文字改 Title 75%，金色只留小箭头
             // 一处线索；连点 500ms 节流
@@ -812,7 +812,7 @@ fun AppCenterContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "问七仔：「${query.trim()}」",
+                        text = "问助手：「${query.trim()}」",
                         fontSize = 13.sp,
                         color = AILauncherColors.current.Title.copy(alpha = 0.75f),
                         fontWeight = FontWeight.Medium,

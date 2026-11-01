@@ -139,16 +139,11 @@ fun HomeScreen(
     // v0.68.98（F-06）：Planning 态取消（宿主真取消在途 Job），透传给 IntentEntry
     onIntentCancelPlanning: () -> Unit,
     // v0.68.99（主页重构 R-1）：输入态开关（HomeHost 持有）——静态主页无胶囊；
-    // 点 Dock 坐姿七仔进入（v0.68.101 起为唯一入口——讲述者七仔已撤），
-    // 协调器在场状态由 HomeHost 自动带起
+    // 点意图胶囊进入，协调器在场状态由 HomeHost 自动带起
     intentInputMode: Boolean = false,
     // 进入输入态时是否挂载即聚焦（点入口进入 = true 要打字；自动带起呈现 = false 不弹键盘）
     intentRequestFocus: Boolean = false,
     onExitIntentInput: () -> Unit = {},
-    // 退出进行中状态上报 MainScreen（Dock 宠物挂载门用，见 PullUpDock
-    // dockPetVisible；上报口径同 onBlindActiveChange 的 LaunchedEffect
-    // 模式；横屏退出分支置位，竖屏离散切换不置位）。
-    onExitFocusChange: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -190,10 +185,10 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(intentInputMode) {
         if (intentInputMode) intentHasFocused = false
     }
-    // ---- 输入态专注·进出过渡（PetPerchTransition，2026-10-26 起；
+    // ---- 输入态专注·进出过渡（2026-10-26 起；
     // 2026-10-27 竖屏区块切换重做） ----
-    // 过渡状态由本宿主持有（横屏场景换与竖屏终态 snap 用，见
-    // PetPerchTransition.kt）。onExitFocusRequest 是本宿主向下暴露的单一
+    // 退出进行中状态由本宿主持有（横屏场景换守卫与竖屏终态 snap 用）。
+    // onExitFocusRequest 是本宿主向下暴露的单一
     // 退出入口：所有退出路径只调它；竖屏它即时清焦点＋收键盘＋翻转
     // mode（离散切换同帧完成），横屏它走场景换分支；D 的 ✕ 一键退出
     // 也只调这个入口（须透传给专注卡片的 ✕ 按钮）。
@@ -210,8 +205,9 @@ fun HomeScreen(
     // 横屏判定共享值（BoxWithConstraints 内算出后经 SideEffect 同步到此，
     // 供 requestExitFocus 横屏分支读取；槽位公式直接读内容域内值）。
     var isLandscapeHomeShared by remember { mutableStateOf(false) }
-    val perchTransition = remember { PetPerchTransitionState() }
-    val perchScope = rememberCoroutineScope()
+    // 退出进行中（焦点退出状态，非宠物逻辑）：横屏退态守卫与复位用。
+    var exitInProgress by remember { mutableStateOf(false) }
+    val exitScope = rememberCoroutineScope()
     val reduceMotionHome = rememberReduceMotion()
     val exitIntentInputLatest by rememberUpdatedState(onExitIntentInput)
     // IME 底部高度提前到此处（横屏退态等待循环与垫高计算同源）：横屏退态
@@ -228,8 +224,8 @@ fun HomeScreen(
     // 切换不建长时退出协程。
     var exitJob by remember { mutableStateOf<Job?>(null) }
     fun requestExitFocus() {
-        if (perchTransition.isExiting || !intentInputModeLatest) return
-        exitJob = perchScope.launch {
+        if (exitInProgress || !intentInputModeLatest) return
+        exitJob = exitScope.launch {
             if (isLandscapeHomeShared) {
                 // 横屏退聚焦（2026-10-26，Bob 22:57 最终口径）：场景整体换、
                 // 不移头、不双头、不走 funnel 行程。beginExit／finishExit 仅借
@@ -241,7 +237,7 @@ fun HomeScreen(
                 // ③ 家场景后进：翻转 mode → Dock 卡片 fade-only 重进（上一帧
                 //    仍在聚焦，PullUpDock 取 fade-only）＋首页淡入。
                 // 竖屏已改离散切换（2026-10-27），见下方竖屏分支。
-                perchTransition.beginExit()
+                exitInProgress = true
                 focusManager.clearFocus()
                 keyboardController?.hide()
                 var waited = 0
@@ -252,7 +248,7 @@ fun HomeScreen(
                 landscapeSlotReady = false
                 delay(PetMotion.FadeStandard.toLong())
                 exitIntentInputLatest()
-                perchTransition.finishExit()
+                exitInProgress = false
                 return@launch
             }
             // 竖屏区块切换（2026-10-27）：离散切换，无 funnel——清焦点＋
@@ -265,27 +261,17 @@ fun HomeScreen(
             exitIntentInputLatest()
         }
         exitJob?.invokeOnCompletion {
-            if (perchTransition.isExiting) perchTransition.finishExit()
+            exitInProgress = false
         }
     }
     val onExitFocusRequest: () -> Unit = { requestExitFocus() }
     // 退出进行中重进（2026-10-27 闪烁修复，横屏沿用）：横屏退出协程在途
-    // 时 mode 一变真即取消它（句柄补清守卫），并递增进态会话号，
-    // IntentEntry 的横屏进态 effect 以会话号为 key 重跑。竖屏离散切换
-    // 无在途退出协程、无进态动画可重启，本 effect 在竖屏是 no-op，
-    // 保留只为横屏路径与 effect key 稳定。
-    var enterSession by remember { mutableStateOf(0) }
+    // 时 mode 一变真即取消它（句柄补清守卫）。竖屏离散切换
+    // 无在途退出协程，本 effect 在竖屏是 no-op，保留只为横屏路径。
     androidx.compose.runtime.LaunchedEffect(intentInputMode) {
         if (intentInputMode) {
             exitJob?.cancel()
-            enterSession++
         }
-    }
-    // 退出进行中状态上报 MainScreen（Dock 宠物挂载门用；横屏退出分支
-    // 置位，竖屏离散切换不置位）：口径同 onBlindActiveChange 的
-    // LaunchedEffect 模式。
-    androidx.compose.runtime.LaunchedEffect(perchTransition.isExiting) {
-        onExitFocusChange(perchTransition.isExiting)
     }
     val intentStateLatest by rememberUpdatedState(intentState)
     // ③ 状态落定退出（纯函数 intentSettleShouldExit，单测锁死矩阵）
@@ -348,7 +334,7 @@ fun HomeScreen(
                 orientationChanged = orientationChanged,
                 isInputState = !intentStateHoldsInput(intentStateLatest),
                 submitPending = imeSubmitPending,
-                isExiting = perchTransition.isExiting,
+                isExiting = exitInProgress,
             )
         ) {
             // 未触发的边沿同样消费提交 flag（提交那次收键盘即此沿；新一轮
@@ -360,7 +346,7 @@ fun HomeScreen(
         delay(120)
         // 防抖后复核最新守卫（effect 重启会取消本分支，故翻回不触发）。
         if (intentInputModeLatest && !intentStateHoldsInput(intentStateLatest) &&
-            !imeSubmitPending && !perchTransition.isExiting
+            !imeSubmitPending && !exitInProgress
         ) {
             onExitFocusRequest()
         }
@@ -373,12 +359,12 @@ fun HomeScreen(
     val intentFieldTextLatest by rememberUpdatedState(intentFieldValue.text)
     // v0.68.102（310 冻结修复二轮·进态错峰）：聚焦（= IME 首秀 + 窗口
     // resize）延迟到进态合成落定后才放行。CI 探针实证（probe-freeze-*，
-    // 2026-10-24）：进态首帧的合成爆发（槽位淡入 + hero 紧凑 + 伴随七仔
+    // 2026-10-24）：进态首帧的合成爆发（槽位淡入 + hero 紧凑 + 伴随卡片
     // 挂载）与 IME 首秀在同一时间窗叠加时整机图形栈死亡（模拟器进程级
     // 消失、logcat 无宾客侧 FATAL）——冷 IME（开机首秀）与深色首帧各为
     // 一个加重因子，任一与进态同窗即点火；应用中心单独聚焦（无进态
     // 合成）与错峰后的进态均存活。故把链条串行化：胶囊先挂载落定
-    // （含 +300ms 的伴随七仔），450ms 后才放行聚焦，IME 在静默窗外弹起。
+    // （含 +300ms 的伴随卡片），450ms 后才放行聚焦，IME 在静默窗外弹起。
     // 呈现带起（intentRequestFocus=false）本就不聚焦，不受影响；滞留
     // 兜底的 2.5s 阈值远大于 450ms，不误伤。
     var intentFocusGateOpen by remember { mutableStateOf(false) }
@@ -415,8 +401,8 @@ fun HomeScreen(
         onBlindActiveChange(blindActive)
     }
     // v0.68.17：落点跟踪已删除（不再需要边缘区检查）
-    // v0.68.35：旧"自定义☆"固定槽位已作废——扇形快捷段直接读七仔装备列表，
-    // 增删复用七仔装备长按/+ 流程，不再需要扇形侧配置弹窗
+    // v0.68.35：旧"自定义☆"固定槽位已作废——扇形快捷段直接读快捷段列表，
+    // 增删复用快捷段长按/+ 流程，不再需要扇形侧配置弹窗
     // v0.68.32：扇形选择状态上报 MainScreen（扇形在 MainScreen 最顶层绘制，盖住 Dock）
     // v0.68.42：上报全状态（Selecting/Dismissing）；收起动画 160ms 后通知
     // controller 收尾（动画本身 120ms，留余量）
@@ -654,8 +640,7 @@ fun HomeScreen(
         // 此处不加任何纱：卡片自身玻璃保证可读；忙乱壁纸上的卡片可读性
         // 列为真机复核项。
         // v0.43.1：宠物回首页——v0.31.0 按"只留 Dock"把 PetZone 从首页移除后，
-        // v0.43.0 的七仔场景改的是一段从未被调用的代码，所以真机上看不到。
-        // v0.65.8：顶部对齐（之前居中导致宠物上方大量空白）——七仔贴近状态栏下方，
+        // v0.65.8：顶部对齐（之前居中导致宠物上方大量空白）——简报贴近状态栏下方，
         // TODAY 卡片和应用图标整体上移，首屏显示更多内容。
         // 横屏刘海/状态栏避让（Bob 2026-10-25）：此前根容器只有固定 16dp 顶距、
         // 无任何显式 inset——横屏下挖孔移到左右两侧边，hero 固定 28dp 边距顶不到
@@ -719,12 +704,12 @@ fun HomeScreen(
         // 与窄化一并拆除。
         // 专注组在场：竖屏即 mode（离散切换同帧翻转）；横屏沿用
         // mode || 退态进行中（场景换先出后进，锚定在退态完成前保留）。
-        val focusGroupVisible = intentInputMode || perchTransition.isExiting
+        val focusGroupVisible = intentInputMode || exitInProgress
         // 垫高跳变补偿（2026-10-27 闪烁修复，竖屏区块切换后仅横屏沿用）：
         // 横屏场景换时 focusGroupVisible 一翻转，权重 Spacer 出现／消失，
         // 整列 PetZone 在一帧内于顶部锚定与底部锚定之间瞬移数百 dp
         // （361“一拍”在真机上未达成的主因：瞬移帧上又叠了四路同窗
-        // 淡入淡出＋宠物 sweep，读着就是闪）。修法不是改布局结构
+        // 淡入淡出叠加，读着就是闪）。修法不是改布局结构
         // （稳态布局一字不动），而是用绘制期位移把瞬移抹成连续滑动：
         // 布局跳变帧的 onGloballyPositioned 回调里同步算出补偿量（绘制
         // 前生效、本帧不闪），再以家族 FadeStandard 一拍滑回 0；减动效
@@ -841,7 +826,7 @@ fun HomeScreen(
         ) {
             // 输入态专注·集成：权重 Spacer 把专注态的 PetZone（可见内容
             // 只剩意图卡片）推到窗口底边——adjustResize 下窗口底边即键盘
-            // 顶边，组随键盘同进同退（整块位移）；竖屏宠物起步落点不再
+            // 顶边，组随键盘同进同退（整块位移）；竖屏起步落点不再
             // 依赖冻结位移量（离散切换无滑入）。
             if (focusGroupVisible) {
                 Spacer(modifier = Modifier.weight(1f))
@@ -884,8 +869,7 @@ fun HomeScreen(
                     }
             ) {
             PetZone(
-                // v0.68.101（单宠物原则）：讲述者七仔撤出（PetZone 已纯文字
-                // 简报）——进输入的唯一门是 Dock 上沿坐姿七仔；inputActive
+                // v0.68.101：PetZone 已纯文字简报；inputActive
                 // 驱动简报紧凑（D-1）与横屏 hero 让位。
                 inputActive = intentInputMode,
                 // v0.68.99（R-1 修订）：输入态填充 PetZone 的 intentSlot（.97
@@ -897,7 +881,7 @@ fun HomeScreen(
                     // v0.68.102（310 冻结修复·入场削峰）：槽位进出只走 fade，
                     // 不再 expandVertically/shrinkVertically——高度动画会让
                     // 简报列在进态首帧逐帧重测（与 IME resize、hero 紧凑、
-                    // 伴随七仔首次挂载叠加成布局风暴，CI 实证进态后进程
+                    // 伴随意图卡片首次挂载叠加成布局风暴，CI 实证进态后进程
                     // 死亡/楔死、screencap 与层级读取全失效）。fade 不改变
                     // 尺寸，槽位一帧到位，语义与呈现内容不变。
                     androidx.compose.animation.AnimatedVisibility(
@@ -937,11 +921,8 @@ fun HomeScreen(
                                 }
                         ) {
                             // F 批（输入态轻量化）：胶囊左侧 Row 站位退役
-                            // ——IntentEntry 独占整宽；2026-10-25 意图卡片统一：
-                            // 七仔改栖坐意图卡片上沿（Dock 宠物本体 HybridPet
-                            // 换 perch，全屏唯一、testTag pet_qizai 不变）；
-                            // 整区在意图区 bounds 内，点它不触发
-                            // 点外退出。
+                            // ——IntentEntry 独占整宽；整区在意图区 bounds 内，
+                            // 点它不触发点外退出。
                             // freeze3 焦点门（§9 削峰）口径保留：requestFocusOnMount
                             // 仍须过 intentFocusGateOpen。
                             IntentEntry(
@@ -962,11 +943,8 @@ fun HomeScreen(
                                 // 单一退出入口：IntentEntry 的显式退出（含 D 的 ✕
                                 // 集成时透传的入口）与旧 onRequestExitInput 同走
                                 // onExitFocusRequest，不再直通 onExitIntentInput。
-                                perchTransition = perchTransition,
-                                enterSession = enterSession,
                                 onExitFocusRequest = onExitFocusRequest,
-                                focusBubbleActive = intentInputMode,
-                                onRequestExitInput = onExitFocusRequest,
+                                                                onRequestExitInput = onExitFocusRequest,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
