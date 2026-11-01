@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.ui.home
 
-import com.bobot.ailauncher.ui.apps.dockPetVisible
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,7 +14,6 @@ import org.junit.Test
  *  ① 垫高跳变补偿 jumpCompensationShift：进出翻转时权重 Spacer
  *     出现／消失致整列瞬移，绘制位移先钉回旧位再滑向新位
  *     （竖屏区块切换后仅横屏沿用）。
- *  ② Dock 宠物挂载门 dockPetVisible：退出进行中 Dock 宠物不挂载
  *     （横屏场景换先出后进；竖屏离散切换不置退出位、翻转即挂载）。
  *  ③ 聚焦槽位可见门 focusSlotVisible（竖屏区块切换，2026-10-27）：
  *     竖屏可见性即 mode——离散切换无退态滞留挂载；横屏沿用
@@ -52,29 +50,6 @@ class EnterExitFlashTest {
         assertEquals(300f, jumpCompensationShift(500, 100, -100f), 0.001f)
     }
 
-    // ---- ② Dock 宠物挂载门：四格矩阵 ----
-
-    @Test
-    fun dockPet_homeSteady_isVisible() {
-        assertTrue(dockPetVisible(intentInputMode = false, exitInProgress = false))
-    }
-
-    @Test
-    fun dockPet_focusMode_isHidden() {
-        assertFalse(dockPetVisible(intentInputMode = true, exitInProgress = false))
-    }
-
-    @Test
-    fun dockPet_exitFunnelInFlight_isHidden() {
-        // 关键回归锁：横屏退出进行中（isExiting）时 Dock 宠物仍不挂载，
-        // 否则与在途意图宠物双影；竖屏离散切换不置此位。
-        assertFalse(dockPetVisible(intentInputMode = false, exitInProgress = true))
-    }
-
-    @Test
-    fun dockPet_focusAndExit_isHidden() {
-        assertFalse(dockPetVisible(intentInputMode = true, exitInProgress = true))
-    }
 
     // ---- ③ 聚焦槽位可见门：竖屏离散、横屏先出后进 ----
 

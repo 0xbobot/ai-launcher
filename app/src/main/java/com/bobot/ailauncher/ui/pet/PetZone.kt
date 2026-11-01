@@ -1,4 +1,5 @@
 package com.bobot.ailauncher.ui.pet
+import com.bobot.ailauncher.ui.island.IslandToasts
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -41,8 +42,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.data.CalendarRepository
-import com.bobot.ailauncher.core.pet.PetState
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.glass.GlassPolicy
 import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
 import com.bobot.ailauncher.ui.home.BriefMeetingRow
@@ -67,26 +66,18 @@ import kotlin.math.roundToInt
  *
  * v0.68.99（主页重构 R-1）：静态主页只剩简报 + Dock 两层——意图胶囊槽位
  * 撤除（改由 HomeScreen 在输入态下底部浮现），NextUp 紧凑条退役、会行以
- * BriefMeetingRow 形式长进简报；七仔点按语义见 PullUpDock
- *（2026-10-25 动作清单批起：点按开关动作清单，直进输入作废）。
+ * BriefMeetingRow 形式长进简报。
  *
  * v0.68.96（F-01 退役）：非封面分支（宠物舞台 + 全量 TODAY 列表卡 + 编辑模式）
  * 整段删除——自 v0.68.44 杂志封面改版起唯一调用点写死封面模式，该分支无入口
  * 可达，Bob 2026-10-22 拍板定性退役。连带下线：舞台上的 ding/sort/carry 浮层、
  * 抚摸手势、长按刷新天气、十万火急舞台动效、编辑模式（含其 BackHandler 与
- * 版本更新指引文案）。七仔说话气泡的唯一调用点也在该分支内，SpeechBubble 本体
- * 保留在 PetCards.kt（.94 强玻璃刚落地，是否在封面形态补回气泡属产品决策，
- * 不在本批范围）。天气/通知/会议提醒等共享状态与 effect 全部保留，行为不变。
+ * 版本更新指引文案）。天气/通知/会议提醒等共享状态与 effect 全部保留，行为不变。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PetZone(
-    // v0.68.101（Stage 1 热修·单宠物原则，Bob 08:08 拍板）：讲述者七仔
-    // 撤出简报——七仔只留 Dock 上沿坐姿一只（静态）与输入态意图卡片上沿
-    // 的同一只（2026-10-25 意图卡片统一：HybridPet 换 perch），简报回归
-    // 纯文字。原 hasUpgrade /
-    // onUpgradeTap / onPetTap 随讲述者退役（hasUpgrade 从未有调用方传入，
-    // 升级提醒走更新流的既有通道；进输入的唯一门是 Dock 坐姿七仔）。
+    // 删宠物批起本文件只剩简报/天气/会议容器，不再有宠物身体与宠物说话。
     // 输入态标记：驱动简报紧凑（D-1）与横屏 hero 让位。
     inputActive: Boolean = false,
     // v0.68.99（R-1 修订）：输入态胶囊槽——恢复 .97 的 coverIntentSlot 位置
@@ -96,17 +87,10 @@ fun PetZone(
     // 布局分区天然不重叠，且与 .97 几何基线同构。
     intentSlot: @Composable () -> Unit = {}
 ) {
-    // alive-p1：普通通知不再经 deliverTick 开口——通知到达的呈现收敛到
-    // PetRepository.handleIncomingNotification：普通通知只瞥视（不出声、
-    // 不弹泡），重要通知走播报（先定向再说）。sayApp 函数本身保留
-    // （合并/深夜降级规则不动），调用点随一期清单退役。
-    // （deliverTick/deliverApp 流保留在仓库层，供其他呈现面消费。）
     // v0.30.0：天气微动作
     val weatherDesc by com.bobot.ailauncher.data.WeatherState.desc.collectAsState()
     // v0.46.0：天气自动触发——突变才播场景，不打扰
     var lastWeatherDesc by remember { mutableStateOf<String?>(null) }
-    var weatherTriggersToday by remember { mutableIntStateOf(0) }
-    var weatherTriggerDate by remember { mutableStateOf("") }
     var morningBriefedDate by remember { mutableStateOf("") }
     // v0.67.6：天气缓存 TTL（省电原则）——60 分钟内不重复发网络请求
     var lastWeatherFetchMs by remember { mutableLongStateOf(0L) }
@@ -125,49 +109,11 @@ fun PetZone(
     fun todayStr(): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Calendar.getInstance().time)
 
-    fun canTriggerWeatherScene(): Boolean {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        if (hour < 7 || hour >= 22) return false // 深夜不打扰
-        val today = todayStr()
-        if (weatherTriggerDate != today) {
-            weatherTriggerDate = today
-            weatherTriggersToday = 0
-        }
-        return weatherTriggersToday < 3 // 每天最多 3 次
-    }
 
+    // 天气只更新简报文字状态（WeatherState），不再有突变播报/场景。
     fun onWeatherFetched(info: WeatherRepository.WeatherInfo?, allowTrigger: Boolean) {
-        val desc = info?.desc
-        val old = lastWeatherDesc
-        lastWeatherDesc = desc
+        lastWeatherDesc = info?.desc
         WeatherState.updateFull(info)
-        if (desc == null || !allowTrigger || !canTriggerWeatherScene()) return
-        val wasBad = old != null && isBadWeather(old)
-        val isBad = isBadWeather(desc)
-        val isGood = isGoodWeather(desc)
-        // v0.68.101：天气场景演示（下雨/天晴姿态）随讲述者七仔退役，
-        // 开口提醒保留（语音状态机，其他呈现面可消费）。
-        when {
-            old != null && !wasBad && isBad -> {
-                // 气泡子项：天气突变配下一步动作“忽略”（点后只关闭气泡）。
-                PetRepository.say(
-                    "下雨啦，出门记得带伞！",
-                    action = PetRepository.SpeechAction(
-                        PetRepository.SpeechActionKind.DISMISS, "忽略"
-                    )
-                )
-                weatherTriggersToday++
-            }
-            old != null && wasBad && isGood -> {
-                PetRepository.say(
-                    "雨停啦，太阳出来了！",
-                    action = PetRepository.SpeechAction(
-                        PetRepository.SpeechActionKind.DISMISS, "忽略"
-                    )
-                )
-                weatherTriggersToday++
-            }
-        }
     }
 
     suspend fun fetchWeather(allowTrigger: Boolean) {
@@ -199,13 +145,6 @@ fun PetZone(
                 lastWeatherFetchMs = System.currentTimeMillis() // v0.67.6：计入 TTL，避免重复请求
                 weatherInitDone = true
                 WeatherState.updateFull(w)
-                // 气泡子项：早晨简报配“知道了”关闭动作（纯播报，无跳转）。
-                PetRepository.say(
-                    "早上好！今天${w.desc}，${w.temp}°",
-                    action = PetRepository.SpeechAction(
-                        PetRepository.SpeechActionKind.DISMISS, "知道了"
-                    )
-                )
             }
         }
     }
@@ -214,35 +153,10 @@ fun PetZone(
     // 改为一次性任务：TodaySection 数据管线的会议提醒调度（开会前 30/15 分钟
     // 各一次）；日历数据变化时重算，边界刷新天然兜底（防任务被杀）
     val notifiedCalendarKeys = remember { mutableSetOf<String>() }
-    // 七仔会议提醒（含去重：同一场同一档只提醒一次）
-    // v0.67.1：会议提醒不再弹模态 Capsule——只走七仔说话 + TODAY 数据，
-    // 产品原则：重要信息不用模态弹窗
-    fun remindMeeting(e: CalEvent, tag: String) {
-        // 没权限就静默跳过
-        if (!CalendarRepository.hasCalendarPermission(context)) return
-        val key = "${e.title}|${e.begin}|$tag"
-        if (!notifiedCalendarKeys.add(key)) return
-        val timeStr = SimpleDateFormat("HH:mm", Locale.CHINA)
-            .format(Date(e.begin))
-        val title = e.title.ifBlank { "（无标题）" }
-        // 七仔开口（v0.68.101：看日程场景随讲述者七仔退役）。
-        // 气泡子项：会议提醒配下一步动作“加入会议”，复用简报会行同一条
-        // joinCalendarEvent 路径（链接直开 → 日历 App → 事件详情 → 失败说
-        // 话兜底），不另起入会通道；注视目标沿用 say 默认（不改既有行为）。
-        PetRepository.say(
-            "$timeStr 有日程：$title",
-            action = PetRepository.SpeechAction(
-                PetRepository.SpeechActionKind.JOIN_MEETING, "加入会议",
-                meetingEvent = e
-            )
-        )
-        // v0.51.2：日历只走 TODAY，不再走整理员（避免多重重复）
-    }
     // 封面紧凑条点按（文案承诺"点一下加入"，必须真入会/打开日程，不能只提醒）：
     // 实现已抽为文件级 joinCalendarEvent（意图入口建议面的会议行共用同一条入会
-    // 路径，三级路径说明见该函数）；不走 remindMeeting 的去重（点按每次都要有结果）。
+    // 路径，三级路径说明见该函数）；点按每次都要有结果。
     fun joinMeeting(e: CalEvent) = joinCalendarEvent(context, e)
-    // v0.68.101：点按果冻随讲述者七仔退役（jellyTick 删除）
 
     // v0.68.44：封面模式状态（hero 标题/下个会议）
     var coverSummary by remember { mutableStateOf("难得清闲") }
@@ -358,8 +272,8 @@ fun PetZone(
     }
 
     // v0.68.44（Bob）：封面模式——杂志 hero + 紧凑条；TodaySection 只跑数据不上 UI
-    // v0.68.45：恢复点七仔快捷面板（Bob：快捷服务别删）；无会议时紧凑条隐藏（Bob：别和 hero 重复）
-    // v0.68.47：装备环包进宠物槽位、以宠物为中心（Bob：散落不优雅）
+    // v0.68.45：恢复快捷面板（Bob：快捷服务别删）；无会议时紧凑条隐藏（Bob：别和 hero 重复）
+    // v0.68.47：装备环收进简报槽位（Bob：散落不优雅）
     // v0.68.74（Bob）：横屏时紧凑条收窄放左侧，避免和 Dock 重叠
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = Modifier.fillMaxWidth()
@@ -475,21 +389,18 @@ fun PetZone(
         if (!inputActive) {
             // 末尾留白 26dp（原罩纱尾巴间距保留，纱已删，布局不动）
             Spacer(modifier = Modifier.height(26.dp))
-            // 气泡宿主已于 2026-10-27 搬家至 PullUpDock 外层 Box（与 Dock 宠物
-            // 同一 Box、同一中轴线，贴头锚定＋跟头；见 PetCards 契约）。
-            // 本处不再挂宿主，禁止两处同挂；列尾留白保留、布局不动。
+            // 列尾留白保留、布局不动。
         }
         }  // Column 结束
     }  // v0.68.74：BoxWithConstraints 结束
     // 数据源：只跑 effect、上报，不渲染（TodaySection 数据管线）
     TodaySection(
-        onMeetingRemind = { e, tag -> remindMeeting(e, tag) },
         onSummaryChange = { coverSummary = it },
         onNextEventChange = { coverNextEvent = it }
     )
 }
 
-/** 思考中的三个跳动点（v0.68.101：放开给输入态伴随七仔共用同一语言） */
+/** 思考中的三个跳动点 */
 @Composable
 internal fun ThinkDots(modifier: Modifier = Modifier) {
     // R3-D：系统减动效时三点静止（只表"思考中"，不跳动）
@@ -524,24 +435,7 @@ internal fun ThinkDots(modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * v0.46.0：天气好坏分类（用于自动触发场景）。
- * 坏=降水类；好=晴/多云；阴/雾为中性（转好时播晴，转坏时不触发）。
- */
-private fun isBadWeather(desc: String?): Boolean =
-    desc == "小雨" || desc == "雨" || desc == "雪" || desc == "雷阵雨"
 
-private fun isGoodWeather(desc: String?): Boolean =
-    desc == "晴" || desc == "多云"
-
-// v0.67.2：天气描述 → 宠物场景（一眼可区分）
-private fun weatherSceneFor(desc: String?): QizaiScene = when (desc) {
-    "晴" -> QizaiScene.WEATHER_SUN
-    "多云" -> QizaiScene.WEATHER_CLOUDY
-    "阴", "雾", "霾" -> QizaiScene.WEATHER_OVERCAST
-    "小雨", "雨", "雪", "雷阵雨", "中雨", "大雨" -> QizaiScene.WEATHER_RAIN
-    else -> QizaiScene.WEATHER_SUN
-}
 
 // 批B ②：CalEvent 已随日历查询下沉 data 层（com.bobot.ailauncher.data.CalEvent）
 
@@ -595,7 +489,7 @@ private val joinGuard = JoinGuard()
  * 点按入会（封面紧凑条与意图入口建议面的会议行共用同一条路径，2026-10-21 抽出）：
  * 1) 事件里有可解析的在线会议链接 → 直开链接（会议 App/浏览器接管）；
  * 2) 无链接 → 打开日历 App / 事件详情（三级兜底，与非封面 TODAY 会议行同款）；
- * 3) 全失败 → 七仔说话兜底，绝不无反应。
+ * 3) 全失败 → 系统提示兜底，绝不无反应。
  */
 fun joinCalendarEvent(context: android.content.Context, e: CalEvent) {
     // D-5：窗口内重复触发直接吞掉（见 JoinGuard）
@@ -640,7 +534,7 @@ fun joinCalendarEvent(context: android.content.Context, e: CalEvent) {
         } catch (_: Exception) { }
     }
     if (!opened) {
-        PetRepository.say("没找到日历应用")
+        IslandToasts.show("没找到日历应用")
     }
 }
 

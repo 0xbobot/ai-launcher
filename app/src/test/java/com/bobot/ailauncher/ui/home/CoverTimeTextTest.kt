@@ -33,8 +33,8 @@ class CoverTimeTextTest {
     fun `daypart boundaries match legacy wording`() {
         assertEquals("好好休息", daypartForHour(0))
         assertEquals("好好休息", daypartForHour(5))
-        assertEquals("七仔帮你盯着呢", daypartForHour(6))
-        assertEquals("七仔帮你盯着呢", daypartForHour(11))
+        assertEquals("帮你盯着呢", daypartForHour(6))
+        assertEquals("帮你盯着呢", daypartForHour(11))
         assertEquals("适合出门走走", daypartForHour(12))
         assertEquals("适合出门走走", daypartForHour(17))
         assertEquals("晚上好好放松", daypartForHour(18))

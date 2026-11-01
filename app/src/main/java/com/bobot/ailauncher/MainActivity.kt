@@ -18,7 +18,6 @@ import com.bobot.ailauncher.core.context.ContextEngine
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.OtaUpdater
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.ui.MainScreen
 import com.bobot.ailauncher.ui.theme.AILauncherTheme
 import kotlinx.coroutines.launch
@@ -54,7 +53,6 @@ class MainActivity : FragmentActivity() {
         }
         CapabilityRegistry.load(this)
         // v0.15 宠物整理员：初始化（亲密度持久化等）
-        PetRepository.init(this)
         // v0.68.56（Bob）：B 方案——灵动岛系统通知通道初始化
         com.bobot.ailauncher.ui.island.IslandToasts.init(this)
         // v0.68.100（卫生批）：有没看过的崩溃记录时，冷启动非模态提示一次

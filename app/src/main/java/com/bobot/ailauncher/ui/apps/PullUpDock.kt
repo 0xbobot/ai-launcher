@@ -37,7 +37,6 @@ import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -98,15 +97,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
-import com.bobot.ailauncher.ui.pet.DragBodyState
-import com.bobot.ailauncher.ui.pet.HybridPet
-import com.bobot.ailauncher.ui.pet.PetActionList
-import com.bobot.ailauncher.ui.pet.PetSpeechBubbleHost
-import com.bobot.ailauncher.data.PetRepository.PetManualAction
 import kotlinx.coroutines.delay
 import com.bobot.ailauncher.data.AppCatalog
-import com.bobot.ailauncher.data.GazeTarget
-import com.bobot.ailauncher.data.PetRepository
 import kotlinx.coroutines.launch
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
@@ -349,25 +341,8 @@ fun PullUpDock(
     onOpenSettings: () -> Unit,
     // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页并提交协调器（HomeHost 提供）
     onAskQizai: (String) -> Unit = {},
-    // v0.68.99（主页重构 R-1）：Dock 宠物点按语义——
-    // 2026-10-26 宠物交互重构（入口子项）：恢复 327 语义，点宠物 =
-    // 问（直进意图输入并聚焦，调用方 enterIntentInput）；长按 =
-    // 表演清单（onPetCellLongPress）；动作清单不再挂点按。
-    // 输入态在场时 D1/D2 卡让位（cardVisible 关），胶囊底部原地接管
-    onPetCellTap: () -> Unit = {},
-    // 长按 Dock 宠物：打开修剪后的单层表演清单（PetActionList）。
-    onPetCellLongPress: () -> Unit = {},
-    // 宠物表演清单（2026-10-26，长按打开、单层 8 行、无 2 级）：
-    // 可见性由调用方 MainScreen 持有；点外关闭见本文件点外关闭层
-    // 与面板空白点按，D3 / 进输入态时状态回落。
-    petActionsVisible: Boolean = false,
-    onPetActionsVisibleChange: (Boolean) -> Unit = {},
     intentInputMode: Boolean = false,
-    // 退出进行中（HomeScreen 经 MainScreen 上报的 perchTransition.isExiting；
-    // 横屏退出分支置位，竖屏离散切换不置位）——横屏 Dock 宠物在退出完成
-    // 前不挂载（场景换先出后进）；竖屏 mode 翻转即挂载。
-    exitInProgress: Boolean = false,
-    // v0.68.169（盲操扇形找回）：Dock 视觉单元（面板＋宠物）精确 bounds
+    // v0.68.169（盲操扇形找回）：Dock 视觉单元（面板）精确 bounds
     // ——供 MainScreen→HomeScreen 盲操手势仲裁。374 批误用 PullUpDock 外层
     // modifier 的 onGloballyPositioned，其根为 fillMaxSize，捕获的是整屏
     // 矩形，致所有主页手势都被判为 Dock 区内、扇形全屏失效。本回调挂在
@@ -417,62 +392,11 @@ fun PullUpDock(
     // 肩线弹性（2026-10-25，Bob 拍板）：仅 Dock 图标点按触发。
     // 峰值动画单位 dp：0 静止 → 7 峰值 → -1 落回过冲 → 0。
     val shoulderScope = rememberCoroutineScope()
-    // 拖拽一体拉伸状态机（2026-10-26 定稿）：在 PullUpDock 函数体顶层
-    // remember（不在 AnimatedVisibility 内容里），visibility 切换不丢态；
-    // 只透传给 Dock 的 HybridPet → FloatingPet，意图侧不传（旧行为）。
-    val dragBody = remember { DragBodyState(shoulderScope) }
-    // 提拉换档会话（2026-10-27）：顶层 remember（与 dragBody 同款，
-    // visibility 切换不丢态）；接线在卡片作用域里（需 isLandscapeDock）。
-    val liftState = remember { LiftTierState(shoulderScope) }
-    // 会话 hygiene：进输入态时宠物卸载（挂载门），中途会话须关、
-    // 不残留 morph 覆盖层。
-    LaunchedEffect(intentInputMode) {
-        if (intentInputMode) liftState.cancelSession()
-    }
+    // D1/D2 换档（2026-11-01，Bob 定）：Dock 面板内部上下滑直接切换，
+    // 不再走宠物提拉 morph 会话；LiftTierState 与 DockLiftMorph 已随之删除，
+    // 档位切换走静止期 AnimatedContent crossfade + scale。
     val shoulderPeakAnim = remember { Animatable(0f) }
     val shoulderPeakDp by shoulderPeakAnim.asState()
-    // 肩线协同（2026-10-26 入口子项，评审 P1-6 口径统一）：
-    // 全带——每一个 actionTick 动作都带肩线脉冲，不许再出现 4/19
-    // （此前仅 STRETCH / HAPPY / SURPRISED / GREET / TILT 带协同，
-    // 其余动作不碰肩线，同一清单内反馈口径不统一）。
-    // 幅度按身体参与度分档：拉伸类 7 / 惊讶 5 / 打招呼 4 / 歪头 3、
-    // 其余（害羞的挤压、晕眩的摇摆、深呼吸的吸气隆起，及未来由交互
-    // 事件自动触发的新动作）一律 2dp 小峰值——自动触发的动作无需
-    // 另配肩线，默认就有身体跟随。歪头仍是软连接：头先动、肩延迟
-    // 约 90ms 跟上（stretch-v2 柔性口径）。图标启动的 7dp 峰值不动
-    // （见 launchApp），点宠物的小峰值见 petTapPeak（3dp）。
-    val petActionTick by PetRepository.actionTick.collectAsState()
-    val petActionKind by PetRepository.actionKind.collectAsState()
-    LaunchedEffect(petActionTick) {
-        if (petActionTick == 0) return@LaunchedEffect
-        if (petActionKind == PetManualAction.TILT) delay(90)
-        val peak = when (petActionKind) {
-            PetManualAction.STRETCH, PetManualAction.HAPPY -> 7f
-            PetManualAction.SURPRISED -> 5f
-            PetManualAction.GREET -> 4f
-            PetManualAction.TILT -> 3f
-            else -> 2f
-        }
-        shoulderPeakAnim.animateTo(peak, tween(250, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)))
-        shoulderPeakAnim.animateTo(-1f, tween(150, easing = FastOutSlowInEasing))
-        shoulderPeakAnim.animateTo(0f, tween(150, easing = FastOutSlowInEasing))
-    }
-    // 点宠物的小峰值（2026-10-26 入口子项，评审 P1-6）：身体反馈归因
-    // 到宠物——点宠物不再只有果冻回弹，肩线也给 3dp 小脉冲（图标启动
-    // 的 7dp 不动）。注意：竖屏点按随即进输入态、Dock 卡片退出动画
-    // 约 150ms，峰值（250ms 到峰）只能部分可见；横屏 Dock 在场时
-    // 完整可见；峰值本身仍按口径触发，不为竖屏可见度延迟进输入。
-    fun petTapPeak() {
-        shoulderScope.launch {
-            shoulderPeakAnim.animateTo(3f, tween(250, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)))
-            shoulderPeakAnim.animateTo(-1f, tween(150, easing = FastOutSlowInEasing))
-            shoulderPeakAnim.animateTo(0f, tween(150, easing = FastOutSlowInEasing))
-        }
-    }
-    // D3 全屏时清单无锚点（宠物不在场），状态回落、避免回 D1 后无故重现。
-    LaunchedEffect(state) {
-        if (state == DockState.D3) onPetActionsVisibleChange(false)
-    }
     // 涟漪与注视定位：图标窗口中心（包名 → Offset）与面板窗口原点/宽。
     val dockIconCenters = remember { mutableStateMapOf<String, Offset>() }
     var dockPanelOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -490,8 +414,6 @@ fun PullUpDock(
             val panelCenterX = dockPanelOrigin.x + dockPanelWidthPx / 2f
             val dx = iconCenter.x - panelCenterX
             val sideThreshold = with(density) { 8.dp.toPx() }
-            if (dx < -sideThreshold) PetRepository.glance(GazeTarget.DOCK_LEFT)
-            else if (dx > sideThreshold) PetRepository.glance(GazeTarget.DOCK_RIGHT)
             rippleCenter = iconCenter - dockPanelOrigin
             shoulderScope.launch {
                 rippleAnim.snapTo(0f)
@@ -528,7 +450,7 @@ fun PullUpDock(
         val cutoutRightDp = with(density) {
             WindowInsets.displayCutout.getRight(density, LayoutDirection.Ltr).toDp()
         }
-        // v0.68.101：面板可用高（坐姿七仔紧配置判定用；内层 AnimatedVisibility
+        // v0.68.101：面板可用高（紧配置判定用；内层 AnimatedVisibility
         // 作用域里隐式 receiver 不可达，故在此提升为局部值）
         val dockAvailableHeight = maxHeight
         // v0.68.99：输入态下卡片让位（意图胶囊在底部原地接管，Dock 内容不与
@@ -552,23 +474,6 @@ fun PullUpDock(
         // D2→D1 改由下滑/提拉手势触发（2026-10-27 提拉换档：竖屏下压宠物，横屏仍走右拖）
         // 点外关闭层（2026-10-26 入口子项，仅清单打开时存在，与 v0.27.4
         // 删除的常驻层不同）：透明全屏 Box，画在 D1/D2 盒之下、简报之上——
-        // 简报 / 背景区的点按落到它身上即关闭清单；Dock 面板与宠物在其
-        // 上层，Dock 自身手势（面板滑动、图标点按、宠物点按）不受影响；
-        // 面板空白点按另见面板 combinedClickable 的 onClick。清单打开期间
-        // 背景手势（上滑开 D3、盲操扇形）需先点外关闭再操作——清单是瞬时
-        // 态，关闭成本为一次点按，与意图区点外退出同一语法。
-        // 注意：本层不透传——点外只关闭清单，不同时触发下层动作。
-        if (petActionsVisible && !intentInputMode && state != DockState.D3) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("pet_action_dismiss_scrim")
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() }
-                    ) { onPetActionsVisibleChange(false) }
-            )
-        }
 
         // ---- D1/D2 悬浮图标（无卡片，v0.27.1 去底） ----
         // v0.68.75（Bob）：横屏时 Dock 放右侧（分栏布局），不再放底部
@@ -665,92 +570,44 @@ fun PullUpDock(
                     ),
                     label = "dockBg"
                 )
-                // v6 静态栖坐（Bob 2026-10-24 18:45 拍板，原型 input-sit-v6 图 2）：
-                // 七仔改在面板前面图层（面板之后画、不 clip），脚底压进面板
-                // 顶缘 25%、可见高 = 面板高 ×0.52（v6 后调整，Bob 2026-10-24
-                // 20:31：再大一倍）、约 75% 露在面板外。外层
-                // Box 高 = 面板高 + 露出部分（面板底锚不变，只向上长）；
+                // v6 面板圆肩（Bob 2026-10-24 18:45 拍板，原型 input-sit-v6 图 2）：
+                // 面板顶缘中央兜起肩线（弦长 = 基底 × 1.224 + 70dp，
+                // rise = 弦 × 18/156）；外层 Box 高 = 面板高 + rise
+                //（面板底锚不变，只向上长）；
                 // 面板高实测回写（首帧按档位估 D2 184dp / D1 136dp，实测到
-                // 即纠正）。紧配置（字体 1.3 / 可用高 <400dp）宠物 ×0.8，
+                // 即纠正）。紧配置（字体 1.3 / 可用高 <400dp）圆肩基底 ×0.8，
                 // 先缩它、不挤其他槽位（布局防线）。
                 // 圆肩批（2026-10-25，Bob 拍板“材质 + 连接 + 圆肩”）：
-                // 玻璃头（曜仔）不再漂浮——头宽取旧坐姿盒 1.224 倍（即
-                // 1.53 × 0.8，B2 缩小档：D1 约 86.6dp / D2 约 117.1dp），盒高按玻璃头
-                // 长宽比 1043:1318；气隙取消，改圆肩连接：面板顶缘中央
-                // 兜起肩线、宠物底部压入肩峰 5dp（前面图层，
-                // 面板先画、宠物后画），不画脚下阴影；外层 Box 只向上长，
-                // 面板几何与锚点不动（容器高 = 面板高 + 宠物高 + rise − press）。
-                // 圆肩 D1/D2 比例批（2026-10-25，Bob：两档宠物大小变了，
+                // 圆肩弦长 = 基底 × 1.224 + 70dp（即
+                // 1.53 × 0.8 缩小档）；
+                // 面板顶缘中央兜起肩线；
+                // 外层 Box 只向上长，
+                // 面板几何与锚点不动（容器高 = 面板高 + rise）。
+                // 圆肩 D1/D2 比例批（2026-10-25，Bob：两档圆肩大小变了，
                 // 圆肩角度也要相应变）：rise 跟弦长成比例走，rise/chord
                 // 恒等于 D1 基准 18/156——拱的两段 cubic 控制点本就与弦长
                 // 成比例（k = half × 0.5 = chord/4），故 rise/chord 不变即
                 // 拱形是 D1 拱的精确缩放，三档（D1/D2/紧配置）是同一个肩
                 // 在缩放，不是被拉扁/拉陡。B2+A 定稿（2026-10-26，Bob 点选
                 // B2+A mock 档）：弦长 = 宠物宽 + 两侧各 35dp，D1 rise 约
-                // 18.1dp、D2 约 21.6dp，紧配置随宠物 ×0.8 同步回落
+                // 18.1dp、D2 约 21.6dp，紧配置随圆肩基底 ×0.8 同步回落
                 // （D1 约 16.1dp、D2 约 18.9dp）；压入 5dp 与弹性峰值
                 // （7/5/4/3dp 绝对形变量）不动。
                 val seatCompact = density.fontScale >= 1.3f ||
                     dockAvailableHeight < 400.dp
                 var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
-                // 提拉换档 morph 用实测档位高（首帧估值 D1 136 / D2 184，
-                // 实测到即纠正；morph 期间不写，避免强制高污染实测）。
-                var d1PanelH by remember { mutableStateOf(136.dp) }
-                var d2PanelH by remember { mutableStateOf(184.dp) }
-                val dockPetSize = dockPanelHeight * 0.52f * (if (seatCompact) 0.8f else 1f)
-                val floatPetWidth = dockPetSize * 1.224f
-                val floatPetHeight = floatPetWidth * (1318f / 1043f)
-                val shoulderChord = floatPetWidth + 70.dp
+                // 面板圆肩基底（数值与删宠物前一致，面板自身形状、非宠物尺寸）：
+                // 基底 = 面板高 × 0.52（紧凑档 ×0.8），弦长 = 基底 × 1.224 + 70dp。
+                val shoulderBase = dockPanelHeight * 0.52f * (if (seatCompact) 0.8f else 1f)
+                val shoulderChord = shoulderBase * 1.224f + 70.dp
                 val shoulderRise = shoulderChord * (18f / 156f)
-                val petPress = 5.dp
-                // 拖拽一体拉伸（2026-10-26 定稿，22:10 后肩升锁定模型）：
-                // 肩升锁定等于头升（FloatingPet 侧同帧赋值），面板纵向拉长
-                // = 肩线 rise 增大（shape 与 dressing 同一 effectiveRise，
-                // 玻璃面 shape 同一实例）；满拉伸拱高 = 肩 rise（D1 约
-                // 18.1dp）＋头升 32dp ≈ 50.1dp（1:1 拉伸的直接后果，列为
-                // 真机复核项）；外层 Box 向上长 headRise（底锚不动——
-                // AnimatedVisibility 底锚 BottomCenter/BottomEnd，故只向上
-                // 长、面板不移位）；宠物 offset 公式一字不动（头底与肩峰
-                // 压入 5dp 全程恒定，见 DragBody 锁定模型）。
-                val dragHeadRiseDp = with(density) { dragBody.headRisePx.toDp() }
-                val dragHeadXdp = with(density) { dragBody.headXPx.toDp() }
-                val dragHeadSinkDp = with(density) { dragBody.headSinkPx.toDp() }
-                val dragShoulderRiseDp = with(density) { dragBody.shoulderRisePx.toDp() }
-                val dragRise = shoulderRise + dragShoulderRiseDp
-                // 提拉换档 morph 期几何：面板高取两档实测高之间的 morph
-                // 插值，宠物偏移同量跟进——相对几何一字不动（头底压入肩峰
-                // 5dp 恒定），身体整体长高、不分离；静止期用实测高。
-                // 宠物尺寸仍取冻结的 dockPanelHeight（morph 期不写实测），
-                // 故 morph 中宠物不缩放、只随面板顶上移。
-                val panelHGeo = if (liftState.sessionActive) {
-                    lerp(d1PanelH, d2PanelH, liftState.progress)
-                } else {
-                    dockPanelHeight
-                }
-                // 提拉换档接线（2026-10-27；2026-10-27 手势清理起横竖屏
-                // 一致、横屏门禁已删除，横屏提拉与竖屏同语义）：dragBody
-                // 字段为普通 var，此处赋值幂等、不触发重组；基底档取最新值
-                //（rememberUpdatedState）。
-                val stateLatest = rememberUpdatedState(state)
-                dragBody.onLiftStart = {
-                    liftState.onDragStart(stateLatest.value)
-                }
-                dragBody.onLiftMove = { up, down -> liftState.onDragMove(up, down) }
-                dragBody.onLiftEnd = {
-                    liftState.onDragEnd(
-                        onCommit = { target -> onStateChangeState.value(target) },
-                        onSettled = { target ->
-                            dockPanelHeight = if (target == DockState.D2) d2PanelH else d1PanelH
-                        }
-                    )
-                }
-                // 圆肩轮廓（弦长 = 宠物宽 + 两侧各 35dp）；shape 只影响
-                // 绘制（clip / 玻璃 / 高光 / 内晕），不改变布局尺寸，故
-                // dockPanelHeight 回写不会引起布局循环。
-                val shoulderShape = remember(dockPanelHeight, seatCompact, shoulderPeakDp, dragShoulderRiseDp) {
+                val panelHGeo = dockPanelHeight
+                // 圆肩轮廓；shape 只影响绘制（clip / 玻璃 / 高光 / 内晕），
+                // 不改变布局尺寸，故 dockPanelHeight 回写不会引起布局循环。
+                val shoulderShape = remember(dockPanelHeight, seatCompact, shoulderPeakDp) {
                     DockShoulderShape(
                         chordDp = shoulderChord,
-                        riseDp = dragRise,
+                        riseDp = shoulderRise,
                         cornerDp = 28.dp,
                         peakDp = shoulderPeakDp.dp,
                     )
@@ -758,8 +615,8 @@ fun PullUpDock(
                 Box(
                     modifier = Modifier
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                        .height(panelHGeo + floatPetHeight + shoulderRise - petPress + shoulderPeakDp.dp + dragHeadRiseDp)
-                        // v0.68.169：单元真实矩形上报仲裁（面板＋宠物，
+                        .height(panelHGeo + shoulderRise + shoulderPeakDp.dp)
+                        // v0.68.169：单元真实矩形上报仲裁（面板单元，
                         // 非外层 fillMaxSize 根的整屏矩形）。
                         .onGloballyPositioned { onDockUnitBoundsChangeLatest(it.boundsInRoot()) }
                 ) {
@@ -782,13 +639,7 @@ fun PullUpDock(
                         .let { if (isLandscapeDock) it.width(344.dp) else it.fillMaxWidth() }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .onGloballyPositioned { coords ->
-                            // morph 期不写实测高（强制高会污染档位实测）；
-                            // 原点与宽度照常更新（涟漪中心用当前原点）。
-                            if (!liftState.sessionActive) {
-                                with(density) { dockPanelHeight = coords.size.height.toDp() }
-                                if (state == DockState.D1) d1PanelH = dockPanelHeight
-                                else if (state == DockState.D2) d2PanelH = dockPanelHeight
-                            }
+                            with(density) { dockPanelHeight = coords.size.height.toDp() }
                             dockPanelOrigin = coords.positionInWindow()
                             dockPanelWidthPx = coords.size.width.toFloat()
                         }
@@ -819,7 +670,7 @@ fun PullUpDock(
                         // 拖拽一体拉伸：rise 跟 shape 同一 effectiveRise。
                         .dockShoulderDressing(
                             chordDp = shoulderChord,
-                            riseDp = dragRise,
+                            riseDp = shoulderRise,
                             cornerDp = 28.dp,
                             peakDp = shoulderPeakDp.dp
                         )
@@ -840,19 +691,17 @@ fun PullUpDock(
                         .combinedClickable(
                             interactionSource = dockPressSource,
                             indication = null,  // 用背景显隐做反馈，不要水波纹
-                            // 面板空白点按：平时无动作；表演清单打开时点空白
-                            // 即关闭清单（点外关闭的 Dock 侧一半，另一半是
-                            // 外层透明层；图标点按是子节点 clickable，不走这里）。
-                            onClick = { if (petActionsVisible) onPetActionsVisibleChange(false) }
+                            // 面板空白点按：无动作（图标点按是子节点 clickable，不走这里）。
+                            onClick = { }
                         )
                         .pointerInput(state, sysGestureBottomPx, dockBottomPadPx) {
                             var accumX = 0f
                             var accumY = 0f
                             var fired = false
                             var inSysGestureZone = false
-                            // 面板手势（2026-10-27 手势清理后）：只剩上滑／下滑；
-                            // 长按与左右滑逻辑全部删除（长按面板、D1 右滑、D2 左滑
-                            // 均无动作；D1↔D2 换档走提拉宠物，见 LiftTierSwitch）。
+                            // 面板手势（2026-11-01，Bob 定）：Dock 内部上下滑换档——
+                            // 上滑：D1→D2、D2→D3（D3 时上滑回桌面主页）；下滑：D2→D1
+                            // （D1 下滑不再隐藏）；长按与左右滑逻辑全部删除。
                             detectDragGestures(
                                 onDragStart = { start ->
                                     accumX = 0f
@@ -873,11 +722,11 @@ fun PullUpDock(
                                     val ax = abs(accumX)
                                     val ay = abs(accumY)
                                     val go = onStateChangeState.value
-                                    // v0.57.0：上滑 → D3 开应用中心；已在 D3 时上滑 → 回桌面主页
-                                    //（Bob：任何时候从底部上滑都要能回桌面主页）
+                                    // 上滑 → 升一档：D1→D2、D2→D3；已在 D3 时上滑 → 回桌面主页
                                     if (ay > vThreshPx && accumY < 0) {
                                         fired = true
                                         if (state == DockState.D3) onD3SwipeUpToHomeState.value()
+                                        else if (state == DockState.D1) go(DockState.D2)
                                         else go(DockState.D3)
                                     } else if (ay > vThreshPx && ay > ax) {
                                         fired = true
@@ -892,28 +741,8 @@ fun PullUpDock(
                     // D1 盒 312dp 恰好占满内容宽，无视觉变化。竖屏保持默认 Start。
                     horizontalAlignment = if (isLandscapeDock) Alignment.CenterHorizontally else Alignment.Start
                 ) {
-                    // pet-hybrid-float：漂浮宠物已移出面板 Column——面板之后画的
-                    // HybridPet 兄弟节点（见面板 Column 闭合后的调用），
-                    // 面板不再 clip 它，漂浮高度才放得下。
-                    // 一二档内容：静止期 crossfade + scale，卡片高度弹簧跟随；
-                    // 提拉换档会话期改走 morph 覆盖层（DockLiftMorph），
-                    // AnimatedContent 不上场、故提交时无二次 crossfade。
-                    // 横拖跟手已随横拖删除（2026-10-27 手势清理）；内容切换
-                    // 只走静止期 crossfade + scale，提拉期走 morph 覆盖层。
-                    if (liftState.sessionActive) {
-                        DockLiftMorph(
-                            progress = liftState.progress,
-                            contentH = panelHGeo - 48.dp,
-                            top4 = top4,
-                            top10 = top10,
-                            popupApp = popupApp,
-                            onLaunch = ::launchApp,
-                            onLongPress = { popupApp = it },
-                            onDismissMenu = { popupApp = null },
-                            isLandscape = isLandscapeDock,
-                            onIconPositioned = { pkg, center -> dockIconCenters[pkg] = center }
-                        )
-                    } else {
+                    // 面板内容区：静止期 crossfade + scale，卡片高度弹簧跟随。
+                    // 一二档内容：静止期 crossfade + scale，卡片高度弹簧跟随。
                     AnimatedContent(
                         targetState = state,
                         transitionSpec = {
@@ -966,80 +795,8 @@ fun PullUpDock(
                         }
                         }
                     }
-                    }
                 }
-                // 圆肩批：连接混合宠物（面板之后画、前面图层；面板底锚
-                // 不变，宠物只向上长）。单宠物原则（2026-10-26，Bob 22:57
-                // 最终口径）：输入态不呈现（让位给意图宠物，横屏亦同——
-                // 横屏聚焦时 Dock 隐藏、宠物在左侧意图卡片上，见 IntentEntry），
-                // 仍保证任何时刻恰一只。
-                // 手势语义（2026-10-26 入口子项）：
-                // 点宠物 = 问（直进意图输入，327 语义恢复，另带 3dp 小峰值），
-                // 长按 = 表演清单；testTag 沿用 dock_pet_cell（冒烟入口
-                // 定位契约不变）；layout_check 已随之上新为接触/压入几何
-                // （压入肩峰 5dp、脸盘完整）。B2+A 几何一字不动（宠物系数
-                // 1.224、弦 +70dp、rise 18/156、压入 5dp）。
-                if (dockPetVisible(intentInputMode, exitInProgress)) {
-                    HybridPet(
-                        petWidth = floatPetWidth,
-                        onPetTap = {
-                            petTapPeak()
-                            onPetCellTap()
-                        },
-                        onPetLongPress = onPetCellLongPress,
-                        dragBodyState = dragBody,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .offset(y = -(panelHGeo + shoulderRise + shoulderPeakDp.dp - petPress))
-                            .testTag("dock_pet_cell")
-                    )
-                }
-                // 表演清单（非模态气泡，宠物上方、尾巴朝下指向宠物）：
-                // 与宠物同在外层 Box 前面图层（不 clip、不改面板几何），
-                // 静止态默认关闭，layout_check 接触/压入规格不受影响。
-                // 单层 8 行、无 2 级（2026-10-26 入口子项）；点外关闭走
-                // 外层透明层 + 面板空白点按，本处只留 ✕ 与状态回落。
-                if (petActionsVisible && !intentInputMode && state != DockState.D3) {
-                    PetActionList(
-                        onDismiss = { onPetActionsVisibleChange(false) },
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .offset(y = -(panelHGeo + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp + dragHeadRiseDp))
-                            .testTag("pet_action_list")
-                    )
-                }
-                // 家里气泡宿主（2026-10-27 气泡搬家）：原 PetZone 列尾宿主移至
-                // 此处——与 Dock 宠物同一外层 Box、同一中轴线（BottomCenter＋
-                // fillMaxWidth，内容居中对齐宠物中心），尾巴朝下指宠物
-                // （tailDown=true 不变）；按钮在文本下方同一中轴线，布局一字
-                // 不动。门控：家里只在 !intentInputMode（= PetZone 的
-                // !inputActive，HomeScreen 传入 intentInputMode）且清单未开时
-                // 挂载——清单与气泡同锚点须让位（意图宿主同款门控；speech 状态
-                // 在仓储里不丢，清单关闭后重挂复现）。单挂载点契约不变：
-                // PetZone 挂载点已删，意图宿主只在聚焦覆盖层。
-                // 拖拽跟头：跟随量取本 perch 的 DragBodyState（头横移、
-                // －头升＋头沉），与 FloatingPet 头盒同一量（dragHeadX／
-                // dragHeadY），故拖拽中气泡贴头走、不脱节。
-                if (!intentInputMode && !petActionsVisible) {
-                    PetSpeechBubbleHost(
-                        tailDown = true,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            // 横屏 Dock 右锚定（2026-10-27，根因）：气泡宿主此前
-                            // fillMaxWidth，在横屏包内容外层盒里把盒子撑满全宽，
-                            // 面板与宠物的 BottomCenter 对齐随之落到屏幕中央——
-                            // 即 Bob 报的“横屏 Dock 居中”。横屏改包内容（宿主
-                            // Column 本就 CenterHorizontally，尾巴仍指宠物中轴；
-                            // 气泡宽于面板时盒子随气泡宽、整组仍右锚定）；
-                            // 竖屏 fillMaxWidth 口径不动。
-                            .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                            .offset(
-                                x = dragHeadXdp,
-                                y = -(panelHGeo + shoulderRise + shoulderPeakDp.dp - petPress + floatPetHeight + 8.dp) - dragHeadRiseDp + dragHeadSinkDp
-                            )
-                    )
-                }
-                } // v6 外层 Box（面板 + 前面图层七仔）
+                } // v6 外层 Box（面板）
             }
         }
 
@@ -1116,7 +873,7 @@ private fun FullAppsOverlay(
 }
 
 /** 第一档：4 个常用大图标（56dp），只留图标，卡内严格垂直居中。
- *  v0.68.101：R-1 的行内七仔格已移除（宠物改漂在面板上方，见 HybridPet），
+ *  v0.68.101：R-1 的行内格已移除（删宠物批起面板上方不再有宠物），
  *  本行回到 4 应用位原始分档（56 图标 / 16 间距）。 */
 @Composable
 private fun DockRow4(
@@ -1209,78 +966,6 @@ private fun DockGrid10(
 }
 
 /**
- * 提拉换档 morph 覆盖层（2026-10-27）：会话期替代 AnimatedContent。
- * 面板高已由 panelHGeo 插值（调用方传 contentH = panelHGeo - 48.dp，
- * 即内层内容盒高：面板 16dp 底边距＋内层 32dp 竖直边距已扣）；
- * Row4 自然尺寸淡出、Grid10 从 contentH/136 缩放淡入——两布局始终
- * 贴合 morph 高、无裁剪、无新增元素；静止期不渲染（走 AnimatedContent）。
- * 横竖屏一致（2026-10-27 手势清理起横屏提拉与竖屏同语义）：
- * isLandscape 只决定内容盒宽度（横屏包内容、竖屏满宽）。
- */
-@Composable
-private fun DockLiftMorph(
-    progress: Float,
-    contentH: Dp,
-    top4: List<AppInfo>,
-    top10: List<AppInfo>,
-    popupApp: AppInfo?,
-    onLaunch: (AppInfo) -> Unit,
-    onLongPress: (AppInfo) -> Unit,
-    onDismissMenu: () -> Unit,
-    isLandscape: Boolean,
-    onIconPositioned: (String, Offset) -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .let { if (isLandscape) it.wrapContentSize() else it.fillMaxWidth() }
-            .padding(vertical = 16.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .height(contentH)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            // 命中门：alpha ≤ 0.01 即不组合（graphicsLayer alpha 不关命中，
-            // 全透明图标仍可点；0.01 以下肉眼不可见，撤组合无视觉跳变）。
-            if (progress < 0.99f) {
-                Box(Modifier.graphicsLayer { alpha = 1f - progress }) {
-                    DockRow4(
-                        apps = top4,
-                        onLaunch = onLaunch,
-                        menuApp = popupApp,
-                        onLongPress = onLongPress,
-                        onDismissMenu = onDismissMenu,
-                        isLandscape = isLandscape,
-                        onIconPositioned = onIconPositioned
-                    )
-                }
-            }
-            if (progress > 0.01f) {
-                val gridScale = (contentH / 136.dp).coerceIn(0f, 1f)
-                Box(
-                    Modifier.graphicsLayer {
-                        alpha = progress
-                        scaleX = gridScale
-                        scaleY = gridScale
-                    }
-                ) {
-                    DockGrid10(
-                        apps = top10,
-                        onLaunch = onLaunch,
-                        menuApp = popupApp,
-                        onLongPress = onLongPress,
-                        onDismissMenu = onDismissMenu,
-                        isLandscape = isLandscape,
-                        onIconPositioned = onIconPositioned
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
  * v0.39.0：Dock 图标按钮——点击启动，长按弹出真弹窗快捷菜单。
  * 菜单锚定在图标所在的 Box 上（图标在屏幕下方时自动弹到图标上面）。
  */
@@ -1345,13 +1030,6 @@ private fun DockIconButton(
 internal fun dockCardFocusSwapIsFadeOnly(isLandscape: Boolean, inFocusSignal: Boolean): Boolean =
     isLandscape && inFocusSignal
 
-/**
- * Dock 宠物挂载门（纯函数，单测锁死）。输入态让位意图宠物；退出进行中
- * 仍让位——横屏 Dock 宠物只在退出完成（finishExit）后挂载；竖屏离散切换
- * 不置退出位，mode 翻转即挂载。
- */
-internal fun dockPetVisible(intentInputMode: Boolean, exitInProgress: Boolean): Boolean =
-    !intentInputMode && !exitInProgress
 
 /** v0.68.44：页脚刊头字距文本 */
 @Composable

@@ -113,7 +113,7 @@ class IntentInputModeTest {
         )
     }
 
-    // 注：竖屏区块切换（2026-10-27）删除了 PetPerchTransition 的退态
+    // 注：竖屏区块切换（2026-10-27）删除了退出过渡的退态
     // 行程函数（exitTravelProgress／exitDockFadeShouldStart）及其测试；
     // 竖屏槽位可见性改由 focusSlotVisible 锁定（见 EnterExitFlashTest）。
 
@@ -313,47 +313,6 @@ class IntentInputModeTest {
         assertTrue(focusSlotVisible(true, false, true))
         assertFalse(focusSlotVisible(false, false, false))
         assertFalse(focusSlotVisible(false, false, true))
-    }
-
-    // ---- 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：进态位移量 ----
-    @Test
-    fun `进态位移 - 横屏恒为零与锚点无关`() {
-        // 横屏不移头：锚点量到与否、落差多大，位移一律为零。
-        org.junit.Assert.assertEquals(
-            0.dp to 0.dp,
-            resolveEnterTravelDelta(true, 100.dp, 500.dp, 300.dp, 800.dp)
-        )
-        org.junit.Assert.assertEquals(
-            0.dp to 0.dp,
-            resolveEnterTravelDelta(true, null, 500.dp, 300.dp, 800.dp)
-        )
-    }
-
-    @Test
-    fun `进态位移 - 竖屏锚点未量到时返回 null 保持初值`() {
-        // 原行为：锚点未量到时不写位移量（保持 funnel 残值或兜底），不归零。
-        org.junit.Assert.assertNull(
-            resolveEnterTravelDelta(false, null, 500.dp, 300.dp, 800.dp)
-        )
-    }
-
-    @Test
-    fun `进态位移 - 竖屏按脚底落差公式且钳制`() {
-        // 落差 200dp：横向恒为零，纵向 = dockFoot − intentFoot。
-        org.junit.Assert.assertEquals(
-            0.dp to 200.dp,
-            resolveEnterTravelDelta(false, 100.dp, 500.dp, 300.dp, 800.dp)
-        )
-        // 负落差钳制到 0（意图脚底已低于 Dock 脚底，不反向位移）。
-        org.junit.Assert.assertEquals(
-            0.dp to 0.dp,
-            resolveEnterTravelDelta(false, 100.dp, 100.dp, 300.dp, 800.dp)
-        )
-        // 超屏高钳制到屏高。
-        org.junit.Assert.assertEquals(
-            0.dp to 800.dp,
-            resolveEnterTravelDelta(false, 100.dp, 900.dp, 100.dp, 800.dp)
-        )
     }
 
     @Test

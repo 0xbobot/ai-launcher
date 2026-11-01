@@ -110,7 +110,7 @@ import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * 设置页（v0.57.0 重构）：
- * - 只剩三项：让七仔更聪明（收起）/ 关于 / 接收测试版更新（v0.68.80）
+ * - 只剩三项：让助手更聪明（收起）/ 关于 / 接收测试版更新（v0.68.80）
  * - 电量守护默认开启，不设开关；Dock 显示纯手势；排序默认智能
  * - 文案全部用户视角
  */
@@ -147,7 +147,7 @@ fun SettingsScreen(
         }
         .onGloballyPositioned { fieldBounds = fieldBounds + (index to it.boundsInRoot()) }
 
-    // 收起「让七仔更聪明」时输入区连同焦点一起卸载：主动清焦 + 收键盘，
+    // 收起「让助手更聪明」时输入区连同焦点一起卸载：主动清焦 + 收键盘，
     // 不把键盘留在已消失的输入框上（F-08：打开子面板/收起时的焦点处理）
     LaunchedEffect(llmExpanded) {
         if (!llmExpanded) {
@@ -318,7 +318,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // 让七仔更聪明（收起一层）
+        // 让助手更聪明（收起一层）
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -342,14 +342,14 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "让七仔更聪明",
+                                text = "让助手更聪明",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = AILauncherColors.current.Title
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "填上大模型 API Key，七仔能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
+                                text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
                                 fontSize = 13.sp,
                                 color = AILauncherColors.current.Hint,
                                 lineHeight = 18.sp
@@ -422,7 +422,7 @@ fun SettingsScreen(
                                         model.ifBlank { LlmConfig.DEFAULT_MODEL }
                                     )
                                     testing = false
-                                    IslandToasts.show(err ?: "连接成功，七仔变聪明了")
+                                    IslandToasts.show(err ?: "连接成功")
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -738,7 +738,7 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = when {
-                                    crashRecords.isEmpty() -> "暂无记录，七仔运行得很稳"
+                                    crashRecords.isEmpty() -> "暂无记录，运行得很稳"
                                     crashUnread > 0 -> "有 $crashUnread 条新记录，点开查看"
                                     else -> "共 ${crashRecords.size} 条，点开查看或分享"
                                 },

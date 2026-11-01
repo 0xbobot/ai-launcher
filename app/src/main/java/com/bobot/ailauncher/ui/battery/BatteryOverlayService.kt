@@ -92,7 +92,7 @@ class BatteryOverlayService : Service() {
         )
         val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("七仔在提醒你充电")
+            .setContentTitle("提醒你充电")
             .setOngoing(true)
             .build()
         startForeground(0xBA72, notification)
@@ -154,11 +154,11 @@ class BatteryOverlayService : Service() {
             elevation = 8 * density
         }
 
-        // 七仔头像（用应用图标占位，实际用七仔资源）
+        // 头像（用应用图标占位）
         val avatar = ImageView(ctx).apply {
             val size = (40 * density).toInt()
             layoutParams = LinearLayout.LayoutParams(size, size)
-            // TODO：换成七仔真实资源
+            // TODO：换成真实资源
             setImageResource(R.mipmap.ic_launcher)
         }
         root.addView(avatar)
@@ -210,10 +210,10 @@ class BatteryOverlayService : Service() {
     private fun updateTextViews(title: TextView, desc: TextView, pct: Int, critical: Boolean) {
         if (critical) {
             title.text = "电量只剩 $pct% 了"
-            desc.text = "再不充电，七仔就要睡着了…"
+            desc.text = "再不充电就要关机了…"
         } else {
             title.text = "电量还有 $pct%"
-            desc.text = "七仔提醒你，该找充电器了"
+            desc.text = "该找充电器了"
         }
     }
 

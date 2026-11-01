@@ -9,9 +9,9 @@ import androidx.core.content.ContextCompat
 import java.util.Calendar
 
 /**
- * 日历事件（v0.48.0：日程从 HomeScreen 迁回、由七仔统一呈现；v0.58.0 加 description
+ * 日历事件（v0.48.0：日程从 HomeScreen 迁回、由简报统一呈现；v0.58.0 加 description
  * 用于提取在线会议链接；v0.67.2 加 eventId 用于日历 fallback 直接打开事件详情）。
- * 批B ②：随日历查询从 ui/pet/PetZone 一起下沉 data 层，字段与语义不变。
+ * 批B ②：随日历查询从主页简报一起下沉 data 层，字段与语义不变。
  */
 data class CalEvent(
     val title: String,
@@ -24,9 +24,9 @@ data class CalEvent(
 )
 
 /**
- * 批B ②：日历查询收口——原 PetZone.kt 文件级函数直接查 CalendarContract、
+ * 批B ②：日历查询收口——原主页简报文件级函数直接查 CalendarContract、
  * 校验 READ_CALENDAR 权限，违反「UI 不直接调系统」铁律。查询与权限判断下沉到此，
- * UI 只消费结果（PetZone 照常在 IO 线程调用，TodayEventsHolder 写入路径不变）。
+ * UI 只消费结果（简报照常在 IO 线程调用，TodayEventsHolder 写入路径不变）。
  */
 object CalendarRepository {
 

@@ -59,7 +59,6 @@ import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.OtaUpdater
-import com.bobot.ailauncher.data.PetRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.apps.DockState
 import com.bobot.ailauncher.ui.apps.AppRail
@@ -81,7 +80,6 @@ import com.bobot.ailauncher.ui.home.FanSegment
 import com.bobot.ailauncher.ui.home.MAX_QUICK_SEGS
 import com.bobot.ailauncher.ui.pet.QuickActionAddFlow
 import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
-import com.bobot.ailauncher.ui.pet.GuideManager
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
@@ -220,30 +218,16 @@ private fun HomeHost(
         intentJob?.cancel()
         intentJob = null
     }
-    // v0.68.99（主页重构 R-1）：输入态开关——静态主页无胶囊；点 Dock 七仔格 /
-    // 简报讲述者七仔进入（要打字，聚焦）；协调器进入在场状态（思考 / 回复 /
+    // v0.68.99（主页重构 R-1）：输入态开关——静态主页无胶囊；点意图胶囊 /
+    // 进入（要打字，聚焦）；协调器进入在场状态（思考 / 回复 /
     // 待确认 / 缺权限 / 追问）时自动带起呈现（不聚焦、不弹键盘，如应用中心
     // 「问七仔」提交后回首页看结果）。开 D3 抽屉即退出（见 HomeScreen 调用点）。
     var intentInputMode by remember { mutableStateOf(false) }
     var intentFocusWanted by remember { mutableStateOf(false) }
-    // 竖屏切换闪烁修复（2026-10-27）：退出 funnel 进行中（HomeScreen
-    // 上报的 perchTransition.isExiting）——Dock 宠物挂载门用。
-    var intentExitInProgress by remember { mutableStateOf(false) }
-    // 宠物表演清单（2026-10-26 宠物交互重构，入口子项）：长按宠物打开
-    // 的单层 8 行表演清单；点宠物已恢复 327 语义（问，直进意图输入），
-    // 不再开关清单。进输入态时清单状态一并清零（见 onPetCellTap），
-    // 避免退出输入态后清单无故重现。
-    var petActionsVisible by remember { mutableStateOf(false) }
     LaunchedEffect(intentState) {
         if (com.bobot.ailauncher.ui.home.intentStateHoldsInput(intentState)) {
             intentInputMode = true
         }
-    }
-    fun enterIntentInput(focus: Boolean) {
-        // 已在输入态时忽略（讲述者七仔在输入态下也可点，避免聚焦意图被重入改写）
-        if (intentInputMode) return
-        intentFocusWanted = focus
-        intentInputMode = true
     }
     // 应用中心「问七仔」：先回首页（离 D3），再把整句交给协调器理解
     val onAskQizai: (String) -> Unit = { text ->
@@ -264,12 +248,6 @@ private fun HomeHost(
         }
     }
 
-    // v0.15 宠物整理员：toast 事件 → 系统 Toast
-    LaunchedEffect(Unit) {
-        PetRepository.toast.collect { msg ->
-            IslandToasts.show(msg)
-        }
-    }
     // v0.68.6：盲操激活中（上报自 HomeScreen）——选择中时压住右边缘字母快找区，
     // 避免长按（~400ms）与盲操 dwell（120ms）在重叠区双重触发
     var blindActive by remember { mutableStateOf(false) }
@@ -294,7 +272,7 @@ private fun HomeHost(
     )
 
     // 玻璃试点批（docs/GLASS_DESIGN.md §9）：背景源 + 玻璃状态宿主。
-    // 背景层（内绘系统壁纸 + 罩纱）整体录入图层，供 Dock / 七仔气泡 / TODAY 卡取材；
+    // 背景层（内绘系统壁纸 + 罩纱）整体录入图层，供 Dock / TODAY 卡取材；
     // 只在桌面可见（RESUMED 且非 D3 全屏层）时启用真材质，否则各面回半透明模拟（省电原则）；
     // 省电/低电/低内存等降级信号在每次 onResume 时刷新（判定逻辑在 GlassPolicy，可单测）。
     val glassState = remember { GlassBackdropState() }
@@ -317,39 +295,6 @@ private fun HomeHost(
     }
     glassState.active = homeResumed && dockState != DockState.D3
 
-    // 宠物重构 D（首次发现引导，评审 P1-8 / §9 第 10 题）：
-    // Dock 宠物首次在场（主页 RESUMED、D1/D2、非输入态——与 PullUpDock 的
-    // cardVisible + !intentInputMode 门禁同口径；D3 与输入态下宠物不在场，
-    // 故不在此触发）时说一次“点我可以直接问，长按可以看我表演”。
-    // 语义是“首次长按前提示一次”：门禁与长按引导共用 PET_LONGPRESS，每用户
-    // 仅一次（GuideManager.tryShowFirstDiscovery）；长按手势落地后，不要在
-    // 长按回调里再调一次，否则门禁已被本处消费、文案也重复。
-    // 非模态：只走 PetRepository.say()，不新开任何弹窗；渲染依赖：say 文本
-    // 在首页的渲染面由气泡子项复活（SpeechBubble 在 354 基线里仍零调用方），
-    // 本处只负责触发、文案与仅一次门禁。
-    // 时序注意：本引导文案以“点宠物 = 问”（P0-1）已落地为前提；若合入时
-    // P0-1 尚未落地，文案会先于行为承诺，合入顺序上 P0-1 应先于或同于本引导。
-    LaunchedEffect(homeResumed, dockState, intentInputMode) {
-        if (homeResumed && (dockState == DockState.D1 || dockState == DockState.D2) &&
-            !intentInputMode
-        ) {
-            // 引导批（2026-10-27）：权限缺失提示一次，优先级高于首次发现引导——
-            // 缺内容时先解释缺失（去设置 → 权限补开），否则用户只看到“没有那块
-            // 内容”却不知道为什么；每项每用户仅一次（GuideManager 门禁），此后
-            // 不再打扰。判定顺序：日历 → 消息提醒 → 首次发现（say 会覆盖前一条，
-            // 故三者互斥；首次发现的门禁未被消费时，下一轮满足条件时再说）。
-            when {
-                !CalendarRepository.hasCalendarPermission(context) &&
-                    GuideManager.tryShow(context, GuideManager.Id.CALENDAR_MISSING) ->
-                    PetRepository.say(GuideManager.CALENDAR_MISSING_TEXT)
-                !isNotificationAccessGranted(context) &&
-                    GuideManager.tryShow(context, GuideManager.Id.NOTIFICATION_MISSING) ->
-                    PetRepository.say(GuideManager.NOTIFICATION_MISSING_TEXT)
-                GuideManager.tryShowFirstDiscovery(context) ->
-                    PetRepository.say(GuideManager.FIRST_DISCOVERY_TEXT)
-            }
-        }
-    }
 
     CompositionLocalProvider(LocalGlassBackdrop provides glassState) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -415,12 +360,10 @@ private fun HomeHost(
             onIntentConfirmUnderstood = { req -> intentCoordinator.confirmUnderstood(req) },
             onIntentDismiss = { intentCoordinator.dismiss() },
             onIntentCancelPlanning = { cancelIntentPlanning() },
-            // v0.68.99（R-1）：输入态（进入 = 点 Dock 坐姿七仔，v0.68.101 起
-            // 为唯一入口——讲述者已撤；退出由 HomeScreen 判定）
+            // v0.68.99（R-1）：输入态（进入 = 点意图胶囊；退出由 HomeScreen 判定）
             intentInputMode = intentInputMode,
             intentRequestFocus = intentFocusWanted,
             onExitIntentInput = { intentInputMode = false },
-            onExitFocusChange = { intentExitInProgress = it },
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位）
@@ -441,19 +384,7 @@ private fun HomeHost(
             onOpenSettings = onOpenSettings,
             // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页 + 提交协调器
             onAskQizai = onAskQizai,
-            // 宠物入口（2026-10-26 宠物交互重构，入口子项）：点宠物 = 问
-            // （恢复 327 语义：直进意图输入并聚焦，TalkBack“问曜仔”说真话；
-            // 先关清单再进输入，避免退出输入态后清单重现）；长按宠物 =
-            // 表演清单（单层 8 行）。清单 2 级与意图搜索行已随 2 级移除。
             intentInputMode = intentInputMode,
-            exitInProgress = intentExitInProgress,
-            onPetCellTap = {
-                petActionsVisible = false
-                enterIntentInput(focus = true)
-            },
-            onPetCellLongPress = { petActionsVisible = true },
-            petActionsVisible = petActionsVisible,
-            onPetActionsVisibleChange = { petActionsVisible = it }
         )
         // v0.67.13（Bob）：主屏 rail 长按 → 快找；房子/收藏/字母/隐藏一条导航滑动到达。
         // 长按震动后选择器浮现；手指一动就由应用中心接管（D3 淡入）；picker 会话在 D3 打开后
@@ -703,7 +634,6 @@ private fun HomeHost(
                                 QuickActionsPrefs.load(ctx).filter { it.id != item.id }
                             )
                             refreshEditSegs()
-                            PetRepository.say("已删除")
                         }
                     },
                     onAddSlot = { showAddSheet = true },
@@ -718,7 +648,6 @@ private fun HomeHost(
                         }
                     },
                     onEditTapOutside = {
-                        PetRepository.say("记住了")
                         // v0.68.64：经 controller 退出（清 editPinned 并同步双端状态，
                         // 直接 Hidden 会导致 HomeScreen 副本残留、下次左滑无反应）
                         blindCtlRef?.exitEditMode()
@@ -736,7 +665,6 @@ private fun HomeHost(
                             QuickActionsPrefs.save(ctx, full)
                             refreshEditSegs()
                             showAddSheet = false
-                            PetRepository.say("已添加")
                         }
                     )
                 }

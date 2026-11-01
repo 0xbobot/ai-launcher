@@ -119,15 +119,15 @@ object AppClassifier {
             }
             val content = extractContent(rawBody)
                 ?: return ClassifyResult.Err(
-                    "七仔没听懂，换个说法再试"
+                    "没听懂，换个说法再试"
                 )
             val parsed = parseMapping(content)
-                ?: return ClassifyResult.Err("七仔没听懂，换个说法再试")
+                ?: return ClassifyResult.Err("没听懂，换个说法再试")
             val validIds = GROUPS.map { it.first }.toSet()
             val filtered = parsed.filter { (pkg, gid) ->
                 pkg.isNotBlank() && gid in validIds
             }
-            if (filtered.isEmpty()) return ClassifyResult.Err("七仔没听懂，换个说法再试")
+            if (filtered.isEmpty()) return ClassifyResult.Err("没听懂，换个说法再试")
             ClassifyResult.Ok(filtered, filtered.size)
         } catch (e: Exception) {
             ClassifyResult.Err("请求失败，请稍后再试")

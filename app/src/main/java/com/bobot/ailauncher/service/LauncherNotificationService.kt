@@ -10,8 +10,8 @@ import com.bobot.ailauncher.data.SimpleNotification
 
 /**
  * 通知监听服务：通知事件的生产者。
- * v0.17.0（PRD 技术方案 Phase 1）：只发 EventBus 事件，不再直调 PetRepository——
- * "收到通知"这个事实与"宠物该怎么做"的决策解耦，决策权在 AiBrain。
+ * v0.17.0（PRD 技术方案 Phase 1）：只发 EventBus 事件，不再直调归档仓储——
+ * "收到通知"这个事实与"归档"的决策解耦，决策权在 AiBrain。
  * 用户需在「设置 > 通知 > 通知读取权限」中手动开启（冷启动 Step3 引导）。
  */
 class LauncherNotificationService : NotificationListenerService() {
@@ -28,7 +28,7 @@ class LauncherNotificationService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        // v0.17.0：只发事件。宠物"接→分类→呈现"由 AiBrain 决策后走原链路，行为不变。
+        // v0.17.0：只发事件。通知分类归档由 AiBrain 决策后走 FiledMessages。
         sbn?.let {
             if (it.isClearable && !it.isOngoing) {
                 it.toSimpleNotification()?.let { n ->
@@ -49,7 +49,7 @@ class LauncherNotificationService : NotificationListenerService() {
             val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
             val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
             if (pkg.isNotBlank()) {
-                com.bobot.ailauncher.data.PetRepository.removeFiledByPredicate { item ->
+                com.bobot.ailauncher.data.FiledMessages.removeByPredicate { item ->
                     item.packageName == pkg &&
                         // v0.67.2：优先按通知 key 精确匹配，key 为空时 fallback 标题/正文匹配
                         (if (key.isNotBlank() && item.notifKey.isNotBlank()) item.notifKey == key

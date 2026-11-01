@@ -9,11 +9,10 @@ import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
-import com.bobot.ailauncher.data.PetRepository
 
 /**
  * 生产装配：把 [IntentCoordinator] 的注入接口接到真实实现
- * （LlmConfig / LlmRouter.plan / CapabilityRegistry / ActionEngine / PetRepository）。
+ * （LlmConfig / LlmRouter.plan / CapabilityRegistry / ActionEngine）。
  * 单测不走这里，用假实现替换各接口。
  */
 object IntentCoordinatorFactory {
@@ -27,7 +26,6 @@ object IntentCoordinatorFactory {
             planner = LlmPlannerAdapter(appContext),
             capabilities = RegistryAdapter(appContext),
             executor = EngineAdapter(appContext),
-            speaker = PetSpeaker,
             contextProvider = { IntentContextProvider.current(appContext) }
         )
     }
@@ -84,14 +82,5 @@ object IntentCoordinatorFactory {
     private class EngineAdapter(private val context: Context) : IntentActionExecutor {
         override fun submit(request: ActionRequest): ActionResult =
             ActionEngine.submit(context, request)
-    }
-
-    private object PetSpeaker : IntentSpeaker {
-        override fun say(text: String) = PetRepository.say(text)
-
-        // 意图页优化（2026-10-30，Bob 已批 §二 B3）：任务办成时宠物
-        // 复用已有 HAPPY 短暂表情（1.2 秒后自回 IDLE），同一只宠物、
-        // 同一套动作，不新增身体、不新增表情。
-        override fun onTaskDone() = PetRepository.setMoodHappyBrief()
     }
 }

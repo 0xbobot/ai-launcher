@@ -58,19 +58,6 @@ interface IntentActionExecutor {
     fun submit(request: ActionRequest): ActionResult
 }
 
-/** 七仔发声（生产实现 = PetRepository.say） */
-interface IntentSpeaker {
-    fun say(text: String)
-
-    /**
-     * 意图页优化（2026-10-30，Bob 已批 §二 B3）：任务执行成功时的
-     * “办成了”回音（生产实现 = 宠物 HAPPY 短暂表情，复用已有动作，
-     * 不新增身体、不新增表情）。默认空实现：旧的 speaker 实现不改
-     * 也能编过；只有生产 PetSpeaker 接线。
-     */
-    fun onTaskDone() {}
-}
-
 /**
  * 意图页优化（2026-10-30，Bob 已批 §二 B2）：理解摘要（纯函数，单测锁定）。
  * 只拼“能力名 ＋ 关键参数值”，不编能力没有的动词、不拼参数名——
@@ -95,7 +82,7 @@ internal fun summarizeAction(capabilityLabel: String, params: Map<String, String
  * - 15 秒超时（[timeoutMillis]）：模型层本身也有 15 秒 callTimeout，这里再兜一层，
  *   保证 UI 不会无限停在 Planning。
  * - 执行前参数校验（意图改进二批）：必填参数缺失/空白绝不执行——进
- *   [IntentUiState.NeedsInput] 由七仔追问，pending 动作保存在协调器里；
+ *   [IntentUiState.NeedsInput] 追问，pending 动作保存在协调器里；
  *   此态下的下一次提交按契约视为补参（多参逐个问），补齐合并后才执行。
  *   这是杀掉「抹掉占位符开空目的地还报已打开」假成功的核心闸门；
  *   注册表底层另有 DeeplinkTemplate 残缺链接防线兜底。
@@ -105,7 +92,6 @@ class IntentCoordinator(
     private val planner: IntentPlanner,
     private val capabilities: IntentCapabilities,
     private val executor: IntentActionExecutor,
-    private val speaker: IntentSpeaker,
     private val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
     /** 上下文包采集（生产实现 = IntentContextProvider；采集失败/为空不影响提交） */
     private val contextProvider: suspend () -> String = { "" }
@@ -135,7 +121,7 @@ class IntentCoordinator(
 
     /**
      * 提交一句话。空输入直接返回（不发请求、不改状态）。
-     * 无 Key 时进可恢复 Error 并让七仔说出原因，用户配好 Key 后可直接重提。
+     * 无 Key 时进可恢复 Error 并给出原因，用户配好 Key 后可直接重提。
      */
     suspend fun submit(text: String) {
         val input = text.trim()
@@ -159,7 +145,6 @@ class IntentCoordinator(
         val generation = planGeneration
 
         if (!config.hasKey()) {
-            speaker.say(NO_KEY_MESSAGE)
             _state.value = IntentUiState.Error(NO_KEY_MESSAGE)
             return
         }
@@ -273,7 +258,7 @@ class IntentCoordinator(
      * - 中／高风险：仍走 execute（引擎安全门回确认弹窗，原路径不动）；
      * - 低风险：先停在 Understood 理解预告条，用户看一眼、点
      *   “就这样办”才真执行；此前低风险是规划完立即执行，用户连
-     *   七仔理解成了什么都看不到，理解错了只能等办错了再挽回。
+     *   理解成了什么都看不到，理解错了只能等办错了再挽回。
      * 纯查询（Chat）不走这里，直接出结果，不多一道确认。
      */
     private fun proceedToExecuteOrPreview(cap: Capability, request: ActionRequest) {
@@ -287,7 +272,7 @@ class IntentCoordinator(
         )
     }
 
-    /** 进入/推进追问态：保存 pending，七仔在结果条里问出 [missing] 的第一个 */
+    /** 进入/推进追问态：保存 pending，在结果条里问出 [missing] 的第一个 */
     private fun askForInput(cap: Capability, request: ActionRequest, missing: List<CapabilityParam>) {
         pendingInput = PendingInput(request, missing)
         val param = missing.first()
@@ -298,7 +283,6 @@ class IntentCoordinator(
             paramName = param.name,
             originalText = request.intent
         )
-        speaker.say(question)
     }
 
     /** 缺参问句：优先用参数声明里的 ask，没有就按「能力+参数名」拼兜底问句 */
@@ -342,9 +326,6 @@ class IntentCoordinator(
         when (val result = executor.submit(request)) {
             is ActionResult.Done -> {
                 reply(result.message)
-                // 意图页优化（B3）：办成了的宠物回音——复用已有 HAPPY
-                // 短暂表情（生产 speaker 接线；测试 fake 默认空实现）。
-                speaker.onTaskDone()
             }
             is ActionResult.NeedsConfirmation -> {
                 if (isConfirm) {
@@ -356,7 +337,6 @@ class IntentCoordinator(
             }
             is ActionResult.NeedsPermission -> {
                 _state.value = IntentUiState.NeedsPermission(result.permission, result.rationale)
-                speaker.say(result.rationale)
             }
             is ActionResult.Failed -> fail(result.reason)
         }
@@ -364,7 +344,6 @@ class IntentCoordinator(
 
     private fun reply(text: String) {
         _state.value = IntentUiState.Reply(text)
-        speaker.say(text)
     }
 
     private fun fail(message: String) {
@@ -373,6 +352,6 @@ class IntentCoordinator(
 
     companion object {
         const val DEFAULT_TIMEOUT_MILLIS = 15_000L
-        const val NO_KEY_MESSAGE = "先在设置里填上大模型 API Key，七仔才能理解这句话"
+        const val NO_KEY_MESSAGE = "先在设置里填上大模型 API Key，才能理解这句话"
     }
 }
