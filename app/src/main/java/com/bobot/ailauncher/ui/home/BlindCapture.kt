@@ -663,14 +663,14 @@ class BlindCaptureController(
             if (flingPhoto || idx < 0 || seg is FanSegment.Photo) {
                 // 2026-10-27 fan-quick-services 批：拍照直接开系统相机，
                 // 不再走应用内快门闪（v0.68.42 的白闪 80ms + 咔嚓震感模拟
-                // 快门作废）；拍完回流按系统相机常规路径（相机应用自存
-                // 相册、返回回启动器，本应用不接回流、不存图）。
+                // 快门作废）；2026-11-01 正式版前修：改直开本机相机应用
+                // 主入口（见 launchCamera），不再走 capture intent 内嵌模式。
                 tracking = false
                 triggered = false
                 modeIndex = -1
                 setUi(BlindUiState.Hidden)
                 launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
-                Log.d(TAG, "diag: commit(拍照-直开系统相机)")
+                Log.d(TAG, "diag: commit(拍照-直开本机相机应用)")
             } else if (seg is FanSegment.AddSlot) {
                 enterEditMode(openAddSheet = true)
                 Log.d(TAG, "diag: edit(+段点入)")
@@ -716,10 +716,26 @@ class BlindCaptureController(
         findSystemCameraPackageName(context, action)
 
     private fun launchCamera(action: String) {
+        // 2026-11-01 正式版前修（Bob 定）：盲操拍照直接调用本机相机应用，
+        // 不走 ACTION_IMAGE_CAPTURE 内嵌拍摄模式。内嵌模式的问题：
+        // 启动器用 startActivity（不接回流），又没传 EXTRA_OUTPUT，
+        // 相机应用不保证把照片存进相册，拍完照片就丢了——用户看到的
+        // 就是“一个内嵌照相，没有保存能力”。本机相机主入口是完整
+        // 相机：快门、保存、相册全走相机应用自己，用户按返回回启动器。
         try {
+            val pkg = findSystemCameraPackage(action)
+            val launch = pkg?.let {
+                context.packageManager.getLaunchIntentForPackage(it)
+            }
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(launch)
+                return
+            }
+            // 兜底：拿不到主入口时才走 capture intent（仍优先系统相机包）。
             val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             // v0.68.22：明确指定系统相机包，避免 resolve 到三方相机
-            findSystemCameraPackage(action)?.let { intent.setPackage(it) }
+            pkg?.let { intent.setPackage(it) }
             if (intent.resolveActivity(context.packageManager) != null) {
                 context.startActivity(intent)
             } else {
