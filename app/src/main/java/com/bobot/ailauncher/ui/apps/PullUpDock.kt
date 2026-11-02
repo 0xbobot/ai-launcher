@@ -359,9 +359,16 @@ fun PullUpDock(
                     ),
                     label = "dockBg"
                 )
-                // 面板高实测回写（首帧按档位估 D2 184dp / D1 136dp，实测到
-                // 即纠正）。面板就是普通 28dp 圆角矩形，高度不再含肩线 rise。
-                var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
+                // 400 Dock 不显示修复：面板高度不再由内层实测回写。
+                // 399 的外层 Box 高 = 内层 Column 实测高，Column 高又由
+                // AnimatedContent 内容决定——首帧目录未到、动效在途或
+                // 实测回调丢一帧时，面板高可以被写成一个远小于内容的
+                // 值，面板被压扁到看不见，之后也没有回写把它拉回来。
+                // 改成档位定高（内容真高，逐项算过）：D1 = 图标 56 +
+                // 行上下内边距 32 + 面板底边距 16 = 104dp；D2 = 两行
+                // 46×2 + 行间距 12 + 网格上下内边距 32 + 底边距 16 = 152dp。
+                // 面板就是普通 28dp 圆角矩形，高度不再含肩线 rise。
+                val dockPanelHeight = if (state == DockState.D2) 152.dp else 104.dp
                 // 普通 28dp 圆角（clip 与玻璃共用同一形状，不再有肩线轮廓）。
                 val dockShape = RoundedCornerShape(28.dp)
                 Box(
@@ -391,20 +398,23 @@ fun PullUpDock(
                         .let { if (isLandscapeDock) it.width(344.dp) else it.fillMaxWidth() }
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                         .onGloballyPositioned { coords ->
-                            with(density) { dockPanelHeight = coords.size.height.toDp() }
                             dockPanelOrigin = coords.positionInWindow()
                             dockPanelWidthPx = coords.size.width.toFloat()
                         }
                         .clip(dockShape)
                         // 玻璃试点批：Dock 强玻璃（AGSL 折射+模糊增色，只换材质不改尺寸/位置）。
-                        // 模拟档（老设备/省电/桌面不可见）逐像素回原行为：默认全透明、
-                        // 按压时 GlassCard 55%——fallback 与 boost 沿用 dockBgAlpha。
+                        // 400 Dock 不显示修复：fallback 不再乘 dockBgAlpha。
+                        // 旧口径是“默认全透明、按压时才 55%”，玻璃背景源一旦
+                        // 不可用（省电/低电/桌面不可见降级），面板就全透明，
+                        // 只剩图标——图标再因亮壁纸或目录未到而看不见时，
+                        // 整个 Dock 就像不存在。fallback 改为常驻 GlassCard
+                        // 55%，按压 boost 仍走 dockBgAlpha，玻璃可用时观感不变。
                         // 玻璃裁剪沿 28dp 圆角轮廓走（shape 参数，共享玻璃参数不动）。
                         .glassSurface(
                             kind = com.bobot.ailauncher.ui.glass.GlassSurfaceKind.STRONG,
                             cornerRadius = 28.dp,
                             tintColor = AILauncherColors.current.Card,
-                            fallbackColor = AILauncherColors.current.GlassCard.copy(alpha = 0.55f * dockBgAlpha),
+                            fallbackColor = AILauncherColors.current.GlassCard.copy(alpha = 0.55f),
                             tintBoost = dockBgAlpha,
                             shape = dockShape,
                             // 玻璃质感 v2：Dock 专用光影（对角明暗 + 高光面 +

@@ -101,6 +101,15 @@ fun MainScreen() {
     var dockState by remember {
         mutableStateOf(if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1)
     }
+    // 400 Dock 不显示修复：状态兜底——Dock 开着（dockVisible=true）
+    // 但状态卡在 Hidden 时，正常流程里没有任何入口能把它叫回来
+    // （隐藏入口已删，首页上滑叫回只在 dockVisible=false 时触发），
+    // 面板会永久不显示。此时直接回记住的档位，不等用户再上滑一次。
+    androidx.compose.runtime.LaunchedEffect(dockVisible, dockState) {
+        if (dockVisible && dockState == DockState.Hidden) {
+            dockState = if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1
+        }
+    }
     // v0.68.50：深色模式随系统主题；批B ③：调色板由 AILauncherTheme 经
     // CompositionLocal 提供，本处原组合期写全局 isDark 已取消
 
