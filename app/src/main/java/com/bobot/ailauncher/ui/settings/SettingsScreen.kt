@@ -81,6 +81,7 @@ import com.bobot.ailauncher.ui.components.downloadStatusText
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import com.bobot.ailauncher.ui.settings.OnGrantedTransition
@@ -236,7 +237,7 @@ fun SettingsScreen(
                 ) {
                     Text(
                         text = "‹ ",
-                        fontSize = 14.sp,
+                        fontSize = AILauncherType.Callout.fontSize,
                         color = AILauncherColors.current.Accent,
                         fontWeight = FontWeight.Bold
                     )
@@ -245,7 +246,7 @@ fun SettingsScreen(
                     text = "设置",
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 32.sp,
+                    fontSize = AILauncherType.Display.fontSize,
                     letterSpacing = 2.sp,
                     color = AILauncherColors.current.Title
                 )
@@ -263,6 +264,14 @@ fun SettingsScreen(
             val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
             val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
             OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
+            // 2026-11-02 设置分区：权限卡可折叠——有未开项默认展开（让人一眼
+            // 看到要补什么），三项全开默认收起（标题行只留已开启计数）。
+            // 展开/收起口径与「让助手更聪明」「崩溃记录」同款：标题行点按 +
+            // 上下箭头 + tick 震动。
+            val grantedCount = listOf(
+                defaultGranted.value, calendarGranted.value, notificationGranted.value
+            ).count { it }
+            var permExpanded by remember { mutableStateOf(grantedCount < 3) }
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
@@ -270,19 +279,39 @@ fun SettingsScreen(
                 modifier = Modifier.padding(horizontal = 20.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "权限",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.current.Title
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "首页要看到日程和消息、按 Home 键回来，需要这几项。随时能改。",
-                        fontSize = 13.sp,
-                        color = AILauncherColors.current.Hint,
-                        lineHeight = 18.sp
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                view.tickHaptic()
+                                permExpanded = !permExpanded
+                            },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "权限",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = AILauncherColors.current.Title
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (permExpanded) "首页要看到日程和消息、按 Home 键回来，需要这几项。随时能改。"
+                                    else "已开启 $grantedCount/3，点按展开",
+                                fontSize = AILauncherType.Footnote.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                lineHeight = 18.sp
+                            )
+                        }
+                        Icon(
+                            if (permExpanded) Icons.Filled.KeyboardArrowUp
+                            else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (permExpanded) "收起" else "展开",
+                            tint = AILauncherColors.current.Hint
+                        )
+                    }
+                    if (permExpanded) {
                     Spacer(modifier = Modifier.height(12.dp))
                     SettingsPermissionRow(
                         title = "默认桌面",
@@ -313,155 +342,22 @@ fun SettingsScreen(
                         actionText = "去开启",
                         onOpen = { openNotificationSettings(context) }
                     )
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // 让助手更聪明（收起一层）
+        // 2026-11-02 设置分区：更新相关的两项放同一分区（检查更新 +
+        // 加入测试计划），分区标题只作视觉分组，不改任何卡片逻辑。
         item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier
-                    .padding(horizontal = 20.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
-                    // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
-                    // F-10：点按补 tick（走 Haptics 两档门面）。
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                view.tickHaptic()
-                                llmExpanded = !llmExpanded
-                            },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "让助手更聪明",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = AILauncherColors.current.Title
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
-                                fontSize = 13.sp,
-                                color = AILauncherColors.current.Hint,
-                                lineHeight = 18.sp
-                            )
-                        }
-                        Icon(
-                            if (llmExpanded) Icons.Filled.KeyboardArrowUp
-                            else Icons.Filled.KeyboardArrowDown,
-                            contentDescription = if (llmExpanded) "收起" else "展开",
-                            tint = AILauncherColors.current.Hint
-                        )
-                    }
-                    if (llmExpanded) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = apiKey,
-                            onValueChange = { apiKey = it; persist() },
-                            label = { Text("大模型 API Key") },
-                            placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = baseUrl,
-                            onValueChange = { baseUrl = it; persist() },
-                            label = { Text("接口地址") },
-                            placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
-                        )
-                        Text(
-                            text = "一般不用改。用别的服务商才需要换",
-                            fontSize = 12.sp,
-                            color = AILauncherColors.current.Hint,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = model,
-                            onValueChange = { model = it; persist() },
-                            label = { Text("用哪个模型") },
-                            placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
-                        )
-                        Text(
-                            text = "填你 API Key 对应的模型名，比如 deepseek-flash",
-                            fontSize = 12.sp,
-                            color = AILauncherColors.current.Hint,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = {
-                                if (testing) return@Button
-                                // F-10：主按钮 = confirm 档
-                                view.confirmHaptic()
-                                persist()
-                                if (apiKey.isBlank()) {
-                                    IslandToasts.show("请先填写大模型 API Key")
-                                    return@Button
-                                }
-                                testing = true
-                                scope.launch {
-                                    val err = LlmConnectionTester.testConnection(
-                                        baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
-                                        apiKey,
-                                        model.ifBlank { LlmConfig.DEFAULT_MODEL }
-                                    )
-                                    testing = false
-                                    IslandToasts.show(err ?: "连接成功")
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
-                        ) {
-                            Text(if (testing) "测试中…" else "测试连接")
-                        }
-                        // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
-                        // 明文降级时醒目提示 + 给得出下一步，不再静默回退
-                        when (keyStatus.mode) {
-                            LlmKeyStore.StorageMode.ENCRYPTED -> Text(
-                                text = "✓ API Key 已加密存储在本机",
-                                fontSize = 12.sp,
-                                color = AILauncherColors.current.Hint,
-                                modifier = Modifier.padding(top = 10.dp)
-                            )
-                            LlmKeyStore.StorageMode.PLAIN_FALLBACK -> Column(
-                                modifier = Modifier.padding(top = 10.dp)
-                            ) {
-                                Text(
-                                    text = "加密出了点问题，你的 Key 现在没有加密保存",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                Text(
-                                    text = "重启手机后回到这里，Key 会自动尝试恢复加密；" +
-                                        "仍不行的话，删掉 API Key 重新粘贴保存一次。",
-                                    fontSize = 12.sp,
-                                    color = AILauncherColors.current.Hint,
-                                    lineHeight = 17.sp,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
-                            }
-                            LlmKeyStore.StorageMode.EMPTY -> Unit
-                        }
-                    }
-                }
-            }
+            Text(
+                text = "版本",
+                fontSize = AILauncherType.Footnote.fontSize,
+                fontWeight = FontWeight.Medium,
+                color = AILauncherColors.current.Hint,
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
         }
 
         // 关于
@@ -571,19 +467,19 @@ fun SettingsScreen(
                                     text = downloadStatusText(
                                         dlState as OtaDownloader.State.Downloading
                                     ),
-                                    fontSize = 13.sp,
+                                    fontSize = AILauncherType.Footnote.fontSize,
                                     color = AILauncherColors.current.Hint
                                 )
                             }
                             dlDone -> Text(
                                 text = "点击安装 v${updateInfo?.versionName ?: ""}",
-                                fontSize = 13.sp,
+                                fontSize = AILauncherType.Footnote.fontSize,
                                 color = AILauncherColors.current.Accent
                             )
                             dlFailed -> {
                                 Text(
                                     text = "点击重试",
-                                    fontSize = 13.sp,
+                                    fontSize = AILauncherType.Footnote.fontSize,
                                     color = MaterialTheme.colorScheme.error
                                 )
                                 val apkUrl = updateInfo?.apkUrl
@@ -606,7 +502,7 @@ fun SettingsScreen(
                                     ) {
                                         Text(
                                             text = "手动下载（浏览器打开）",
-                                            fontSize = 13.sp,
+                                            fontSize = AILauncherType.Footnote.fontSize,
                                             color = AILauncherColors.current.Accent
                                         )
                                     }
@@ -614,14 +510,14 @@ fun SettingsScreen(
                             }
                             updateInfo != null -> Text(
                                 text = updateInfo!!.changelog,
-                                fontSize = 13.sp,
+                                fontSize = AILauncherType.Footnote.fontSize,
                                 color = AILauncherColors.current.Hint,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                             else -> Text(
                                 text = "当前版本 v${BuildConfig.VERSION_NAME}",
-                                fontSize = 13.sp,
+                                fontSize = AILauncherType.Footnote.fontSize,
                                 color = AILauncherColors.current.Hint
                             )
                         }
@@ -670,7 +566,7 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "加入后可提前收到测试版本，适合尝鲜；默认只收正式版",
-                            fontSize = 13.sp,
+                            fontSize = AILauncherType.Footnote.fontSize,
                             color = AILauncherColors.current.Hint
                         )
                     }
@@ -686,6 +582,152 @@ fun SettingsScreen(
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // 让助手更聪明（收起一层）
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier
+                    .padding(horizontal = 20.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
+                    // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
+                    // F-10：点按补 tick（走 Haptics 两档门面）。
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                view.tickHaptic()
+                                llmExpanded = !llmExpanded
+                            },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "让助手更聪明",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = AILauncherColors.current.Title
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
+                                fontSize = AILauncherType.Footnote.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                lineHeight = 18.sp
+                            )
+                        }
+                        Icon(
+                            if (llmExpanded) Icons.Filled.KeyboardArrowUp
+                            else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (llmExpanded) "收起" else "展开",
+                            tint = AILauncherColors.current.Hint
+                        )
+                    }
+                    if (llmExpanded) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = apiKey,
+                            onValueChange = { apiKey = it; persist() },
+                            label = { Text("大模型 API Key") },
+                            placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = baseUrl,
+                            onValueChange = { baseUrl = it; persist() },
+                            label = { Text("接口地址") },
+                            placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
+                        )
+                        Text(
+                            text = "一般不用改。用别的服务商才需要换",
+                            fontSize = AILauncherType.Caption.fontSize,
+                            color = AILauncherColors.current.Hint,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = model,
+                            onValueChange = { model = it; persist() },
+                            label = { Text("用哪个模型") },
+                            placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
+                        )
+                        Text(
+                            text = "填你 API Key 对应的模型名，比如 deepseek-flash",
+                            fontSize = AILauncherType.Caption.fontSize,
+                            color = AILauncherColors.current.Hint,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                if (testing) return@Button
+                                // F-10：主按钮 = confirm 档
+                                view.confirmHaptic()
+                                persist()
+                                if (apiKey.isBlank()) {
+                                    IslandToasts.show("请先填写大模型 API Key")
+                                    return@Button
+                                }
+                                testing = true
+                                scope.launch {
+                                    val err = LlmConnectionTester.testConnection(
+                                        baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
+                                        apiKey,
+                                        model.ifBlank { LlmConfig.DEFAULT_MODEL }
+                                    )
+                                    testing = false
+                                    IslandToasts.show(err ?: "连接成功")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
+                        ) {
+                            Text(if (testing) "测试中…" else "测试连接")
+                        }
+                        // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
+                        // 明文降级时醒目提示 + 给得出下一步，不再静默回退
+                        when (keyStatus.mode) {
+                            LlmKeyStore.StorageMode.ENCRYPTED -> Text(
+                                text = "✓ API Key 已加密存储在本机",
+                                fontSize = AILauncherType.Caption.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                modifier = Modifier.padding(top = 10.dp)
+                            )
+                            LlmKeyStore.StorageMode.PLAIN_FALLBACK -> Column(
+                                modifier = Modifier.padding(top = 10.dp)
+                            ) {
+                                Text(
+                                    text = "加密出了点问题，你的 Key 现在没有加密保存",
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = "重启手机后回到这里，Key 会自动尝试恢复加密；" +
+                                        "仍不行的话，删掉 API Key 重新粘贴保存一次。",
+                                    fontSize = AILauncherType.Caption.fontSize,
+                                    color = AILauncherColors.current.Hint,
+                                    lineHeight = 17.sp,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                            LlmKeyStore.StorageMode.EMPTY -> Unit
+                        }
+                    }
+                }
+            }
         }
 
         // v0.68.100（卫生批）：崩溃记录——侧载没有 Play Console，崩溃在这里
@@ -742,7 +784,7 @@ fun SettingsScreen(
                                     crashUnread > 0 -> "有 $crashUnread 条新记录，点开查看"
                                     else -> "共 ${crashRecords.size} 条，点开查看或分享"
                                 },
-                                fontSize = 13.sp,
+                                fontSize = AILauncherType.Footnote.fontSize,
                                 color = AILauncherColors.current.Hint,
                                 lineHeight = 18.sp
                             )
@@ -772,12 +814,12 @@ fun SettingsScreen(
                                         "yyyy-MM-dd HH:mm",
                                         java.util.Locale.getDefault()
                                     ).format(java.util.Date(record.epochMillis)),
-                                    fontSize = 13.sp,
+                                    fontSize = AILauncherType.Footnote.fontSize,
                                     color = AILauncherColors.current.Title
                                 )
                                 Text(
                                     text = record.title,
-                                    fontSize = 12.sp,
+                                    fontSize = AILauncherType.Caption.fontSize,
                                     color = AILauncherColors.current.Hint,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -815,7 +857,7 @@ fun SettingsScreen(
                                 ) {
                                     Text(
                                         text = "分享这条",
-                                        fontSize = 13.sp,
+                                        fontSize = AILauncherType.Footnote.fontSize,
                                         color = AILauncherColors.current.Accent
                                     )
                                 }
@@ -835,7 +877,7 @@ fun SettingsScreen(
                             ) {
                                 Text(
                                     text = "全部删除",
-                                    fontSize = 13.sp,
+                                    fontSize = AILauncherType.Footnote.fontSize,
                                     color = MaterialTheme.colorScheme.error
                                 )
                             }
@@ -868,14 +910,14 @@ private fun SettingsPermissionRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    fontSize = 15.sp,
+                    fontSize = AILauncherType.Body.fontSize,
                     fontWeight = FontWeight.Medium,
                     color = AILauncherColors.current.Title
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = desc,
-                    fontSize = 13.sp,
+                    fontSize = AILauncherType.Footnote.fontSize,
                     color = AILauncherColors.current.Hint,
                     lineHeight = 18.sp
                 )
@@ -884,7 +926,7 @@ private fun SettingsPermissionRow(
                 TextButton(onClick = { view.tickHaptic(); onOpen() }) {
                     Text(
                         text = actionText,
-                        fontSize = 14.sp,
+                        fontSize = AILauncherType.Callout.fontSize,
                         color = AILauncherColors.current.Accent
                     )
                 }
@@ -903,7 +945,7 @@ private fun SettingsPermissionRow(
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = if (granted) doneText else todoText,
-                fontSize = 13.sp,
+                fontSize = AILauncherType.Footnote.fontSize,
                 color = if (granted) AILauncherColors.current.Success else AILauncherColors.current.Hint
             )
         }
