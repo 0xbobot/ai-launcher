@@ -112,6 +112,8 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import com.bobot.ailauncher.ui.theme.AILauncherType
+import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.platform.LocalDensity
@@ -468,10 +470,7 @@ fun AppCenterContent(
     // 应用中心升级：减动态开启时直接贴合
     val animatedPushPx by animateFloatAsState(
         targetValue = stuckPushPx,
-        animationSpec = if (reduceMotion) tween(0) else spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
+        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
         label = "stuckPush"
     )
     // v0.41.28（Bob）：隐藏分组的幽灵眼也要悬停——隐藏头滚出顶部后，
@@ -525,10 +524,7 @@ fun AppCenterContent(
     }
     val animatedDockPushPx by animateFloatAsState(
         targetValue = dockPushPx,
-        animationSpec = if (reduceMotion) tween(0) else spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
+        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
         label = "dockPush"
     )
     // v0.41.31（Bob）：打开应用中心默认从 A（首个字母组）开始，不显示 Dock 分区；
@@ -709,13 +705,13 @@ fun AppCenterContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 12.dp, top = 16.dp)
+                    .padding(start = 24.dp, end = 16.dp, top = 16.dp)
             ) {
                 Text(
                     text = "全部应用",
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 32.sp,
+                    fontSize = AILauncherType.Display.fontSize,
                     letterSpacing = 2.sp,
                     color = AILauncherColors.current.Title
                 )
@@ -723,9 +719,9 @@ fun AppCenterContent(
                     // 应用中心升级：catalog 为空时不显示"0 款"空列表，改弱提示
                     text = if (catalog == null) "正在加载…"
                         else "${azApps.size} 款 · 右侧滑字母直达",
-                    fontSize = 12.sp,
+                    fontSize = AILauncherType.Caption.fontSize,
                     color = AILauncherColors.current.Hint,
-                    modifier = Modifier.padding(top = 4.dp)
+                    modifier = Modifier.padding(top = 8.dp)
                 )
             }
             }  // else 竖屏刊头结束
@@ -734,7 +730,7 @@ fun AppCenterContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 12.dp, top = 12.dp)
+                    .padding(start = 24.dp, end = 16.dp, top = 16.dp)
                     .pointerInput(Unit) {
                         // 顶栏右滑 → 回到记住的 Dock 行数（手势签名：右滑=更少）
                         var accumX = 0f
@@ -783,7 +779,7 @@ fun AppCenterContent(
                     modifier = Modifier.weight(1f)
                         .onGloballyPositioned { intentBoundsInRoot = it.boundsInRoot() }
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 // v0.41.9（Bob 选 B）：设置齿轮缩小弱化，仍在右上
                 IconButton(
                     onClick = onOpenSettings,
@@ -806,14 +802,14 @@ fun AppCenterContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 20.dp, end = 12.dp, top = 10.dp)
+                        .padding(start = 24.dp, end = 16.dp, top = 8.dp)
                         .clickable { throttledAsk(query.trim()) }
-                        .padding(horizontal = 16.dp, vertical = 11.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "问助手：「${query.trim()}」",
-                        fontSize = 13.sp,
+                        fontSize = AILauncherType.Footnote.fontSize,
                         color = AILauncherColors.current.Title.copy(alpha = 0.75f),
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
@@ -904,7 +900,7 @@ fun AppCenterContent(
                 // v0.41.7：列表不再统一 padding（之前字母头用负 offset 伸进左留白，
                 // 在某些行渲染异常）；改为每项各自加正向 padding——应用行保持
                 // 72dp 左缩进 + 64dp 右缩进（左隐形触发区/右 rail 避让），字母头占满宽
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 // v0.40.0：底部留出手势条高度，避免末行被手势条盖住
                 contentPadding = PaddingValues(bottom = 96.dp)
             ) {
@@ -917,7 +913,7 @@ fun AppCenterContent(
                                 // 应用中心升级：索引缺失与真无匹配区分文案
                                 text = if (catalog == null) "应用列表还没准备好，请稍后再试"
                                     else "没有找到「${filterQuery.trim()}」相关的应用",
-                                fontSize = 14.sp,
+                                fontSize = AILauncherType.Callout.fontSize,
                                 color = AILauncherColors.current.Hint,
                                 modifier = Modifier.padding(
                                     top = 32.dp, start = 72.dp, end = 64.dp
@@ -1029,7 +1025,7 @@ fun AppCenterContent(
                                 tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) 0.14f else 0f),
                                 modifier = Modifier
                                     .align(Alignment.CenterStart)
-                                    .padding(start = 20.dp)
+                                    .padding(start = 24.dp)
                                     .size(36.dp)
                                     .semantics { invisibleToUser() }
                             )
@@ -1099,7 +1095,7 @@ fun AppCenterContent(
                                 tint = AILauncherColors.current.Hint,
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
-                                    .padding(end = 86.dp)
+                                    .padding(end = 88.dp)
                                     .size(18.dp)
                                     .pointerInput(app.packageName) {
                                         detectDragGestures(
@@ -1152,7 +1148,7 @@ fun AppCenterContent(
                             )
                         }
                     }
-                    item(key = "sp:dock") { Spacer(modifier = Modifier.height(20.dp)) }
+                    item(key = "sp:dock") { Spacer(modifier = Modifier.height(24.dp)) }
                 }
                 // A-Z 列表（v0.41.0 B 方案）
                 // v0.41.8：每组 = 应用行 + 组间间距（字母不再独占一行，Bob）。
@@ -1163,7 +1159,7 @@ fun AppCenterContent(
                     item(key = "catalog-loading") {
                         Text(
                             text = "正在加载应用…",
-                            fontSize = 14.sp,
+                            fontSize = AILauncherType.Callout.fontSize,
                             color = AILauncherColors.current.Hint,
                             modifier = Modifier.padding(
                                 top = 32.dp, start = 72.dp, end = 64.dp
@@ -1189,7 +1185,7 @@ fun AppCenterContent(
                                     color = AILauncherColors.current.Title.copy(alpha = 0.35f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
-                                        .padding(start = 20.dp)
+                                        .padding(start = 24.dp)
                                 )
                             }
                             // v0.68.53（Bob）：生长式
@@ -1241,7 +1237,7 @@ fun AppCenterContent(
                         }
                         }
                     }
-                    item(key = "sp:$letter") { Spacer(modifier = Modifier.height(20.dp)) }
+                    item(key = "sp:$letter") { Spacer(modifier = Modifier.height(24.dp)) }
                 }
                 // v0.41.18（Bob）：隐藏分组——主列表末尾，像 ABCD 分组一样；
                 // v0.41.20（Bob）：不显示"已隐藏"标题文字，只留幽灵图标。
@@ -1261,7 +1257,7 @@ fun AppCenterContent(
                                     tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
-                                        .padding(start = 20.dp)
+                                        .padding(start = 24.dp)
                                         .size(36.dp)
                                         .semantics { invisibleToUser() }
                                 )
@@ -1271,13 +1267,13 @@ fun AppCenterContent(
                                         .padding(start = 72.dp, end = 64.dp)
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable { unlockHiddenApps() }
-                                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                                        .padding(horizontal = 16.dp, vertical = 16.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                 Box(
                                     modifier = Modifier
                                         .size(40.dp)
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .clip(RoundedCornerShape(12.dp))
                                         .background(AILauncherColors.current.Divider),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1291,10 +1287,10 @@ fun AppCenterContent(
                                             .semantics { invisibleToUser() }
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "点击解锁查看",
-                                    fontSize = 16.sp,
+                                    fontSize = AILauncherType.BodyLarge.fontSize,
                                     color = AILauncherColors.current.Title
                                 )
                                 }
@@ -1312,7 +1308,7 @@ fun AppCenterContent(
                                     tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) 0.14f else 0f),
                                     modifier = Modifier
                                         .align(Alignment.CenterStart)
-                                        .padding(start = 20.dp)
+                                        .padding(start = 24.dp)
                                         .size(36.dp)
                                         .semantics { invisibleToUser() }
                                 )
@@ -1379,7 +1375,7 @@ fun AppCenterContent(
                             }
                         }
                     }
-                    item(key = "sp:hidden") { Spacer(modifier = Modifier.height(20.dp)) }
+                    item(key = "sp:hidden") { Spacer(modifier = Modifier.height(24.dp)) }
                 }
                 item { Spacer(modifier = Modifier.height(24.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
@@ -1398,7 +1394,7 @@ fun AppCenterContent(
                         tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(start = 20.dp, top = 12.dp)
+                            .padding(start = 24.dp, top = 16.dp)
                             .size(36.dp)
                             .semantics { invisibleToUser() }
                             .offset { IntOffset(0, animatedDockPushPx.roundToInt()) }
@@ -1413,7 +1409,7 @@ fun AppCenterContent(
                         tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(start = 20.dp, top = 12.dp)
+                            .padding(start = 24.dp, top = 16.dp)
                             .size(36.dp)
                             .semantics { invisibleToUser() }
                     )
@@ -1425,7 +1421,7 @@ fun AppCenterContent(
                         color = AILauncherColors.current.Title.copy(alpha = 0.35f),
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(start = 20.dp, top = 12.dp)
+                            .padding(start = 24.dp, top = 16.dp)
                             .offset { IntOffset(0, animatedPushPx.roundToInt()) }
                     )
                 }
@@ -1594,7 +1590,7 @@ fun AppCenterContent(
                     railWidth = 48.dp,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(bottom = 70.dp)
+                        .padding(bottom = 72.dp)
                 )
                 WaveRail(
                     items = railItems,
@@ -1649,23 +1645,23 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
             modifier = Modifier
-                .padding(horizontal = 36.dp)
+                .padding(horizontal = 40.dp)
                 .clickable(enabled = false, onClick = {})
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // v0.57.2（Bob）：更新为新手势说明
                 Text(
                     text = "滑动快捷操作",
-                    fontSize = 16.sp,
+                    fontSize = AILauncherType.BodyLarge.fontSize,
                     fontWeight = FontWeight.SemiBold,
                     color = AILauncherColors.current.Title
                 )
                 GuideRow(
                     icon = Icons.Filled.Star,
-                    tint = Color(0xFFC9A227),
+                    tint = AILauncherColors.current.Accent,
                     title = "左滑：收藏",
                     desc = "把应用加到 Dock 收藏区，再滑一次取消"
                 )
@@ -1677,7 +1673,7 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
                 )
                 Text(
                     text = "点任意处关闭",
-                    fontSize = 12.sp,
+                    fontSize = AILauncherType.Caption.fontSize,
                     color = AILauncherColors.current.Hint,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
@@ -1700,17 +1696,17 @@ private fun GuideRow(
             tint = tint,
             modifier = Modifier.size(22.dp)
         )
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(16.dp))
         Column {
             Text(
                 text = title,
-                fontSize = 14.sp,
+                fontSize = AILauncherType.Callout.fontSize,
                 fontWeight = FontWeight.Medium,
                 color = AILauncherColors.current.Title
             )
             Text(
                 text = desc,
-                fontSize = 12.sp,
+                fontSize = AILauncherType.Caption.fontSize,
                 color = AILauncherColors.current.Hint
             )
         }

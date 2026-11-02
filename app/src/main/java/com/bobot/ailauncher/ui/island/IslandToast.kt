@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -136,7 +137,7 @@ fun IslandToastHost(
                         // R3-B：深色下黑胶囊与深底融为一体，加 1dp 描边保住边界
                         // （Divider token 深浅自适应；浅色下几乎不可见，不改原观感）
                         .border(1.dp, AILauncherColors.current.Divider, RoundedCornerShape(28.dp))
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     t.icon?.let {
@@ -154,7 +155,7 @@ fun IslandToastHost(
                     Text(
                         text = t.text,
                         color = Color.White,
-                        fontSize = 14.sp,
+                        fontSize = AILauncherType.Callout.fontSize,
                         lineHeight = 20.sp
                     )
                 }

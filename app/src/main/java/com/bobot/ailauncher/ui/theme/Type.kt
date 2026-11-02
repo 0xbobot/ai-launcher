@@ -7,8 +7,8 @@ import androidx.compose.ui.unit.sp
 
 /**
  * v0.68.66：设计评审 P1 —— 字阶 token。
- * 全应用统一 7 档语义字阶，替代散落的 20+ 种字号。
- * 层级：Display（杂志刊头）> Title（区块）> Headline（行标题）> Body/Callout（正文）> Footnote/Caption（辅助）。
+ * 全应用统一 8 档语义字阶，替代散落的 20+ 种字号。
+ * 层级：Display（杂志刊头）> Title（区块）> Headline（行标题）> BodyLarge/Body/Callout（正文）> Footnote/Caption（辅助）。
  *
  * 行高按中文阅读优化：标题紧凑、正文宽松。
  */
@@ -32,6 +32,12 @@ object AILauncherType {
     val Headline = TextStyle(
         fontWeight = FontWeight.SemiBold,
         fontSize = 17.sp,
+        lineHeight = 24.sp,
+    )
+    /** 大正文：16sp 正文（高级感收敛新增档，原散落 16sp 全量归入此处） */
+    val BodyLarge = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp, // lint-ok：档位定义本身，非裸字号使用
         lineHeight = 24.sp,
     )
     /** 正文：默认阅读文本（15sp） */

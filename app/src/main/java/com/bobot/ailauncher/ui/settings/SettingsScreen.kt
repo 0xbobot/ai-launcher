@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.draw.shadow
 import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -220,7 +221,7 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 28.dp, end = 12.dp, top = 8.dp)
+                    .padding(start = 32.dp, end = 16.dp, top = 8.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -275,8 +276,8 @@ fun SettingsScreen(
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.padding(horizontal = 20.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -291,11 +292,11 @@ fun SettingsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "权限",
-                                fontSize = 16.sp,
+                                fontSize = AILauncherType.BodyLarge.fontSize,
                                 fontWeight = FontWeight.Medium,
                                 color = AILauncherColors.current.Title
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = if (permExpanded) "首页要看到日程和消息、按 Home 键回来，需要这几项。随时能改。"
                                     else "已开启 $grantedCount/3，点按展开",
@@ -312,7 +313,7 @@ fun SettingsScreen(
                         )
                     }
                     if (permExpanded) {
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     SettingsPermissionRow(
                         title = "默认桌面",
                         desc = "按 Home 键回到 AI 桌面",
@@ -322,7 +323,7 @@ fun SettingsScreen(
                         actionText = "去设置",
                         onOpen = { openHomeSettings(context) }
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     SettingsPermissionRow(
                         title = "日历",
                         desc = "首页显示今天的会、开会前提醒、点一下加入",
@@ -332,7 +333,7 @@ fun SettingsScreen(
                         actionText = "去开启",
                         onOpen = openCalendar
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     SettingsPermissionRow(
                         title = "消息提醒",
                         desc = "要回的消息整理到首页，不漏掉",
@@ -345,7 +346,7 @@ fun SettingsScreen(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
         // 2026-11-02 设置分区：更新相关的两项放同一分区（检查更新 +
@@ -356,7 +357,7 @@ fun SettingsScreen(
                 fontSize = AILauncherType.Footnote.fontSize,
                 fontWeight = FontWeight.Medium,
                 color = AILauncherColors.current.Hint,
-                modifier = Modifier.padding(horizontal = 20.dp)
+                modifier = Modifier.padding(horizontal = 24.dp)
             )
         }
 
@@ -430,8 +431,8 @@ fun SettingsScreen(
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.padding(horizontal = 20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f)),
                 // F-10：整卡点按补 tick（不可点态不震，与视觉禁用一致）
                 onClick = { onCardClick?.let { view.tickHaptic(); it() } }
             ) {
@@ -451,18 +452,18 @@ fun SettingsScreen(
                                 updateInfo != null -> "发现新版本 v${updateInfo!!.versionName}"
                                 else -> "检查更新"
                             },
-                            fontSize = 16.sp,
+                            fontSize = AILauncherType.BodyLarge.fontSize,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.current.Title
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         when {
                             downloading -> {
                                 LinearProgressIndicator(
                                     progress = { dlProgress },
                                     modifier = Modifier.fillMaxWidth()
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = downloadStatusText(
                                         dlState as OtaDownloader.State.Downloading
@@ -547,8 +548,8 @@ fun SettingsScreen(
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.padding(horizontal = 20.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             ) {
                 Row(
                     modifier = Modifier
@@ -559,11 +560,11 @@ fun SettingsScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "加入测试计划",
-                            fontSize = 16.sp,
+                            fontSize = AILauncherType.BodyLarge.fontSize,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.current.Title
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "加入后可提前收到测试版本，适合尝鲜；默认只收正式版",
                             fontSize = AILauncherType.Footnote.fontSize,
@@ -581,7 +582,7 @@ fun SettingsScreen(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
         // 让助手更聪明（收起一层）
@@ -589,9 +590,9 @@ fun SettingsScreen(
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 modifier = Modifier
-                    .padding(horizontal = 20.dp)
+                    .padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
@@ -609,11 +610,11 @@ fun SettingsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "让助手更聪明",
-                                fontSize = 16.sp,
+                                fontSize = AILauncherType.BodyLarge.fontSize,
                                 fontWeight = FontWeight.Medium,
                                 color = AILauncherColors.current.Title
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
                                 fontSize = AILauncherType.Footnote.fontSize,
@@ -629,7 +630,7 @@ fun SettingsScreen(
                         )
                     }
                     if (llmExpanded) {
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                         OutlinedTextField(
                             value = apiKey,
                             onValueChange = { apiKey = it; persist() },
@@ -652,7 +653,7 @@ fun SettingsScreen(
                             text = "一般不用改。用别的服务商才需要换",
                             fontSize = AILauncherType.Caption.fontSize,
                             color = AILauncherColors.current.Hint,
-                            modifier = Modifier.padding(top = 4.dp)
+                            modifier = Modifier.padding(top = 8.dp)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
@@ -667,9 +668,9 @@ fun SettingsScreen(
                             text = "填你 API Key 对应的模型名，比如 deepseek-flash",
                             fontSize = AILauncherType.Caption.fontSize,
                             color = AILauncherColors.current.Hint,
-                            modifier = Modifier.padding(top = 4.dp)
+                            modifier = Modifier.padding(top = 8.dp)
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                         Button(
                             onClick = {
                                 if (testing) return@Button
@@ -703,10 +704,10 @@ fun SettingsScreen(
                                 text = "✓ API Key 已加密存储在本机",
                                 fontSize = AILauncherType.Caption.fontSize,
                                 color = AILauncherColors.current.Hint,
-                                modifier = Modifier.padding(top = 10.dp)
+                                modifier = Modifier.padding(top = 8.dp)
                             )
                             LlmKeyStore.StorageMode.PLAIN_FALLBACK -> Column(
-                                modifier = Modifier.padding(top = 10.dp)
+                                modifier = Modifier.padding(top = 8.dp)
                             ) {
                                 Text(
                                     text = "加密出了点问题，你的 Key 现在没有加密保存",
@@ -720,7 +721,7 @@ fun SettingsScreen(
                                     fontSize = AILauncherType.Caption.fontSize,
                                     color = AILauncherColors.current.Hint,
                                     lineHeight = 17.sp,
-                                    modifier = Modifier.padding(top = 2.dp)
+                                    modifier = Modifier.padding(top = 8.dp)
                                 )
                             }
                             LlmKeyStore.StorageMode.EMPTY -> Unit
@@ -741,8 +742,8 @@ fun SettingsScreen(
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.padding(horizontal = 20.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -763,7 +764,7 @@ fun SettingsScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = "崩溃记录",
-                                    fontSize = 16.sp,
+                                    fontSize = AILauncherType.BodyLarge.fontSize,
                                     fontWeight = FontWeight.Medium,
                                     color = AILauncherColors.current.Title
                                 )
@@ -777,7 +778,7 @@ fun SettingsScreen(
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = when {
                                     crashRecords.isEmpty() -> "暂无记录，运行得很稳"
@@ -823,13 +824,13 @@ fun SettingsScreen(
                                     color = AILauncherColors.current.Hint,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(top = 2.dp)
+                                    modifier = Modifier.padding(top = 8.dp)
                                 )
                             }
                             if (openedCrash == record.epochMillis) {
                                 Text(
                                     text = record.content,
-                                    fontSize = 11.sp,
+                                    fontSize = AILauncherType.Caption.fontSize,
                                     fontFamily = FontFamily.Monospace,
                                     color = AILauncherColors.current.Body,
                                     modifier = Modifier
@@ -885,7 +886,7 @@ fun SettingsScreen(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -914,7 +915,7 @@ private fun SettingsPermissionRow(
                     fontWeight = FontWeight.Medium,
                     color = AILauncherColors.current.Title
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = desc,
                     fontSize = AILauncherType.Footnote.fontSize,
@@ -932,7 +933,7 @@ private fun SettingsPermissionRow(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 Icons.Filled.Check,
@@ -942,7 +943,7 @@ private fun SettingsPermissionRow(
                     .size(16.dp)
                     .semantics { invisibleToUser() }
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = if (granted) doneText else todoText,
                 fontSize = AILauncherType.Footnote.fontSize,

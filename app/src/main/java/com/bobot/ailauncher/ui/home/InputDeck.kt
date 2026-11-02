@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.AILauncherType
 
 /**
  * 输入甲板组件（v0.68.101 主页重构 R-2 建，F 批改素行）：聚焦且未打字时，
@@ -100,7 +101,7 @@ fun DeckExamplesRow(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(intentContentScrim())
     ) {
     // 意图页优化（2026-10-30，Bob 已批 §二 A3）：行首用途标签固定在
@@ -113,13 +114,13 @@ fun DeckExamplesRow(
     ) {
         Text(
             text = "可以这样问：",
-            fontSize = 13.sp,
+            fontSize = AILauncherType.Footnote.fontSize,
             color = exampleTextColor,
             maxLines = 1,
             // 对齐修复（2026-10-30，385 实拍）：标签左缘须与胶囊文字／
             // 结果标题同一左轴（面板内容左缘＋46dp）；385 时为 32dp，
             // 实拍量测标签左缘比轴线左偏约 14dp。
-            modifier = Modifier.padding(start = 46.dp, end = 8.dp)
+            modifier = Modifier.padding(start = 48.dp, end = 8.dp)
         )
         Box(modifier = Modifier.weight(1f)) {
             // 2026-10-29 意图页设计评审第 4 轮 P1-5（示例行内局部几何，只动间距与渐隐宽度）：
@@ -143,7 +144,7 @@ fun DeckExamplesRow(
                             .testTag("deck_example_${t.id}")
                             .heightIn(min = 48.dp)
                             .clickable { onPick(t) }
-                            .padding(horizontal = 2.dp),
+                            .padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -159,7 +160,7 @@ fun DeckExamplesRow(
                         )
                         Text(
                             text = t.exampleFillText(),
-                            fontSize = 13.sp,
+                            fontSize = AILauncherType.Footnote.fontSize,
                             color = exampleTextColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis

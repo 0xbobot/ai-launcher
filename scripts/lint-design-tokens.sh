@@ -6,7 +6,7 @@
 #  - 新增 Color(0x…)（theme/glass/场景文件除外）→ 仅警告，提示评估是否进 Palette
 set -euo pipefail
 BASE="${1:-origin/main}"
-FONT_EQ='(12|13|14|15|17|20|32)'
+FONT_EQ='(12|13|14|15|16|17|20|32)'
 SCENE_RE='ui/(theme|glass)/|ui/home/(WeatherEnv|BlindCapture)\.kt|ui/battery/'
 
 fail=0

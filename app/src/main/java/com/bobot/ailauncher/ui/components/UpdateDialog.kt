@@ -75,7 +75,7 @@ fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
                 failed -> Text("请检查网络后重试")
                 downloading -> Column(modifier = Modifier.fillMaxWidth()) {
                     Text(info.changelog)
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     LinearProgressIndicator(progress = { progress })
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(downloadStatusText(dlState as OtaDownloader.State.Downloading))
