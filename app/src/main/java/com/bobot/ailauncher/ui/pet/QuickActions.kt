@@ -352,7 +352,7 @@ internal fun QuickActionAddFlow(
                                         Column(modifier = Modifier.padding(vertical = 8.dp)) {
                                             if (!isDefaultLauncher(context)) {
                                                 Text(
-                                                    text = "这个应用的快捷方式选不到，是因为系统只把快捷方式给默认桌面，AI 桌面现在还不是默认桌面。",
+                                                    text = "设为默认桌面后，可以显示更多快捷操作。",
                                                     fontSize = AILauncherType.Footnote.fontSize,
                                                     color = AILauncherColors.current.Hint,
                                                     lineHeight = 18.sp
@@ -360,19 +360,19 @@ internal fun QuickActionAddFlow(
                                                 Spacer(Modifier.height(4.dp))
                                                 Row {
                                                     TextButton(onClick = { openHomeSettings(context) }) {
-                                                        Text("去设为默认桌面", color = AILauncherColors.current.Accent)
+                                                        Text("去设置", color = AILauncherColors.current.Accent)
                                                     }
                                                     Spacer(Modifier.width(8.dp))
                                                     TextButton(onClick = {
                                                         shortcuts = null
                                                         shortcutReload++
                                                     }) {
-                                                        Text("已设好，重新加载")
+                                                        Text("重新加载")
                                                     }
                                                 }
                                             } else {
                                                 Text(
-                                                    text = "这个应用暂时没有可用的快捷方式，只能打开主应用。",
+                                                    text = "这个应用没有快捷操作，只能打开主应用。",
                                                     fontSize = AILauncherType.Footnote.fontSize,
                                                     color = AILauncherColors.current.Hint,
                                                     lineHeight = 18.sp
