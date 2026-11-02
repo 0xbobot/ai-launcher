@@ -364,11 +364,14 @@ fun PullUpDock(
                 // AnimatedContent 内容决定——首帧目录未到、动效在途或
                 // 实测回调丢一帧时，面板高可以被写成一个远小于内容的
                 // 值，面板被压扁到看不见，之后也没有回写把它拉回来。
-                // 改成档位定高（内容真高，逐项算过）：D1 = 图标 56 +
-                // 行上下内边距 32 + 面板底边距 16 = 104dp；D2 = 两行
-                // 46×2 + 行间距 12 + 网格上下内边距 32 + 底边距 16 = 152dp。
+                // 改成档位定高。401 修正 400 的算错：400 只算了行与外层
+                // 底边距，漏了 AnimatedContent 内层 Column 的上下内边距
+                // 32dp，面板比内容矮 32dp，内容贴底、顶部空一截。
+                // 逐项重算：D1 = 内层上下 32 + 行（图标 56 + 上下 32）+
+                // 外层底边距 16 = 136dp；D2 = 内层上下 32 + 网格（上下
+                // 32 + 两行 92 + 间距 12）+ 外层底边距 16 = 184dp。
                 // 面板就是普通 28dp 圆角矩形，高度不再含肩线 rise。
-                val dockPanelHeight = if (state == DockState.D2) 152.dp else 104.dp
+                val dockPanelHeight = if (state == DockState.D2) 184.dp else 136.dp
                 // 普通 28dp 圆角（clip 与玻璃共用同一形状，不再有肩线轮廓）。
                 val dockShape = RoundedCornerShape(28.dp)
                 Box(
