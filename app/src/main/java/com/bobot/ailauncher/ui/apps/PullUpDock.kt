@@ -21,7 +21,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.slideOut
 import androidx.compose.animation.slideOutVertically
@@ -78,17 +77,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -128,9 +120,9 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * - D3：不透明整屏替换（App 底色），顶部常用横滑一行 + 全部应用 A-Z 列表 + 弧形 A-Z 导航
  *
  * 手势签名（全 App 统一，v0.14 纠正）：左滑 = 更多，右滑 = 更少
- * - D1 —提拉宠物↑→ D2（2026-10-27 提拉换档：边提边膨胀、过阈值才切，
- *   可中途取消；横竖屏同语义）；D3 —右滑→ 记住的行数
- * - D2 —提拉宠物↓→ D1（提拉换档；横竖屏同语义）
+ * - D1 —面板上滑→ D2（2026-11-01，Bob 定：Dock 面板内部上下滑换档；
+ *   横竖屏同语义）；D3 —右滑→ 记住的行数
+ * - D2 —面板下滑→ D1（面板内部上下滑换档；横竖屏同语义）
  * - 上滑：隐藏→记住的行数（首页上滑）；D1/D2→D3（直接全屏）
  * - 下滑：D3→D2→D1（逐级收回）；点按卡片外部 → D2 收回 D1
  * - 2026-10-27 手势清理（Bob 12:20 确认）：Dock 面板长按、左右滑逻辑
@@ -141,195 +133,10 @@ import com.bobot.ailauncher.ui.island.IslandToasts
 enum class DockState { Hidden, D1, D2, D3 }
 
 /**
- * Dock 圆肩轮廓（2026-10-25，Bob 拍板“材质 + 连接 + 圆肩”）：
- * 圆角矩形（28dp 角）+ 顶部肩线——中央一段向上兜起的平滑拱，
- * 托住宠物底部。两段 cubicTo，弦端与峰顶处切线水平（控制点
- * 取半弦长 50% 处），与平顶缘相切、无折点；弧度与宠物底部
- * 圆弧同向。轮廓可超出布局上沿 rise（肩峰在 y=-rise 处），
- * 布局高本身不动（外层 Box 用 rise−press 公式留出空间）。
+ * Dock 面板轮廓（2026-11-02，无宠物清理）：普通 28dp 圆角矩形。
+ * 旧肩线（顶部中央拱、拱函数、弧形高光＋暖白内晕、点按弹性峰值）已随
+ * 宠物一并删除，不再为面板顶缘留任何拱形或拱光影。
  */
-internal class DockShoulderShape(
-    private val chordDp: Dp,
-    private val riseDp: Dp,
-    private val cornerDp: Dp,
-    // 肩线弹性（2026-10-25）：峰值隆起量，默认 0 即 339 静止形态。
-    private val peakDp: Dp = 0.dp,
-) : Shape {
-    override fun createOutline(
-        size: Size,
-        layoutDirection: LayoutDirection,
-        density: Density,
-    ): Outline {
-        val chord = with(density) { chordDp.toPx() }
-        val rise = with(density) { riseDp.toPx() }
-        val corner = with(density) { cornerDp.toPx() }
-        val peak = with(density) { peakDp.toPx() }
-        return Outline.Generic(dockShoulderPath(size, chord, rise, corner, peak))
-    }
-}
-
-/**
- * 肩线拱（从 (x0, yBase) 到 (x1, yBase)，峰顶在 yBase - rise），
- * 追加到当前 Path 而不是自建 Path。
- * peak=0 时与 339 两段 cubicTo 一字不动；peak≠0 时在两段三次贝塞尔
- * 采样点上叠加余弦衰减隆起（弦端 0、峰顶 1），两端锚定不动——
- * 皮筋式隆起，不是整条线平移。
- * moveToStart=true（默认）时先 moveTo 到弦端——独立描边（如 dressing
- * 拱高光）用；false 时从当前点直接续画——圆肩轮廓用，轮廓必须保持
- * 单一 contour：旧写法用 addPath 拼独立拱 Path，addPath 另起 contour，
- * 末尾 close() 会从轮廓末点（左下）向拱 contour 起点（左弦端）拉一
- * 条对角线，轮廓描边（亮带／亮边／暗描边）全都沿这条线走——真机上
- * Dock 左侧那道斜线就是它（Bob 2026-10-25 22:31）。单 contour 后
- * close() 只是回到起点，不再有对角线；填充区域与之前两 contour
- * 并集一字不动（对角线本就是两 contour 共边），clip／叠色不受影响。
- */
-internal fun Path.appendShoulderArch(
-    x0: Float,
-    x1: Float,
-    cx: Float,
-    k: Float,
-    risePx: Float,
-    peakPx: Float,
-    yBase: Float,
-    moveToStart: Boolean = true,
-) {
-    if (peakPx == 0f) {
-        if (moveToStart) moveTo(x0, yBase)
-        cubicTo(x0 + k, yBase, cx - k, yBase - risePx, cx, yBase - risePx)
-        cubicTo(cx + k, yBase - risePx, x1 - k, yBase, x1, yBase)
-    } else {
-        val steps = 24
-        fun cubicPoint(t: Float, p0: Float, p1: Float, p2: Float, p3: Float): Float {
-            val u = 1f - t
-            return u * u * u * p0 + 3f * u * u * t * p1 + 3f * u * t * t * p2 + t * t * t * p3
-        }
-        if (moveToStart) moveTo(x0, yBase)
-        for (i in 1..steps) {
-            val t = i.toFloat() / steps
-            val fall = 0.5f - 0.5f * kotlin.math.cos(Math.PI.toFloat() * t)
-            lineTo(
-                cubicPoint(t, x0, x0 + k, cx - k, cx),
-                cubicPoint(t, yBase, yBase, yBase - risePx, yBase - risePx) - peakPx * fall
-            )
-        }
-        for (i in 1..steps) {
-            val t = i.toFloat() / steps
-            val fall = 0.5f + 0.5f * kotlin.math.cos(Math.PI.toFloat() * t)
-            lineTo(
-                cubicPoint(t, cx, cx + k, x1 - k, x1),
-                cubicPoint(t, yBase - risePx, yBase - risePx, yBase, yBase) - peakPx * fall
-            )
-        }
-    }
-}
-
-/** 圆肩轮廓 Path（布局坐标：原点在布局左上，y 向下；肩峰在 y=-rise-peak）。 */
-private fun dockShoulderPath(
-    size: Size,
-    chordPx: Float,
-    risePx: Float,
-    cornerPx: Float,
-    peakPx: Float = 0f,
-): Path {
-    val w = size.width
-    val h = size.height
-    val cx = w / 2f
-    val half = (chordPx / 2f).coerceAtMost((w / 2f - cornerPx).coerceAtLeast(0f))
-    val x0 = cx - half
-    val x1 = cx + half
-    // cubic 控制点取半弦长 50% 处，弦端与峰顶切线水平。
-    val k = half * 0.5f
-    return Path().apply {
-        moveTo(0f, h - cornerPx)
-        lineTo(0f, cornerPx)
-        quadraticTo(0f, 0f, cornerPx, 0f)
-        lineTo(x0, 0f)
-        // 单 contour 续画拱（moveToStart=false）：不用 addPath，杜绝对角线。
-        appendShoulderArch(x0, x1, cx, k, risePx, peakPx, 0f, moveToStart = false)
-        lineTo(w - cornerPx, 0f)
-        quadraticTo(w, 0f, w, cornerPx)
-        lineTo(w, h - cornerPx)
-        quadraticTo(w, h, w - cornerPx, h)
-        lineTo(cornerPx, h)
-        quadraticTo(0f, h, 0f, h - cornerPx)
-        close()
-    }
-}
-
-/**
- * Dock 圆肩材质 dressing（玻璃之上、图标之下，链上游 clip 已把
- * 绘制截在圆肩轮廓内）：
- * ① 沿肩线内侧 3dp 的弧形高光：宽 14dp 淡 + 窄 5dp 亮两道描边
- *    叠出柔边；光方向与宠物同源（右上）：水平渐变右亮左隐
- *    （旧左亮方向已作废，2026-10-25 纠正）；
- * ② 暖白径向内晕：中心偏右上（x 右移 7% 宽、y 上移），呼应宠物
- *    球体的内发光暖核，并叠加右侧增亮。
- * 高光拱跟随肩线弹性形变（与轮廓同一拱函数）。
- */
-private fun Modifier.dockShoulderDressing(
-    chordDp: Dp,
-    riseDp: Dp,
-    cornerDp: Dp,
-    peakDp: Dp = 0.dp,
-): Modifier = drawBehind {
-    val chord = chordDp.toPx()
-    val rise = riseDp.toPx()
-    val corner = cornerDp.toPx()
-    val peak = peakDp.toPx()
-    val cx = size.width / 2f
-    val half = (chord / 2f).coerceAtMost((size.width / 2f - corner).coerceAtLeast(0f))
-    val x0 = cx - half
-    val x1 = cx + half
-    val k = half * 0.5f
-    // 肩线内侧 3dp 的拱（与轮廓肩线同形、下移 3dp，含弹性峰值）。
-    val yBase = 3.dp.toPx()
-    val arch = Path().apply { appendShoulderArch(x0, x1, cx, k, rise, peak, yBase) }
-    drawPath(
-        path = arch,
-        brush = Brush.horizontalGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.0f),
-                Color.White.copy(alpha = 0.10f),
-            ),
-            startX = x0,
-            endX = x1,
-        ),
-        style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round),
-    )
-    drawPath(
-        path = arch,
-        brush = Brush.horizontalGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.0f),
-                Color.White.copy(alpha = 0.32f),
-            ),
-            startX = x0,
-            endX = x1,
-        ),
-        style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round),
-    )
-    drawRect(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                Color(0xFFFFF6E8).copy(alpha = 0.38f),
-                Color(0xFFFFF6E8).copy(alpha = 0.0f),
-            ),
-            center = Offset(cx + size.width * 0.07f, -size.height * 0.05f),
-            radius = size.width * 0.5f,
-        ),
-    )
-    // 右侧增亮：与宠物右上光源同向的暖白横向渐变。
-    drawRect(
-        brush = Brush.horizontalGradient(
-            colors = listOf(
-                Color(0xFFFFF6E8).copy(alpha = 0.0f),
-                Color(0xFFFFF6E8).copy(alpha = 0.10f),
-            ),
-            startX = size.width * 0.4f,
-            endX = size.width,
-        ),
-    )
-}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -389,15 +196,11 @@ fun PullUpDock(
     }
     val top4 = remember(top10) { top10.take(4) }
 
-    // 肩线弹性（2026-10-25，Bob 拍板）：仅 Dock 图标点按触发。
-    // 峰值动画单位 dp：0 静止 → 7 峰值 → -1 落回过冲 → 0。
-    val shoulderScope = rememberCoroutineScope()
+    // 图标点按涟漪用协程域。
+    val rippleScope = rememberCoroutineScope()
     // D1/D2 换档（2026-11-01，Bob 定）：Dock 面板内部上下滑直接切换，
-    // 不再走宠物提拉 morph 会话；LiftTierState 与 DockLiftMorph 已随之删除，
-    // 档位切换走静止期 AnimatedContent crossfade + scale。
-    val shoulderPeakAnim = remember { Animatable(0f) }
-    val shoulderPeakDp by shoulderPeakAnim.asState()
-    // 涟漪与注视定位：图标窗口中心（包名 → Offset）与面板窗口原点/宽。
+    // 档位切换走 AnimatedContent crossfade + scale。
+    // 涟漪定位：图标窗口中心（包名 → Offset）与面板窗口原点/宽。
     val dockIconCenters = remember { mutableStateMapOf<String, Offset>() }
     var dockPanelOrigin by remember { mutableStateOf(Offset.Zero) }
     var dockPanelWidthPx by remember { mutableFloatStateOf(0f) }
@@ -407,25 +210,14 @@ fun PullUpDock(
     fun launchApp(app: AppInfo) {
         AppUsageTracker.recordLaunch(context, app.packageName)
         usageTick++
-        // 肩线弹性三联（fire-and-forget，不阻塞应用启动）：
-        // ① 肩线峰值动画；② 注视转向被点图标方位；③ 图标中心涟漪。
+        // 图标点按涟漪（fire-and-forget，不阻塞应用启动）。
         val iconCenter = dockIconCenters[app.packageName]
         if (iconCenter != null && dockPanelWidthPx > 0f) {
-            val panelCenterX = dockPanelOrigin.x + dockPanelWidthPx / 2f
-            val dx = iconCenter.x - panelCenterX
-            val sideThreshold = with(density) { 8.dp.toPx() }
             rippleCenter = iconCenter - dockPanelOrigin
-            shoulderScope.launch {
+            rippleScope.launch {
                 rippleAnim.snapTo(0f)
                 rippleAnim.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
             }
-        }
-        shoulderScope.launch {
-            shoulderPeakAnim.animateTo(
-                7f, tween(250, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f))
-            )
-            shoulderPeakAnim.animateTo(-1f, tween(150, easing = FastOutSlowInEasing))
-            shoulderPeakAnim.animateTo(0f, tween(150, easing = FastOutSlowInEasing))
         }
         try {
             val intent = context.packageManager
@@ -450,9 +242,6 @@ fun PullUpDock(
         val cutoutRightDp = with(density) {
             WindowInsets.displayCutout.getRight(density, LayoutDirection.Ltr).toDp()
         }
-        // v0.68.101：面板可用高（紧配置判定用；内层 AnimatedVisibility
-        // 作用域里隐式 receiver 不可达，故在此提升为局部值）
-        val dockAvailableHeight = maxHeight
         // v0.68.99：输入态下卡片让位（意图胶囊在底部原地接管，Dock 内容不与
         // 之叠画）。横屏聚焦（2026-10-26，Bob 22:57 最终口径）：Dock 要隐藏
         // （与竖屏聚焦一致）——聚焦批的横屏留场例外（isLandscapeDock）已删除，
@@ -471,7 +260,7 @@ fun PullUpDock(
         var prevIntentInputMode by remember { mutableStateOf(intentInputMode) }
         androidx.compose.runtime.SideEffect { prevIntentInputMode = intentInputMode }
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
-        // D2→D1 改由下滑/提拉手势触发（2026-10-27 提拉换档：竖屏下压宠物，横屏仍走右拖）
+        // D2→D1 改由面板下滑手势触发
         // 点外关闭层（2026-10-26 入口子项，仅清单打开时存在，与 v0.27.4
         // 删除的常驻层不同）：透明全屏 Box，画在 D1/D2 盒之下、简报之上——
 
@@ -570,52 +359,15 @@ fun PullUpDock(
                     ),
                     label = "dockBg"
                 )
-                // v6 面板圆肩（Bob 2026-10-24 18:45 拍板，原型 input-sit-v6 图 2）：
-                // 面板顶缘中央兜起肩线（弦长 = 基底 × 1.224 + 70dp，
-                // rise = 弦 × 18/156）；外层 Box 高 = 面板高 + rise
-                //（面板底锚不变，只向上长）；
                 // 面板高实测回写（首帧按档位估 D2 184dp / D1 136dp，实测到
-                // 即纠正）。紧配置（字体 1.3 / 可用高 <400dp）圆肩基底 ×0.8，
-                // 先缩它、不挤其他槽位（布局防线）。
-                // 圆肩批（2026-10-25，Bob 拍板“材质 + 连接 + 圆肩”）：
-                // 圆肩弦长 = 基底 × 1.224 + 70dp（即
-                // 1.53 × 0.8 缩小档）；
-                // 面板顶缘中央兜起肩线；
-                // 外层 Box 只向上长，
-                // 面板几何与锚点不动（容器高 = 面板高 + rise）。
-                // 圆肩 D1/D2 比例批（2026-10-25，Bob：两档圆肩大小变了，
-                // 圆肩角度也要相应变）：rise 跟弦长成比例走，rise/chord
-                // 恒等于 D1 基准 18/156——拱的两段 cubic 控制点本就与弦长
-                // 成比例（k = half × 0.5 = chord/4），故 rise/chord 不变即
-                // 拱形是 D1 拱的精确缩放，三档（D1/D2/紧配置）是同一个肩
-                // 在缩放，不是被拉扁/拉陡。B2+A 定稿（2026-10-26，Bob 点选
-                // B2+A mock 档）：弦长 = 宠物宽 + 两侧各 35dp，D1 rise 约
-                // 18.1dp、D2 约 21.6dp，紧配置随圆肩基底 ×0.8 同步回落
-                // （D1 约 16.1dp、D2 约 18.9dp）；压入 5dp 与弹性峰值
-                // （7/5/4/3dp 绝对形变量）不动。
-                val seatCompact = density.fontScale >= 1.3f ||
-                    dockAvailableHeight < 400.dp
+                // 即纠正）。面板就是普通 28dp 圆角矩形，高度不再含肩线 rise。
                 var dockPanelHeight by remember { mutableStateOf(if (state == DockState.D2) 184.dp else 136.dp) }
-                // 面板圆肩基底（数值与删宠物前一致，面板自身形状、非宠物尺寸）：
-                // 基底 = 面板高 × 0.52（紧凑档 ×0.8），弦长 = 基底 × 1.224 + 70dp。
-                val shoulderBase = dockPanelHeight * 0.52f * (if (seatCompact) 0.8f else 1f)
-                val shoulderChord = shoulderBase * 1.224f + 70.dp
-                val shoulderRise = shoulderChord * (18f / 156f)
-                val panelHGeo = dockPanelHeight
-                // 圆肩轮廓；shape 只影响绘制（clip / 玻璃 / 高光 / 内晕），
-                // 不改变布局尺寸，故 dockPanelHeight 回写不会引起布局循环。
-                val shoulderShape = remember(dockPanelHeight, seatCompact, shoulderPeakDp) {
-                    DockShoulderShape(
-                        chordDp = shoulderChord,
-                        riseDp = shoulderRise,
-                        cornerDp = 28.dp,
-                        peakDp = shoulderPeakDp.dp,
-                    )
-                }
+                // 普通 28dp 圆角（clip 与玻璃共用同一形状，不再有肩线轮廓）。
+                val dockShape = RoundedCornerShape(28.dp)
                 Box(
                     modifier = Modifier
                         .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                        .height(panelHGeo + shoulderRise + shoulderPeakDp.dp)
+                        .height(dockPanelHeight)
                         // v0.68.169：单元真实矩形上报仲裁（面板单元，
                         // 非外层 fillMaxSize 根的整屏矩形）。
                         .onGloballyPositioned { onDockUnitBoundsChangeLatest(it.boundsInRoot()) }
@@ -643,18 +395,18 @@ fun PullUpDock(
                             dockPanelOrigin = coords.positionInWindow()
                             dockPanelWidthPx = coords.size.width.toFloat()
                         }
-                        .clip(shoulderShape)
+                        .clip(dockShape)
                         // 玻璃试点批：Dock 强玻璃（AGSL 折射+模糊增色，只换材质不改尺寸/位置）。
                         // 模拟档（老设备/省电/桌面不可见）逐像素回原行为：默认全透明、
                         // 按压时 GlassCard 55%——fallback 与 boost 沿用 dockBgAlpha。
-                        // 圆肩批：玻璃裁剪沿圆肩轮廓走（shape 参数，共享玻璃参数不动）。
+                        // 玻璃裁剪沿 28dp 圆角轮廓走（shape 参数，共享玻璃参数不动）。
                         .glassSurface(
                             kind = com.bobot.ailauncher.ui.glass.GlassSurfaceKind.STRONG,
                             cornerRadius = 28.dp,
                             tintColor = AILauncherColors.current.Card,
                             fallbackColor = AILauncherColors.current.GlassCard.copy(alpha = 0.55f * dockBgAlpha),
                             tintBoost = dockBgAlpha,
-                            shape = shoulderShape,
+                            shape = dockShape,
                             // 玻璃质感 v2：Dock 专用光影（对角明暗 + 高光面 +
                             // 左下出口 + 沉底暖核 + 方向性亮带）；其他玻璃面
                             // 不传此参数、一字不动。
@@ -662,19 +414,9 @@ fun PullUpDock(
                             // 玻璃边框效果不要（Bob 2026-10-25 22:31）：跳过全部
                             // 轮廓描边（暗描边＋方向性亮带＋1dp 顶部亮边），
                             // 仅 Dock 面板；意图卡片等其他玻璃面一字不动。
-                            // Dock 左侧斜线另由圆肩轮廓单 contour 化根除（见
-                            // appendShoulderArch），与本开关无关。
                             noRim = true
                         )
-                        // 圆肩批：弧形高光 + 暖白内晕（玻璃之上、图标之下）。
-                        // 拖拽一体拉伸：rise 跟 shape 同一 effectiveRise。
-                        .dockShoulderDressing(
-                            chordDp = shoulderChord,
-                            riseDp = shoulderRise,
-                            cornerDp = 28.dp,
-                            peakDp = shoulderPeakDp.dp
-                        )
-                        // 肩线弹性：图标中心涟漪（内容之上、细白圈、不盖字形）。
+                        // 图标中心涟漪（内容之上、细白圈、不盖字形）。
                         .drawWithContent {
                             drawContent()
                             val c = rippleCenter
@@ -741,26 +483,23 @@ fun PullUpDock(
                     // D1 盒 312dp 恰好占满内容宽，无视觉变化。竖屏保持默认 Start。
                     horizontalAlignment = if (isLandscapeDock) Alignment.CenterHorizontally else Alignment.Start
                 ) {
-                    // 面板内容区：静止期 crossfade + scale，卡片高度弹簧跟随。
-                    // 一二档内容：静止期 crossfade + scale，卡片高度弹簧跟随。
+                    // 面板内容区：crossfade + scale，卡片高度用快弹簧跟随
+                    // （2026-11-02：旧 MediumLow 高度弹簧拖尾是上滑卡顿主因之一）。
                     AnimatedContent(
                         targetState = state,
                         transitionSpec = {
-                            (fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
+                            (fadeIn(tween(PetMotion.FadeQuick)) +
                                 scaleIn(
                                     spring(
                                         stiffness = Spring.StiffnessMedium,
-                                        dampingRatio = 0.9f
+                                        dampingRatio = 1f
                                     ),
-                                    initialScale = 0.92f
+                                    initialScale = 0.96f
                                 ))
                                 .togetherWith(fadeOut(tween(120)))
                                 .using(
                                     SizeTransform(clip = false) { _, _ ->
-                                        spring(
-                                            stiffness = Spring.StiffnessMediumLow,
-                                            dampingRatio = 0.9f
-                                        )
+                                        PetMotion.DockTierSize
                                     }
                                 )
                         },
@@ -796,7 +535,7 @@ fun PullUpDock(
                         }
                     }
                 }
-                } // v6 外层 Box（面板）
+                } // 外层 Box（面板）
             }
         }
 
@@ -807,17 +546,11 @@ fun PullUpDock(
             visible = state == DockState.D3,
             enter = if (d3FromPicker) fadeIn(tween(200))
             else slideInVertically(
-                animationSpec = spring(
-                    stiffness = Spring.StiffnessMediumLow,
-                    dampingRatio = 0.9f
-                )
-            ) { it } + fadeIn(tween(180)),
+                animationSpec = PetMotion.DockTierOffset
+            ) { it } + fadeIn(tween(PetMotion.FadeQuick)),
             exit = slideOutVertically(
-                animationSpec = spring(
-                    stiffness = Spring.StiffnessMedium,
-                    dampingRatio = 0.9f
-                )
-            ) { it } + fadeOut(tween(150)),
+                animationSpec = PetMotion.DockTierOffset
+            ) { it } + fadeOut(tween(120)),
             label = "fullOverlay"
         ) {
             FullAppsOverlay(
@@ -883,7 +616,7 @@ private fun DockRow4(
     onLongPress: (AppInfo) -> Unit,
     onDismissMenu: () -> Unit,
     isLandscape: Boolean = false,
-    // 肩线弹性：上报图标窗口中心（供涟漪中心与注视方位计算）
+    // 上报图标窗口中心（供点按涟漪中心计算）
     onIconPositioned: (String, Offset) -> Unit = { _, _ -> }
 ) {
     // v0.68.82（第 3 项）：横屏改回横向（同竖屏），不再竖排
@@ -926,7 +659,7 @@ private fun DockGrid10(
     onLongPress: (AppInfo) -> Unit,
     onDismissMenu: () -> Unit,
     isLandscape: Boolean = false,
-    // 肩线弹性：上报图标窗口中心（供涟漪中心与注视方位计算）
+    // 上报图标窗口中心（供点按涟漪中心计算）
     onIconPositioned: (String, Offset) -> Unit = { _, _ -> }
 ) {
     // v0.68.82（第 3 项）：横屏改回横向 5 列（同竖屏），不再 2 列竖排
@@ -980,7 +713,7 @@ private fun DockIconButton(
     onLongPress: (AppInfo) -> Unit,
     onDismissMenu: () -> Unit,
     modifier: Modifier = Modifier,
-    // 肩线弹性：上报图标窗口中心（供涟漪中心与注视方位计算）
+    // 上报图标窗口中心（供点按涟漪中心计算）
     onIconPositioned: (String, Offset) -> Unit = { _, _ -> }
 ) {
     val hapticView = LocalView.current

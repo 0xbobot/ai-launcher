@@ -2,6 +2,7 @@ package com.bobot.ailauncher.ui.theme
 
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.IntOffset
 
 /**
@@ -33,13 +34,6 @@ object PetMotion {
     val DragRelease = spring<Float>(dampingRatio = 0.45f, stiffness = 90f)
 
     /**
-     * 拖拽肩水平跟随：临界阻尼，约 90ms 达目标 63%。值不动。
-     * 22:10 后模型：垂直方向肩升锁定等于头升（不用弹簧），本弹簧只用于
-     * 肩横移滞后跟随（头略先行、肩跟上落在此处）。
-     */
-    val ShoulderLag = spring<Float>(dampingRatio = 1f, stiffness = 550f)
-
-    /**
      * 垫高滑动：临界阻尼，无过冲，约 250ms 落定。
      * 接替原 tween(250)：跟键盘／导航垫目标的滑动不再用 tween 位移。
      */
@@ -56,6 +50,17 @@ object PetMotion {
 
     /** Dock 卡片退场滑出。值不动。 */
     val DockExit = spring<IntOffset>(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium)
+
+    /**
+     * Dock 档位快切（2026-11-02，上滑卡顿修复）：D1↔D2 内容高度跟随与
+     * D2↔D3 全屏滑入滑出共用。临界阻尼、无过冲、刚度 1200——比旧
+     * MediumLow（400）高度弹簧落定快得多，又保留滑入滑出本身，
+     * 不是生切。档位切换只改此处。
+     */
+    val DockTierOffset = spring<IntOffset>(dampingRatio = 1f, stiffness = 1200f)
+
+    /** Dock 档位快切的高度版（与 DockTierOffset 同参数，IntSize 专用——SizeTransform 要的就是 IntSize）。 */
+    val DockTierSize = spring<IntSize>(dampingRatio = 1f, stiffness = 1200f)
 
     // ---- 淡入家族（可见性类， easing 一律 MotionTokens.Easing = EaseOutCubic） ----
 
