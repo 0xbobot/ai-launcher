@@ -23,6 +23,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.bobot.ailauncher.ui.theme.MotionTokens
+import com.bobot.ailauncher.ui.theme.PetMotion
 
 /**
  * 首页指示器 v4.1（v0.11）：
@@ -46,13 +48,7 @@ fun PageIndicator(
             lastPage = currentPage
             val distPx = with(density) { 8.dp.toPx() }
             nudgeX.snapTo(dir * distPx)
-            nudgeX.animateTo(
-                0f,
-                spring(
-                    stiffness = Spring.StiffnessMediumLow,
-                    dampingRatio = Spring.DampingRatioMediumBouncy
-                )
-            )
+            nudgeX.animateTo(0f, PetMotion.DotNudge)
         }
     }
 
@@ -64,15 +60,12 @@ fun PageIndicator(
             val selected = currentPage == i
             val scale by animateFloatAsState(
                 targetValue = if (selected) 1.3f else 1f,
-                animationSpec = spring(
-                    stiffness = Spring.StiffnessMedium,
-                    dampingRatio = Spring.DampingRatioMediumBouncy
-                ),
+                animationSpec = PetMotion.PopBounce,
                 label = "dotScale"
             )
             val dotAlpha by animateFloatAsState(
                 targetValue = if (selected) 1f else 0.35f,
-                animationSpec = tween(250),
+                animationSpec = tween(MotionTokens.Medium),
                 label = "dotAlpha"
             )
             Box(

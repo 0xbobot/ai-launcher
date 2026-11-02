@@ -49,6 +49,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.bobot.ailauncher.ui.theme.AILauncherType
+import com.bobot.ailauncher.ui.theme.PetMotion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
@@ -140,10 +142,7 @@ internal fun AppRow(
     val revealPx = with(density) { 56.dp.toPx() }
     val fullPx = with(density) { 120.dp.toPx() }
     val maxDragPx = with(density) { 160.dp.toPx() }
-    val settleSpring = spring<Float>(
-        dampingRatio = Spring.DampingRatioMediumBouncy,
-        stiffness = Spring.StiffnessLow
-    )
+    val settleSpring = PetMotion.DragSettle
 
     // 弱化进度：拖动时跟手，松手后弹簧动画到目标
     val dragDim = (kotlin.math.abs(dragDist) / revealPx).coerceIn(0f, 1f)
@@ -175,10 +174,7 @@ internal fun AppRow(
     // scale 0.6→1.0 + alpha 0→1，MediumBouncy
     val eyeEntry = remember { Animatable(0f) }
     val starEntry = remember { Animatable(0f) }
-    val entrySpring = spring<Float>(
-        dampingRatio = Spring.DampingRatioMediumBouncy,
-        stiffness = Spring.StiffnessMedium
-    )
+    val entrySpring = PetMotion.PopBounce
     LaunchedEffect(actionsVisible) {
         if (actionsVisible && !isDragging) {
             // 从当前弱化进度开始，避免跳变
@@ -308,7 +304,7 @@ internal fun AppRow(
                     )
                     // v0.41.0（B 方案）：行距拉大——纵向 padding 12dp，图标 40dp，呼吸感
                     // 应用中心升级：紧凑行 8dp（行高 56dp）
-                    .padding(horizontal = 12.dp, vertical = if (compact) 8.dp else 12.dp),
+                    .padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AppIconImage(
@@ -316,13 +312,13 @@ internal fun AppRow(
                     contentDescription = app.label.toString(),
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .graphicsLayer { alpha = contentAlpha }
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = app.label.toString(),
-                    fontSize = 16.sp,
+                    fontSize = AILauncherType.BodyLarge.fontSize,
                     color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -354,7 +350,7 @@ internal fun AppRow(
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(AILauncherColors.current.Card.copy(alpha = 0.8f))
                         .clickable(
                             indication = null,
@@ -365,7 +361,7 @@ internal fun AppRow(
                 ) {
                     // v0.41.34（Bob）：蒙版和应用行一样大——整行白 80%，双钮居中
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(36.dp),
+                        horizontalArrangement = Arrangement.spacedBy(40.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // 眼睛：隐藏/取消隐藏（简洁线条，无底色；32dp + 图标形投影）
@@ -452,7 +448,7 @@ internal fun AppRow(
                                     imageVector = Icons.Filled.Star,
                                     contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
                                     // 未收藏用半透明金（线条感），已收藏用实金
-                                    tint = Color(0xFFC9A227).copy(alpha = if (isPinned) 1f else 0.45f),
+                                    tint = AILauncherColors.current.Accent.copy(alpha = if (isPinned) 1f else 0.45f),
                                     modifier = Modifier.size(26.dp)
                                 )
                             }

@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.bobot.ailauncher.ui.theme.AILauncherType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1022,16 +1023,16 @@ private fun PanelPermissionGuide(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
             modifier = Modifier
-                .padding(horizontal = 36.dp)
+                .padding(horizontal = 40.dp)
                 .clickable(enabled = false, onClick = {})
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
                     text = if (compact) "还没开启权限" else "下滑手势需要开个权限",
-                    fontSize = 16.sp,
+                    fontSize = AILauncherType.BodyLarge.fontSize,
                     fontWeight = FontWeight.SemiBold,
                     color = AILauncherColors.current.Title
                 )
@@ -1040,7 +1041,7 @@ private fun PanelPermissionGuide(
                         "无障碍里的「AI 桌面」还没开，下滑手势暂时用不了。"
                     else
                         "下滑打开通知中心、斜滑打开控制中心，都要借用系统的无障碍能力。请在无障碍设置中开启「AI 桌面」，只用来帮你打开这两个面板，不会读取任何内容。",
-                    fontSize = 13.sp,
+                    fontSize = AILauncherType.Footnote.fontSize,
                     color = AILauncherColors.current.Body
                 )
                 Row(

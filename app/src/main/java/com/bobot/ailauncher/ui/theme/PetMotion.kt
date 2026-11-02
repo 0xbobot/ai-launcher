@@ -2,6 +2,7 @@ package com.bobot.ailauncher.ui.theme
 
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.IntOffset
 
@@ -61,6 +62,45 @@ object PetMotion {
 
     /** Dock 档位快切的高度版（与 DockTierOffset 同参数，IntSize 专用——SizeTransform 要的就是 IntSize）。 */
     val DockTierSize = spring<IntSize>(dampingRatio = 1f, stiffness = 1200f)
+
+    // ---- 高级感收敛（2026-11-02，Bob 全批）：以下 11 条原为各处行内自造规格，
+    // 参数与原值逐字相同、仅位置收进家族，行为零变化；新增档不许再各自发明。
+    // 统一不是同参数（见文件头注释）：不同身体就该有不同的弹簧。
+    // 另：临界阻尼 + Medium 的无回弹收敛（应用中心推挤、Dock 卡片缩放进场）
+    // 与既有 PadStandard 参数逐字相同，直接复用 PadStandard，不另建档。
+
+    /** 弹入：应用行双图标 staggered 进入、页指示圆点缩放共用（MediumBouncy + Medium）。 */
+    val PopBounce = spring<Float>(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+
+    /** 拖拽弱化收敛：应用行蒙层松手回落（MediumBouncy + Low）。 */
+    val DragSettle = spring<Float>(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+
+    /** 字母导航回位：Bob 2026-10-25 精修——高硬度 + 0.7 轻欠阻尼，各一次轻微回弹。 */
+    val RailSnap = spring<Float>(dampingRatio = 0.7f, stiffness = Spring.StiffnessHigh)
+
+    /** 页指示轻推：换页时圆点 8dp 横向回弹（MediumBouncy + MediumLow）。 */
+    val DotNudge = spring<Float>(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow)
+
+    /** 宠物区圆点浮动：原 PetZone dot 弹簧（0.6 + Medium）。 */
+    val PetDot = spring<Float>(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)
+
+    /** 盲操扇形段半径：段展开/收起半径弹簧（0.62 + 300）。 */
+    val FanRadius = spring<Float>(dampingRatio = 0.62f, stiffness = 300f)
+
+    /** 盲操扇形指示位移：选中指示 Offset 跟随（0.62 + 380，Offset 专用）。 */
+    val FanIndicator = spring<Offset>(dampingRatio = 0.62f, stiffness = 380f)
+
+    /** 盲操扇形图标弹入：选中图标 0.6→1 过冲（0.45 + 1100）。 */
+    val FanIconPop = spring<Float>(dampingRatio = 0.45f, stiffness = 1100f)
+
+    /** 盲操扇形选中弹：段选中 1.22 倍弹（0.6 + 400）。 */
+    val FanPop = spring<Float>(dampingRatio = 0.6f, stiffness = 400f)
+
+    /** 盲操扇形字号过渡：选中段字号弹簧（0.7 + 500）。 */
+    val FanSize = spring<Float>(dampingRatio = 0.7f, stiffness = 500f)
+
+    /** 盲操扇形角标弹：角标出现弹（0.5 + 900）。 */
+    val FanBadge = spring<Float>(dampingRatio = 0.5f, stiffness = 900f)
 
     // ---- 淡入家族（可见性类， easing 一律 MotionTokens.Easing = EaseOutCubic） ----
 

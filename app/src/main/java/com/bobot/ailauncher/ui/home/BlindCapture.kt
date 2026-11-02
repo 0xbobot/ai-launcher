@@ -44,6 +44,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import com.bobot.ailauncher.ui.theme.AILauncherType
+import com.bobot.ailauncher.ui.theme.MotionTokens
+import com.bobot.ailauncher.ui.theme.PetMotion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
@@ -839,7 +842,7 @@ private fun FanIndicatorIcon(seg: FanSegment) {
                 ) {
                     Text(
                         text = seg.item.label.firstOrNull()?.toString() ?: "快",
-                        fontSize = 16.sp,
+                        fontSize = AILauncherType.BodyLarge.fontSize,
                         fontWeight = FontWeight.Medium,
                         color = iconTint,
                         maxLines = 1,
@@ -904,7 +907,7 @@ fun BlindCaptureFan(
     // v0.68.64：非拍照段都算（快捷＋空槽位），绘制/命中一致
     val sweeps = fanSweeps(segments.size - 1)
     val density = LocalDensity.current
-    val goldRipple = Color(0xFFD9A05B)
+    val goldRipple = AILauncherColors.current.Accent
     val titleColor = AILauncherColors.current.Title
     val bodyColor = AILauncherColors.current.Body
     // 2026-10-27 fan-quick-services 批：扇形玻璃取值全部来自 Dock，不另起一套——
@@ -933,7 +936,7 @@ fun BlindCaptureFan(
             targetValue = if (segShown[i] != true) 0f
             else if (i == selectedIndex) FAN_R_OUTER_SELECTED_DP
             else FAN_R_OUTER_DP,
-            animationSpec = spring(dampingRatio = 0.62f, stiffness = 300f),
+            animationSpec = PetMotion.FanRadius,
             label = "segR$i"
         )
     }
@@ -942,13 +945,13 @@ fun BlindCaptureFan(
     LaunchedEffect(Unit) { fanShown = true }
     val fanAlpha by animateFloatAsState(
         targetValue = if (fanShown) 1f else 0f,
-        animationSpec = tween(160),
+        animationSpec = tween(MotionTokens.Fast),
         label = "fanAlpha"
     )
     // v0.68.42：收起 120ms 内收+淡出（替代瞬间消失）
     val dismissT by animateFloatAsState(
         targetValue = if (dismiss) 1f else 0f,
-        animationSpec = tween(120),
+        animationSpec = tween(MotionTokens.Short),
         label = "dismissT"
     )
     // v0.68.29 方案C：中心触摸涟漪（呼吸感圆环，替代 mini）
@@ -1267,7 +1270,7 @@ fun BlindCaptureFan(
                     }
                     // ⑥ 选中段：暖金记忆色改罩染（不盖住玻璃）
                     if (selected) {
-                        drawPath(wedgePath, Color(0xFFD9A05B).copy(alpha = 0.45f))
+                        drawPath(wedgePath, goldRipple.copy(alpha = 0.45f))
                     }
                 }
                 // 外缘 1px 描边：浮动楔形没有 Dock 面板的抓拍模糊衬底，边缘须
@@ -1340,7 +1343,7 @@ fun BlindCaptureFan(
         }
         val indOffset by animateOffsetAsState(
             targetValue = indClamped ?: indAnchor,
-            animationSpec = spring(dampingRatio = 0.62f, stiffness = 380f),
+            animationSpec = PetMotion.FanIndicator,
             label = "indOffset"
         )
         // v0.68.42：选中图标 pop（0.6→1 overshoot，替代淡入）；换段重播一次
@@ -1349,13 +1352,10 @@ fun BlindCaptureFan(
         LaunchedEffect(hasSel, selectedIndex) {
             if (hasSel) {
                 indScaleAnim.snapTo(0.6f)
-                launch { indAlphaAnim.animateTo(1f, tween(100)) }
-                indScaleAnim.animateTo(
-                    1f,
-                    spring(dampingRatio = 0.45f, stiffness = 1100f)
-                )
+                launch { indAlphaAnim.animateTo(1f, tween(MotionTokens.Short)) }
+                indScaleAnim.animateTo(1f, PetMotion.FanIconPop)
             } else {
-                launch { indAlphaAnim.animateTo(0f, tween(100)) }
+                launch { indAlphaAnim.animateTo(0f, tween(MotionTokens.Short)) }
                 indScaleAnim.snapTo(0.6f)
             }
         }
@@ -1407,7 +1407,7 @@ fun BlindCaptureFan(
             }
             val pop by animateFloatAsState(
                 targetValue = if (selected) 1.22f else 1f,
-                animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
+                animationSpec = PetMotion.FanPop,
                 label = "segPop$i"
             )
             // v0.68.42：选中段字号 +2sp 过渡（14→16sp，拍照 15→17sp）；
@@ -1421,7 +1421,7 @@ fun BlindCaptureFan(
             }
             val sizeAnim by animateFloatAsState(
                 targetValue = targetSize,
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 500f),
+                animationSpec = PetMotion.FanSize,
                 label = "segSize$i"
             )
             key(i) {
@@ -1477,7 +1477,7 @@ fun BlindCaptureFan(
                 key("badge$segIdx") {
                     val badgePop by animateFloatAsState(
                         targetValue = 1f,
-                        animationSpec = spring(dampingRatio = 0.5f, stiffness = 900f),
+                        animationSpec = PetMotion.FanBadge,
                         label = "badgePop$segIdx"
                     )
                     val badgeHalfPx = with(density) { 11.dp.toPx() }
@@ -1501,7 +1501,7 @@ fun BlindCaptureFan(
                     ) {
                         Text(
                             text = "×",
-                            fontSize = 14.sp,
+                            fontSize = AILauncherType.Callout.fontSize,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )

@@ -48,6 +48,7 @@ import com.bobot.ailauncher.ui.home.BriefMeetingRow
 import com.bobot.ailauncher.ui.home.CoverHero
 import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.coverPaletteFor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -367,7 +368,7 @@ fun PetZone(
             ) else androidx.compose.animation.ExitTransition.None
         ) {
             if (coverNextEvent != null) {
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 BriefMeetingRow(
                     event = coverNextEvent!!,
                     palette = briefingPalette,
@@ -388,7 +389,7 @@ fun PetZone(
         // 翻转点复现、无交叉淡化；横屏沿用场景换口径。
         if (!inputActive) {
             // 末尾留白 26dp（原罩纱尾巴间距保留，纱已删，布局不动）
-            Spacer(modifier = Modifier.height(26.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             // 列尾留白保留、布局不动。
         }
         }  // Column 结束
@@ -405,7 +406,7 @@ fun PetZone(
 internal fun ThinkDots(modifier: Modifier = Modifier) {
     // R3-D：系统减动效时三点静止（只表"思考中"，不跳动）
     val reduceMotion = com.bobot.ailauncher.ui.theme.rememberReduceMotion()
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         repeat(3) { i ->
             var up by remember { mutableStateOf(false) }
             LaunchedEffect(reduceMotion) {
@@ -418,10 +419,7 @@ internal fun ThinkDots(modifier: Modifier = Modifier) {
             }
             val dy by androidx.compose.animation.core.animateFloatAsState(
                 targetValue = if (up) -9f else 0f,
-                animationSpec = androidx.compose.animation.core.spring(
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
-                    dampingRatio = 0.6f
-                ),
+                animationSpec = PetMotion.PetDot,
                 label = "dot$i"
             )
             val density = LocalDensity.current

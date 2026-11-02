@@ -42,6 +42,7 @@ import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.island.IslandToasts
+import com.bobot.ailauncher.ui.theme.AILauncherType
 
 /**
  * v0.39.0：Dock 长按 → 真弹窗快捷菜单（Material3 DropdownMenu）。
@@ -75,7 +76,7 @@ fun AppPopupMenu(
         // 头：应用图标 + 名称 + 应用信息图标（v0.39.1：应用信息收到标题行，用图标表示）
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp)
+            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
         ) {
             AppIconImage(
                 drawable = app.icon,
@@ -83,13 +84,13 @@ fun AppPopupMenu(
                 contentDescription = null,
                 modifier = Modifier
                     .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .semantics { invisibleToUser() }
             )
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = app.label.toString(),
-                fontSize = 14.sp,
+                fontSize = AILauncherType.Callout.fontSize,
                 fontWeight = FontWeight.SemiBold,
                 color = AILauncherColors.current.Title,
                 maxLines = 1,
@@ -113,7 +114,7 @@ fun AppPopupMenu(
         }
         if (shortcuts.isNotEmpty()) {
             HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 14.dp),
+                modifier = Modifier.padding(horizontal = 16.dp),
                 color = AILauncherColors.current.Divider
             )
         }
@@ -124,7 +125,7 @@ fun AppPopupMenu(
                 text = {
                     Text(
                         text = s.shortLabel?.toString().orEmpty().ifBlank { "快捷方式" },
-                        fontSize = 14.sp,
+                        fontSize = AILauncherType.Callout.fontSize,
                         color = AILauncherColors.current.Title,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -138,7 +139,7 @@ fun AppPopupMenu(
                             contentDescription = null,
                             modifier = Modifier
                                 .size(26.dp)
-                                .clip(RoundedCornerShape(7.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .semantics { invisibleToUser() }
                         )
                     }
@@ -153,14 +154,14 @@ fun AppPopupMenu(
         }
         // v0.41.11（Bob 选方案1）：卸载从左滑移到长按菜单；ⓘ 已在标题行
         HorizontalDivider(
-            modifier = Modifier.padding(horizontal = 14.dp),
+            modifier = Modifier.padding(horizontal = 16.dp),
             color = AILauncherColors.current.Divider
         )
         DropdownMenuItem(
             text = {
                 Text(
                     text = "卸载",
-                    fontSize = 14.sp,
+                    fontSize = AILauncherType.Callout.fontSize,
                     color = MaterialTheme.colorScheme.error,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -216,7 +217,7 @@ fun AppShortcutInline(
         // （图标左、名字中、ⓘ 右）一致，展开时才出现。
         // 金线分隔（与行内容区分，但同一张卡）
         androidx.compose.material3.HorizontalDivider(
-            modifier = Modifier.padding(horizontal = 20.dp),
+            modifier = Modifier.padding(horizontal = 24.dp),
             color = AILauncherColors.current.Divider
         )
         // 系统快捷方式
@@ -230,7 +231,7 @@ fun AppShortcutInline(
                         launchAppShortcut(context, app.packageName, s.id)
                         onDismiss()
                     }
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
                 if (icon != null) {
                     AppIconImage(
@@ -239,14 +240,14 @@ fun AppShortcutInline(
                         contentDescription = null,
                         modifier = Modifier
                             .size(26.dp)
-                            .clip(RoundedCornerShape(7.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .semantics { invisibleToUser() }
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
                 }
                 Text(
                     text = s.shortLabel?.toString().orEmpty().ifBlank { "快捷方式" },
-                    fontSize = 14.sp,
+                    fontSize = AILauncherType.Callout.fontSize,
                     color = AILauncherColors.current.Title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -255,7 +256,7 @@ fun AppShortcutInline(
         }
         // 卸载
         androidx.compose.material3.HorizontalDivider(
-            modifier = Modifier.padding(horizontal = 20.dp),
+            modifier = Modifier.padding(horizontal = 24.dp),
             color = AILauncherColors.current.Divider
         )
         Row(
@@ -274,7 +275,7 @@ fun AppShortcutInline(
                     }
                     onDismiss()
                 }
-                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
             Icon(
                 imageVector = Icons.Outlined.Delete,
@@ -285,10 +286,10 @@ fun AppShortcutInline(
                     .size(22.dp)
                     .semantics { invisibleToUser() }
             )
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(16.dp))
             Text(
                 text = "卸载",
-                fontSize = 14.sp,
+                fontSize = AILauncherType.Callout.fontSize,
                 color = MaterialTheme.colorScheme.error
             )
         }

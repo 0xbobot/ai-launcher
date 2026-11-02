@@ -43,6 +43,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.positionInParent
+import com.bobot.ailauncher.ui.theme.AILauncherType
+import com.bobot.ailauncher.ui.theme.MotionTokens
+import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.platform.LocalDensity
@@ -188,8 +191,8 @@ internal fun WaveRail(
         if (pulseItem != null && pulseTick > 0) {
             hapticView.tickHaptic()
             if (!reduceMotion) {
-                pulseScale.animateTo(1.7f, tween(180))
-                pulseScale.animateTo(1f, tween(220))
+                pulseScale.animateTo(1.7f, tween(PetMotion.FadeHandoff))
+                pulseScale.animateTo(1f, tween(MotionTokens.Medium))
             }
         }
     }
@@ -235,10 +238,7 @@ internal fun WaveRail(
         // 回位时各一次轻微回弹再稳住，不晃个不停；减动态仍走 tween(0)
         val waveShiftX by animateFloatAsState(
             targetValue = if (displayIndex >= 0) dirSign * shiftPx else 0f,
-            animationSpec = if (reduceMotion) tween(0) else spring(
-                stiffness = Spring.StiffnessHigh,
-                dampingRatio = 0.7f
-            ),
+            animationSpec = if (reduceMotion) tween(0) else PetMotion.RailSnap,
             label = "waveShift"
         )
 
@@ -519,7 +519,7 @@ internal fun WaveRail(
                 if (bubbleItem is RailItem.Letter) {
                     Text(
                         text = bubbleItem.char.toString(),
-                        fontSize = 22.sp,
+                        fontSize = AILauncherType.Title.fontSize,
                         fontWeight = FontWeight.Bold,
                         color = AILauncherColors.current.Title
                     )

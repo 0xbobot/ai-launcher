@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.LocalAILauncherColors
 
 /**
@@ -158,42 +159,42 @@ private fun BatteryGuardDialog(
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = title,
-                    fontSize = 20.sp,
+                    fontSize = AILauncherType.Title.fontSize,
                     fontWeight = FontWeight.SemiBold,
                     color = AILauncherColors.current.Title
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = message,
-                    fontSize = 14.sp,
+                    fontSize = AILauncherType.Callout.fontSize,
                     color = AILauncherColors.current.Body,
                     textAlign = TextAlign.Center,
                     lineHeight = 20.sp
                 )
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(24.dp))
                 // 主按钮：引导去开省电模式（已在省电模式则隐藏）
                 if (!powerSaveMode) {
                     Button(
                         onClick = onOpenSaver,
                         colors = ButtonDefaults.buttonColors(containerColor = accent),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = "去开省电模式",
-                            fontSize = 16.sp,
+                            fontSize = AILauncherType.BodyLarge.fontSize,
                             fontWeight = FontWeight.Medium,
                             color = Color.White,
-                            modifier = Modifier.padding(vertical = 4.dp)
+                            modifier = Modifier.padding(vertical = 8.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
                 // 次按钮：一键关闭，毫无压力
                 TextButton(onClick = onDismiss) {
                     Text(
                         text = "好，知道了",
-                        fontSize = 14.sp,
+                        fontSize = AILauncherType.Callout.fontSize,
                         color = AILauncherColors.current.Hint
                     )
                 }

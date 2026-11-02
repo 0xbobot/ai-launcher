@@ -32,6 +32,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.graphics.Color
@@ -216,7 +217,7 @@ fun PullUpDock(
             rippleCenter = iconCenter - dockPanelOrigin
             rippleScope.launch {
                 rippleAnim.snapTo(0f)
-                rippleAnim.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+                rippleAnim.animateTo(1f, tween(MotionTokens.Medium, easing = FastOutSlowInEasing))
             }
         }
         try {
@@ -280,7 +281,7 @@ fun PullUpDock(
                     // v0.68.78：横屏时右侧留边，不贴边；2026-10-27 右锚定：
                     // 再让 live cutoutRight（挖孔在右时卡片不顶挖孔区，
                     // 无挖孔时仍是 12dp，一字不写死数值）
-                    .let { if (isLandscapeDock) it.padding(end = 12.dp + cutoutRightDp) else it },
+                    .let { if (isLandscapeDock) it.padding(end = 16.dp + cutoutRightDp) else it },
                 enter = if (isLandscapeDock) {
                     // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：聚焦退出
                     // 回场时只淡入、不滑动（上一帧仍在聚焦 → fade-only）；正常
@@ -503,13 +504,10 @@ fun PullUpDock(
                         transitionSpec = {
                             (fadeIn(tween(PetMotion.FadeQuick)) +
                                 scaleIn(
-                                    spring(
-                                        stiffness = Spring.StiffnessMedium,
-                                        dampingRatio = 1f
-                                    ),
+                                    PetMotion.PadStandard,
                                     initialScale = 0.96f
                                 ))
-                                .togetherWith(fadeOut(tween(120)))
+                                .togetherWith(fadeOut(tween(MotionTokens.Short)))
                                 .using(
                                     SizeTransform(clip = false) { _, _ ->
                                         PetMotion.DockTierSize
@@ -557,13 +555,13 @@ fun PullUpDock(
         val d3FromPicker by UiPrefs.d3EnterFromPicker.collectAsState()
         AnimatedVisibility(
             visible = state == DockState.D3,
-            enter = if (d3FromPicker) fadeIn(tween(200))
+            enter = if (d3FromPicker) fadeIn(tween(PetMotion.FadeHandoff))
             else slideInVertically(
                 animationSpec = PetMotion.DockTierOffset
             ) { it } + fadeIn(tween(PetMotion.FadeQuick)),
             exit = slideOutVertically(
                 animationSpec = PetMotion.DockTierOffset
-            ) { it } + fadeOut(tween(120)),
+            ) { it } + fadeOut(tween(MotionTokens.Short)),
             label = "fullOverlay"
         ) {
             FullAppsOverlay(
@@ -636,7 +634,7 @@ private fun DockRow4(
     BoxWithConstraints(
         modifier = Modifier
             .let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() }
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
         val iconSize = 56.dp
         val gap = 16.dp
@@ -651,7 +649,7 @@ private fun DockRow4(
                 DockIconButton(
                     app = app,
                     iconSize = iconSize,
-                    corner = if (iconSize >= 56.dp) 16.dp else 14.dp,
+                    corner = 12.dp,
                     menuApp = menuApp,
                     onLaunch = onLaunch,
                     onLongPress = onLongPress,
@@ -680,13 +678,13 @@ private fun DockGrid10(
     Column(
         modifier = Modifier
             .let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() }
-            .padding(horizontal = 12.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         apps.chunked(cols).forEach { row ->
             Row(
                 modifier = Modifier.let { if (isLandscape) it.wrapContentWidth() else it.fillMaxWidth() },
-                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
             ) {
                 row.forEach { app ->
                     // v0.68.77（Bob）：横屏不用 weight，否则被撑开散掉
@@ -697,7 +695,7 @@ private fun DockGrid10(
                         DockIconButton(
                             app = app,
                             iconSize = 46.dp,
-                            corner = 13.dp,
+                            corner = 12.dp,
                             menuApp = menuApp,
                             onLaunch = onLaunch,
                             onLongPress = onLongPress,
@@ -784,11 +782,11 @@ private fun TrackedFooterText(text: String, color: androidx.compose.ui.graphics.
         text.forEach { ch ->
             androidx.compose.material3.Text(
                 text = ch.toString(),
-                fontSize = 12.sp,
+                fontSize = AILauncherType.Caption.fontSize,
                 color = color,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(8.dp))
         }
     }
 }

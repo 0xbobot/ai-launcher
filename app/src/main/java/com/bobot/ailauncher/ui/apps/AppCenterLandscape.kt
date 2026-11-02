@@ -70,6 +70,7 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.confirmHaptic
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import kotlinx.coroutines.launch
@@ -341,7 +342,7 @@ fun AppCenterLandscape(
                     ) {
                         Text(
                             text = "$totalCount 款",
-                            fontSize = 12.sp,
+                            fontSize = AILauncherType.Caption.fontSize,
                             color = AILauncherColors.current.Hint
                         )
                     }
@@ -392,19 +393,19 @@ fun AppCenterLandscape(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 24.dp, end = 24.dp, top = 10.dp)
+                            .padding(start = 24.dp, end = 24.dp, top = 8.dp)
                             // 触控下限 48dp：与竖屏同结构在横屏宽容器下布局
                             // 取整差 3px（实测行高 123px≈46.9dp，竖屏 126px=
                             // 48.0dp），§16 a11y 量到 46.9<48——下限保不变量，
                             // 内容更高时自然长高，外观与竖屏一致
                             .heightIn(min = 48.dp)
                             .clickable { throttledAsk(searchFieldValue.text.trim()) }
-                            .padding(horizontal = 16.dp, vertical = 11.dp),
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "问助手：「${searchFieldValue.text.trim()}」",
-                            fontSize = 13.sp,
+                            fontSize = AILauncherType.Footnote.fontSize,
                             color = AILauncherColors.current.Title.copy(alpha = 0.75f),
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
@@ -443,10 +444,10 @@ fun AppCenterLandscape(
                                     // 应用中心升级：索引缺失与真无匹配区分文案
                                     text = if (indexLoading) "应用列表还没准备好，请稍后再试"
                                         else "没有找到「${searchFieldValue.text.trim()}」相关的应用",
-                                    fontSize = 14.sp,
+                                    fontSize = AILauncherType.Callout.fontSize,
                                     color = AILauncherColors.current.Hint,
                                     modifier = Modifier.padding(
-                                        top = 32.dp, start = 12.dp, end = 12.dp
+                                        top = 32.dp, start = 16.dp, end = 16.dp
                                     )
                                 )
                             }
@@ -491,12 +492,12 @@ fun AppCenterLandscape(
                                         Text(
                                             text = item.letter.toString(),
                                             fontFamily = FontFamily.Serif,
-                                            fontSize = 20.sp,
+                                            fontSize = AILauncherType.Title.fontSize,
                                             fontWeight = FontWeight.Bold,
                                             color = AILauncherColors.current.Title,
                                             modifier = Modifier
                                                 .height(rowH)
-                                                .padding(start = 12.dp)
+                                                .padding(start = 16.dp)
                                                 .wrapContentHeight(Alignment.CenterVertically)
                                         )
                                     }
@@ -506,13 +507,13 @@ fun AppCenterLandscape(
                                         // 选中环 / 已收藏★ 本体，不再成片刷）
                                         Text(
                                             text = item.title,
-                                            fontSize = 15.sp,
+                                            fontSize = AILauncherType.Body.fontSize,
                                             fontWeight = FontWeight.Bold,
                                             letterSpacing = 2.sp,
                                             color = AILauncherColors.current.Title,
                                             modifier = Modifier
                                                 .height(rowH)
-                                                .padding(start = 12.dp)
+                                                .padding(start = 16.dp)
                                                 .wrapContentHeight(Alignment.CenterVertically)
                                         )
                                     }
@@ -528,12 +529,12 @@ fun AppCenterLandscape(
                                                 .clip(RoundedCornerShape(12.dp))
                                                 .clickable { onUnlockHiddenAppsState.value() }
                                                 .testTag("hidden_locked")
-                                                .padding(horizontal = 12.dp)
+                                                .padding(horizontal = 16.dp)
                                         ) {
                                             Box(
                                                 modifier = Modifier
                                                     .size(40.dp)
-                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .clip(RoundedCornerShape(12.dp))
                                                     .background(AILauncherColors.current.Divider),
                                                 contentAlignment = Alignment.Center
                                             ) {
@@ -546,10 +547,10 @@ fun AppCenterLandscape(
                                                         .semantics { invisibleToUser() }
                                                 )
                                             }
-                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
                                             Text(
                                                 text = "点击解锁查看",
-                                                fontSize = 14.sp,
+                                                fontSize = AILauncherType.Callout.fontSize,
                                                 color = AILauncherColors.current.Title,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
@@ -727,10 +728,10 @@ private fun LandscapeAppRow(
                 .size(48.dp)
                 .clip(RoundedCornerShape(12.dp))
         )
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = app.label.toString(),
-            fontSize = 14.sp,
+            fontSize = AILauncherType.Callout.fontSize,
             color = AILauncherColors.current.Title,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

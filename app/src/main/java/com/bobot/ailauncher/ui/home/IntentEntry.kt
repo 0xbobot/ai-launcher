@@ -350,7 +350,7 @@ fun IntentCapsuleField(
             .clickable { focusRequester.requestFocus() }
             // 去 AI 味（2026-10-31）：星标图标已删；start padding 18→46dp（原 18dp 内边＋18dp 图标＋10dp 间隙），
             // 胶囊文字左缘仍落在 386 轴线（内容左缘＋46dp）上，不左移。
-            .padding(start = 46.dp, end = 18.dp),
+            .padding(start = 48.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         BasicTextField(
@@ -406,7 +406,7 @@ fun IntentCapsuleField(
                 }
             }
         )
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(8.dp))
         // ✕ 一键清空（仅应用中心变体开启）：有文本时才出现，清空走 onValueChange(空值)，
         // 宿主状态层（应用中心 query）随之回空、网格自动恢复，不另设回调。
         // R3-C 无障碍：触控目标 48dp（外框可点），视觉小圆仍 28dp，不改外观尺寸感。
@@ -433,7 +433,7 @@ fun IntentCapsuleField(
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(2.dp))
+            Spacer(modifier = Modifier.width(8.dp))
         }
         // 提交区：Planning 时换轻量进度（文字保留、不可重复提交）
         // R3-C 无障碍：触控目标 48dp（外框可点），金色视觉圆仍 40dp
@@ -914,10 +914,10 @@ fun IntentEntry(
             .padding(
                 start = 16.dp,
                 end = 16.dp,
-                top = 14.dp,
+                top = 16.dp,
                 bottom = 8.dp + if (isLandscapeCard) 0.dp else INTENT_FLARE_HEIGHT
             ),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
       ) {
         // ---- 输入甲板已瘦身（2026-10-25）：面板上区应用推荐整段删除 ----
         // （Dock 里已有应用推荐，意图初始状态再推一遍多为重复）；初始状态
@@ -979,7 +979,7 @@ fun IntentEntry(
         }
 
         // ---- v6 后调整（Bob 2026-10-24 20:31）：胶囊下方「猜你想问」行
-        // 整行删除（标签 + 后续推荐素行）；面板 Column 的 spacedBy(12.dp)
+        // 整行删除（标签 + 后续推荐素行）；面板 Column 的 spacedBy(16.dp)
         // 自动收拢间距，不留空带；结果槽位直接回到胶囊下方。 ----
 
         // ---- 结果条槽位（非模态）：本地结果 / 回复 / 错误 / 权限说明共用 ----
@@ -1130,9 +1130,9 @@ fun IntentEntry(
             // 热区内，不压触控。
             Row(
                 modifier = Modifier
-                    .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
+                    .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
                     imageVector = Icons.Filled.KeyboardArrowDown,
@@ -1264,7 +1264,7 @@ private fun LocalResultsBar(
             // 2026-10-27 设计精致化 P0-1：结果区坐稳局部底色（与推荐行同源），
             // 玻璃＋花纹壁纸下标题与名称对比度不再随壁纸走；只盖本条、卡片
             // 边缘仍透玻璃。F 批“面板内透明”口径就此让位给局部衬底。
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(intentContentScrim())
             .requiredHeightIn(min = minBarHeight, max = RESULT_BAR_MAX_HEIGHT)
             .verticalScroll(rememberScrollState())
@@ -1272,7 +1272,7 @@ private fun LocalResultsBar(
             .semantics { liveRegion = LiveRegionMode.Polite }
             // 2026-10-27 设计精致化 P1-5：内容左轴对齐输入文字——胶囊内边距
             // 18dp＋图标 18dp＋间距 10dp＝46dp，标题与首项左缘与之一致。
-            .padding(start = 46.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
+            .padding(start = 48.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
     ) {
         Text(
             // 2026-10-27 设计精致化 P1-5：说明缩成“应用 · N 个”，更紧更好扫。
@@ -1307,7 +1307,7 @@ private fun LocalResultsBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(top = 6.dp, end = 8.dp),
+                .padding(top = 8.dp, end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             apps.forEach { app ->
@@ -1343,7 +1343,7 @@ fun ResultAppItem(
             .testTag("result_item")
             .clip(RoundedCornerShape(12.dp))
             .clickable { onOpen(app) }
-            .padding(vertical = 4.dp),
+            .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         AppIconImage(
@@ -1351,7 +1351,7 @@ fun ResultAppItem(
             contentDescription = app.label.toString(),
             modifier = Modifier
                 .size(36.dp)
-                .clip(RoundedCornerShape(9.dp))
+                .clip(RoundedCornerShape(12.dp))
         )
         Text(
             text = app.label.toString(),
@@ -1371,7 +1371,7 @@ fun ResultAppItem(
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 3.dp)
+                .padding(top = 8.dp)
         )
     }
 }
@@ -1399,11 +1399,11 @@ private fun SlotStatusLine(text: String, testTag: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(intentContentScrim())
             .semantics { liveRegion = LiveRegionMode.Polite }
             .testTag(testTag)
-            .padding(start = 46.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+            .padding(start = 48.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
         contentAlignment = Alignment.CenterStart
     ) {
         Text(
@@ -1435,7 +1435,7 @@ private fun StatusStrip(
             // F 批：面板内透明——面板已提供统一背景，本条不再自带卡片底
             // R3-C 无障碍：回复/错误出现时 TalkBack 礼貌播报条内文案
             .semantics { liveRegion = LiveRegionMode.Polite }
-            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (attribution != null) {
@@ -1447,7 +1447,7 @@ private fun StatusStrip(
                 // 上约 7.06:1（与正文同口径，见 §一对比表）。
                 color = AILauncherColors.current.Body,
                 maxLines = 1,
-                modifier = Modifier.padding(end = 6.dp)
+                modifier = Modifier.padding(end = 8.dp)
             )
         }
         Text(
@@ -1521,8 +1521,8 @@ private fun UnderstoodStrip(
             .heightIn(max = RESULT_BAR_MAX_HEIGHT)
             .semantics { liveRegion = LiveRegionMode.Polite }
             .testTag("understood_strip")
-            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             text = "理解成：$summary",
@@ -1579,7 +1579,7 @@ private fun ExecutingStrip(summary: String) {
             .heightIn(max = RESULT_BAR_MAX_HEIGHT)
             .semantics { liveRegion = LiveRegionMode.Polite }
             .testTag("executing_strip")
-            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -1611,7 +1611,7 @@ private fun PlanningStrip(
             .heightIn(max = RESULT_BAR_MAX_HEIGHT)
             // F 批：面板内透明——面板已提供统一背景，本条不再自带卡片底
             .semantics { liveRegion = LiveRegionMode.Polite }
-            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -1658,7 +1658,7 @@ private fun NeedsInputStrip(
             // F 批：面板内透明——面板已提供统一背景，本条不再自带卡片底
             // 问题出现时 TalkBack 礼貌播报，用户不用找焦点也知道被问了什么
             .semantics { liveRegion = LiveRegionMode.Polite }
-            .padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -1707,8 +1707,8 @@ private fun PermissionExplainCard(
             .verticalScroll(rememberScrollState())
             // R3-C 无障碍：权限说明出现时 TalkBack 礼貌播报
             .semantics { liveRegion = LiveRegionMode.Polite }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             text = "需要开启一个权限",

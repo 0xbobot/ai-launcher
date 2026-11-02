@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.ui.rememberNowMillis
+import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.CoverPalette
 import com.bobot.ailauncher.ui.theme.GlassTextShadow
 import kotlinx.coroutines.delay
@@ -109,7 +110,7 @@ fun CoverHeroGiantTime(
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = if (inputCompact) 16.dp else 56.dp, start = 28.dp, end = 16.dp)
+            .padding(top = if (inputCompact) 16.dp else 56.dp, start = 32.dp, end = 16.dp)
     ) {
         val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
         // v0.68.101：输入态时钟收一档（104→82 基准），给胶囊堆栈让高
@@ -146,12 +147,12 @@ fun CoverHeroGiantTime(
             ) {
                 TrackedText(
                     text = dateText,
-                    fontSize = 12.sp,
+                    fontSize = AILauncherType.Caption.fontSize,
                     tracking = 4.dp,
                     color = palette.title.copy(alpha = 0.45f)
                 )
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             // 金线
             androidx.compose.animation.AnimatedVisibility(
                 visible = entered,
@@ -168,7 +169,7 @@ fun CoverHeroGiantTime(
                         .background(accent)
                 )
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             // 巨型时间（冒号金色点睛）——上滑入场
             androidx.compose.animation.AnimatedVisibility(
                 visible = entered,
@@ -235,7 +236,7 @@ fun CoverHeroGiantTime(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             // 副行：天气 + 时段
             androidx.compose.animation.AnimatedVisibility(
                 visible = titleEntered,
@@ -245,7 +246,7 @@ fun CoverHeroGiantTime(
             ) {
                 Text(style = briefingTextShadowStyle,
                     text = listOf(weatherDesc, daypartLine).filter { it.isNotBlank() }.joinToString(" · "),
-                    fontSize = 16.sp,
+                    fontSize = AILauncherType.BodyLarge.fontSize,
                     lineHeight = 28.sp,
                     color = palette.title.copy(alpha = 0.6f)
                 )
@@ -334,7 +335,7 @@ fun CoverHeroHeadline(
 
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = modifier.fillMaxWidth()
-            .padding(top = if (inputCompact) 16.dp else 56.dp, start = 28.dp, end = 16.dp)
+            .padding(top = if (inputCompact) 16.dp else 56.dp, start = 32.dp, end = 16.dp)
     ) {
         val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
         val titleSize = (32 * scale).sp
@@ -344,26 +345,26 @@ fun CoverHeroHeadline(
             // 横屏：左右双栏
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    TrackedText(text = "TODAY · 今日简报", fontSize = 12.sp, tracking = 4.dp,
+                    TrackedText(text = "TODAY · 今日简报", fontSize = AILauncherType.Caption.fontSize, tracking = 4.dp,
                         color = accent)
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     Text(style = briefingTextShadowStyle, text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
                         color = palette.title, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(style = briefingTextShadowStyle, text = "$timeText · $weatherDesc", fontSize = 16.sp,
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(style = briefingTextShadowStyle, text = "$timeText · $weatherDesc", fontSize = AILauncherType.BodyLarge.fontSize,
                         color = palette.title.copy(alpha = 0.6f))
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(style = briefingTextShadowStyle, text = narration, fontSize = 15.sp,
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(style = briefingTextShadowStyle, text = narration, fontSize = AILauncherType.Body.fontSize,
                         color = palette.title.copy(alpha = 0.7f))
                 }
             }
         } else {
             Box(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    TrackedText(text = "TODAY · 今日简报", fontSize = 12.sp, tracking = 4.dp,
+                    TrackedText(text = "TODAY · 今日简报", fontSize = AILauncherType.Caption.fontSize, tracking = 4.dp,
                         color = accent)
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     Box(modifier = Modifier.width(44.dp).height(3.dp)
                         .background(accent))
                     Spacer(modifier = Modifier.height(16.dp))
@@ -371,14 +372,14 @@ fun CoverHeroHeadline(
                         fontSize = titleSize, lineHeight = (titleSize.value + 8).sp,
                         letterSpacing = 2.sp, color = palette.title, maxLines = 4, overflow = TextOverflow.Ellipsis)
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(style = briefingTextShadowStyle, text = "$timeText · $weatherDesc", fontSize = 16.sp,
+                    Text(style = briefingTextShadowStyle, text = "$timeText · $weatherDesc", fontSize = AILauncherType.BodyLarge.fontSize,
                         color = palette.title.copy(alpha = 0.6f))
                     Spacer(modifier = Modifier.height(8.dp))
-                    TrackedText(text = dateText, fontSize = 12.sp, tracking = 4.dp,
+                    TrackedText(text = dateText, fontSize = AILauncherType.Caption.fontSize, tracking = 4.dp,
                         color = palette.title.copy(alpha = 0.45f))
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     // v0.68.99：讲述句——简报的一句话（时段句，不复述会议）
-                    Text(style = briefingTextShadowStyle, text = narration, fontSize = 15.sp,
+                    Text(style = briefingTextShadowStyle, text = narration, fontSize = AILauncherType.Body.fontSize,
                         color = palette.title.copy(alpha = 0.7f))
                 }
             }
@@ -407,7 +408,7 @@ fun CoverHeroMinimal(
 
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = modifier.fillMaxWidth()
-            .padding(top = if (inputCompact) 20.dp else 80.dp, start = 28.dp, end = 28.dp)
+            .padding(top = if (inputCompact) 24.dp else 80.dp, start = 32.dp, end = 32.dp)
     ) {
         val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
         // v0.68.99：时钟行 64sp（原 104sp 巨像收编——简报句才是 MINIMAL 的锚点）
@@ -429,18 +430,18 @@ fun CoverHeroMinimal(
                     fontWeight = FontWeight.Bold, letterSpacing = (-2).sp,
                     color = palette.title, lineHeight = timeSize)
             }
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             // 金线（居中短线）
             Box(modifier = Modifier.width(32.dp).height(2.dp)
                 .background(accent))
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             // 一行简报（单行省略——MINIMAL 只给锚点，不展开）
             Text(style = briefingTextShadowStyle, text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
-                fontSize = 18.sp, color = palette.title,
+                fontSize = AILauncherType.Headline.fontSize, color = palette.title,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(modifier = Modifier.height(8.dp))
             // 日期 · 天气副行
-            Text(style = briefingTextShadowStyle, text = "$dateText · $weatherDesc", fontSize = 14.sp,
+            Text(style = briefingTextShadowStyle, text = "$dateText · $weatherDesc", fontSize = AILauncherType.Callout.fontSize,
                 color = palette.title.copy(alpha = 0.6f))
             // v0.68.101：讲述者七仔撤出——MINIMAL 以日期副行收尾（纯文字）
         }
@@ -466,13 +467,13 @@ fun CoverHeroLandscape(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 32.dp, start = 28.dp, end = 28.dp),
+            .padding(top = 32.dp, start = 32.dp, end = 32.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
             TrackedText(
                 text = dateText,
-                fontSize = 12.sp,
+                fontSize = AILauncherType.Caption.fontSize,
                 tracking = 4.dp,
                 color = palette.title.copy(alpha = 0.45f)
             )
@@ -492,7 +493,7 @@ fun CoverHeroLandscape(
                     text = summary,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
+                    fontSize = AILauncherType.Title.fontSize,
                     color = palette.title,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -501,7 +502,7 @@ fun CoverHeroLandscape(
             Spacer(modifier = Modifier.height(8.dp))
             Text(style = briefingTextShadowStyle,
                 text = weatherDesc,
-                fontSize = 14.sp,
+                fontSize = AILauncherType.Callout.fontSize,
                 color = palette.title.copy(alpha = 0.6f)
             )
         }
@@ -551,7 +552,7 @@ fun BriefMeetingRow(
         "接下来 · $timeText"
     }
     val title = event.title.ifBlank { "日程" }
-    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 28.dp)) {
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 32.dp)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -569,29 +570,29 @@ fun BriefMeetingRow(
                 }
                 .clip(RoundedCornerShape(12.dp))
                 .clickable { onJoin(event) }
-                .padding(vertical = 12.dp),
+                .padding(vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 TrackedText(
                     text = labelText,
-                    fontSize = 12.sp,
+                    fontSize = AILauncherType.Caption.fontSize,
                     tracking = 3.dp,
                     color = accent
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(style = briefingTextShadowStyle,
                     text = title,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
+                    fontSize = AILauncherType.Title.fontSize,
                     lineHeight = 27.sp,
                     color = palette.title,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(16.dp))
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(99.dp))
@@ -600,7 +601,7 @@ fun BriefMeetingRow(
             ) {
                 Text(style = briefingTextShadowStyle,
                     text = "加入",
-                    fontSize = 14.sp,
+                    fontSize = AILauncherType.Callout.fontSize,
                     fontWeight = FontWeight.SemiBold,
                     color = accent
                 )

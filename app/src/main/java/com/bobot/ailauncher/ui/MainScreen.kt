@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.bobot.ailauncher.ui.theme.PetMotion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
@@ -276,7 +277,7 @@ private fun HomeHost(
     // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位），收起后恢复
     val dockAlpha by animateFloatAsState(
         targetValue = if (blindActive) 0.3f else 1f,
-        animationSpec = tween(200),
+        animationSpec = tween(PetMotion.FadeHandoff),
         label = "dockAlpha",
     )
 
@@ -570,7 +571,7 @@ private fun HomeHost(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(
-                        bottom = if (isLandscapePicker) 0.dp else 70.dp,
+                        bottom = if (isLandscapePicker) 0.dp else 72.dp,
                         end = if (isLandscapePicker) pickerCutoutRight else 0.dp
                     )
             )
