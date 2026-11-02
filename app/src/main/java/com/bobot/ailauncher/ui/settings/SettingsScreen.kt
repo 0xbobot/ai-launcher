@@ -67,8 +67,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
@@ -163,26 +161,7 @@ fun SettingsScreen(
         keyStatus = LlmConfig.keyStorageStatus(context)
     }
 
-    // v0.57.0：从屏幕底部上滑 → 回桌面主页（Bob：任何时候从底部上滑都要能回主页）
-    // 只响应起始点在屏幕底部 1/4 区域内的上滑，避免与列表滚动冲突
-    val swipeUpToHome = Modifier.pointerInput(onBack) {
-        var totalY = 0f
-        var startY = 0f
-        // pointerInput 作用域的 size 在 detectDragGestures 回调里不可见，先存下来
-        val heightPx = size.height
-        detectDragGestures(
-            onDragStart = { offset -> totalY = 0f; startY = offset.y },
-            onDragEnd = {
-                val fromBottom = startY > heightPx * 0.75f
-                if (fromBottom && totalY < -120) onBack()
-            },
-            onDrag = { _, dragAmount ->
-                // 不消费，让 LazyColumn 照常滚动
-                totalY += dragAmount.y
-            }
-        )
-    }
-
+    // 设置页底部上滑回主页已删除（Bob 2026-11-03：避免操作干扰，与应用中心同批）
     LazyColumn(
         // v0.61.1：和应用中心一样的半透明背景（GlassCardStrong，白 88%）
         // v0.68.45：contentPadding 归零，各 item 自带 padding——刊头和应用中心像素对齐
@@ -210,8 +189,7 @@ fun SettingsScreen(
                 },
                 focusManager = focusManager,
                 keyboardController = keyboardController
-            )
-            .then(swipeUpToHome),
+            ),
         contentPadding = PaddingValues(0.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
