@@ -172,7 +172,7 @@ fun MainScreen() {
                 },
                 onStateChange = { goDock(it) },
                 onD3SwipeRight = { goDock(DockState.D2, fromD3SwipeRight = true) },
-                // v0.57.0：D3 上滑回主页——Dock 没隐藏时回记住的行数，隐藏时保持隐藏
+                // 离 D3 回记住的档（问七仔提交前先离 D3 用；D3 上滑手势已删，不再是手势回调）
                 onD3SwipeUpToHome = {
                     if (dockVisible) {
                         val remembered =
@@ -381,7 +381,6 @@ private fun HomeHost(
             state = dockState,
             onStateChange = onStateChange,
             onD3SwipeRight = onD3SwipeRight,
-            onD3SwipeUpToHome = onD3SwipeUpToHome,
             modifier = Modifier.graphicsLayer { alpha = dockAlpha },
             // v0.68.169（盲操扇形找回）：Dock bounds 改由单元回调上报——
             // 旧外层 modifier 的 onGloballyPositioned 挂在 fillMaxSize 根上，

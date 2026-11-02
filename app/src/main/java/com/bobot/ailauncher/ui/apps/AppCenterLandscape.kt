@@ -96,10 +96,9 @@ fun AppCenterLandscape(
     onLaunch: (AppInfo) -> Unit,
     onLongPress: (AppInfo) -> Unit,
     onOpenSettings: () -> Unit,
-    // v0.68.82（横屏专项第 1 项）：三套手势对齐竖屏
+    // v0.68.82（横屏专项第 1 项）：两套手势对齐竖屏（底部上滑已删）
     onPullDownToD2: () -> Unit,
     onHeaderSwipeRight: () -> Unit,
-    onBottomSwipeUp: () -> Unit,
     // F2 销账（线 C）：搜索契约与竖屏统一——同一 IntentCapsuleField 组件
     // （showClearButton 变体）、同一 TextFieldValue 状态层（composing 守卫 /
     // 120ms 防抖 / AppSearchIndex 过滤语义对横屏同样生效），本文件只保留
@@ -140,7 +139,6 @@ fun AppCenterLandscape(
     }
     val onPullDownToD2State = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
-    val onBottomSwipeUpState = rememberUpdatedState(onBottomSwipeUp)
     val rowState = rememberLazyListState()
     // 横屏挖孔留白（Bob 2026-10-24）：横屏下左侧是竖屏状态栏位置
     // （摄像头/刘海），此前内容顶到左边缘、第一列会被挖孔遮挡。
@@ -172,15 +170,6 @@ fun AppCenterLandscape(
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
-            // D-6：底部上滑回桌面观察者挂根容器（原 88dp 覆盖条已删，见文末注）；
-            // 起点让出右侧 57dp Rail 区，搜索态 Rail 隐藏时不让
-            .observeBottomSwipeUp(
-                rightExclusionPx = {
-                    // rail 右移后排除区同量右扩，保证排除区仍盖住整条 rail
-                    // （57dp 是原 rail 区宽度口径；无右侧挖孔时与此前一致）。
-                    if (searchResults == null) with(density) { (57.dp + cutoutRight).toPx() } else 0f
-                }
-            ) { onBottomSwipeUpState.value() }
     ) {
         val rowH = LandscapeRowH
         // v0.68.73：字母头占一个完整行位（rowH），与应用同高
@@ -691,10 +680,7 @@ fun AppCenterLandscape(
             }  // Box：右侧挖孔让位结束
             }  // Rail 隐藏门结束（搜索态 / 键盘弹出 / 主屏 picker 会话）
         }
-        // v0.68.82 的底部 88dp 透明手势条已于 D-6 删除（同竖屏：它盖住的
-        // 底部带内行点按永不成立，CI 二分实证摘条即恢复）；「底部上滑回
-        // 桌面」改由根容器的 observeBottomSwipeUp 观察者承担，起点右端让
-        // 57dp 给 Rail 的旧口径由 rightExclusionPx 保留（见根 BoxWithConstraints）。
+        // 应用中心底部上滑已删除（Bob 2026-11-03：避免操作干扰）。
     }
 }
 
