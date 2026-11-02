@@ -66,6 +66,8 @@ import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.listLaunchableApps
 import com.bobot.ailauncher.ui.apps.loadAppShortcuts
 import com.bobot.ailauncher.ui.apps.loadShortcutIcon
+import com.bobot.ailauncher.ui.settings.isDefaultLauncher
+import com.bobot.ailauncher.ui.settings.openHomeSettings
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -76,6 +78,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.AILauncherType
 
 /**
  * v0.65.2：快捷操作从 TODAY 卡片移到悬浮面板（旧面板已退役，见下）。
@@ -187,6 +190,7 @@ internal fun QuickActionAddFlow(
     var search by remember { mutableStateOf("") }
     var pickedApp by remember { mutableStateOf<AppInfo?>(null) }
     var shortcuts by remember { mutableStateOf<List<ShortcutInfo>?>(null) }
+    var shortcutReload by remember { mutableStateOf(0) }
     var pickedShortcut by remember { mutableStateOf<ShortcutInfo?>(null) } // null=打开主应用
     var label by remember { mutableStateOf("") }
 
@@ -296,8 +300,11 @@ internal fun QuickActionAddFlow(
                             color = AILauncherColors.current.Hint
                         )
                         Spacer(Modifier.height(8.dp))
-                        // 加载快捷方式
-                        LaunchedEffect(app?.packageName) {
+                        // 加载快捷方式（2026-11-02 盲操修复：系统只把应用的
+                        // 快捷方式给默认桌面；非默认桌面时 LauncherApps 查回
+                        // 来就是空的，旧代码直接留一片空白、让人以为选不到了。
+                        // 下面空列表时给原因和去设默认桌面的入口，不再留白）。
+                        LaunchedEffect(app?.packageName, shortcutReload) {
                             val pkg = app?.packageName ?: return@LaunchedEffect
                             shortcuts = withContext(Dispatchers.IO) {
                                 try {
@@ -340,6 +347,40 @@ internal fun QuickActionAddFlow(
                                         }
                                     )
                                 }
+                                if (list.isEmpty()) {
+                                    item(key = "no-shortcuts") {
+                                        Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                                            if (!isDefaultLauncher(context)) {
+                                                Text(
+                                                    text = "这个应用的快捷方式选不到，是因为系统只把快捷方式给默认桌面，AI 桌面现在还不是默认桌面。",
+                                                    fontSize = AILauncherType.Footnote.fontSize,
+                                                    color = AILauncherColors.current.Hint,
+                                                    lineHeight = 18.sp
+                                                )
+                                                Spacer(Modifier.height(4.dp))
+                                                Row {
+                                                    TextButton(onClick = { openHomeSettings(context) }) {
+                                                        Text("去设为默认桌面", color = AILauncherColors.current.Accent)
+                                                    }
+                                                    Spacer(Modifier.width(8.dp))
+                                                    TextButton(onClick = {
+                                                        shortcuts = null
+                                                        shortcutReload++
+                                                    }) {
+                                                        Text("已设好，重新加载")
+                                                    }
+                                                }
+                                            } else {
+                                                Text(
+                                                    text = "这个应用暂时没有可用的快捷方式，只能打开主应用。",
+                                                    fontSize = AILauncherType.Footnote.fontSize,
+                                                    color = AILauncherColors.current.Hint,
+                                                    lineHeight = 18.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                                 items(list, key = { it.id }) { sc ->
                                     ShortcutRow(
                                         icon = {
@@ -363,7 +404,7 @@ internal fun QuickActionAddFlow(
                             }
                         }
                         Spacer(Modifier.height(4.dp))
-                        TextButton(onClick = { step = 0 }) { Text("‹ 返回选应用", fontSize = 13.sp) }
+                        TextButton(onClick = { step = 0 }) { Text("‹ 返回选应用", fontSize = AILauncherType.Footnote.fontSize) }
                     }
                 }
                 else -> {
