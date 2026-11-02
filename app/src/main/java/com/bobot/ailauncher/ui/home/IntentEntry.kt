@@ -108,7 +108,6 @@ import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.listLaunchableApps
-import com.bobot.ailauncher.ui.apps.appendShoulderArch
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.DockLightParams
 import com.bobot.ailauncher.ui.glass.FlareShaderParams
@@ -134,16 +133,9 @@ private val RESULT_BAR_MAX_HEIGHT = 180.dp
 
 
 /**
- * 意图卡片肩线（输入态专注，2026-10-26 设计 §2）：弦 156.4dp、rise 18.0dp、
- * 压入 5dp——与 Dock B2+A 同一套语言，数值按设计定稿字面取，不从 Dock
- * 公式二次推导（156.4 × 18/156 = 18.05 ≈ 18.0，舍入差不可见）。
- * 2026-10-28 意图页设计评审第 1 轮 P1-9：18dp 浅肩峰托 86.4dp 宽的头
- * 接触弦显窄、视觉像贴纸，弦 156.4dp→175dp、rise 18.0dp→21.0dp
- * （报告区间弦 170～180dp、rise 20～22dp 内取中值），压入 5dp 不动，
- * 卡片顶缘圆肩一字不动。
+ * 意图卡片轮廓（2026-11-02，无宠物清理）：顶部就是普通 28dp 圆角，
+ * 不再有肩线拱；底部圆角外延（竖屏 24dp 高＋20dp 外扩、横屏无外延）保留。
  */
-private val INTENT_SHOULDER_CHORD = 175.dp
-private val INTENT_SHOULDER_RISE = 21.0.dp
 
 
 
@@ -187,22 +179,19 @@ internal fun intentHasResultContent(
 private val INTENT_FLARE_HEIGHT = 24.dp
 
 /**
- * 意图卡片轮廓（输入态专注·圆角外延，2026-10-26 Bob 点选）：
- * 顶缘 = Dock 肩线——直接复用 PullUpDock 的 [appendShoulderArch]（两段
- * cubicTo，k = 弦长/4，弦端与峰顶切线水平），不为意图卡片另写肩线；
+ * 意图卡片轮廓（输入态专注·圆角外延）：
+ * 顶部 = 普通 28dp 圆角（2026-11-02 起不再有肩线拱）；
  * 底部 = [flareDp] 高的外延区内两侧贝塞尔外扩 [flareExtentDp] 到全宽；
  * flareDp = 0 且 flareExtentDp = 0 时底边走纯圆角（横屏本批），不留
  * 退化贝塞尔凸起；
- * 全程单一 contour：拱与外延都在同一 Path 里续画，不 addPath、不另起
- * contour（351 对角线教训：addPath 另起 contour 会让 close() 从轮廓末点
- * 向拱起点拉对角线）。
+ * 全程单一 contour：外延在同一 Path 里续画，不 addPath、不另起
+ * contour。
  *
  * 局部坐标：原点在布局左上，y 向下；布局宽 = 卡片主体宽（竖屏 320dp、
  * 横屏封顶 520dp），主体两侧边在 x=0 / x=w；外延到底边时各向外扩
  * [flareExtentDp]（竖屏 20dp = 外边距，底边恰为屏宽；横屏同理外扩 20dp，
  * 底边 560dp 居中——横屏外扩到屏边须 140dp/side，曲线比例全毁，不取）。
- * 肩峰在 y=-rise 处（同 Dock：轮廓可超出布局上沿，布局高本身不动，
- * 外层 Box 不 clip，探出部分由宠物覆盖层空间容纳）；底边 y=h 全宽直线。
+ * 底边 y=h 全宽直线。
  *
  * 外延贝塞尔口径（设计附录，屏坐标左档 P0=(20,kb−24)→C1=(20,kb−10.8)→
  * C2=(11,kb)→P1=(0,kb)，右镜像；此处换算到布局坐标，主体左边缘为 x=0）：
@@ -210,11 +199,9 @@ private val INTENT_FLARE_HEIGHT = 24.dp
  * 右（自上而下画）：P0=(w,h−24)→C1=(w,h−10.8)→C2=(w+ext−11,h)→P1=(w+ext,h)。
  * 切线核对：外延上端控制点与主体侧边共线（竖直相切）、下端控制点与底边
  * 共线（水平相切），G1 连续无 kink；底角不再是 28dp 圆角——外延曲线本身
- * 就是底角处理（设计附录底边档口径；顶部两角仍走 Dock 同款 28dp 圆角）。
+ * 就是底角处理（设计附录底边档口径；顶部两角仍走 28dp 圆角）。
  */
 internal class IntentCardShape(
-    private val chordDp: Dp,
-    private val riseDp: Dp,
     private val cornerDp: Dp,
     private val flareDp: Dp,
     private val flareExtentDp: Dp,
@@ -224,8 +211,6 @@ internal class IntentCardShape(
         layoutDirection: LayoutDirection,
         density: Density,
     ): Outline {
-        val chord = with(density) { chordDp.toPx() }
-        val rise = with(density) { riseDp.toPx() }
         val corner = with(density) { cornerDp.toPx() }
         val flare = with(density) { flareDp.toPx() }
         val ext = with(density) { flareExtentDp.toPx() }
@@ -233,19 +218,10 @@ internal class IntentCardShape(
         val c2Run = with(density) { 11.dp.toPx() }
         val w = size.width
         val h = size.height
-        val cx = w / 2f
-        // 与 Dock 同款弦长钳制：窄布局下弦不超出圆角内侧。
-        val half = (chord / 2f).coerceAtMost((w / 2f - corner).coerceAtLeast(0f))
-        val x0 = cx - half
-        val x1 = cx + half
-        val k = half * 0.5f
         val yFlare = h - flare
         return Outline.Generic(Path().apply {
             moveTo(0f, corner)
             quadraticTo(0f, 0f, corner, 0f)
-            lineTo(x0, 0f)
-            // 单 contour 续画肩线拱（moveToStart=false，不另起 contour）。
-            appendShoulderArch(x0, x1, cx, k, rise, 0f, 0f, moveToStart = false)
             lineTo(w - corner, 0f)
             quadraticTo(w, 0f, w, corner)
             if (flare > 0f || ext > 0f) {
@@ -818,15 +794,13 @@ fun IntentEntry(
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
     // 横屏判定（卡片形状、外延 shader 共用同一值）。
     val isLandscapeCard = screenWidthDp > screenHeightDp
-    // 意图卡片轮廓（输入态专注·圆角外延）：顶缘复用 Dock 肩线、底部外延，
-    // 参数常量见文件头。横屏整体（本批）：横屏纯圆角 28dp、无外延
+    // 意图卡片轮廓（输入态专注·圆角外延）：顶部普通圆角、底部外延。
+    // 横屏整体（本批）：横屏纯圆角 28dp、无外延
     // （flare 0、extent 0——IntentCardShape 在 flare=0 时走真圆角底边，
     // 无外延残留、无退化贝塞尔凸起）；竖屏保留 24dp 外延＋20dp 外扩。
     // remember keyed on isLandscapeCard（横竖屏切换时形状重建）。
     val intentCardShape = remember(isLandscapeCard) {
         IntentCardShape(
-            chordDp = INTENT_SHOULDER_CHORD,
-            riseDp = INTENT_SHOULDER_RISE,
             cornerDp = 28.dp,
             flareDp = if (isLandscapeCard) 0.dp else INTENT_FLARE_HEIGHT,
             flareExtentDp = if (isLandscapeCard) 0.dp else 20.dp,
@@ -911,7 +885,7 @@ fun IntentEntry(
       )
       // ---- F 批·一体化面板：输入区（胶囊 + 推荐行）+ 结果槽位同处一面 ----
       // 样式与 Dock 卡片同一套（2026-10-25 意图卡片统一）：玻璃引擎 STRONG +
-      // 肩线＋圆角外延轮廓（IntentCardShape：顶缘复用 Dock 肩线、底部 24dp
+      // 圆角＋外延轮廓（IntentCardShape：顶部普通圆角、底部 24dp
       // 外延，2026-10-26 输入态专注定稿）+ v2 光影（dockLight）+ 无描边——与
       // Dock 面板逐项对齐（见回执对照表）。Dock 的按压显底（dockBgAlpha）是
       // 按压反馈、不是卡片静止样式，故不复制：意图面板 fallback 用 GlassCard 自然透明度、

@@ -23,10 +23,6 @@ class PetMotionTest {
         // 拖拽松手（359 值不动，约 20% 过冲、约 0.9s 落定）。
         assertEquals(0.45f, PetMotion.DragRelease.dampingRatio, 0f)
         assertEquals(90f, PetMotion.DragRelease.stiffness, 0f)
-        // 拖拽肩水平跟随（临界阻尼，约 90ms 达目标 63%；垂直方向已锁定，
-        // 不再用弹簧）。
-        assertEquals(1f, PetMotion.ShoulderLag.dampingRatio, 0f)
-        assertEquals(550f, PetMotion.ShoulderLag.stiffness, 0f)
         // 垫高滑动（临界阻尼、无过冲；接替原 tween 250／150）。
         assertEquals(1f, PetMotion.PadStandard.dampingRatio, 0f)
         assertEquals(Spring.StiffnessMedium, PetMotion.PadStandard.stiffness, 0f)
@@ -37,6 +33,11 @@ class PetMotionTest {
         assertEquals(Spring.StiffnessMediumLow, PetMotion.DockEnter.stiffness, 0f)
         assertEquals(0.9f, PetMotion.DockExit.dampingRatio, 0f)
         assertEquals(Spring.StiffnessMedium, PetMotion.DockExit.stiffness, 0f)
+        // Dock 档位快切（2026-11-02）：临界阻尼、刚度 1200、无拖尾。
+        assertEquals(1f, PetMotion.DockTierOffset.dampingRatio, 0f)
+        assertEquals(1200f, PetMotion.DockTierOffset.stiffness, 0f)
+        assertEquals(1f, PetMotion.DockTierSize.dampingRatio, 0f)
+        assertEquals(1200f, PetMotion.DockTierSize.stiffness, 0f)
     }
 
     @Test
