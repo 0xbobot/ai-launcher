@@ -145,7 +145,6 @@ fun PullUpDock(
     state: DockState,
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
-    onD3SwipeUpToHome: () -> Unit,
     onOpenSettings: () -> Unit,
     // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页并提交协调器（HomeHost 提供）
     onAskQizai: (String) -> Unit = {},
@@ -163,7 +162,6 @@ fun PullUpDock(
     val density = LocalDensity.current
     val onStateChangeState = rememberUpdatedState(onStateChange)
     val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
-    val onD3SwipeUpToHomeState = rememberUpdatedState(onD3SwipeUpToHome)
     val onAskQizaiState = rememberUpdatedState(onAskQizai)
     // v0.68.169：单元 bounds 回调最新态（DisposableEffect(Unit) 不重启，
     // 卸载时报 null 须调最新回调，不读首帧闭包）。
@@ -455,9 +453,9 @@ fun PullUpDock(
                             var accumY = 0f
                             var fired = false
                             var inSysGestureZone = false
-                            // 面板手势（2026-11-01，Bob 定）：Dock 内部上下滑换档——
-                            // 上滑：D1→D2、D2→D3（D3 时上滑回桌面主页）；下滑：D2→D1
-                            // （D1 下滑不再隐藏）；长按与左右滑逻辑全部删除。
+                            // 面板手势（2026-11-01，Bob 定；2026-11-03 删 D3 上滑回桌面）：
+                            // Dock 内部上下滑换档——上滑：D1→D2、D2→D3；下滑：D2→D1
+                            // （D1 下滑不再隐藏；D3 上滑不再回桌面）；长按与左右滑逻辑全部删除。
                             detectDragGestures(
                                 onDragStart = { start ->
                                     accumX = 0f
@@ -478,12 +476,11 @@ fun PullUpDock(
                                     val ax = abs(accumX)
                                     val ay = abs(accumY)
                                     val go = onStateChangeState.value
-                                    // 上滑 → 升一档：D1→D2、D2→D3；已在 D3 时上滑 → 回桌面主页
+                                    // 上滑 → 升一档：D1→D2、D2→D3（D3 上滑无动作）
                                     if (ay > vThreshPx && accumY < 0) {
                                         fired = true
-                                        if (state == DockState.D3) onD3SwipeUpToHomeState.value()
-                                        else if (state == DockState.D1) go(DockState.D2)
-                                        else go(DockState.D3)
+                                        if (state == DockState.D1) go(DockState.D2)
+                                        else if (state == DockState.D2) go(DockState.D3)
                                     } else if (ay > vThreshPx && ay > ax) {
                                         fired = true
                                         // 下滑 → 收一档（D1 下滑不再隐藏）
@@ -605,8 +602,6 @@ private fun FullAppsOverlay(
             onOpenSettings = onOpenSettings,
             onPullDownToD2 = { onStateChangeState.value(DockState.D2) },
             onHeaderSwipeRight = { onD3SwipeRightState.value() },
-            // v0.40.0：底部上滑 → 回桌面（与标题区右滑同义：回到记住的 Dock 档）
-            onBottomSwipeUp = { onD3SwipeRightState.value() },
             // R2 UI（10-21 新规格）：「问七仔」——回首页并提交协调器
             onAskQizai = onAskQizai,
             modifier = Modifier
