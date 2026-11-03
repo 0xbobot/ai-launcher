@@ -160,7 +160,7 @@ object AppSearchIndex {
         ensureKeywordsLoaded(context)
         val keywordPkgs = keywordPackagesFor(q, keywordPinyin)
         return rank(index, q, keywordPkgs) { pkg ->
-            AppUsageTracker.usageScore(context, pkg)
+            AppUsageTracker.usageScoreForSearch(context, pkg)
         }
     }
 

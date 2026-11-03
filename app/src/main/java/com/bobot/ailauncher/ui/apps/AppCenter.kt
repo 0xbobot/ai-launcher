@@ -71,6 +71,8 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.fragment.app.FragmentActivity
 import com.bobot.ailauncher.data.BiometricAuth
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.TextButton
@@ -86,6 +88,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -241,6 +244,19 @@ fun AppCenterContent(
     // 逐字一致：去自己/去隐藏 + Collator(CHINA) 排序）；装卸时快照在后台换代，
     // 结果到了才换表，组合期不再整表同步重建。
     val azApps = catalog?.visibleApps ?: emptyList()
+    // 智能 v3：一键隐藏候选——可见 = azApps（已去隐藏、去自己）；固定位
+    // （置顶集合）绝不计入；90 天未启动或从未启动。inactiveTick 由 launchApp
+    // 在真实启动时 +1，逼出重组（否则回应用中心时 N 不刷新）。
+    var inactiveTick by remember { mutableIntStateOf(0) }
+    val inactiveTargets = remember(azApps, dockTick, inactiveTick) {
+        val pinned = UiPrefs.getDockPinned(context).toSet()
+        val now = System.currentTimeMillis()
+        val ninetyDaysMs = 90L * 24 * 60 * 60 * 1000
+        azApps.filter { app ->
+            app.packageName !in pinned &&
+                AppUsageTracker.lastUsed(context, app.packageName).let { it == 0L || now - it > ninetyDaysMs }
+        }
+    }
     val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps) {
         val map = linkedMapOf<Char, MutableList<AppInfo>>()
         // 拼音首字母分组：用字典（20924 字），GB2312 区位码做兜底
@@ -510,6 +526,7 @@ fun AppCenterContent(
         focusManager.clearFocus()
         keyboardController?.hide()
         AppUsageTracker.recordLaunch(context, app.packageName)
+        inactiveTick++
         try {
             val intent = context.packageManager
                 .getLaunchIntentForPackage(app.packageName)
@@ -1178,9 +1195,13 @@ fun AppCenterContent(
                 // v0.41.18（Bob）：隐藏分组——主列表末尾，像 ABCD 分组一样；
                 // v0.41.20（Bob）：不显示"已隐藏"标题文字，只留幽灵图标。
                 // 未解锁显示锁定占位，解锁后应用可直接打开（不用先恢复）。
-                if (hiddenApps.isNotEmpty()) {
+                // 智能 v3：一键隐藏按钮与隐藏块并列——隐藏为空但 N>0 时也进门
+                // （即首次清理时可见）；锁门仍只看 hiddenApps（见下）。
+                if (hiddenApps.isNotEmpty() || inactiveTargets.isNotEmpty()) {
                     // v0.41.32（Bob）：幽灵眼与第一行同行，不单独占行
-                    if (!hiddenUnlocked) {
+                    // 智能 v3：隐藏为空时不画锁占位（否则 N>0 且无隐藏时会冒出
+                    // “点击解锁查看”）；锁占位只在确实有隐藏应用时出现。
+                    if (hiddenApps.isNotEmpty() && !hiddenUnlocked) {
                         // 锁定占位：点按触发面部/指纹
                         // v0.41.21（Bob）：锁定占位按应用行样式——40dp 圆角锁图标 + 15sp 文字，
                         // 与上方应用行视觉统一；点按整行触发面部/指纹解锁。
@@ -1308,6 +1329,54 @@ fun AppCenterContent(
                                     )
                                 }
                                 }
+                            }
+                        }
+                    }
+                    // 智能 v3：一键隐藏 90 天不活跃——隐藏列表之后；仅 N>0 时出现；
+                    // 点按时实时重算目标（防点按前刚启动过），用现有 HiddenApps.hide
+                    // 逐个隐藏；隐藏后版本 +1，列表刷新、N 归零，按钮随之消失。
+                    // 固定位绝不计入（显示与点按两次都按置顶集合排除）。
+                    if (inactiveTargets.isNotEmpty()) {
+                        item(key = "hide-inactive") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Button(
+                                    onClick = {
+                                        val pinned = UiPrefs.getDockPinned(context).toSet()
+                                        val hiddenNow = HiddenApps.getHidden(context)
+                                        val now = System.currentTimeMillis()
+                                        val ninetyDaysMs = 90L * 24 * 60 * 60 * 1000
+                                        azApps.filter { app ->
+                                            app.packageName !in pinned &&
+                                                app.packageName !in hiddenNow &&
+                                                AppUsageTracker.lastUsed(context, app.packageName).let { it == 0L || now - it > ninetyDaysMs }
+                                        }.forEach { HiddenApps.hide(context, it.packageName) }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AILauncherColors.current.Accent,
+                                        contentColor = Color.White
+                                    ),
+                                    shape = CircleShape,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(56.dp)
+                                ) {
+                                    Text(
+                                        text = "一键隐藏 90 天不活跃的应用（${inactiveTargets.size} 个）",
+                                        fontSize = AILauncherType.BodyLarge.fontSize,
+                                        color = Color.White
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "藏起来的应用随时可以在这里恢复",
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    color = AILauncherColors.current.Hint
+                                )
                             }
                         }
                     }
