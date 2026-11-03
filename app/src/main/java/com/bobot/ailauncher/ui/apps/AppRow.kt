@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -101,7 +102,10 @@ internal fun AppRow(
     // 名字中、ⓘ 右一致；不要单独加一行菜单）。点 ⓘ 走 onInfoClick
     // （系统应用信息页），不触发行点按；收起时 ⓘ 消失。
     showInfoIcon: Boolean = false,
-    onInfoClick: (() -> Unit)? = null
+    onInfoClick: (() -> Unit)? = null,
+    // Bob 2026-11-03 原型比例：行尾轻量箭头（原型同款）；展开态 ⓘ 占行尾时不显示，
+    // Dock 行传 false（拖动手柄位置不动，不与箭头重叠）
+    showChevron: Boolean = true
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -303,15 +307,15 @@ internal fun AppRow(
                         onLongClick = onLongClick
                     )
                     // v0.41.0（B 方案）：行距拉大——纵向 padding 12dp，图标 40dp，呼吸感
-                    // Bob 2026-11-03 密度规范：图标 56dp + 紧凑纵向 10dp（行高 76dp），行间距 4dp（步进 80dp）
-                    .padding(horizontal = 16.dp, vertical = if (compact) 10.dp else 16.dp),
+                    // Bob 2026-11-03 原型比例：图标 44dp + 紧凑纵向 4dp（行高 52dp），行间距 4dp（步进 56dp）
+                    .padding(horizontal = 16.dp, vertical = if (compact) 4.dp else 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AppIconImage(
                     drawable = app.icon,
                     contentDescription = app.label.toString(),
                     modifier = Modifier
-                        .size(56.dp)
+                        .size(44.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .graphicsLayer { alpha = contentAlpha }
                 )
@@ -322,8 +326,9 @@ internal fun AppRow(
                     color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    // 只在出 ⓘ 时占满剩余宽，把 ⓘ 顶到行尾；收起时布局一字不动
-                    modifier = if (showInfoIcon && onInfoClick != null) Modifier.weight(1f) else Modifier
+                    // ⓘ 或箭头在行尾时占满剩余宽，把行尾元素顶到行尾；
+                    // 两者必居其一（箭头 = 非展开态），故除 Dock 行外恒占满
+                    modifier = if (showInfoIcon && onInfoClick != null || showChevron) Modifier.weight(1f) else Modifier
                 )
                 // v0.68.180：展开态行尾 ⓘ（Dock 标题行同款位置与图标）。
                 // IconButton 自带 48dp 触控框；内层 clickable 消费点按，不触发行点按。
@@ -342,6 +347,20 @@ internal fun AppRow(
                                 .semantics { invisibleToUser() }
                         )
                     }
+                }
+                // Bob 2026-11-03 原型比例：行尾轻量箭头（原型同款）；展开态 ⓘ 占行尾时不显示，
+                // Dock 行传 showChevron=false（拖动手柄位置不动，不与箭头重叠）
+                if (showChevron) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(
+                        imageVector = Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = AILauncherColors.current.Hint,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .graphicsLayer { alpha = contentAlpha }
+                            .semantics { invisibleToUser() }
+                    )
                 }
             }
 

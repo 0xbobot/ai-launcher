@@ -982,6 +982,7 @@ fun AppCenterContent(
                                 app = app,
                                 onLaunch = { launchApp(app) },
                                 compact = true,
+                                showChevron = false,
                                 onLongClick = {
                                     hapticView.confirmHaptic()
                                     popupApp = app
@@ -1061,10 +1062,10 @@ fun AppCenterContent(
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dockDragOffsetY += dragAmount.y
-                                                // v0.55.2：步进 = 行 76dp + 4dp 间距 = 80dp
-                                                // （Bob 2026-11-03：密度规范；旧 64dp 是 56dp 紧凑行时代的数，已作废）
+                                                // v0.55.2：步进 = 行 52dp + 4dp 间距 = 56dp
+                                                // （Bob 2026-11-03：原型比例；旧 80dp 是 76dp 行时代的数，已作废）
                                                 val rowH = with(density) {
-                                                    80.dp.toPx()
+                                                    56.dp.toPx()
                                                 }
                                                 val curIdx = dockOrder.indexOfFirst {
                                                     it.packageName == app.packageName
@@ -1117,10 +1118,10 @@ fun AppCenterContent(
                                 Text(
                                     text = letter.toString(),
                                     fontFamily = FontFamily.Serif,
-                                    fontSize = 56.sp,
-                                    // Bob 2026-11-03：行高压缩后组首行仍 56dp——
-                                    // 幽灵字母行高收进 56dp，字形本身不裁（大写高约 0.7em）
-                                    lineHeight = 56.sp,
+                                    fontSize = 40.sp,
+                                    // Bob 2026-11-03 原型比例：幽灵字母收小（52dp 行内不撑高，
+                                    // 大写高约 0.7em，40sp 字形约 28dp）
+                                    lineHeight = 40.sp,
                                     // v0.68.44（Bob）：杂志章节感——放大加深
                                     color = AILauncherColors.current.Title.copy(alpha = 0.35f),
                                     modifier = Modifier
@@ -1359,7 +1360,7 @@ fun AppCenterContent(
                     Text(
                         text = sl.toString(),
                         fontFamily = FontFamily.Serif,
-                        fontSize = 56.sp,
+                        fontSize = 40.sp,
                         color = AILauncherColors.current.Title.copy(alpha = 0.35f),
                         modifier = Modifier
                             .align(Alignment.TopStart)

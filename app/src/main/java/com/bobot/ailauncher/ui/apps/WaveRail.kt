@@ -217,13 +217,16 @@ internal fun WaveRail(
     ) {
         val hPx = constraints.maxHeight.toFloat()
         if (hPx <= 0f || items.isEmpty()) return@BoxWithConstraints
-        // Bob 2026-11-03：字母少时 rail 不拉满——行高封顶 32dp，整列居中收紧；
+        // Bob 2026-11-03：字母少时 rail 不拉满——行高封顶 32dp，整列靠上收紧；
         // 字母多时行高低于封顶，仍按原比例铺满（不变）。仅可见 rail 封顶，
-        // 左侧隐形触发区保持原几何（触摸映射不受影响）。
+        // 左侧隐形触发区行高仍不封顶，但顶边与可见 rail 一致（触摸映射对齐）。
         val maxRowHpx = with(density) { 32.dp.toPx() }
         val rawRailHpx = hPx * railFraction
         val railHpx = if (visible) minOf(rawRailHpx, items.size * maxRowHpx) else rawRailHpx
-        val railTopPx = (hPx - railHpx) / 2f
+        // Bob 2026-11-03：rail 字母靠上对齐，不再居中——字母少时居中悬空很奇怪；
+        // 容器顶边即列表顶边（竖屏父 Box 在刊头下方、横屏右列与左侧顶栏无重叠），
+        // 触摸映射、房子/眼睛拉拽、气泡 Y 全跟 railTopPx 走，自动对齐。
+        val railTopPx = 0f
         val rowHpx = railHpx / items.size
         // 应用中心升级（Bob 2026-10-24 定稿）：波浪降推挤——内鼓 36→24dp、
         // 避让 56→40dp；气泡内移 128→96dp，少压应用名
@@ -371,11 +374,11 @@ internal fun WaveRail(
                 }
         )
 
-        // 字母列：紧凑居中，常显（visible=false 的隐形触发区不绘制）
+        // 字母列：紧凑靠上，常显（visible=false 的隐形触发区不绘制）
         if (visible) {
         Column(
             modifier = Modifier
-                .align(Alignment.Center)
+                .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .fillMaxHeight(railHpx / hPx),
             horizontalAlignment = Alignment.CenterHorizontally
