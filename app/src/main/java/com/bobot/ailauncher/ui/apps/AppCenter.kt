@@ -978,7 +978,6 @@ fun AppCenterContent(
                                 app = app,
                                 onLaunch = { launchApp(app) },
                                 compact = true,
-                                showChevron = false,
                                 onLongClick = {
                                     hapticView.confirmHaptic()
                                     popupApp = app
