@@ -86,6 +86,9 @@ import kotlinx.coroutines.launch
 fun AppCenterLandscape(
     azGroups: List<Pair<Char, List<AppInfo>>>,
     letters: List<Char>,
+    // Bob 2026-11-03：搜索态字母锚点（竖屏 letterAnchors，搜索态即扁平结果首现行；
+    // 仅搜索态下使用，非搜索态走 letterToCol）
+    searchLetterIndex: Map<Char, Int> = emptyMap(),
     totalCount: Int,
     favApps: List<AppInfo> = emptyList(),
     hiddenApps: List<AppInfo> = emptyList(),
@@ -123,10 +126,6 @@ fun AppCenterLandscape(
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
-    // 应用中心升级：键盘可见检测——横屏键盘弹出专用布局的开关
-    // （隐藏 rail 与款数、搜索结果行切紧凑、composing 降透明度）
-    // ime 是 WindowInsets.Companion 的扩展属性，须单独导入（同 HomeScreen）
-    val imeVisible = WindowInsets.ime.getBottom(density) > 0
     // 应用中心升级：问七仔行 500ms 节流（同竖屏）
     var lastAskMs by remember { mutableStateOf(0L) }
     fun throttledAsk(q: String) {
@@ -138,6 +137,8 @@ fun AppCenterLandscape(
     val onPullDownToD2State = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val rowState = rememberLazyListState()
+    // Bob 2026-11-03：搜索态 rail 落点用——扁平结果列自有状态（与列流 rowState 分开）
+    val searchListState = rememberLazyListState()
     // 横屏挖孔留白（Bob 2026-10-24）：横屏下左侧是竖屏状态栏位置
     // （摄像头/刘海），此前内容顶到左边缘、第一列会被挖孔遮挡。
     // 取系统 displayCutout inset，不写死数值；无挖孔的设备/模拟器上
@@ -303,9 +304,8 @@ fun AppCenterLandscape(
                 ) {
                     // v0.68.82（横屏专项第 1 项）：顶栏左半右滑 → D2（记住档，阈值沿用竖屏 48dp）
                     // 只包款数：避开中间搜索框与右侧齿轮
-                    // 应用中心升级：键盘弹出时款数隐藏（胶囊与齿轮保留）；
+                    // Bob 2026-11-03：编辑态不再隐藏款数（胶囊与齿轮保留）；
                     // 款数 Hint 色细体（同竖屏刊头口径）
-                    if (!imeVisible) {
                     Row(
                         modifier = Modifier.pointerInput(Unit) {
                             var accumX = 0f
@@ -333,7 +333,6 @@ fun AppCenterLandscape(
                             color = AILauncherColors.current.Hint
                         )
                     }
-                    }
                     Spacer(modifier = Modifier.weight(1f))
                     // F2：与竖屏同一 IntentCapsuleField（占位/✕ 清空/焦点
                     // 礼仪全部同组件同口径；胶囊无提交钮，Bob 2026-11-03 与竖屏同批删）
@@ -346,6 +345,7 @@ fun AppCenterLandscape(
                         // 应用中心变体（同竖屏）：✕ 一键清空、清空后列流恢复全量
                         showClearButton = true,
                         showSubmitButton = false,
+                        fusedBackground = true,
                         onFocusChanged = onSearchFocusChanged,
                         modifier = Modifier
                             .weight(1f)
@@ -410,6 +410,7 @@ fun AppCenterLandscape(
                 if (results != null) {
                     // v0.68.82（横屏专项第 2 项）：搜索态——单列结果列表（行样式复用）
                     LazyColumn(
+                        state = searchListState,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
@@ -440,10 +441,10 @@ fun AppCenterLandscape(
                             // LazyListScope.items 重载解析总偏向 count:Int 版，改用 forEach+item 避开
                             results.forEach { app ->
                                 item(key = "s:${app.packageName}") {
-                                    // 应用中心升级：键盘弹出时搜索结果行切紧凑
+                                    // Bob 2026-11-03：编辑态不再切紧凑行距
                                     LandscapeAppRow(
                                         app = app, onLaunch = onLaunch,
-                                        compact = imeVisible
+                                        compact = false
                                     )
                                 }
                             }
@@ -562,13 +563,12 @@ fun AppCenterLandscape(
                     .width(1.dp)
                     .background(AILauncherColors.current.Divider)
             )
-            // v0.68.74（Bob）：右：波浪字母导航（复用竖屏 WaveRail，完整 A-Z）
+            // v0.68.74（Bob）：右：波浪字母导航（复用竖屏 WaveRail，字母跟当前列表走）
             // v0.68.75（Bob）：加回收藏★和隐藏👁，核心功能不能丢
-            // v0.68.82（横屏专项第 2 项）：搜索态隐藏 Rail（定位无意义，同竖屏）
-            // 应用中心升级：键盘弹出时同样隐藏 Rail
+            // Bob 2026-11-03：编辑态不再隐藏 Rail（搜索态下字母跟过滤结果走）
             // 横屏首页修：主屏 picker 会话中隐藏自己的 rail（同竖屏 homeTarget==null 门，
             // 否则进场手势未松手时首页 picker rail 与本 rail 同时在场）
-            if (searchResults == null && !imeVisible && homeTarget == null) {
+            if (homeTarget == null) {
             // 右侧挖孔：rail 整块左让 cutoutRight（无右侧挖孔时为 0，
             // 布局不变）；不要只修左不修右。
             Box(
@@ -580,15 +580,20 @@ fun AppCenterLandscape(
                 // 字母导航完全统一（Bob 2026-10-25 追问）：项目表走三处共用的
                 // buildRailItems（RailItems.kt），构造与此前逐字一致，仅换调用；
                 // letters 即调用点按 azGroups 派生的有应用字母集（与竖屏同源）。
-                items = remember(favApps, hiddenApps, letters) {
-                    buildRailItems(favApps.isNotEmpty(), letters, hiddenApps.isNotEmpty())
+                // Bob 2026-11-03：搜索态下隐藏分区不在结果里，👁 不出现
+                items = remember(favApps, hiddenApps, letters, searchResults) {
+                    buildRailItems(favApps.isNotEmpty(), letters, searchResults == null && hiddenApps.isNotEmpty())
                 },
                 onActiveItem = { item ->
                     when (item) {
                         // 竖屏同口径：点房子本身不跳转，回首页走上拉手势。
                         is RailItem.House -> {}
                         is RailItem.Star -> {
-                            scope.launch { rowState.animateScrollToItem(favColIdx) }
+                            if (searchResults != null) {
+                                scope.launch { searchListState.scrollToItem(0) }
+                            } else {
+                                scope.launch { rowState.animateScrollToItem(favColIdx) }
+                            }
                         }
                         // 横屏隐藏补齐（竖屏同款）：未解锁时点 👁触发生物
                         // 识别解锁；解锁后点 👁滚到隐藏列。
@@ -602,16 +607,25 @@ fun AppCenterLandscape(
                             }
                         }
                         is RailItem.Letter -> {
-                            // 找该字母或之后最近有应用的字母（过滤后一般直
-                            // 中，兜底保留作保险）
-                            var c = item.char
-                            while (c <= 'Z' && !letterToCol.containsKey(c)) c++
-                            if (c <= 'Z') scrollToLetter(c)
-                            else {
-                                // 往前找
-                                c = item.char
-                                while (c >= 'A' && !letterToCol.containsKey(c)) c--
-                                if (c >= 'A') scrollToLetter(c)
+                            // Bob 2026-11-03：搜索态下 rail 字母即结果字母，
+                            // 直接落到扁平结果里该字母首现行
+                            if (searchResults != null) {
+                                var c = item.char
+                                var idx = searchLetterIndex[c]
+                                while (idx == null && c <= 'Z') { c++; idx = searchLetterIndex[c] }
+                                idx?.let { scope.launch { searchListState.scrollToItem(it) } }
+                            } else {
+                                // 找该字母或之后最近有应用的字母（过滤后一般直
+                                // 中，兜底保留作保险）
+                                var c = item.char
+                                while (c <= 'Z' && !letterToCol.containsKey(c)) c++
+                                if (c <= 'Z') scrollToLetter(c)
+                                else {
+                                    // 往前找
+                                    c = item.char
+                                    while (c >= 'A' && !letterToCol.containsKey(c)) c--
+                                    if (c >= 'A') scrollToLetter(c)
+                                }
                             }
                         }
                         else -> {}
