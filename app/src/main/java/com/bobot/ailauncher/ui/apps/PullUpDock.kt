@@ -108,6 +108,18 @@ import kotlin.math.abs
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.ui.island.IslandToasts
 
@@ -139,7 +151,7 @@ enum class DockState { Hidden, D1, D2, D3 }
  * 宠物一并删除，不再为面板顶缘留任何拱形或拱光影。
  */
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PullUpDock(
     state: DockState,
@@ -178,12 +190,16 @@ fun PullUpDock(
         catalog?.apps?.filter { it.packageName != context.packageName } ?: emptyList()
     }
     var usageTick by remember { mutableIntStateOf(0) }
+    // 智能 v3：idea 图标点按先刷新排序（whyTick 进 top10 的 key，点按时
+    // Dock 按当前钟点重算一次），再开说明页——说明的原因与显示的顺序同源。
+    var whyTick by remember { mutableIntStateOf(0) }
+    var showWhySheet by remember { mutableStateOf(false) }
     // v0.20：智能排序开关（设置页可关）；key 里带上开关值，切换后返回即生效
     val smartSort = UiPrefs.getDockSmartSort(context)
     // v0.35.0：用户置顶——排最前（按用户自定义顺序），后面用智能排序补齐并去重
     val dockTick by UiPrefs.dockTick.collectAsState()
     val pinnedPkgs = remember(dockTick) { UiPrefs.getDockPinned(context) }
-    val top10 = remember(allApps, usageTick, smartSort, dockTick) {
+    val top10 = remember(allApps, usageTick, smartSort, dockTick, whyTick) {
         val pinned = pinnedPkgs.mapNotNull { pkg -> allApps.find { it.packageName == pkg } }
         val rest = AppUsageTracker.topApps(
             context,
@@ -543,6 +559,25 @@ fun PullUpDock(
                         }
                     }
                 }
+                // 智能 v3：Dock idea 图标——面板右上角贴角（48dp 触控框、
+                // 22dp 线性灯泡字形、Hint 安静灰；金色只留主操作）。
+                // 面板内容区顶部留白：D1 图标顶缘在面板顶下 48dp、D2 在
+                // 52dp 下，按钮 0-48dp 只占留白与内边距，不盖字形、
+                // 不参与行布局、不挤压应用图标；点按先刷新排序再开说明页。
+                IconButton(
+                    onClick = {
+                        whyTick++
+                        showWhySheet = true
+                    },
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Lightbulb,
+                        contentDescription = "为什么是这几个应用",
+                        tint = AILauncherColors.current.Hint,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
                 } // 外层 Box（面板）
             }
         }
@@ -567,6 +602,97 @@ fun PullUpDock(
                 onOpenSettings = onOpenSettings,
                 onAskQizai = onAskQizaiState.value
             )
+        }
+
+        // 智能 v3：Dock 说明页——按当前 Dock 显示顺序（固定位＋智能位）
+        // 列出 top10，每行只展示原因（不可点）；下滑/返回关闭，无额外按钮。
+        // 原因与 Dock 排序同源（点图标时已按当前钟点刷新过一次）。
+        if (showWhySheet) {
+            val (sheetDow, sheetHour) = AppUsageTracker.currentDowHour()
+            val (sheetPrevPkg, sheetPrevTime) = AppUsageTracker.prevLaunch(context)
+            val sheetPrevRecent = sheetPrevPkg.isNotEmpty() &&
+                System.currentTimeMillis() - sheetPrevTime <= 10 * 60 * 1000
+            val sheetPrevLabel = if (sheetPrevRecent) {
+                allApps.find { it.packageName == sheetPrevPkg }?.label?.toString()
+            } else null
+            ModalBottomSheet(
+                onDismissRequest = { showWhySheet = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = AILauncherColors.current.Card,
+                dragHandle = { BottomSheetDefaults.DragHandle() }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp)
+                ) {
+                    Text(
+                        text = "为什么是这几个应用",
+                        fontSize = AILauncherType.BodyLarge.fontSize,
+                        fontWeight = FontWeight.Bold,
+                        color = AILauncherColors.current.Title,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                    top10.forEach { app ->
+                        val reason = when {
+                            app.packageName in pinnedPkgs -> "你固定在 Dock 上"
+                            AppUsageTracker.hwCount(context, app.packageName, sheetDow, sheetHour) >= 3 -> {
+                                val weekday = when (sheetDow) {
+                                    6 -> "周六"
+                                    7 -> "周日"
+                                    else -> "工作日"
+                                }
+                                val period = when (sheetHour) {
+                                    in 0..5 -> "夜里"
+                                    in 6..11 -> "早上"
+                                    in 12..13 -> "中午"
+                                    in 14..17 -> "下午"
+                                    else -> "晚上"
+                                }
+                                "$weekday$period $sheetHour 点常开"
+                            }
+                            sheetPrevLabel != null &&
+                                AppUsageTracker.transferCount(context, sheetPrevPkg, app.packageName) >= 3 ->
+                                "打开 $sheetPrevLabel 后常接着开"
+                            AppUsageTracker.totalCount(context, app.packageName) > 0 -> "经常用"
+                            else -> "热门应用（暂无你的使用记录）"
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AppIconImage(
+                                drawable = app.icon,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = app.label.toString(),
+                                    fontSize = AILauncherType.BodyLarge.fontSize,
+                                    color = AILauncherColors.current.Title,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = reason,
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    color = AILauncherColors.current.Hint,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
