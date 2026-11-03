@@ -655,7 +655,7 @@ fun AppCenterContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 24.dp, end = 16.dp, top = 16.dp)
+                    .padding(start = 24.dp, end = 16.dp, top = 8.dp)
             ) {
                 Text(
                     text = "全部应用",
@@ -681,7 +681,7 @@ fun AppCenterContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 24.dp, end = 16.dp, top = 16.dp)
+                    .padding(start = 24.dp, end = 16.dp, top = 8.dp)
                     .pointerInput(Unit) {
                         // 顶栏右滑 → 回到记住的 Dock 行数（手势签名：右滑=更少）
                         var accumX = 0f
@@ -747,7 +747,7 @@ fun AppCenterContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 24.dp, end = 16.dp, top = 8.dp)
+                        .padding(start = 24.dp, end = 16.dp, top = 4.dp)
                         .clickable { throttledAsk(query.trim()) }
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -772,7 +772,7 @@ fun AppCenterContent(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             }  // if (!isLandscapeAc) 搜索区结束（v0.68.72 新增，R2 改同组件）
         }  // Header Column 闭合
 
@@ -837,7 +837,7 @@ fun AppCenterContent(
                 // v0.41.7：列表不再统一 padding（之前字母头用负 offset 伸进左留白，
                 // 在某些行渲染异常）；改为每项各自加正向 padding——应用行保持
                 // 72dp 左缩进 + 64dp 右缩进（左隐形触发区/右 rail 避让），字母头占满宽
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 // v0.40.0：底部留出手势条高度，避免末行被手势条盖住
                 contentPadding = PaddingValues(bottom = 96.dp)
             ) {
@@ -927,7 +927,7 @@ fun AppCenterContent(
                             }
                         }
                     }
-                    item { Spacer(modifier = Modifier.height(24.dp)) }
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
                 } else {
                 // v0.25.7：去掉"全部应用"标题（Bob）
                 // v0.41.31（Bob）：Dock 分区——A 之前，像隐藏分区一样；
@@ -1061,10 +1061,10 @@ fun AppCenterContent(
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dockDragOffsetY += dragAmount.y
-                                                // v0.55.2：步进 = 紧凑行 56dp + 8dp 间距 = 64dp
-                                                // （Bob 2026-11-03：行距压缩同步；旧 66dp 是 2dp 间距时代的数，已作废）
+                                                // v0.55.2：步进 = 行 76dp + 4dp 间距 = 80dp
+                                                // （Bob 2026-11-03：密度规范；旧 64dp 是 56dp 紧凑行时代的数，已作废）
                                                 val rowH = with(density) {
-                                                    64.dp.toPx()
+                                                    80.dp.toPx()
                                                 }
                                                 val curIdx = dockOrder.indexOfFirst {
                                                     it.packageName == app.packageName
@@ -1085,7 +1085,7 @@ fun AppCenterContent(
                             )
                         }
                     }
-                    item(key = "sp:dock") { Spacer(modifier = Modifier.height(24.dp)) }
+                    item(key = "sp:dock") { Spacer(modifier = Modifier.height(16.dp)) }
                 }
                 // A-Z 列表（v0.41.0 B 方案）
                 // v0.41.8：每组 = 应用行 + 组间间距（字母不再独占一行，Bob）。
@@ -1177,7 +1177,7 @@ fun AppCenterContent(
                         }
                         }
                     }
-                    item(key = "sp:$letter") { Spacer(modifier = Modifier.height(24.dp)) }
+                    item(key = "sp:$letter") { Spacer(modifier = Modifier.height(16.dp)) }
                 }
                 // v0.41.18（Bob）：隐藏分组——主列表末尾，像 ABCD 分组一样；
                 // v0.41.20（Bob）：不显示"已隐藏"标题文字，只留幽灵图标。
@@ -1315,9 +1315,9 @@ fun AppCenterContent(
                             }
                         }
                     }
-                    item(key = "sp:hidden") { Spacer(modifier = Modifier.height(24.dp)) }
+                    item(key = "sp:hidden") { Spacer(modifier = Modifier.height(16.dp)) }
                 }
-                item { Spacer(modifier = Modifier.height(24.dp)) }
+                item { Spacer(modifier = Modifier.height(16.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
             // v0.41.8：悬停幽灵字母——只在当前组首行滚出顶部后显示，下一组首行
