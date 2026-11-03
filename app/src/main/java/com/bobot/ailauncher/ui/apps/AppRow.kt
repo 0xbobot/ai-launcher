@@ -350,7 +350,7 @@ internal fun AppRow(
                 }
                 // Bob 2026-11-03 原型比例：行尾轻量箭头（原型同款）；展开态 ⓘ 占行尾时不显示，
                 // Dock 行传 showChevron=false（拖动手柄位置不动，不与箭头重叠）
-                if (showChevron) {
+                if (showChevron && !(showInfoIcon && onInfoClick != null)) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Icon(
                         imageVector = Icons.Filled.ChevronRight,
