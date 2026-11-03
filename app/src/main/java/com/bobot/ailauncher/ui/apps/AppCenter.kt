@@ -731,12 +731,22 @@ fun AppCenterContent(
                     // 体检批D ⑥：冒烟语义定位锚点（应用中心设置齿轮）
                     modifier = Modifier.testTag("appcenter_settings")
                 ) {
-                    Icon(
-                        Icons.Filled.Settings,
-                        contentDescription = "设置",
-                        tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
-                        modifier = Modifier.size(20.dp)
-                    )
+                    // Bob 2026-11-03 原型样式：齿轮坐浅色圆盘（原型同款）；
+                    // 触控框仍是 IconButton 48dp，圆盘 40dp 只改视觉
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(AILauncherColors.current.Title.copy(alpha = 0.08f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.Settings,
+                            contentDescription = "设置",
+                            tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
             // R2 UI（10-21 新规格）：「问七仔」行——有输入时出现，整句交给助手理解（回首页提交协调器）
@@ -1062,10 +1072,10 @@ fun AppCenterContent(
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dockDragOffsetY += dragAmount.y
-                                                // v0.55.2：步进 = 行 52dp + 4dp 间距 = 56dp
-                                                // （Bob 2026-11-03：原型比例；旧 80dp 是 76dp 行时代的数，已作废）
+                                                // v0.55.2：步进 = 行 60dp + 4dp 间距 = 64dp
+                                                // （Bob 2026-11-03：一屏 8 个；旧 56dp 是 52dp 行时代的数，已作废）
                                                 val rowH = with(density) {
-                                                    56.dp.toPx()
+                                                    64.dp.toPx()
                                                 }
                                                 val curIdx = dockOrder.indexOfFirst {
                                                     it.packageName == app.packageName
@@ -1378,7 +1388,9 @@ fun AppCenterContent(
             // 左边不摆 rail（摆两个很奇怪），但左侧滑动同样触发字母切换，
             // 触发后是右侧 rail 亮起波浪跟随；应用列表左侧缩进给手指留空间。
             // v0.67.11（Bob）：主屏 picker 会话中隐藏自己的 rail，避免与 picker 重叠
-            if (letters.isNotEmpty() && homeTarget == null) {
+            // Bob 2026-11-03：搜索后隐藏字母导航——可见 rail 与左侧隐形触发区
+            // 同在此门内，一并隐藏；搜索结束恢复全量字母
+            if (letters.isNotEmpty() && homeTarget == null && searchResults == null) {
                 // 左侧隐形区触发时，右侧可见 rail 跟随显示波浪
                 var mirrorIndex by remember { mutableStateOf<Int?>(null) }
                 // Niagara 做法：直接滚完整列表，不做内容过滤；松手时列表本来就在位置上，零位移

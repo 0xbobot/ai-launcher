@@ -3,6 +3,7 @@
 package com.bobot.ailauncher.ui.apps
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -361,12 +362,22 @@ fun AppCenterLandscape(
                         onClick = onOpenSettings,
                         modifier = Modifier.testTag("appcenter_settings")
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = "设置",
-                            tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
-                            modifier = Modifier.size(20.dp)
-                        )
+                        // Bob 2026-11-03 原型样式：齿轮坐浅色圆盘（原型同款）；
+                        // 触控框仍是 IconButton 48dp，圆盘 40dp 只改视觉
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(AILauncherColors.current.Title.copy(alpha = 0.08f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Settings,
+                                contentDescription = "设置",
+                                tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
                 // F2：「问七仔」行与竖屏同契约同结构（跟随原始文本即时出现、
@@ -569,7 +580,8 @@ fun AppCenterLandscape(
             // Bob 2026-11-03：编辑态不再隐藏 Rail（搜索态下字母跟过滤结果走）
             // 横屏首页修：主屏 picker 会话中隐藏自己的 rail（同竖屏 homeTarget==null 门，
             // 否则进场手势未松手时首页 picker rail 与本 rail 同时在场）
-            if (homeTarget == null) {
+            // Bob 2026-11-03：搜索后隐藏字母导航（同竖屏门）
+            if (homeTarget == null && searchResults == null) {
             // 右侧挖孔：rail 整块左让 cutoutRight（无右侧挖孔时为 0，
             // 布局不变）；不要只修左不修右。
             Box(

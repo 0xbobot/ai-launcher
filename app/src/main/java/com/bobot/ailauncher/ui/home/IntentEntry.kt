@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -85,6 +86,7 @@ import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.PlatformTextStyle
@@ -279,8 +281,8 @@ fun IntentCapsuleField(
     // 应用中心变体不画提交钮（Bob 2026-11-03：箭头仅收键盘、无实际功能，
     // 随首页意图入口一并删；首页默认 true 不变）
     showSubmitButton: Boolean = true,
-    // 应用中心融合变体（Bob 2026-11-03）：胶囊与页面同底色 + 细线描边、无阴影；
-    // 只改表面，尺寸/内边距/交互不动；首页默认 false 不变
+    // 应用中心变体（Bob 2026-11-03 原型样式，取代 409 融合）：Card 白 pill +
+    // 8dp 阴影、无描边，框内放大镜；主题 Card 色随深浅档走；首页默认 false 不变
     fusedBackground: Boolean = false,
     // R3-C：焦点变化回调（首页用来驱动胶囊焦点状态；应用中心不传，保持纯过滤）
     onFocusChanged: (Boolean) -> Unit = {},
@@ -320,26 +322,27 @@ fun IntentCapsuleField(
             // F 批：几何网锚点（整胶囊 bounds——layout_check 的坐沿/包含
             // 断言以它为准，不拿 intent_input 的文本区凑数）
             .testTag("intent_capsule")
-            // R3-A：最小高度策略——fontScale 放大时允许胶囊长高，不定死 56dp 裁字；
-            // 内容最高项是提交钮触控外框 48dp（R3-C），< 56dp 下限，外观仍是原规格 56dp
-            .heightIn(min = 56.dp)
+            // R3-A：最小高度策略——fontScale 放大时允许胶囊长高，不定死裁字；
+            // 内容最高项是提交钮触控外框 48dp（R3-C），< 下限，外观仍是原规格；
+            // 应用中心变体（Bob 2026-11-03 原型样式）：下限 50dp（原型胶囊高），
+            // 仍 ≥48dp 触控，首页 56dp 不变
+            .heightIn(min = if (fusedBackground) 50.dp else 56.dp)
             // 2026-10-28 意图页设计评审第 1 轮 P2-1：面板语境（solidBackground）
-            // 下删 8dp 阴影（玻璃面板内多一层脏边）；应用中心变体（实心底）
-            // 保留原阴影，一字不动。
+            // 下删 8dp 阴影（玻璃面板内多一层脏边）；应用中心变体（原型样式）
+            // 恢复 8dp 阴影（原型白 pill 同款），首页变体一字不动。
             .then(
-                if (fusedBackground || solidBackground) Modifier
+                if (solidBackground) Modifier
                 else Modifier.shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             )
             .clip(RoundedCornerShape(28.dp))
             .then(
                 if (fusedBackground) {
-                    // 应用中心融合变体（Bob 2026-11-03）：与页面同底色 + 细线描边、
-                    // 无阴影；只改表面，尺寸/内边距/交互不动
+                    // 应用中心变体（Bob 2026-11-03 原型样式，取代 409 融合）：
+                    // Card 白 pill、无描边；主题 Card 色随深浅档走，深色下仍是
+                    // pill 与底色的明度差；只改表面，交互不动
                     Modifier.background(
-                        AILauncherColors.current.Background,
+                        AILauncherColors.current.Card,
                         RoundedCornerShape(28.dp)
-                    ).border(
-                        1.dp, AILauncherColors.current.Divider, RoundedCornerShape(28.dp)
                     )
                 } else if (solidBackground) {
                     // 首页变体（2026-10-27 设计精致化 P1-3：弱化玻璃套玻璃）：
@@ -362,9 +365,24 @@ fun IntentCapsuleField(
             .clickable { focusRequester.requestFocus() }
             // 去 AI 味（2026-10-31）：星标图标已删；start padding 18→46dp（原 18dp 内边＋18dp 图标＋10dp 间隙），
             // 胶囊文字左缘仍落在 386 轴线（内容左缘＋46dp）上，不左移。
-            .padding(start = 48.dp, end = 16.dp),
+            // 应用中心变体（Bob 2026-11-03 原型样式）：start 回 18dp，框内放大镜
+            // 20dp＋间隙 10dp 补回 48dp，文字轴线一字不动。
+            .padding(start = if (fusedBackground) 18.dp else 48.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 应用中心变体（Bob 2026-11-03 原型样式）：框内放大镜（装饰语义，
+        // 不进无障碍树；输入框用途由占位文案表达）
+        if (fusedBackground) {
+            Icon(
+                imageVector = Icons.Filled.Search,
+                contentDescription = null,
+                tint = AILauncherColors.current.Hint,
+                modifier = Modifier
+                    .size(20.dp)
+                    .semantics { invisibleToUser() }
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+        }
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
