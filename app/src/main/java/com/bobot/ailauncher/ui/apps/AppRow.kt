@@ -34,7 +34,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -103,9 +102,6 @@ internal fun AppRow(
     // （系统应用信息页），不触发行点按；收起时 ⓘ 消失。
     showInfoIcon: Boolean = false,
     onInfoClick: (() -> Unit)? = null,
-    // Bob 2026-11-03 原型比例：行尾轻量箭头（原型同款）；展开态 ⓘ 占行尾时不显示，
-    // Dock 行传 false（拖动手柄位置不动，不与箭头重叠）
-    showChevron: Boolean = true
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -326,9 +322,8 @@ internal fun AppRow(
                     color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    // ⓘ 或箭头在行尾时占满剩余宽，把行尾元素顶到行尾；
-                    // 两者必居其一（箭头 = 非展开态），故除 Dock 行外恒占满
-                    modifier = if (showInfoIcon && onInfoClick != null || showChevron) Modifier.weight(1f) else Modifier
+                    // ⓘ 在行尾时占满剩余宽，把行尾元素顶到行尾
+                    modifier = if (showInfoIcon && onInfoClick != null) Modifier.weight(1f) else Modifier
                 )
                 // v0.68.180：展开态行尾 ⓘ（Dock 标题行同款位置与图标）。
                 // IconButton 自带 48dp 触控框；内层 clickable 消费点按，不触发行点按。
@@ -348,20 +343,8 @@ internal fun AppRow(
                         )
                     }
                 }
-                // Bob 2026-11-03 原型比例：行尾轻量箭头（原型同款）；展开态 ⓘ 占行尾时不显示，
-                // Dock 行传 showChevron=false（拖动手柄位置不动，不与箭头重叠）
-                if (showChevron && !(showInfoIcon && onInfoClick != null)) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(
-                        imageVector = Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = AILauncherColors.current.Hint,
-                        modifier = Modifier
-                            .size(20.dp)
-                            .graphicsLayer { alpha = contentAlpha }
-                            .semantics { invisibleToUser() }
-                    )
-                }
+                // Bob 2026-11-03：行尾轻量箭头已删（无独立点击动作，纯装饰；
+                // 删 UI 本身，不只删回调）。展开行只留 ⓘ（413 行为不变）。
             }
 
             // 蒙层：透明全行覆盖，中央并排双钮；点空白处复原
