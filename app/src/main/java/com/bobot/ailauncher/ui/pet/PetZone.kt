@@ -368,7 +368,10 @@ fun PetZone(
             ) else androidx.compose.animation.ExitTransition.None
         ) {
             if (coverNextEvent != null) {
-                Spacer(modifier = Modifier.height(16.dp))
+                // 418（Bob）：简报与日程之间留白——16dp 时分隔线贴着简报
+                // 正文、两段读成一块；提到 32dp（大于简报内部 24dp 的段间
+                // 距，8dp 网格），日程作为独立一段站得住。
+                Spacer(modifier = Modifier.height(32.dp))
                 BriefMeetingRow(
                     event = coverNextEvent!!,
                     palette = briefingPalette,
