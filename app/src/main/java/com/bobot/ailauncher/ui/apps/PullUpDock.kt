@@ -101,6 +101,7 @@ import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.DockLightParams
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.GlassTextShadow
 import com.bobot.ailauncher.ui.theme.MotionTokens
 import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.systemGestureBottomPx
@@ -118,6 +119,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
@@ -563,9 +565,16 @@ fun PullUpDock(
                 // 的隐形触控条盖住：WaveRail visible=false 时只关绘制、
                 // 不关触摸，48dp 宽、近乎整屏高，且后组合故压在 Dock 面板
                 // 之上；首页 rail 又是长按才进选择器，轻点直接被吞掉。
-                // 新入口：面板顶部留白条正中的小标签（圆角 pill：同底色＋
-                // 细线描边、无阴影，线性灯泡＋“为什么”两字，Hint 安静灰，
-                // 金色只留主操作）——居中，左右 rail 都够不着；落在面板
+                // 420：418 的圆角 pill 实拍翻车——玻璃面板上的实色填充
+                // 在真机上糊成一团暗渍（像素验过：pill 区颜色≈被压暗的
+                // 山体，不是干净的实色），像随手贴上去的。门面不能这么
+                // 随意：玻璃本身就是容器，不再另套容器——改成直接落在
+                // 玻璃上的 caption（线性灯泡＋“为什么”，白字＋
+                // GlassTextShadow，简报字在壁纸上的同款做法，任意壁纸
+                // 都可读）。位置、触控、点按开说明页一字不动。
+                // 新入口：面板顶部留白条正中的小标签（无容器 caption，
+                // 线性灯泡＋“为什么”两字，白字＋玻璃字阴影）——居中，
+                // 左右 rail 都够不着；落在面板
                 // 顶部留白里（行列底对齐、顶部空 48/52dp），不盖图标、
                 // 不挤行；点按先刷新排序再开说明页。
                 Box(
@@ -581,29 +590,21 @@ fun PullUpDock(
                 ) {
                     Row(
                         modifier = Modifier
-                            .background(
-                                color = AILauncherColors.current.Card,
-                                shape = CircleShape
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = AILauncherColors.current.Title.copy(alpha = 0.08f),
-                                shape = CircleShape
-                            )
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Lightbulb,
                             contentDescription = null,
-                            tint = AILauncherColors.current.Hint,
+                            tint = Color.White,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "为什么",
                             fontSize = AILauncherType.Footnote.fontSize,
-                            color = AILauncherColors.current.Hint
+                            color = Color.White,
+                            style = TextStyle(shadow = GlassTextShadow)
                         )
                     }
                 }
