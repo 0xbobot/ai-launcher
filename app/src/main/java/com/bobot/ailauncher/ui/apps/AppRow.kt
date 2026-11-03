@@ -303,15 +303,15 @@ internal fun AppRow(
                         onLongClick = onLongClick
                     )
                     // v0.41.0（B 方案）：行距拉大——纵向 padding 12dp，图标 40dp，呼吸感
-                    // 应用中心升级：紧凑行 8dp（行高 56dp）
-                    .padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 16.dp),
+                    // Bob 2026-11-03 密度规范：图标 56dp + 紧凑纵向 10dp（行高 76dp），行间距 4dp（步进 80dp）
+                    .padding(horizontal = 16.dp, vertical = if (compact) 10.dp else 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AppIconImage(
                     drawable = app.icon,
                     contentDescription = app.label.toString(),
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(56.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .graphicsLayer { alpha = contentAlpha }
                 )
