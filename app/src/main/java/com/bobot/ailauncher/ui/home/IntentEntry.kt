@@ -275,6 +275,9 @@ fun IntentCapsuleField(
     placeholder: String = "想做什么？",
     planning: Boolean = false,
     showClearButton: Boolean = false,
+    // 应用中心变体不画提交钮（Bob 2026-11-03：箭头仅收键盘、无实际功能，
+    // 随首页意图入口一并删；首页默认 true 不变）
+    showSubmitButton: Boolean = true,
     // R3-C：焦点变化回调（首页用来驱动胶囊焦点状态；应用中心不传，保持纯过滤）
     onFocusChanged: (Boolean) -> Unit = {},
     // v0.68.99（主页重构 R-1）：挂载即聚焦——首页输入态由「点意图胶囊」
@@ -291,13 +294,9 @@ fun IntentCapsuleField(
     // 再套强玻璃＋方向高光即玻璃套玻璃打架；现改平底（见 solidBackground 分支），
     // 靠明度差＋光标表达可输入。
     solidBackground: Boolean = false,
-    // 应用中心升级（Bob 2026-10-24 定稿②）：箭头 = 确认本地搜索——
-    // 调用方传此回调时，箭头钮走它（仅收键盘 + 定格结果）；不传时箭头
-    // 沿旧走 onSubmit（首页不动）；IME Done 恒走 onSubmit，不受此影响
-    onArrowSubmit: (() -> Unit)? = null,
     // 意图页优化（2026-10-30，Bob 已批 §二 A1）：提交钮的无障碍文案——
     // 首页默认“交给助手去办”（点它就是把这句话交给助手办，不是下一页、
-    // 不是搜一下）；应用中心箭头语义不同（确认本地搜索），调用方另传。
+    // 不是搜一下）；应用中心胶囊无提交钮，不传。
     submitContentDescription: String = "交给助手去办"
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -437,12 +436,13 @@ fun IntentCapsuleField(
         }
         // 提交区：Planning 时换轻量进度（文字保留、不可重复提交）
         // R3-C 无障碍：触控目标 48dp（外框可点），金色视觉圆仍 40dp
-        Box(
+        // 应用中心变体不画此钮（见 showSubmitButton）
+        if (showSubmitButton) Box(
             modifier = Modifier
                 .size(48.dp)
                 // 体检批D ⑥：冒烟语义定位锚点（提交钮）
                 .testTag("intent_submit")
-                .clickable(enabled = canSubmit) { (onArrowSubmit ?: onSubmit)() },
+                .clickable(enabled = canSubmit) { onSubmit() },
             contentAlignment = Alignment.Center
         ) {
             Box(
@@ -951,7 +951,7 @@ fun IntentEntry(
             // 意图页优化（2026-10-30，Bob 已批 §二 A1）：首页占位文案点明
             // 提交的含义——“想办什么？交给助手”，配金色提交钮与“交给助手
             // 去办”的无障碍文案，没用过这页的人也能一眼看懂点它就是把
-            // 这句话交给助手去办。应用中心占位不动（其箭头是确认本地搜索）。
+            // 这句话交给助手去办。应用中心胶囊无提交钮（2026-11-03 已删），占位不动。
             IntentCapsuleField(
                 value = fieldValue,
                 onValueChange = { nv -> onFieldValueChange(nv) },
