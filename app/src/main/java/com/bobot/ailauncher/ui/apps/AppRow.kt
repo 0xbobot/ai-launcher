@@ -307,8 +307,8 @@ internal fun AppRow(
                         onLongClick = onLongClick
                     )
                     // v0.41.0（B 方案）：行距拉大——纵向 padding 12dp，图标 40dp，呼吸感
-                    // Bob 2026-11-03 原型比例：图标 44dp + 紧凑纵向 4dp（行高 52dp），行间距 4dp（步进 56dp）
-                    .padding(horizontal = 16.dp, vertical = if (compact) 4.dp else 16.dp),
+                    // Bob 2026-11-03：一屏 8 个——图标 44dp 不变，紧凑纵向 4→8dp（行高 60dp），行间距 4dp（步进 64dp）
+                    .padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AppIconImage(
