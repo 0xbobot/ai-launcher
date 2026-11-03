@@ -1,6 +1,8 @@
 package com.bobot.ailauncher.data
 
+import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.SharedPreferences
 import com.bobot.ailauncher.core.context.ContextEngine
 import java.util.Calendar
 
@@ -23,6 +25,9 @@ object AppUsageTracker {
     private const val KEY_PREV_PKG = "prev_pkg"
     private const val KEY_PREV_TIME = "prev_time"
     private const val KEY_LAST_DECAY_MONTH = "lastDecayMonth"
+    // 折叠组（419）：不活跃判定——首次见到 first_<pkg>（毫秒）；90 天阈值
+    private const val KEY_FIRST_PREFIX = "first_"
+    private const val NINETY_DAYS_MS = 90L * 24 * 60 * 60 * 1000
 
     /** Dock 兜底优先级：国民应用（仅取本机已安装的） */
     private val fallbackPriority = listOf(
@@ -104,13 +109,113 @@ object AppUsageTracker {
         }
     }
 
-    /** 最近启动时间（毫秒；从未启动返回 0）。供隐藏一键按钮的 90 天判断用。 */
+    /** 自己记的最近启动时间（毫秒；从未启动返回 0）。系统数据兜底用。 */
     fun lastUsed(context: Context, packageName: String): Long {
         return try {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getLong(KEY_LAST_PREFIX + packageName, 0L)
         } catch (_: Exception) {
             0L
+        }
+    }
+
+    /**
+     * 折叠组（419）：系统最后前台时间表（包名 -> 近 6 个月内 max lastTimeUsed）。
+     * 查到空或抛 SecurityException 即视为未授权，返回 null 走兜底——与
+     * AppDiscovery、ContextEngine 现有策略一致，不新增 AppOps 检查；
+     * PACKAGE_USAGE_STATS Manifest 已声明，不新增权限。
+     * 月度聚合保留半年左右，6 个月窗口覆盖 90 天判断所需历史。
+     */
+    private fun systemLastUsedMap(context: Context): Map<String, Long>? {
+        return try {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val now = System.currentTimeMillis()
+            val cal = Calendar.getInstance()
+            cal.add(Calendar.MONTH, -6)
+            val stats = usm.queryUsageStats(
+                UsageStatsManager.INTERVAL_MONTHLY,
+                cal.timeInMillis,
+                now
+            )
+            if (stats.isNullOrEmpty()) return null
+            val map = mutableMapOf<String, Long>()
+            for (s in stats) {
+                if (s.lastTimeUsed > 0L) {
+                    val prev = map[s.packageName] ?: 0L
+                    if (s.lastTimeUsed > prev) map[s.packageName] = s.lastTimeUsed
+                }
+            }
+            if (map.isEmpty()) null else map
+        } catch (_: SecurityException) {
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 有效最后使用时间（单应用便捷口径）：系统优先——授权且有记录时为系统
+     * lastTimeUsed（通知/最近任务/他 App 跳过来到前台都算）；否则自己记的
+     * last_used；0 表无记录。批量判定走 [inactiveMembers]（一次查系统表）。
+     */
+    fun effectiveLastUsed(context: Context, packageName: String): Long {
+        return try {
+            val sys = systemLastUsedMap(context)
+            if (sys != null) sys[packageName] ?: 0L
+            else lastUsed(context, packageName)
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    /**
+     * 单应用不活跃判定（纯规则，系统表与历史深度由调用方一次算好传入）：
+     * 有效最后使用 > 0 且距今 > 90 天 → 不活跃。
+     * 有效最后使用 == 0（无记录）时：系统已授权且历史够深（任一应用的系统
+     * lastTimeUsed 早于 90 天，证明系统有 90 天以上历史）→ 不活跃；
+     * 否则（未授权，或新手机没历史）走首次见到宽限：first_<pkg> 缺失时懒打戳
+     * 为 now 并当次按活跃算（打戳本身不触发重组，下次算才生效），满 90 天
+     * 没打开才算不活跃——新用户/新装应用不会一上来就被折进去。
+     */
+    private fun isInactiveRule(
+        p: SharedPreferences,
+        packageName: String,
+        sys: Map<String, Long>?,
+        historyDeep: Boolean,
+        now: Long
+    ): Boolean {
+        val eff = if (sys != null) (sys[packageName] ?: 0L)
+            else p.getLong(KEY_LAST_PREFIX + packageName, 0L)
+        if (eff > 0L) return now - eff > NINETY_DAYS_MS
+        if (sys != null && historyDeep) return true
+        val key = KEY_FIRST_PREFIX + packageName
+        val first = p.getLong(key, 0L)
+        if (first == 0L) {
+            p.edit().putLong(key, now).apply()
+            return false
+        }
+        return now - first > NINETY_DAYS_MS
+    }
+
+    /**
+     * 不活跃成员（共享规则：折叠组与一键隐藏按钮共用；Dock 排序 topApps 与
+     * 搜索 tie-break 的时间源一律不动，仍走自己记的 counts/last）。
+     * 输入须为可见集（已去隐藏、去自己，沿用 azApps 口径）；固定位
+     * （UiPrefs.getDockPinned 置顶集合）永远不进。系统表只查一次。
+     */
+    fun inactiveMembers(context: Context, apps: List<AppInfo>): List<AppInfo> {
+        return try {
+            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val now = System.currentTimeMillis()
+            val sys = systemLastUsedMap(context)
+            val historyDeep = sys?.values?.any { now - it > NINETY_DAYS_MS } ?: false
+            val pinned = UiPrefs.getDockPinned(context).toSet()
+            apps.filter { app ->
+                app.packageName !in pinned &&
+                    isInactiveRule(p, app.packageName, sys, historyDeep, now)
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 

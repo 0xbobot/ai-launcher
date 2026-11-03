@@ -66,11 +66,14 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.fragment.app.FragmentActivity
 import com.bobot.ailauncher.data.BiometricAuth
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -244,27 +247,37 @@ fun AppCenterContent(
     // 逐字一致：去自己/去隐藏 + Collator(CHINA) 排序）；装卸时快照在后台换代，
     // 结果到了才换表，组合期不再整表同步重建。
     val azApps = catalog?.visibleApps ?: emptyList()
-    // 智能 v3：一键隐藏候选——可见 = azApps（已去隐藏、去自己）；固定位
-    // （置顶集合）绝不计入；90 天未启动或从未启动。inactiveTick 由 launchApp
+    // 折叠组（419）：不活跃集——可见 = azApps（已去隐藏、去自己）；共享规则
+    // （AppUsageTracker.inactiveMembers：系统 UsageStats 优先，没授权退回
+    // 自己记的＋首次见到宽限；固定位永远不进）。inactiveTick 由 launchApp
     // 在真实启动时 +1，逼出重组（否则回应用中心时 N 不刷新）。
+    // 一键隐藏按钮的 N 与折叠组成员同源（同一规则、同一集合）。
     var inactiveTick by remember { mutableIntStateOf(0) }
     val inactiveTargets = remember(azApps, dockTick, inactiveTick) {
-        val pinned = UiPrefs.getDockPinned(context).toSet()
-        val now = System.currentTimeMillis()
-        val ninetyDaysMs = 90L * 24 * 60 * 60 * 1000
-        azApps.filter { app ->
-            app.packageName !in pinned &&
-                AppUsageTracker.lastUsed(context, app.packageName).let { it == 0L || now - it > ninetyDaysMs }
-        }
+        AppUsageTracker.inactiveMembers(context, azApps)
     }
-    val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps) {
+    // 折叠组（419）：本地态与持久化镜像——对话框动作须当场见效（只写 prefs
+    // 不触发重组，列表不会立刻变），故三态本地持有、动作时双写。
+    var foldConfirmedState by remember { mutableStateOf(UiPrefs.getFoldConfirmed(context)) }
+    var foldExpandedState by remember { mutableStateOf(UiPrefs.getFoldExpanded(context)) }
+    var foldLastDeclinedN by remember { mutableStateOf(UiPrefs.getFoldLastDeclinedN(context)) }
+    var showFoldDialog by remember { mutableStateOf(false) }
+    // 折叠组（419）：确认后才成立；确认前成员仍留在 A-Z 里，确认后从 A-Z
+    // 拿掉（分组时先分出折叠组，剩余再按字母分组）；确认后新变不常用的
+    // 自动进来（inactiveTargets 重算即进）。
+    val foldMembers = if (foldConfirmedState) inactiveTargets else emptyList()
+    val foldVisible = foldMembers.isNotEmpty()
+    val foldMemberPkgs = remember(foldMembers) { foldMembers.map { it.packageName }.toSet() }
+    val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps, foldMemberPkgs) {
         val map = linkedMapOf<Char, MutableList<AppInfo>>()
         // 拼音首字母分组：用字典（20924 字），GB2312 区位码做兜底
         val pinyinOf: (Char) -> Char = { c ->
             val fromDict = AppSearchIndex.pinyinInitialOf(context, c)
             if (fromDict != '#') fromDict else pinyinInitial(c)
         }
-        azApps.forEach { app ->
+        val rest = if (foldMemberPkgs.isEmpty()) azApps
+            else azApps.filter { it.packageName !in foldMemberPkgs }
+        rest.forEach { app ->
             map.getOrPut(groupKey(app.label, pinyinOf)) { mutableListOf() }.add(app)
         }
         map.toList().sortedWith(compareBy({ if (it.first == '#') 1 else 0 }, { it.first }))
@@ -346,7 +359,11 @@ fun AppCenterContent(
     // v0.41.31：隐藏分区第一个 item 的绝对 index（供 rail 眼睛按钮跳转）
     // v0.41.32：隐藏头已并入第一行，index 不变
     val azTotalItems = remember(azGroups) { azGroups.sumOf { it.second.size + 1 } }
-    val hiddenHeaderIndex = dockSectionSize + azTotalItems
+    // 折叠组（419）：段占位——组头 1 项＋展开时 N 行＋组间呼吸 1 项；
+    // 未确认或 N==0 时不占位。隐藏段锚点随之移位。
+    val foldSectionSize = if (foldVisible) 2 + if (foldExpandedState) foldMembers.size else 0 else 0
+    val foldHeaderIndex = dockSectionSize + azTotalItems
+    val hiddenHeaderIndex = foldHeaderIndex + foldSectionSize
 
     // v0.67.13（Bob）：主屏 picker 连续驱动——手指不松开时持续跟随滚动
     val homeTarget by UiPrefs.homeRailTarget.collectAsState()
@@ -376,11 +393,26 @@ fun AppCenterContent(
         }
     }
 
+    // 折叠组（419）：折叠前一次确认——进浏览态（非搜索）时，N>0 且未确认过，
+    // 且（从未拒绝过，或 N ≥ 上次拒绝时的 N＋10）时弹一次。确认/拒绝后条件
+    // 即翻转（已确认 / lastDeclinedN 更新），故每条件只弹一次；LaunchedEffect
+    // 驱动，不在组合期直接改状态。
+    LaunchedEffect(searching, inactiveTargets.size, foldConfirmedState, foldLastDeclinedN) {
+        if (!searching && !foldConfirmedState && inactiveTargets.isNotEmpty() &&
+            (foldLastDeclinedN < 0 || inactiveTargets.size >= foldLastDeclinedN + 10)
+        ) {
+            showFoldDialog = true
+        }
+    }
+
     // v0.41.8：手动吸顶——当前组首行滚出顶部后，悬停 overlay 接管显示；
     // 下一组首行接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走）
-    val stuckLetter: Char? by remember(azGroups) {
+    val stuckLetter: Char? by remember(azGroups, foldVisible, foldHeaderIndex) {
         derivedStateOf {
             val firstIdx = listState.firstVisibleItemIndex
+            // 折叠组（419）：滚进折叠段（含其后）后不显示字母幽灵，改由
+            // 折叠幽灵接管（折叠段后是隐藏区，隐藏幽灵另有分支）。
+            if (foldVisible && firstIdx >= foldHeaderIndex) return@derivedStateOf null
             val current = letterAnchors.entries
                 .filter { it.value <= firstIdx }
                 .maxByOrNull { it.value }
@@ -392,7 +424,7 @@ fun AppCenterContent(
     // 顶走位移：下一组首行进入顶部区域时，悬停字母被往上顶（负值）；
     // 读 firstVisibleItemScrollOffset 订阅逐像素滚动，保证顶走动画跟手。
     // 外层 Box 有 clipToBounds，顶出去的部分会被裁掉，不会跑到搜索栏上面（Bob）
-    val stuckPushPx: Float by remember(azGroups, hiddenApps, hiddenUnlocked) {
+    val stuckPushPx: Float by remember(azGroups, hiddenApps, hiddenUnlocked, foldVisible, foldHeaderIndex) {
         derivedStateOf {
             val cur = stuckLetter ?: return@derivedStateOf 0f
             @Suppress("UNUSED_EXPRESSION")
@@ -405,6 +437,12 @@ fun AppCenterContent(
                 val nextAnchor = letterAnchors[next] ?: return@derivedStateOf 0f
                 listState.layoutInfo.visibleItemsInfo
                     .firstOrNull { it.index == nextAnchor }
+                    ?.offset?.toFloat() ?: return@derivedStateOf 0f
+            } else if (foldVisible) {
+                // 折叠组（419）：最后一个字母后面是折叠组头（不是隐藏头），
+                // 组头接近顶部时把悬停字母顶走
+                listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.index == foldHeaderIndex }
                     ?.offset?.toFloat() ?: return@derivedStateOf 0f
             } else {
                 if (hiddenApps.isEmpty()) return@derivedStateOf 0f
@@ -444,6 +482,43 @@ fun AppCenterContent(
             firstGone && hiddenVisible
         }
     }
+    // 折叠组（419）：折叠段幽灵——组头滚出顶部后接管，直到滚出折叠段；
+    // 与 stuckHidden 同理（组头已走＋段内仍有可见项）
+    val stuckFold: Boolean by remember(foldVisible, foldHeaderIndex) {
+        derivedStateOf {
+            if (!foldVisible) return@derivedStateOf false
+            val vis = listState.layoutInfo.visibleItemsInfo
+            val first = vis.firstOrNull { it.key == "fold-header" }
+            val firstGone = first == null || first.offset + first.size < 0
+            val foldInView = vis.any {
+                it.key == "fold-header" || it.key == "sp:fold" ||
+                    (it.key is String && (it.key as String).startsWith("f:"))
+            }
+            firstGone && foldInView
+        }
+    }
+    // 折叠组（419）：折叠幽灵被隐藏头顶走（与字母顶走逻辑一致）；
+    // 无隐藏应用时不顶（幽灵随滚出自然消失，沿用隐藏为空时的旧口径）
+    val foldPushPx: Float by remember(foldVisible, hiddenApps, hiddenUnlocked) {
+        derivedStateOf {
+            if (!stuckFold) return@derivedStateOf 0f
+            if (hiddenApps.isEmpty()) return@derivedStateOf 0f
+            @Suppress("UNUSED_EXPRESSION")
+            listState.firstVisibleItemScrollOffset
+            val firstHiddenKey = if (hiddenUnlocked) "h:${hiddenApps.first().packageName}"
+                else "hidden-locked"
+            val off = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.key == firstHiddenKey }
+                ?.offset?.toFloat() ?: return@derivedStateOf 0f
+            val pushZonePx = with(density) { 48.dp.toPx() }
+            if (off < pushZonePx) off - pushZonePx else 0f
+        }
+    }
+    val animatedFoldPushPx by animateFloatAsState(
+        targetValue = foldPushPx,
+        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
+        label = "foldPush"
+    )
     // v0.41.31（Bob）：Dock 分区幽灵 ★ 悬停——第一行滚出顶部后接管，
     // 直到滚出 Dock 分区；与 stuckHidden 同理
     // v0.41.32：dock 头已并入第一行
@@ -799,6 +874,15 @@ fun AppCenterContent(
                 favApps = dockApps,
                 hiddenApps = hiddenApps,
                 hiddenUnlocked = hiddenUnlocked,
+                // 折叠组（419）：状态由调用点传入（横屏不另起一套）；
+                // foldMembers 已含“确认且 N>0”门，横屏直接用。
+                foldApps = foldMembers,
+                foldExpanded = foldExpandedState,
+                onToggleFold = {
+                    val next = !foldExpandedState
+                    foldExpandedState = next
+                    UiPrefs.setFoldExpanded(context, next)
+                },
                 onUnlockHiddenApps = { unlockHiddenApps() },
                 onLaunch = ::launchApp,
                 onLongPress = { popupApp = it },
@@ -1192,6 +1276,97 @@ fun AppCenterContent(
                     }
                     item(key = "sp:$letter") { Spacer(modifier = Modifier.height(16.dp)) }
                 }
+                // 折叠组（419）：主列表末尾、A-Z 之后、隐藏区之前；平时只占
+                // 组头一行（“不常用 · N 个”＋收展 chevron），展开时组内为正常
+                // 应用行（复用 AppRow：能打开、长按菜单都在），按 A-Z 行内顺序
+                // （拼音排序）排列。确认前不渲染（成员仍留在 A-Z 里）。
+                // 组头 chevron 是组自身的收展标示，不是应用行箭头（416 删的是
+                // 应用行尾箭头，两者不是同一元素）。
+                if (foldVisible) {
+                    item(key = "fold-header") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 72.dp, end = 64.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    val next = !foldExpandedState
+                                    foldExpandedState = next
+                                    UiPrefs.setFoldExpanded(context, next)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "不常用 · ${foldMembers.size} 个",
+                                fontSize = AILauncherType.BodyLarge.fontSize,
+                                color = AILauncherColors.current.Title,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = if (foldExpandedState) Icons.Outlined.KeyboardArrowUp
+                                    else Icons.Outlined.KeyboardArrowDown,
+                                contentDescription = if (foldExpandedState) "收起不常用" else "展开不常用",
+                                tint = AILauncherColors.current.Hint,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    if (foldExpandedState) {
+                        itemsIndexed(foldMembers, key = { _, app -> "f:${app.packageName}" }) { _, app ->
+                            Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
+                                // 折叠组内无幽灵字母（不是字母组）；行结构与 A-Z 行一致
+                                val isPopupExpandedX = popupApp?.packageName == app.packageName
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 72.dp, end = 64.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(
+                                            if (isPopupExpandedX) AILauncherColors.current.Card
+                                            else Color.Transparent
+                                        )
+                                ) {
+                                    AppRow(
+                                        app = app,
+                                        onLaunch = { launchApp(app) },
+                                        compact = true,
+                                        onLongClick = {
+                                            hapticView.confirmHaptic()
+                                            popupApp = app
+                                        },
+                                        showInfoIcon = isPopupExpandedX,
+                                        onInfoClick = {
+                                            openAppDetailsPage(context, app.packageName)
+                                            popupApp = null
+                                        },
+                                        onHide = ::hideApp,
+                                        actionsVisible = expandedActionsPkg == app.packageName,
+                                        onActionsVisibleChange = { expanded ->
+                                            expandedActionsPkg =
+                                                if (expanded) app.packageName
+                                                else if (expandedActionsPkg == app.packageName) null
+                                                else expandedActionsPkg
+                                        }
+                                    )
+                                    AnimatedVisibility(
+                                        visible = isPopupExpandedX,
+                                        enter = expandVertically() +
+                                            fadeIn(),
+                                        exit = shrinkVertically() +
+                                            fadeOut()
+                                    ) {
+                                        AppShortcutInline(
+                                            app = app,
+                                            onDismiss = { popupApp = null }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item(key = "sp:fold") { Spacer(modifier = Modifier.height(16.dp)) }
+                }
                 // v0.41.18（Bob）：隐藏分组——主列表末尾，像 ABCD 分组一样；
                 // v0.41.20（Bob）：不显示"已隐藏"标题文字，只留幽灵图标。
                 // 未解锁显示锁定占位，解锁后应用可直接打开（不用先恢复）。
@@ -1420,6 +1595,18 @@ fun AppCenterContent(
                             .size(36.dp)
                             .semantics { invisibleToUser() }
                     )
+                } else if (stuckFold) {
+                    // 折叠组（419）：折叠段悬停——“不常用”文字（不是字母），
+                    // 永远报你在哪一段；Callout 档（14sp）以便 3 字塞进幽灵留白
+                    Text(
+                        text = "不常用",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Title.copy(alpha = 0.35f),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 24.dp, top = 16.dp)
+                            .offset { IntOffset(0, animatedFoldPushPx.roundToInt()) }
+                    )
                 } else if (sl != null && !isLandscapeAc) {
                     Text(
                         text = sl.toString(),
@@ -1444,7 +1631,9 @@ fun AppCenterContent(
             // v0.67.11（Bob）：主屏 picker 会话中隐藏自己的 rail，避免与 picker 重叠
             // Bob 2026-11-03：搜索后隐藏字母导航——可见 rail 与左侧隐形触发区
             // 同在此门内，一并隐藏；搜索结束恢复全量字母
-            if (letters.isNotEmpty() && homeTarget == null && searchResults == null) {
+            // 折叠组（419）：字母全被折掉时 rail 仍可达折叠专位（否则 Fold
+            // 专位在恰恰需要它时不可达）；空目录时 letters 与 fold 皆空，门仍关。
+            if ((letters.isNotEmpty() || foldVisible) && homeTarget == null && searchResults == null) {
                 // 左侧隐形区触发时，右侧可见 rail 跟随显示波浪
                 var mirrorIndex by remember { mutableStateOf<Int?>(null) }
                 // Niagara 做法：直接滚完整列表，不做内容过滤；松手时列表本来就在位置上，零位移
@@ -1512,8 +1701,8 @@ fun AppCenterContent(
                 // buildRailItems（RailItems.kt），构造与此前逐字一致，仅换调用。
                 // Bob 2026-11-03 回滚：👁 门回 409 加过滤前——只看隐藏分区非空
                 // （搜索态 rail 按上一条已隐藏，此门不再区分搜索态）
-                val railItems = remember(dockApps, letters, hiddenApps) {
-                    buildRailItems(dockApps.isNotEmpty(), letters, hiddenApps.isNotEmpty())
+                val railItems = remember(dockApps, letters, hiddenApps, foldVisible) {
+                    buildRailItems(dockApps.isNotEmpty(), letters, hiddenApps.isNotEmpty(), hasFold = foldVisible)
                 }
                 // 收藏/隐藏时的脉冲目标
                 val pulseItem = when (flashTarget) {
@@ -1529,6 +1718,8 @@ fun AppCenterContent(
                         // （此前动画滚动与字母瞬跳交替）
                         is RailItem.Star -> scope.launch { listState.scrollToItem(0) }
                         is RailItem.Eye -> scope.launch { listState.scrollToItem(hiddenHeaderIndex) }
+                        // 折叠组（419）：收纳盒专位 → 折叠组头锚点
+                        is RailItem.Fold -> scope.launch { listState.scrollToItem(foldHeaderIndex) }
                         is RailItem.Letter -> glideToLetter(item.char)
                         is RailItem.Separator -> {}
                     }
@@ -1627,6 +1818,56 @@ fun AppCenterContent(
             onDismiss = {
                 UiPrefs.setRowActionsGuideSeen(context)
                 showActionsGuide = false
+            }
+        )
+    }
+    // 折叠组（419）：折叠前一次确认——样式跟应用内现有确认弹窗一致
+    // （IntentEntry NeedsConfirmation 口径：标题 Headline SemiBold Title 色，
+    // 正文 Callout Body 色，确认 TextButton Title 色 Medium，取消 Hint 色）；
+    // [折叠] 为主操作（确认位）。点空白/返回关掉按 [暂不] 计。
+    if (showFoldDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                UiPrefs.setFoldLastDeclinedN(context, inactiveTargets.size)
+                foldLastDeclinedN = inactiveTargets.size
+                showFoldDialog = false
+            },
+            title = {
+                Text(
+                    text = "要把不常用应用折叠起来吗？",
+                    fontSize = AILauncherType.Headline.fontSize,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AILauncherColors.current.Title
+                )
+            },
+            text = {
+                Text(
+                    text = "共 ${inactiveTargets.size} 个应用 90 天没打开过。折起来不是隐藏：点组头随时展开，搜索也能搜到（不用解锁）。",
+                    fontSize = AILauncherType.Callout.fontSize,
+                    color = AILauncherColors.current.Body
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    UiPrefs.setFoldConfirmed(context, true)
+                    foldConfirmedState = true
+                    showFoldDialog = false
+                }) {
+                    Text(
+                        text = "折叠",
+                        color = AILauncherColors.current.Title,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    UiPrefs.setFoldLastDeclinedN(context, inactiveTargets.size)
+                    foldLastDeclinedN = inactiveTargets.size
+                    showFoldDialog = false
+                }) {
+                    Text(text = "暂不", color = AILauncherColors.current.Hint)
+                }
             }
         )
     }

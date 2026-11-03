@@ -35,6 +35,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -94,6 +96,11 @@ fun AppCenterLandscape(
     // 调用点（AppCenter.kt）传入竖屏已有的状态源，不得另起一套。
     hiddenUnlocked: Boolean = false,
     onUnlockHiddenApps: () -> Unit = {},
+    // 折叠组（419）：状态由调用点传入（竖屏同款，不得另起一套）；
+    // foldApps 已含“确认且 N>0”门，横屏直接用。
+    foldApps: List<AppInfo> = emptyList(),
+    foldExpanded: Boolean = false,
+    onToggleFold: () -> Unit = {},
     onLaunch: (AppInfo) -> Unit,
     onLongPress: (AppInfo) -> Unit,
     onOpenSettings: () -> Unit,
@@ -176,7 +183,7 @@ fun AppCenterLandscape(
         // v0.68.75（Bob）：收藏放最前、隐藏放最后，核心功能不能丢
         // hiddenUnlocked 必须进 key：解锁前后隐藏列形态不同（锁定占位 ↔
         // 应用列），否则解锁后列流不重建。
-        val columns = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, rowsPerCol) {
+        val columns = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, rowsPerCol) {
             val cols = mutableListOf<MutableList<FlowItem>>()
             var cur = mutableListOf<FlowItem>()
             fun colCap(): Int = rowsPerCol
@@ -209,6 +216,23 @@ fun AppCenterLandscape(
                         count = 0
                     }
                     cur.add(FlowItem.App(app)); count++
+                }
+            }
+            // 折叠组（419）：A-Z 之后、隐藏区之前；平时只占区头一行
+            // （“不常用 · N 个”＋收展 chevron，点按收展），展开时组内应用
+            // 按列流续排（与其它区同 cap 逻辑）。搜索态不走列流，折叠不参与。
+            if (foldApps.isNotEmpty()) {
+                flush()
+                cur.add(FlowItem.FoldHeader(foldApps.size, foldExpanded))
+                if (foldExpanded) {
+                    var cap = colCap() - 1
+                    var count = 0
+                    foldApps.forEach { app ->
+                        if (count >= cap) {
+                            flush(); cap = colCap(); count = 0
+                        }
+                        cur.add(FlowItem.App(app)); count++
+                    }
                 }
             }
             // 隐藏区（👁头）：竖屏同款门禁——未解锁时只放锁定占位（点按
@@ -247,6 +271,11 @@ fun AppCenterLandscape(
         val favColIdx = 0
         val hiddenColIdx = remember(columns) {
             columns.indexOfFirst { col -> col.any { it is FlowItem.SectionHeader && it.title.contains("隐藏") } }
+                .takeIf { it >= 0 }
+        }
+        // 折叠组（419）：收纳盒专位 → 折叠区头所在列
+        val foldColIdx = remember(columns) {
+            columns.indexOfFirst { col -> col.any { it is FlowItem.FoldHeader } }
                 .takeIf { it >= 0 }
         }
 
@@ -507,6 +536,35 @@ fun AppCenterLandscape(
                                                 .wrapContentHeight(Alignment.CenterVertically)
                                         )
                                     }
+                                    is FlowItem.FoldHeader -> {
+                                        // 折叠组（419）：区头行位，点按收展；样式同区头
+                                        // （Body 粗体、字距 2sp、Title 色）＋收展 chevron
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(rowH)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable { onToggleFold() }
+                                                .padding(start = 16.dp, end = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = "不常用 · ${item.count} 个",
+                                                fontSize = AILauncherType.Body.fontSize,
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 2.sp,
+                                                color = AILauncherColors.current.Title,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Icon(
+                                                imageVector = if (item.expanded) Icons.Outlined.KeyboardArrowUp
+                                                    else Icons.Outlined.KeyboardArrowDown,
+                                                contentDescription = if (item.expanded) "收起不常用" else "展开不常用",
+                                                tint = AILauncherColors.current.Hint,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
                                     is FlowItem.LockPlaceholder -> {
                                         // 竖屏同款锁定占位（横屏列格样式）：点按触发
                                         // 指纹/面部解锁；CI 只能验占位渲染，生物识别
@@ -588,8 +646,8 @@ fun AppCenterLandscape(
                 // buildRailItems（RailItems.kt），构造与此前逐字一致，仅换调用；
                 // letters 即调用点按 azGroups 派生的有应用字母集（与竖屏同源）。
                 // Bob 2026-11-03 回滚：👁 门回 409 加过滤前——只看隐藏分区非空
-                items = remember(favApps, hiddenApps, letters) {
-                    buildRailItems(favApps.isNotEmpty(), letters, hiddenApps.isNotEmpty())
+                items = remember(favApps, hiddenApps, letters, foldApps) {
+                    buildRailItems(favApps.isNotEmpty(), letters, hiddenApps.isNotEmpty(), hasFold = foldApps.isNotEmpty())
                 },
                 onActiveItem = { item ->
                     when (item) {
@@ -620,6 +678,12 @@ fun AppCenterLandscape(
                                 c = item.char
                                 while (c >= 'A' && !letterToCol.containsKey(c)) c--
                                 if (c >= 'A') scrollToLetter(c)
+                            }
+                        }
+                        // 折叠组（419）：收纳盒专位 → 折叠区头所在列
+                        is RailItem.Fold -> {
+                            foldColIdx?.let { idx ->
+                                scope.launch { rowState.animateScrollToItem(idx) }
                             }
                         }
                         else -> {}
@@ -732,6 +796,8 @@ private fun LandscapeAppRow(
 private sealed interface FlowItem {
     data class Header(val letter: Char) : FlowItem
     data class SectionHeader(val title: String) : FlowItem
+    // 折叠组（419）：区头（个数＋收展态），点按收展
+    data class FoldHeader(val count: Int, val expanded: Boolean) : FlowItem
     data object LockPlaceholder : FlowItem
     data class App(val app: AppInfo) : FlowItem
 }

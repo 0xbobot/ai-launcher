@@ -56,6 +56,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.bobot.ailauncher.ui.island.IslandToastHost
 import com.bobot.ailauncher.data.AppCatalog
+import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
@@ -436,8 +437,20 @@ private fun HomeHost(
             if (pickerHidden.isEmpty()) false
             else (pickerCatalog?.apps ?: emptyList()).any { it.packageName in pickerHidden }
         }
-        val pickerLetters = remember(pickerCatalog) {
-            railLettersFromVisibleApps(pickerCatalog?.visibleApps ?: emptyList(), context)
+        // 折叠组（419）：首页 rail 字母也要排除折叠组成员（与应用中心同口径，
+        // 避免点到无锚点的字母）；foldTick 跟随确认/收展变化重算。首页 rail
+        // 本次不加折叠专位（hasFold 默认 false）——要进折叠组从应用中心走。
+        val pickerFoldTick by UiPrefs.foldTick.collectAsState()
+        val pickerFoldPkgs = remember(pickerCatalog, pickerFoldTick) {
+            if (!UiPrefs.getFoldConfirmed(context)) emptySet()
+            else AppUsageTracker.inactiveMembers(context, pickerCatalog?.visibleApps ?: emptyList())
+                .map { it.packageName }.toSet()
+        }
+        val pickerLetters = remember(pickerCatalog, pickerFoldPkgs) {
+            val visible = pickerCatalog?.visibleApps ?: emptyList()
+            val rest = if (pickerFoldPkgs.isEmpty()) visible
+                else visible.filter { it.packageName !in pickerFoldPkgs }
+            railLettersFromVisibleApps(rest, context)
         }
         val homeItems = remember(pickerHasDock, pickerLetters, pickerHasHidden) {
             buildRailItems(pickerHasDock, pickerLetters, pickerHasHidden)
@@ -507,6 +520,9 @@ private fun HomeHost(
                                 onOpenAppDrawer()
                             }
                         }
+                        // 折叠组（419）：首页 rail 不带 Fold 专位（hasFold 默认 false），
+                        // 此分支仅为 sealed 穷尽——运行时恒不可达。
+                        is RailItem.Fold -> {}
                         is RailItem.Separator -> {}
                     }
                 },

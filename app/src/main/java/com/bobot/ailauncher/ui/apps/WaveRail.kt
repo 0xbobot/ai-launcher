@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
@@ -80,6 +81,8 @@ internal sealed interface RailItem {
     data object Star : RailItem
     data class Letter(val char: Char) : RailItem
     data object Eye : RailItem
+    // 折叠组（419）：收纳盒专位，点按滚到折叠组头
+    data object Fold : RailItem
     // v0.68.13（Bob）：分隔线——图标组和字母组之间的视觉分隔，不可触摸
     data object Separator : RailItem
 }
@@ -476,6 +479,11 @@ internal fun WaveRail(
                                 color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
+                            // 折叠组（419）：收纳盒，同款细描边
+                            RailItem.Fold -> FoldGlyph(
+                                color = AILauncherColors.current.Title.copy(alpha = 0.6f),
+                                modifier = waveMod
+                            )
                             is RailItem.Letter -> StarGlyph(
                                 color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
@@ -566,6 +574,11 @@ internal fun WaveRail(
                             )
                         }
                         is RailItem.Letter -> StarGlyph(
+                            color = AILauncherColors.current.Title,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        // 折叠组（419）：收纳盒气泡，同款细描边
+                        RailItem.Fold -> FoldGlyph(
                             color = AILauncherColors.current.Title,
                             modifier = Modifier.size(24.dp)
                         )
@@ -710,6 +723,47 @@ private fun EyeOffGlyph(
             color = color,
             start = Offset(w * 0.16f, h * 0.80f),
             end = Offset(w * 0.84f, h * 0.20f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+/**
+ * 折叠组（419）：线性收纳盒——与房子/星星/眼睛同款细描边+圆角。
+ * 盖（上）+ 盒身（下）+ 中间一道标签槽，14dp 下仍可辨。
+ */
+@Composable
+private fun FoldGlyph(
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.08f
+        val style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        // 盖：略宽于盒身的顶条
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.06f, h * 0.12f),
+            size = Size(w * 0.88f, h * 0.18f),
+            cornerRadius = CornerRadius(w * 0.06f, w * 0.06f),
+            style = style
+        )
+        // 盒身
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.14f, h * 0.30f),
+            size = Size(w * 0.72f, h * 0.58f),
+            cornerRadius = CornerRadius(w * 0.08f, w * 0.08f),
+            style = style
+        )
+        // 标签槽：盒身中部一道短横
+        drawLine(
+            color = color,
+            start = Offset(w * 0.35f, h * 0.59f),
+            end = Offset(w * 0.65f, h * 0.59f),
             strokeWidth = stroke,
             cap = StrokeCap.Round
         )
