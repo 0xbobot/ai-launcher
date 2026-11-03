@@ -437,14 +437,19 @@ private fun HomeHost(
             if (pickerHidden.isEmpty()) false
             else (pickerCatalog?.apps ?: emptyList()).any { it.packageName in pickerHidden }
         }
-        // 折叠组（419）：首页 rail 字母也要排除折叠组成员（与应用中心同口径，
-        // 避免点到无锚点的字母）；foldTick 跟随确认/收展变化重算。首页 rail
-        // 本次不加折叠专位（hasFold 默认 false）——要进折叠组从应用中心走。
+        // 折叠组（421 安静版）：首页 rail 字母也要排除折叠组成员（与应用中心
+        // 同口径，避免点到无锚点的字母）；门与应用中心一致——压制规则
+        // （点过“取消折叠”且 N 还没多 10 个时成员回 A-Z、字母恢复）。
+        // foldTick 跟随取消/收展变化重算（两 setter 都 bump foldTick）。
+        // 首页 rail 本次不加折叠专位（hasFold 默认 false）——要进折叠组
+        // 从应用中心走。
         val pickerFoldTick by UiPrefs.foldTick.collectAsState()
         val pickerFoldPkgs = remember(pickerCatalog, pickerFoldTick) {
-            if (!UiPrefs.getFoldConfirmed(context)) emptySet()
-            else AppUsageTracker.inactiveMembers(context, pickerCatalog?.visibleApps ?: emptyList())
-                .map { it.packageName }.toSet()
+            val inactiveSet = AppUsageTracker.inactiveMembers(context, pickerCatalog?.visibleApps ?: emptyList())
+            val lastDeclinedN = UiPrefs.getFoldLastDeclinedN(context)
+            val suppressed = lastDeclinedN >= 0 && inactiveSet.size < lastDeclinedN + 10
+            if (suppressed) emptySet()
+            else inactiveSet.map { it.packageName }.toSet()
         }
         val pickerLetters = remember(pickerCatalog, pickerFoldPkgs) {
             val visible = pickerCatalog?.visibleApps ?: emptyList()

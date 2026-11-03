@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -96,11 +97,13 @@ fun AppCenterLandscape(
     // 调用点（AppCenter.kt）传入竖屏已有的状态源，不得另起一套。
     hiddenUnlocked: Boolean = false,
     onUnlockHiddenApps: () -> Unit = {},
-    // 折叠组（419）：状态由调用点传入（竖屏同款，不得另起一套）；
-    // foldApps 已含“确认且 N>0”门，横屏直接用。
+    // 折叠组（419/421）：状态由调用点传入（竖屏同款，不得另起一套）；
+    // foldApps 已含压制与 N>0 门，横屏直接用。
     foldApps: List<AppInfo> = emptyList(),
     foldExpanded: Boolean = false,
     onToggleFold: () -> Unit = {},
+    // 折叠组（421 安静版）：组底“取消折叠”——调用点传入竖屏同一双写逻辑。
+    onUnfold: () -> Unit = {},
     onLaunch: (AppInfo) -> Unit,
     onLongPress: (AppInfo) -> Unit,
     onOpenSettings: () -> Unit,
@@ -218,9 +221,10 @@ fun AppCenterLandscape(
                     cur.add(FlowItem.App(app)); count++
                 }
             }
-            // 折叠组（419）：A-Z 之后、隐藏区之前；平时只占区头一行
+            // 折叠组（419/421）：A-Z 之后、隐藏区之前；平时只占区头一行
             // （“不常用 · N 个”＋收展 chevron，点按收展），展开时组内应用
-            // 按列流续排（与其它区同 cap 逻辑）。搜索态不走列流，折叠不参与。
+            // 按列流续排（与其它区同 cap 逻辑），行后跟组底确认行。
+            // 搜索态不走列流，折叠不参与。
             if (foldApps.isNotEmpty()) {
                 flush()
                 cur.add(FlowItem.FoldHeader(foldApps.size, foldExpanded))
@@ -233,6 +237,11 @@ fun AppCenterLandscape(
                         }
                         cur.add(FlowItem.App(app)); count++
                     }
+                    // 组底确认行占一列格；当前列已满先 flush 再放
+                    if (count >= cap) {
+                        flush()
+                    }
+                    cur.add(FlowItem.FoldFooter)
                 }
             }
             // 隐藏区（👁头）：竖屏同款门禁——未解锁时只放锁定占位（点按
@@ -565,6 +574,31 @@ fun AppCenterLandscape(
                                             )
                                         }
                                     }
+                                    is FlowItem.FoldFooter -> {
+                                        // 折叠组（421 安静版）：组底确认行——不点就是认了，
+                                        // 点“取消折叠”走调用点 onUnfold（压制＋收起）。
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(rowH)
+                                                .padding(start = 16.dp, end = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = "这些应用 90 天没打开，已折起来",
+                                                fontSize = AILauncherType.Footnote.fontSize,
+                                                color = AILauncherColors.current.Hint,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            TextButton(onClick = { onUnfold() }) {
+                                                Text(
+                                                    text = "取消折叠",
+                                                    color = AILauncherColors.current.Body,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+                                    }
                                     is FlowItem.LockPlaceholder -> {
                                         // 竖屏同款锁定占位（横屏列格样式）：点按触发
                                         // 指纹/面部解锁；CI 只能验占位渲染，生物识别
@@ -798,6 +832,8 @@ private sealed interface FlowItem {
     data class SectionHeader(val title: String) : FlowItem
     // 折叠组（419）：区头（个数＋收展态），点按收展
     data class FoldHeader(val count: Int, val expanded: Boolean) : FlowItem
+    // 折叠组（421 安静版）：组底确认行（展开态才有），点按走 onUnfold
+    data object FoldFooter : FlowItem
     data object LockPlaceholder : FlowItem
     data class App(val app: AppInfo) : FlowItem
 }

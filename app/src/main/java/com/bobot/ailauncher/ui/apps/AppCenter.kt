@@ -73,7 +73,6 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.fragment.app.FragmentActivity
 import com.bobot.ailauncher.data.BiometricAuth
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -256,16 +255,18 @@ fun AppCenterContent(
     val inactiveTargets = remember(azApps, dockTick, inactiveTick) {
         AppUsageTracker.inactiveMembers(context, azApps)
     }
-    // 折叠组（419）：本地态与持久化镜像——对话框动作须当场见效（只写 prefs
-    // 不触发重组，列表不会立刻变），故三态本地持有、动作时双写。
-    var foldConfirmedState by remember { mutableStateOf(UiPrefs.getFoldConfirmed(context)) }
+    // 折叠组（421 安静版）：本地态与持久化镜像——动作须当场见效（只写 prefs
+    // 不触发重组，列表不会立刻变），故两态本地持有、动作时双写。
+    // 419 的确认弹窗已删（Bob：太干扰）：组在 N>0 且未被取消压制时自动
+    // 出现（默认收着）；用户在组底点“取消折叠”即压制，N 再多 10 个时
+    // 安静重现，不弹任何东西。
     var foldExpandedState by remember { mutableStateOf(UiPrefs.getFoldExpanded(context)) }
     var foldLastDeclinedN by remember { mutableStateOf(UiPrefs.getFoldLastDeclinedN(context)) }
-    var showFoldDialog by remember { mutableStateOf(false) }
-    // 折叠组（419）：确认后才成立；确认前成员仍留在 A-Z 里，确认后从 A-Z
-    // 拿掉（分组时先分出折叠组，剩余再按字母分组）；确认后新变不常用的
-    // 自动进来（inactiveTargets 重算即进）。
-    val foldMembers = if (foldConfirmedState) inactiveTargets else emptyList()
+    // 压制：点过“取消折叠”且 N 还没比取消时多 10 个
+    val foldSuppressed = foldLastDeclinedN >= 0 && inactiveTargets.size < foldLastDeclinedN + 10
+    // 未压制时成员即不活跃集（从 A-Z 拿掉，分组时先分出折叠组）；
+    // 新变不常用的自动进来（inactiveTargets 重算即进）。
+    val foldMembers = if (foldSuppressed) emptyList() else inactiveTargets
     val foldVisible = foldMembers.isNotEmpty()
     val foldMemberPkgs = remember(foldMembers) { foldMembers.map { it.packageName }.toSet() }
     val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps, foldMemberPkgs) {
@@ -359,9 +360,10 @@ fun AppCenterContent(
     // v0.41.31：隐藏分区第一个 item 的绝对 index（供 rail 眼睛按钮跳转）
     // v0.41.32：隐藏头已并入第一行，index 不变
     val azTotalItems = remember(azGroups) { azGroups.sumOf { it.second.size + 1 } }
-    // 折叠组（419）：段占位——组头 1 项＋展开时 N 行＋组间呼吸 1 项；
-    // 未确认或 N==0 时不占位。隐藏段锚点随之移位。
-    val foldSectionSize = if (foldVisible) 2 + if (foldExpandedState) foldMembers.size else 0 else 0
+    // 折叠组（421 安静版）：段占位——组头 1 项＋（展开时 N 行＋组底行 1）＋
+    // 组间呼吸 1 项；收起 2 项、展开 3＋N 项；压制或 N==0 时不占位。
+    // 隐藏段锚点随之移位。
+    val foldSectionSize = if (foldVisible) (if (foldExpandedState) 3 + foldMembers.size else 2) else 0
     val foldHeaderIndex = dockSectionSize + azTotalItems
     val hiddenHeaderIndex = foldHeaderIndex + foldSectionSize
 
@@ -390,18 +392,6 @@ fun AppCenterContent(
             UiPrefs.HomeRailTarget.DOCK -> listState.scrollToItem(0)
             UiPrefs.HomeRailTarget.HIDDEN -> listState.scrollToItem(hiddenHeaderIndex)
             null -> {}
-        }
-    }
-
-    // 折叠组（419）：折叠前一次确认——进浏览态（非搜索）时，N>0 且未确认过，
-    // 且（从未拒绝过，或 N ≥ 上次拒绝时的 N＋10）时弹一次。确认/拒绝后条件
-    // 即翻转（已确认 / lastDeclinedN 更新），故每条件只弹一次；LaunchedEffect
-    // 驱动，不在组合期直接改状态。
-    LaunchedEffect(searching, inactiveTargets.size, foldConfirmedState, foldLastDeclinedN) {
-        if (!searching && !foldConfirmedState && inactiveTargets.isNotEmpty() &&
-            (foldLastDeclinedN < 0 || inactiveTargets.size >= foldLastDeclinedN + 10)
-        ) {
-            showFoldDialog = true
         }
     }
 
@@ -491,7 +481,7 @@ fun AppCenterContent(
             val first = vis.firstOrNull { it.key == "fold-header" }
             val firstGone = first == null || first.offset + first.size < 0
             val foldInView = vis.any {
-                it.key == "fold-header" || it.key == "sp:fold" ||
+                it.key == "fold-header" || it.key == "sp:fold" || it.key == "fold-foot" ||
                     (it.key is String && (it.key as String).startsWith("f:"))
             }
             firstGone && foldInView
@@ -874,14 +864,22 @@ fun AppCenterContent(
                 favApps = dockApps,
                 hiddenApps = hiddenApps,
                 hiddenUnlocked = hiddenUnlocked,
-                // 折叠组（419）：状态由调用点传入（横屏不另起一套）；
-                // foldMembers 已含“确认且 N>0”门，横屏直接用。
+                // 折叠组（419/421）：状态由调用点传入（横屏不另起一套）；
+                // foldMembers 已含压制与 N>0 门，横屏直接用。
                 foldApps = foldMembers,
                 foldExpanded = foldExpandedState,
                 onToggleFold = {
                     val next = !foldExpandedState
                     foldExpandedState = next
                     UiPrefs.setFoldExpanded(context, next)
+                },
+                // 折叠组（421 安静版）：组底“取消折叠”——与竖屏同一双写逻辑
+                // （压制＋收起，重现时默认仍是收着的）。
+                onUnfold = {
+                    UiPrefs.setFoldLastDeclinedN(context, inactiveTargets.size)
+                    foldLastDeclinedN = inactiveTargets.size
+                    foldExpandedState = false
+                    UiPrefs.setFoldExpanded(context, false)
                 },
                 onUnlockHiddenApps = { unlockHiddenApps() },
                 onLaunch = ::launchApp,
@@ -1276,10 +1274,11 @@ fun AppCenterContent(
                     }
                     item(key = "sp:$letter") { Spacer(modifier = Modifier.height(16.dp)) }
                 }
-                // 折叠组（419）：主列表末尾、A-Z 之后、隐藏区之前；平时只占
+                // 折叠组（421 安静版）：主列表末尾、A-Z 之后、隐藏区之前；平时只占
                 // 组头一行（“不常用 · N 个”＋收展 chevron），展开时组内为正常
                 // 应用行（复用 AppRow：能打开、长按菜单都在），按 A-Z 行内顺序
-                // （拼音排序）排列。确认前不渲染（成员仍留在 A-Z 里）。
+                // （拼音排序）排列，行后跟组底确认行；N>0 且未压制时自动出现
+                // （默认收着），压制时成员回到 A-Z 里。
                 // 组头 chevron 是组自身的收展标示，不是应用行箭头（416 删的是
                 // 应用行尾箭头，两者不是同一元素）。
                 if (foldVisible) {
@@ -1361,6 +1360,38 @@ fun AppCenterContent(
                                             onDismiss = { popupApp = null }
                                         )
                                     }
+                                }
+                            }
+                        }
+                    }
+                    // 折叠组（421 安静版）：组底确认行——展开态才有；不点就是
+                    // 认了（组一直留着），点“取消折叠”即压制＋收起，组消失、
+                    // 成员回 A-Z，N 再多 10 个时安静重现（不弹任何东西）。
+                    if (foldExpandedState) {
+                        item(key = "fold-foot") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 72.dp, end = 64.dp, top = 8.dp, bottom = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "这些应用 90 天没打开，已折起来",
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    color = AILauncherColors.current.Hint,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = {
+                                    UiPrefs.setFoldLastDeclinedN(context, inactiveTargets.size)
+                                    foldLastDeclinedN = inactiveTargets.size
+                                    foldExpandedState = false
+                                    UiPrefs.setFoldExpanded(context, false)
+                                }) {
+                                    Text(
+                                        text = "取消折叠",
+                                        color = AILauncherColors.current.Body,
+                                        fontWeight = FontWeight.Medium
+                                    )
                                 }
                             }
                         }
@@ -1818,56 +1849,6 @@ fun AppCenterContent(
             onDismiss = {
                 UiPrefs.setRowActionsGuideSeen(context)
                 showActionsGuide = false
-            }
-        )
-    }
-    // 折叠组（419）：折叠前一次确认——样式跟应用内现有确认弹窗一致
-    // （IntentEntry NeedsConfirmation 口径：标题 Headline SemiBold Title 色，
-    // 正文 Callout Body 色，确认 TextButton Title 色 Medium，取消 Hint 色）；
-    // [折叠] 为主操作（确认位）。点空白/返回关掉按 [暂不] 计。
-    if (showFoldDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                UiPrefs.setFoldLastDeclinedN(context, inactiveTargets.size)
-                foldLastDeclinedN = inactiveTargets.size
-                showFoldDialog = false
-            },
-            title = {
-                Text(
-                    text = "要把不常用应用折叠起来吗？",
-                    fontSize = AILauncherType.Headline.fontSize,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.current.Title
-                )
-            },
-            text = {
-                Text(
-                    text = "共 ${inactiveTargets.size} 个应用 90 天没打开过。折起来不是隐藏：点组头随时展开，搜索也能搜到（不用解锁）。",
-                    fontSize = AILauncherType.Callout.fontSize,
-                    color = AILauncherColors.current.Body
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    UiPrefs.setFoldConfirmed(context, true)
-                    foldConfirmedState = true
-                    showFoldDialog = false
-                }) {
-                    Text(
-                        text = "折叠",
-                        color = AILauncherColors.current.Title,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    UiPrefs.setFoldLastDeclinedN(context, inactiveTargets.size)
-                    foldLastDeclinedN = inactiveTargets.size
-                    showFoldDialog = false
-                }) {
-                    Text(text = "暂不", color = AILauncherColors.current.Hint)
-                }
             }
         )
     }
