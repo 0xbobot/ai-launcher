@@ -9,6 +9,7 @@ import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -278,6 +279,9 @@ fun IntentCapsuleField(
     // 应用中心变体不画提交钮（Bob 2026-11-03：箭头仅收键盘、无实际功能，
     // 随首页意图入口一并删；首页默认 true 不变）
     showSubmitButton: Boolean = true,
+    // 应用中心融合变体（Bob 2026-11-03）：胶囊与页面同底色 + 细线描边、无阴影；
+    // 只改表面，尺寸/内边距/交互不动；首页默认 false 不变
+    fusedBackground: Boolean = false,
     // R3-C：焦点变化回调（首页用来驱动胶囊焦点状态；应用中心不传，保持纯过滤）
     onFocusChanged: (Boolean) -> Unit = {},
     // v0.68.99（主页重构 R-1）：挂载即聚焦——首页输入态由「点意图胶囊」
@@ -323,12 +327,21 @@ fun IntentCapsuleField(
             // 下删 8dp 阴影（玻璃面板内多一层脏边）；应用中心变体（实心底）
             // 保留原阴影，一字不动。
             .then(
-                if (solidBackground) Modifier
+                if (fusedBackground || solidBackground) Modifier
                 else Modifier.shadow(8.dp, RoundedCornerShape(28.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             )
             .clip(RoundedCornerShape(28.dp))
             .then(
-                if (solidBackground) {
+                if (fusedBackground) {
+                    // 应用中心融合变体（Bob 2026-11-03）：与页面同底色 + 细线描边、
+                    // 无阴影；只改表面，尺寸/内边距/交互不动
+                    Modifier.background(
+                        AILauncherColors.current.Background,
+                        RoundedCornerShape(28.dp)
+                    ).border(
+                        1.dp, AILauncherColors.current.Divider, RoundedCornerShape(28.dp)
+                    )
+                } else if (solidBackground) {
                     // 首页变体（2026-10-27 设计精致化 P1-3：弱化玻璃套玻璃）：
                     // 面板已是强玻璃，胶囊不再套第二层强玻璃＋方向高光（两层打架），
                     // 改平底：仅明度差（比面板玻璃更实一档）＋金色光标＋占位文案

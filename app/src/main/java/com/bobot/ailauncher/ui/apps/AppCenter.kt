@@ -241,19 +241,19 @@ fun AppCenterContent(
     // 逐字一致：去自己/去隐藏 + Collator(CHINA) 排序）；装卸时快照在后台换代，
     // 结果到了才换表，组合期不再整表同步重建。
     val azApps = catalog?.visibleApps ?: emptyList()
+    // 拼音首字母分组：用字典（20924 字），GB2312 区位码做兜底（azGroups 与
+    // 搜索态锚点共用同一口径）
+    val pinyinOf: (Char) -> Char = { c ->
+        val fromDict = AppSearchIndex.pinyinInitialOf(context, c)
+        if (fromDict != '#') fromDict else pinyinInitial(c)
+    }
     val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps) {
         val map = linkedMapOf<Char, MutableList<AppInfo>>()
-        // 拼音首字母分组：用字典（20924 字），GB2312 区位码做兜底
-        val pinyinOf: (Char) -> Char = { c ->
-            val fromDict = AppSearchIndex.pinyinInitialOf(context, c)
-            if (fromDict != '#') fromDict else pinyinInitial(c)
-        }
         azApps.forEach { app ->
             map.getOrPut(groupKey(app.label, pinyinOf)) { mutableListOf() }.add(app)
         }
         map.toList().sortedWith(compareBy({ if (it.first == '#') 1 else 0 }, { it.first }))
     }
-    val letters = remember(azGroups) { azGroups.map { it.first } }
 
     // v0.21：应用中心搜索（PRD §三十三）——拼音/首字母/自然语言/模糊
     // 意图改进一批：状态迁到 TextFieldValue（与首页共用同一胶囊组件、同一 composing
@@ -281,8 +281,6 @@ fun AppCenterContent(
     // 下 ime inset 仍正常上报
     // ime 是 WindowInsets.Companion 的扩展属性，须单独导入（同 HomeScreen）
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
-    // 应用中心升级：搜索态或键盘弹出时行距切紧凑（64→56dp）
-    val compactRows = searching || imeVisible
     // 应用中心升级：composing 期间结果区降透明度至 0.6（Bob 定稿③）——
     // composing 守卫与 120ms 防抖本身不动，只弱化旧结果的视觉权重
     val composingDim = queryField.composition != null
@@ -294,6 +292,12 @@ fun AppCenterContent(
     val searchResults = remember(filterQuery, searchIndex) {
         if (filterQuery.trim().isBlank()) null
         else AppSearchIndex.search(context, filterQuery, searchIndex)
+    }
+    // Bob 2026-11-03：字母导航只含当前列表里有的字母——搜索态跟过滤结果走
+    val letters = remember(azGroups, searchResults) {
+        val results = searchResults
+        if (results == null) azGroups.map { it.first }
+        else railLettersFromVisibleApps(results, context)
     }
     // 开始搜索时滚到顶部；退出搜索时恢复进入前位置
     val listState = rememberLazyListState()
@@ -316,14 +320,25 @@ fun AppCenterContent(
     // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
     // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；
     // 吸顶仍由悬停 overlay 实现
-    val letterAnchors = remember(azGroups, dockSectionSize) {
-        val m = mutableMapOf<Char, Int>()
-        var idx = dockSectionSize // v0.41.31：Dock 分区在前，字母锚点后移
-        azGroups.forEach { (letter, apps) ->
-            m[letter] = idx
-            idx += apps.size + 1
+    // Bob 2026-11-03：搜索态锚点跟过滤结果走（扁平结果无 Dock 分区、无组间距）
+    val letterAnchors = remember(azGroups, dockSectionSize, searchResults) {
+        val results = searchResults
+        if (results != null) {
+            val m = mutableMapOf<Char, Int>()
+            results.forEachIndexed { idx, app ->
+                val k = groupKey(app.label, pinyinOf)
+                if (!m.containsKey(k)) m[k] = idx
+            }
+            m
+        } else {
+            val m = mutableMapOf<Char, Int>()
+            var idx = dockSectionSize // v0.41.31：Dock 分区在前，字母锚点后移
+            azGroups.forEach { (letter, apps) ->
+                m[letter] = idx
+                idx += apps.size + 1
+            }
+            m
         }
-        m
     }
     // v0.41.31：隐藏分区第一个 item 的绝对 index（供 rail 眼睛按钮跳转）
     // v0.41.32：隐藏头已并入第一行，index 不变
@@ -633,9 +648,9 @@ fun AppCenterContent(
             }
         ) {
             // v0.68.66（Bob）：横屏时顶栏+搜索全由 AppCenterLandscape 提供，这里只留竖屏
-            // 应用中心升级：键盘弹出时刊头标题区隐藏（搜索胶囊与问七仔行保留）；
+            // Bob 2026-11-03：编辑态不再换版面——刊头常驻（键盘弹出也不隐藏）；
             // 顶栏左轴 28→20dp，与搜索行统一 20/12dp 口径
-            if (!isLandscapeAc && !imeVisible) {
+            if (!isLandscapeAc) {
             // v0.68.44（Bob）：杂志刊头
             Column(
                 modifier = Modifier
@@ -652,8 +667,9 @@ fun AppCenterContent(
                 )
                 Text(
                     // 应用中心升级：catalog 为空时不显示"0 款"空列表，改弱提示
+                    // Bob 2026-11-03：数字跟当前列表走——搜索态显示过滤后条数
                     text = if (catalog == null) "正在加载…"
-                        else "${azApps.size} 款 · 右侧滑字母直达",
+                        else "${searchResults?.size ?: azApps.size} 款 · 右侧滑字母直达",
                     fontSize = AILauncherType.Caption.fontSize,
                     color = AILauncherColors.current.Hint,
                     modifier = Modifier.padding(top = 8.dp)
@@ -702,6 +718,7 @@ fun AppCenterContent(
                     // 首页胶囊不开启，保持原设计。
                     showClearButton = true,
                     showSubmitButton = false,
+                    fusedBackground = true,
                     // v0.68.93：焦点外报 + 范围捕获（根 Box 点外部观察者用）
                     onFocusChanged = { intentFocused = it },
                     modifier = Modifier.weight(1f)
@@ -764,7 +781,8 @@ fun AppCenterContent(
             AppCenterLandscape(
                 azGroups = azGroups,
                 letters = letters,
-                totalCount = azApps.size,
+                totalCount = searchResults?.size ?: azApps.size,
+                searchLetterIndex = letterAnchors,
                 favApps = dockApps,
                 hiddenApps = hiddenApps,
                 hiddenUnlocked = hiddenUnlocked,
@@ -859,7 +877,6 @@ fun AppCenterContent(
                                 AppRow(
                                     app = app,
                                     onLaunch = { launchApp(app) },
-                                    compact = compactRows,
                                     onLongClick = {
                                         hapticView.confirmHaptic()
                                         popupApp = app
@@ -963,7 +980,6 @@ fun AppCenterContent(
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app) },
-                                    compact = compactRows,
                                 onLongClick = {
                                     hapticView.confirmHaptic()
                                     popupApp = app
@@ -1043,10 +1059,10 @@ fun AppCenterContent(
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dockDragOffsetY += dragAmount.y
-                                                // v0.55.2：行高 64dp + 2dp 间距 = 66dp；
-                                                // 应用中心升级：紧凑行 56dp + 2dp = 58dp
+                                                // v0.55.2：行高 64dp + 2dp 间距 = 66dp
+                                                // （Bob 2026-11-03：编辑态不再切紧凑行距）
                                                 val rowH = with(density) {
-                                                    (if (compactRows) 58.dp else 66.dp).toPx()
+                                                    66.dp.toPx()
                                                 }
                                                 val curIdx = dockOrder.indexOfFirst {
                                                     it.packageName == app.packageName
@@ -1093,9 +1109,9 @@ fun AppCenterContent(
                         // 字母不侵入上下行（字号不动）
                         Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
                             // v0.68.61：横屏隐藏幽灵字母（省竖向空间，不乱）
-                            // 应用中心升级：键盘弹出时隐藏幽灵字母；透明度
+                            // Bob 2026-11-03：编辑态不再隐藏幽灵字母；透明度
                             // 0.20 → 0.35（Bob 定稿④：可以动、效果优先）
-                            if (index == 0 && !isLandscapeAc && !imeVisible) {
+                            if (index == 0 && !isLandscapeAc) {
                                 Text(
                                     text = letter.toString(),
                                     fontFamily = FontFamily.Serif,
@@ -1122,7 +1138,6 @@ fun AppCenterContent(
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app) },
-                                    compact = compactRows,
                                 onLongClick = {
                                     hapticView.confirmHaptic()
                                     popupApp = app
@@ -1246,7 +1261,6 @@ fun AppCenterContent(
                                 AppRow(
                                     app = app,
                                     onLaunch = { launchApp(app) },
-                                    compact = compactRows,
                                     onLongClick = {
                                         hapticView.confirmHaptic()
                                         popupApp = app
@@ -1301,10 +1315,9 @@ fun AppCenterContent(
             }
             // v0.41.8：悬停幽灵字母——只在当前组首行滚出顶部后显示，下一组首行
             // 接近时被顶走；外层 clipToBounds 保证不会顶到搜索栏上面（Bob）。
-            // 应用中心升级：透明度跟行内幽灵字母同为 0.35；键盘弹出时隐藏
+            // 应用中心升级：透明度跟行内幽灵字母同为 0.35；Bob 2026-11-03 起编辑态不再隐藏
             val sl = stuckLetter
-            if (!searching && !imeVisible) {
-                if (stuckDock) {
+            if (stuckDock) {
                     // v0.41.31：Dock 分区悬停——幽灵 ★（与第一行幽灵一致）
                     Icon(
                         imageVector = Icons.Filled.Star,
@@ -1344,18 +1357,16 @@ fun AppCenterContent(
                             .offset { IntOffset(0, animatedPushPx.roundToInt()) }
                     )
                 }
-            }
             // 应用中心底部上滑已删除（Bob 2026-11-03：避免操作干扰）。
             // Rail：波浪字母导航（v0.24，学 Niagara/参考视频）——只做定位
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）
-            // v0.21：搜索态隐藏 rail（定位无意义）
+            // Bob 2026-11-03：编辑态不再隐藏 rail（搜索态下字母跟过滤结果走）
             // v0.24：点按跳字母（居中）；拖动时波浪跟手，列表跟手滚动切换字母
             // v0.40.2：右侧一条可见 rail + 左侧隐形触发区（Bob）——
             // 左边不摆 rail（摆两个很奇怪），但左侧滑动同样触发字母切换，
             // 触发后是右侧 rail 亮起波浪跟随；应用列表左侧缩进给手指留空间。
             // v0.67.11（Bob）：主屏 picker 会话中隐藏自己的 rail，避免与 picker 重叠
-            // 应用中心升级：键盘弹出时同样隐藏 rail（键盘弹出专用布局）
-            if (!searching && !imeVisible && letters.isNotEmpty() && homeTarget == null) {
+            if (letters.isNotEmpty() && homeTarget == null) {
                 // 左侧隐形区触发时，右侧可见 rail 跟随显示波浪
                 var mirrorIndex by remember { mutableStateOf<Int?>(null) }
                 // Niagara 做法：直接滚完整列表，不做内容过滤；松手时列表本来就在位置上，零位移
@@ -1421,8 +1432,9 @@ fun AppCenterContent(
                 // v0.67.13（Bob）：房子/收藏/隐藏做进 rail 滑动项，一条导航滑到哪去哪
                 // 字母导航完全统一（Bob 2026-10-25 追问）：项目表走三处共用的
                 // buildRailItems（RailItems.kt），构造与此前逐字一致，仅换调用。
-                val railItems = remember(dockApps, letters, hiddenApps) {
-                    buildRailItems(dockApps.isNotEmpty(), letters, hiddenApps.isNotEmpty())
+                // Bob 2026-11-03：搜索态下隐藏分区不在结果里，👁 不出现
+                val railItems = remember(dockApps, letters, hiddenApps, searchResults) {
+                    buildRailItems(dockApps.isNotEmpty(), letters, searchResults == null && hiddenApps.isNotEmpty())
                 }
                 // 收藏/隐藏时的脉冲目标
                 val pulseItem = when (flashTarget) {
