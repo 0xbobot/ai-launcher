@@ -877,6 +877,7 @@ fun AppCenterContent(
                                 AppRow(
                                     app = app,
                                     onLaunch = { launchApp(app) },
+                                    compact = true,
                                     onLongClick = {
                                         hapticView.confirmHaptic()
                                         popupApp = app
@@ -980,6 +981,7 @@ fun AppCenterContent(
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app) },
+                                compact = true,
                                 onLongClick = {
                                     hapticView.confirmHaptic()
                                     popupApp = app
@@ -1059,10 +1061,10 @@ fun AppCenterContent(
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dockDragOffsetY += dragAmount.y
-                                                // v0.55.2：行高 64dp + 2dp 间距 = 66dp
-                                                // （Bob 2026-11-03：编辑态不再切紧凑行距）
+                                                // v0.55.2：步进 = 紧凑行 56dp + 8dp 间距 = 64dp
+                                                // （Bob 2026-11-03：行距压缩同步；旧 66dp 是 2dp 间距时代的数，已作废）
                                                 val rowH = with(density) {
-                                                    66.dp.toPx()
+                                                    64.dp.toPx()
                                                 }
                                                 val curIdx = dockOrder.indexOfFirst {
                                                     it.packageName == app.packageName
@@ -1116,6 +1118,9 @@ fun AppCenterContent(
                                     text = letter.toString(),
                                     fontFamily = FontFamily.Serif,
                                     fontSize = 56.sp,
+                                    // Bob 2026-11-03：行高压缩后组首行仍 56dp——
+                                    // 幽灵字母行高收进 56dp，字形本身不裁（大写高约 0.7em）
+                                    lineHeight = 56.sp,
                                     // v0.68.44（Bob）：杂志章节感——放大加深
                                     color = AILauncherColors.current.Title.copy(alpha = 0.35f),
                                     modifier = Modifier
@@ -1138,6 +1143,7 @@ fun AppCenterContent(
                             AppRow(
                                 app = app,
                                 onLaunch = { launchApp(app) },
+                                compact = true,
                                 onLongClick = {
                                     hapticView.confirmHaptic()
                                     popupApp = app
@@ -1261,6 +1267,7 @@ fun AppCenterContent(
                                 AppRow(
                                     app = app,
                                     onLaunch = { launchApp(app) },
+                                    compact = true,
                                     onLongClick = {
                                         hapticView.confirmHaptic()
                                         popupApp = app
@@ -1317,7 +1324,10 @@ fun AppCenterContent(
             // 接近时被顶走；外层 clipToBounds 保证不会顶到搜索栏上面（Bob）。
             // 应用中心升级：透明度跟行内幽灵字母同为 0.35；Bob 2026-11-03 起编辑态不再隐藏
             val sl = stuckLetter
-            if (stuckDock) {
+            // Bob 2026-11-03：搜索态无分组可指示，悬停字母不显示
+            // （扁平结果无组概念；仅键盘弹出未输入时仍显示）
+            if (!searching) {
+                if (stuckDock) {
                     // v0.41.31：Dock 分区悬停——幽灵 ★（与第一行幽灵一致）
                     Icon(
                         imageVector = Icons.Filled.Star,
@@ -1357,6 +1367,7 @@ fun AppCenterContent(
                             .offset { IntOffset(0, animatedPushPx.roundToInt()) }
                     )
                 }
+            }
             // 应用中心底部上滑已删除（Bob 2026-11-03：避免操作干扰）。
             // Rail：波浪字母导航（v0.24，学 Niagara/参考视频）——只做定位
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）

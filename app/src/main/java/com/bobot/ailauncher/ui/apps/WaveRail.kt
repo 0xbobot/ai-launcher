@@ -217,7 +217,12 @@ internal fun WaveRail(
     ) {
         val hPx = constraints.maxHeight.toFloat()
         if (hPx <= 0f || items.isEmpty()) return@BoxWithConstraints
-        val railHpx = hPx * railFraction
+        // Bob 2026-11-03：字母少时 rail 不拉满——行高封顶 32dp，整列居中收紧；
+        // 字母多时行高低于封顶，仍按原比例铺满（不变）。仅可见 rail 封顶，
+        // 左侧隐形触发区保持原几何（触摸映射不受影响）。
+        val maxRowHpx = with(density) { 32.dp.toPx() }
+        val rawRailHpx = hPx * railFraction
+        val railHpx = if (visible) minOf(rawRailHpx, items.size * maxRowHpx) else rawRailHpx
         val railTopPx = (hPx - railHpx) / 2f
         val rowHpx = railHpx / items.size
         // 应用中心升级（Bob 2026-10-24 定稿）：波浪降推挤——内鼓 36→24dp、
@@ -372,7 +377,7 @@ internal fun WaveRail(
             modifier = Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth()
-                .fillMaxHeight(railFraction),
+                .fillMaxHeight(railHpx / hPx),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             items.forEachIndexed { i, item ->
