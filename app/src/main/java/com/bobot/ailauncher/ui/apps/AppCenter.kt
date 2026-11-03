@@ -689,8 +689,8 @@ fun AppCenterContent(
             ) {
                 // R2 UI（2026-10-21 新规格）：原搜索框删除，换成与首页同一个意图胶囊组件——
                 // 一个入口两层响应：打字走本地层过滤网格（状态层 query/searchResults 不变）。
-                // 应用中心升级（Bob 定稿②）：箭头 = 确认本地搜索（仅收键盘 +
-                // 定格结果，不走 AI）；IME Done 与问七仔行仍 = 问七仔。
+                // 应用中心胶囊无提交钮（Bob 2026-11-03：箭头仅收键盘、无实际功能，
+                // 随首页意图入口一并删）；IME Done 与问七仔行仍 = 问七仔。
                 IntentCapsuleField(
                     value = queryField,
                     onValueChange = ::onQueryFieldChange,
@@ -698,17 +698,10 @@ fun AppCenterContent(
                         val q = query.trim()
                         if (q.isNotEmpty()) onAskQizai(q)
                     },
-                    onArrowSubmit = {
-                        focusManager.clearFocus()
-                        keyboardController?.hide()
-                    },
-                    // 意图页优化（2026-10-30，Bob 已批 §二 A1 连带）：应用中心
-                    // 箭头 = 确认本地搜索，不走 AI——无障碍文案不能沿用首页
-                    // 的“交给助手去办”，否则 TalkBack 会说错动作。
-                    submitContentDescription = "确认本地搜索",
                     // 应用中心变体专属（10-21 Bob 批准）：✕ 一键清空，清空后网格恢复全量；
                     // 首页胶囊不开启，保持原设计。
                     showClearButton = true,
+                    showSubmitButton = false,
                     // v0.68.93：焦点外报 + 范围捕获（根 Box 点外部观察者用）
                     onFocusChanged = { intentFocused = it },
                     modifier = Modifier.weight(1f)
@@ -792,11 +785,6 @@ fun AppCenterContent(
                 onSearchSubmit = {
                     val q = query.trim()
                     if (q.isNotEmpty()) onAskQizai(q)
-                },
-                // 应用中心升级：横屏箭头同竖屏 = 确认本地搜索
-                onSearchArrowSubmit = {
-                    focusManager.clearFocus()
-                    keyboardController?.hide()
                 },
                 // 应用中心升级：横屏空结果文案区分"索引加载中"与"真无匹配"
                 indexLoading = catalog == null && query.isNotBlank(),

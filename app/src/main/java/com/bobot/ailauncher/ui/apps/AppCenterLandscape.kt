@@ -107,9 +107,7 @@ fun AppCenterLandscape(
     onSearchFieldChange: (TextFieldValue) -> Unit,
     searchResults: List<AppInfo>?,
     onSearchSubmit: () -> Unit,
-    // 应用中心升级：横屏箭头同竖屏 = 确认本地搜索；索引加载中标记
-    // （空结果文案区分"索引加载中"与"真无匹配"）
-    onSearchArrowSubmit: () -> Unit = {},
+    // 应用中心升级：索引加载中标记（空结果文案区分"索引加载中"与"真无匹配"）
     indexLoading: Boolean = false,
     onAskQizai: (String) -> Unit,
     // 与竖屏同一套焦点礼仪（v0.68.93）：焦点外报 + 范围捕获，
@@ -337,20 +335,17 @@ fun AppCenterLandscape(
                     }
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    // F2：与竖屏同一 IntentCapsuleField（占位/提交/✕ 清空/焦点
-                    // 礼仪全部同组件同口径）
+                    // F2：与竖屏同一 IntentCapsuleField（占位/✕ 清空/焦点
+                    // 礼仪全部同组件同口径；胶囊无提交钮，Bob 2026-11-03 与竖屏同批删）
                     // 应用中心升级：宽度 440dp 写死 → weight + 上限 440dp——
-                    // 窄高横屏下不再挤压款数 / 齿轮；箭头同竖屏 = 确认本地搜索
+                    // 窄高横屏下不再挤压款数 / 齿轮
                     IntentCapsuleField(
                         value = searchFieldValue,
                         onValueChange = onSearchFieldChange,
                         onSubmit = onSearchSubmit,
-                        onArrowSubmit = onSearchArrowSubmit,
-                        // 意图页优化（2026-10-30，Bob 已批 §二 A1 连带）：与竖屏
-                        // 同款——横屏箭头同样是确认本地搜索，不走 AI。
-                        submitContentDescription = "确认本地搜索",
                         // 应用中心变体（同竖屏）：✕ 一键清空、清空后列流恢复全量
                         showClearButton = true,
+                        showSubmitButton = false,
                         onFocusChanged = onSearchFocusChanged,
                         modifier = Modifier
                             .weight(1f)
