@@ -241,19 +241,21 @@ fun AppCenterContent(
     // 逐字一致：去自己/去隐藏 + Collator(CHINA) 排序）；装卸时快照在后台换代，
     // 结果到了才换表，组合期不再整表同步重建。
     val azApps = catalog?.visibleApps ?: emptyList()
-    // 拼音首字母分组：用字典（20924 字），GB2312 区位码做兜底（azGroups 与
-    // 搜索态锚点共用同一口径）
-    val pinyinOf: (Char) -> Char = { c ->
-        val fromDict = AppSearchIndex.pinyinInitialOf(context, c)
-        if (fromDict != '#') fromDict else pinyinInitial(c)
-    }
     val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps) {
         val map = linkedMapOf<Char, MutableList<AppInfo>>()
+        // 拼音首字母分组：用字典（20924 字），GB2312 区位码做兜底
+        val pinyinOf: (Char) -> Char = { c ->
+            val fromDict = AppSearchIndex.pinyinInitialOf(context, c)
+            if (fromDict != '#') fromDict else pinyinInitial(c)
+        }
         azApps.forEach { app ->
             map.getOrPut(groupKey(app.label, pinyinOf)) { mutableListOf() }.add(app)
         }
         map.toList().sortedWith(compareBy({ if (it.first == '#') 1 else 0 }, { it.first }))
     }
+    // Bob 2026-11-03 回滚：字母导航回 409 加过滤前——letters 只取 azGroups
+    // （有应用字母集），不再跟搜索结果走；搜索态 rail 按上一条已隐藏
+    val letters = remember(azGroups) { azGroups.map { it.first } }
 
     // v0.21：应用中心搜索（PRD §三十三）——拼音/首字母/自然语言/模糊
     // 意图改进一批：状态迁到 TextFieldValue（与首页共用同一胶囊组件、同一 composing
@@ -293,12 +295,6 @@ fun AppCenterContent(
         if (filterQuery.trim().isBlank()) null
         else AppSearchIndex.search(context, filterQuery, searchIndex)
     }
-    // Bob 2026-11-03：字母导航只含当前列表里有的字母——搜索态跟过滤结果走
-    val letters = remember(azGroups, searchResults) {
-        val results = searchResults
-        if (results == null) azGroups.map { it.first }
-        else railLettersFromVisibleApps(results, context)
-    }
     // 开始搜索时滚到顶部；退出搜索时恢复进入前位置
     val listState = rememberLazyListState()
     // 应用中心升级：退出搜索恢复进入前位置（只记首次进入搜索前的位置，
@@ -320,25 +316,16 @@ fun AppCenterContent(
     // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
     // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；
     // 吸顶仍由悬停 overlay 实现
-    // Bob 2026-11-03：搜索态锚点跟过滤结果走（扁平结果无 Dock 分区、无组间距）
-    val letterAnchors = remember(azGroups, dockSectionSize, searchResults) {
-        val results = searchResults
-        if (results != null) {
-            val m = mutableMapOf<Char, Int>()
-            results.forEachIndexed { idx, app ->
-                val k = groupKey(app.label, pinyinOf)
-                if (!m.containsKey(k)) m[k] = idx
-            }
-            m
-        } else {
-            val m = mutableMapOf<Char, Int>()
-            var idx = dockSectionSize // v0.41.31：Dock 分区在前，字母锚点后移
-            azGroups.forEach { (letter, apps) ->
-                m[letter] = idx
-                idx += apps.size + 1
-            }
-            m
+    // Bob 2026-11-03 回滚：锚点回 409 加过滤前——只按完整列表算
+    // （Dock 分区在前、每组＋1 组间呼吸），不再跟搜索结果走
+    val letterAnchors = remember(azGroups, dockSectionSize) {
+        val m = mutableMapOf<Char, Int>()
+        var idx = dockSectionSize // v0.41.31：Dock 分区在前，字母锚点后移
+        azGroups.forEach { (letter, apps) ->
+            m[letter] = idx
+            idx += apps.size + 1
         }
+        m
     }
     // v0.41.31：隐藏分区第一个 item 的绝对 index（供 rail 眼睛按钮跳转）
     // v0.41.32：隐藏头已并入第一行，index 不变
@@ -792,7 +779,6 @@ fun AppCenterContent(
                 azGroups = azGroups,
                 letters = letters,
                 totalCount = searchResults?.size ?: azApps.size,
-                searchLetterIndex = letterAnchors,
                 favApps = dockApps,
                 hiddenApps = hiddenApps,
                 hiddenUnlocked = hiddenUnlocked,
@@ -1382,7 +1368,7 @@ fun AppCenterContent(
             // 应用中心底部上滑已删除（Bob 2026-11-03：避免操作干扰）。
             // Rail：波浪字母导航（v0.24，学 Niagara/参考视频）——只做定位
             // v0.15.1：rail 整体再往外侧靠（字母列距屏幕边缘约 10dp）
-            // Bob 2026-11-03：编辑态不再隐藏 rail（搜索态下字母跟过滤结果走）
+            // Bob 2026-11-03 回滚：字母导航回 409 加过滤前（字母/锚点只按完整列表；搜索态 rail 按上一条隐藏）
             // v0.24：点按跳字母（居中）；拖动时波浪跟手，列表跟手滚动切换字母
             // v0.40.2：右侧一条可见 rail + 左侧隐形触发区（Bob）——
             // 左边不摆 rail（摆两个很奇怪），但左侧滑动同样触发字母切换，
@@ -1456,9 +1442,10 @@ fun AppCenterContent(
                 // v0.67.13（Bob）：房子/收藏/隐藏做进 rail 滑动项，一条导航滑到哪去哪
                 // 字母导航完全统一（Bob 2026-10-25 追问）：项目表走三处共用的
                 // buildRailItems（RailItems.kt），构造与此前逐字一致，仅换调用。
-                // Bob 2026-11-03：搜索态下隐藏分区不在结果里，👁 不出现
-                val railItems = remember(dockApps, letters, hiddenApps, searchResults) {
-                    buildRailItems(dockApps.isNotEmpty(), letters, searchResults == null && hiddenApps.isNotEmpty())
+                // Bob 2026-11-03 回滚：👁 门回 409 加过滤前——只看隐藏分区非空
+                // （搜索态 rail 按上一条已隐藏，此门不再区分搜索态）
+                val railItems = remember(dockApps, letters, hiddenApps) {
+                    buildRailItems(dockApps.isNotEmpty(), letters, hiddenApps.isNotEmpty())
                 }
                 // 收藏/隐藏时的脉冲目标
                 val pulseItem = when (flashTarget) {
