@@ -110,7 +110,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.IconButton
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -559,24 +559,53 @@ fun PullUpDock(
                         }
                     }
                 }
-                // 智能 v3：Dock idea 图标——面板右上角贴角（48dp 触控框、
-                // 22dp 线性灯泡字形、Hint 安静灰；金色只留主操作）。
-                // 面板内容区顶部留白：D1 图标顶缘在面板顶下 48dp、D2 在
-                // 52dp 下，按钮 0-48dp 只占留白与内边距，不盖字形、
-                // 不参与行布局、不挤压应用图标；点按先刷新排序再开说明页。
-                IconButton(
-                    onClick = {
-                        whyTick++
-                        showWhySheet = true
-                    },
-                    modifier = Modifier.align(Alignment.TopEnd)
+                // 418：Dock idea 入口换方案——417 的右上角灯泡被首页 rail
+                // 的隐形触控条盖住：WaveRail visible=false 时只关绘制、
+                // 不关触摸，48dp 宽、近乎整屏高，且后组合故压在 Dock 面板
+                // 之上；首页 rail 又是长按才进选择器，轻点直接被吞掉。
+                // 新入口：面板顶部留白条正中的小标签（圆角 pill：同底色＋
+                // 细线描边、无阴影，线性灯泡＋“为什么”两字，Hint 安静灰，
+                // 金色只留主操作）——居中，左右 rail 都够不着；落在面板
+                // 顶部留白里（行列底对齐、顶部空 48/52dp），不盖图标、
+                // 不挤行；点按先刷新排序再开说明页。
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .height(48.dp)
+                        .semantics { contentDescription = "为什么是这几个应用" }
+                        .clickable {
+                            whyTick++
+                            showWhySheet = true
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Lightbulb,
-                        contentDescription = "为什么是这几个应用",
-                        tint = AILauncherColors.current.Hint,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .background(
+                                color = AILauncherColors.current.Card,
+                                shape = CircleShape
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = AILauncherColors.current.Title.copy(alpha = 0.08f),
+                                shape = CircleShape
+                            )
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Lightbulb,
+                            contentDescription = null,
+                            tint = AILauncherColors.current.Hint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "为什么",
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Hint
+                        )
+                    }
                 }
                 } // 外层 Box（面板）
             }
