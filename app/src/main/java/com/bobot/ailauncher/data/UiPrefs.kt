@@ -13,6 +13,10 @@ object UiPrefs {
     private const val KEY_ROW_ACTIONS_GUIDE_SEEN = "row_actions_guide_seen"
     private const val KEY_PANEL_GUIDE_SEEN = "panel_guide_seen"
     private const val KEY_PANEL_GUIDE_REMIND = "panel_guide_reminded"
+    // 折叠组（419）：确认态/上次拒绝时 N/展开态；foldTick 供首页 rail 跟随刷新
+    private const val KEY_FOLD_CONFIRMED = "fold_confirmed"
+    private const val KEY_FOLD_LAST_DECLINED_N = "fold_last_declined_n"
+    private const val KEY_FOLD_EXPANDED = "fold_expanded"
 
     /** Dock 数据变化通知：置顶增删/排序后 bump，Dock 侧重算 */
     val dockTick = MutableStateFlow(0)
@@ -128,5 +132,44 @@ object UiPrefs {
     fun setPanelGuideReminded(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_PANEL_GUIDE_REMIND, true).apply()
+    }
+
+    /** 折叠组状态变化通知：确认/拒绝/收展后 bump，首页 rail 跟随重算 */
+    val foldTick = MutableStateFlow(0)
+
+    /** 折叠组已确认（点过确认框 [折叠]），默认 false */
+    fun getFoldConfirmed(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_FOLD_CONFIRMED, false)
+    }
+
+    fun setFoldConfirmed(context: Context, confirmed: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_FOLD_CONFIRMED, confirmed).apply()
+        foldTick.value++
+    }
+
+    /** 上次拒绝折叠时的 N（-1 表从未拒绝）；N 再多 10 个时再问 */
+    fun getFoldLastDeclinedN(context: Context): Int {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_FOLD_LAST_DECLINED_N, -1)
+    }
+
+    fun setFoldLastDeclinedN(context: Context, n: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_FOLD_LAST_DECLINED_N, n).apply()
+        foldTick.value++
+    }
+
+    /** 折叠组展开态，默认折叠（false） */
+    fun getFoldExpanded(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_FOLD_EXPANDED, false)
+    }
+
+    fun setFoldExpanded(context: Context, expanded: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_FOLD_EXPANDED, expanded).apply()
+        foldTick.value++
     }
 }
