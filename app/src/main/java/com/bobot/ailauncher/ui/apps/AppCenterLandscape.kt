@@ -441,10 +441,10 @@ fun AppCenterLandscape(
                             // LazyListScope.items 重载解析总偏向 count:Int 版，改用 forEach+item 避开
                             results.forEach { app ->
                                 item(key = "s:${app.packageName}") {
-                                    // Bob 2026-11-03：编辑态不再切紧凑行距
+                                    // Bob 2026-11-03：行距压缩——横屏搜索行同步走紧凑行
                                     LandscapeAppRow(
                                         app = app, onLaunch = onLaunch,
-                                        compact = false
+                                        compact = true
                                     )
                                 }
                             }
@@ -546,7 +546,8 @@ fun AppCenterLandscape(
                                     is FlowItem.App -> {
                                         LandscapeAppRow(
                                             app = item.app,
-                                            onLaunch = onLaunch
+                                            onLaunch = onLaunch,
+                                            compact = true
                                         )
                                     }
                                 }
