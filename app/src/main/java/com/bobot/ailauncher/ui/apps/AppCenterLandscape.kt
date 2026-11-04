@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -58,6 +59,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.invisibleToUser
@@ -124,6 +126,8 @@ fun AppCenterLandscape(
     // 与竖屏同一套焦点礼仪（v0.68.93）：焦点外报 + 范围捕获，
     // 供 AppCenter 根 Box 的点外部清焦观察者使用
     onSearchFocusChanged: (Boolean) -> Unit = {},
+    // 425 齿轮 morph：调用点传入的当前焦点值（与 onSearchFocusChanged 同源，只读不写）
+    searchFocused: Boolean = false,
     onSearchPositioned: (Rect) -> Unit = {},
     // 横屏首页修（Bob 2026-10-25）：主屏 picker 会话状态（由调用点透传竖屏已有的
     // UiPrefs.homeRailTarget collectAsState 值）；rail 门与竖屏 AppCenter.kt:1419 同款——
@@ -133,6 +137,7 @@ fun AppCenterLandscape(
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
     // 应用中心升级：问七仔行 500ms 节流（同竖屏）
     var lastAskMs by remember { mutableStateOf(0L) }
@@ -376,8 +381,8 @@ fun AppCenterLandscape(
                         value = searchFieldValue,
                         onValueChange = onSearchFieldChange,
                         onSubmit = onSearchSubmit,
-                        // 应用中心变体（同竖屏）：✕ 一键清空、清空后列流恢复全量
-                        showClearButton = true,
+                        // 425（Bob 2026-11-04，参考视频）：里侧清空去掉，挪到外面齿轮位（同竖屏）
+                        showClearButton = false,
                         showSubmitButton = false,
                         fusedBackground = true,
                         onFocusChanged = onSearchFocusChanged,
@@ -387,12 +392,22 @@ fun AppCenterLandscape(
                             .onGloballyPositioned { onSearchPositioned(it.boundsInRoot()) }
                     )
                     Spacer(modifier = Modifier.weight(1f))
+                    // 425（Bob 2026-11-04，参考视频）：齿轮位 morph（同竖屏）——失焦设置齿轮原样，
+                    // 聚焦（输入态）就地变清空；只换图标＋动作＋文案，圆盘／位置／尺寸／testTag 一律不动。
+                    // 点 X：有字清空（留输入态，X 还在）、没字退焦（键盘收起，自动变回齿轮）。
                     // 设置齿轮（Bob：横屏时竖屏的齿轮拿掉，放这里）
                     // F2：与竖屏同一 IconButton + testTag 锚点——此前是裸 Icon
                     // 无锚点，冒烟 §21 到达校验与布局几何断言在横屏测不到本节点、
                     // 触控面也只有约 28dp（竖屏为 48dp IconButton）
                     IconButton(
-                        onClick = onOpenSettings,
+                        onClick = {
+                            if (searchFocused) {
+                                if (searchFieldValue.text.isNotEmpty()) onSearchFieldChange(TextFieldValue(""))
+                                else focusManager.clearFocus()
+                            } else {
+                                onOpenSettings()
+                            }
+                        },
                         modifier = Modifier.testTag("appcenter_settings")
                     ) {
                         // Bob 2026-11-03 原型样式：齿轮坐浅色圆盘（原型同款）；
@@ -404,12 +419,21 @@ fun AppCenterLandscape(
                                 .background(AILauncherColors.current.Title.copy(alpha = 0.08f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Filled.Settings,
-                                contentDescription = "设置",
-                                tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
-                                modifier = Modifier.size(20.dp)
-                            )
+                            if (searchFocused) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "清空",
+                                    tint = AILauncherColors.current.Title,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Filled.Settings,
+                                    contentDescription = "设置",
+                                    tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
