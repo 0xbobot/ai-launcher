@@ -54,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
@@ -129,6 +130,9 @@ fun AppCenterLandscape(
     // 425 齿轮 morph：调用点传入的当前焦点值（与 onSearchFocusChanged 同源，只读不写）
     searchFocused: Boolean = false,
     onSearchPositioned: (Rect) -> Unit = {},
+    // 426（Bob 2026-11-04 点 X 回设置页）：morph 按钮位 bounds 回传，调用点
+    // 记入同一排除状态（见 AppCenter 根 Box 观察者的 extraBoundsInHost）
+    onMorphButtonPositioned: (Rect) -> Unit = {},
     // 横屏首页修（Bob 2026-10-25）：主屏 picker 会话状态（由调用点透传竖屏已有的
     // UiPrefs.homeRailTarget collectAsState 值）；rail 门与竖屏 AppCenter.kt:1419 同款——
     // 进场手势未松手时只显示首页 picker rail，松手后 dismissPicker 置 null，
@@ -399,6 +403,9 @@ fun AppCenterLandscape(
                     // F2：与竖屏同一 IconButton + testTag 锚点——此前是裸 Icon
                     // 无锚点，冒烟 §21 到达校验与布局几何断言在横屏测不到本节点、
                     // 触控面也只有约 28dp（竖屏为 48dp IconButton）
+                    // 426（Bob 2026-11-04 点 X 回设置页）：按钮不可聚焦＋记 bounds 回传
+                    // （同竖屏：点 X 不抢输入框焦点、按钮位不算点外面；圆盘／位置／
+                    // 尺寸／testTag 一律不动，只加这两项）
                     IconButton(
                         onClick = {
                             if (searchFocused) {
@@ -409,6 +416,8 @@ fun AppCenterLandscape(
                             }
                         },
                         modifier = Modifier.testTag("appcenter_settings")
+                            .focusProperties { canFocus = false }
+                            .onGloballyPositioned { onMorphButtonPositioned(it.boundsInRoot()) }
                     ) {
                         // Bob 2026-11-03 原型样式：齿轮坐浅色圆盘（原型同款）；
                         // 触控框仍是 IconButton 48dp，圆盘 40dp 只改视觉

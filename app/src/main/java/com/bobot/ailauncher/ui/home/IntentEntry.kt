@@ -552,7 +552,12 @@ fun Modifier.clearIntentFocusOnOutsideTap(
     // v0.68.101（D-2）：真实外点事件回调——宿主据此退出输入态。退出判定
     // 从此走「用户动作事件」而非「焦点变 false 的边沿推断」：IME 切面板/
     // 删字造成的瞬时焦点抖动不再能把输入态误退（Bob 真机两幕实证）。
-    onOutsideTap: () -> Unit = {}
+    onOutsideTap: () -> Unit = {},
+    // 426（Bob 2026-11-04 点 X 回设置页）：附加排除范围——胶囊外但不算
+    // “外面”的按钮位（应用中心 morph 清空钮在胶囊框外，点它不能算点外面
+    // 清焦点，否则点 X 时焦点先丢、点击读到已失焦就走设置分支）。不传则
+    // 为空，首页／宠物／设置调用点行为一字不动。
+    extraBoundsInHost: () -> List<Rect> = { emptyList() }
 ): Modifier = this.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
@@ -561,7 +566,7 @@ fun Modifier.clearIntentFocusOnOutsideTap(
             if (!focused()) continue
             val bounds = targetBoundsInHost() ?: continue
             val pos = event.changes.firstOrNull()?.position ?: continue
-            if (!bounds.contains(pos)) {
+            if (!bounds.contains(pos) && extraBoundsInHost().none { it.contains(pos) }) {
                 focusManager.clearFocus()
                 keyboardController?.hide()
                 onOutsideTap()
