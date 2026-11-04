@@ -783,9 +783,9 @@ fun AppCenterContent(
                         val q = query.trim()
                         if (q.isNotEmpty()) onAskQizai(q)
                     },
-                    // 应用中心变体专属（10-21 Bob 批准）：✕ 一键清空，清空后网格恢复全量；
-                    // 首页胶囊不开启，保持原设计。
-                    showClearButton = true,
+                    // 425（Bob 2026-11-04，参考视频）：里侧清空去掉，挪到外面齿轮位——
+                    // 聚焦变 X、失焦回齿轮，全程只剩外面这一个清空（见下齿轮 morph）。
+                    showClearButton = false,
                     showSubmitButton = false,
                     fusedBackground = true,
                     // v0.68.93：焦点外报 + 范围捕获（根 Box 点外部观察者用）
@@ -794,9 +794,20 @@ fun AppCenterContent(
                         .onGloballyPositioned { intentBoundsInRoot = it.boundsInRoot() }
                 )
                 Spacer(modifier = Modifier.width(8.dp))
+                // 425（Bob 2026-11-04，参考视频）：齿轮位 morph——失焦是设置齿轮原样，
+                // 聚焦（输入态）就地变清空；只换图标＋动作＋文案，圆盘／位置／尺寸／testTag 一律不动。
+                // 点 X：有字清空（留输入态，X 还在）、没字退焦（键盘收起，自动变回齿轮）；
+                // 返回／点外面／点完成／点开应用都会失焦，变回齿轮不用每个出口单独处理。
                 // v0.41.9（Bob 选 B）：设置齿轮缩小弱化，仍在右上
                 IconButton(
-                    onClick = onOpenSettings,
+                    onClick = {
+                        if (intentFocused) {
+                            if (query.isNotEmpty()) onQueryFieldChange(TextFieldValue(""))
+                            else focusManager.clearFocus()
+                        } else {
+                            onOpenSettings()
+                        }
+                    },
                     // 体检批D ⑥：冒烟语义定位锚点（应用中心设置齿轮）
                     modifier = Modifier.testTag("appcenter_settings")
                 ) {
@@ -809,12 +820,21 @@ fun AppCenterContent(
                             .background(AILauncherColors.current.Title.copy(alpha = 0.08f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            Icons.Filled.Settings,
-                            contentDescription = "设置",
-                            tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
-                            modifier = Modifier.size(20.dp)
-                        )
+                        if (intentFocused) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "清空",
+                                tint = AILauncherColors.current.Title,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else {
+                            Icon(
+                                Icons.Filled.Settings,
+                                contentDescription = "设置",
+                                tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -905,6 +925,8 @@ fun AppCenterContent(
                 homeTarget = homeTarget,
                 onAskQizai = onAskQizai,
                 onSearchFocusChanged = { intentFocused = it },
+                // 425 齿轮 morph：横屏复用竖屏同一 intentFocused（只读传入，不另起状态）
+                searchFocused = intentFocused,
                 onSearchPositioned = { intentBoundsInRoot = it },
                 modifier = Modifier
                     .fillMaxWidth()
