@@ -101,7 +101,6 @@ import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.DockLightParams
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.theme.AILauncherColors
-import com.bobot.ailauncher.ui.theme.GlassTextShadow
 import com.bobot.ailauncher.ui.theme.MotionTokens
 import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.systemGestureBottomPx
@@ -119,7 +118,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
@@ -212,6 +210,46 @@ fun PullUpDock(
         (pinned + rest).take(10)
     }
     val top4 = remember(top10) { top10.take(4) }
+
+    // 422（Bob 2026-11-04）：idea 灯泡按洞察出现——常规时隐藏，仅当
+    // 智能尾巴出现“新面孔＋有数据理由”时才出现。tail 取 Dock 渲染的
+    // 同一份 top10 去掉固定位（固定位变动不触发）；D1/D2 共用同一 tail
+    // 与 seenTail（不按档位分，避免切档误触发）。
+    val insightTail = remember(top10, pinnedPkgs) {
+        top10.filter { it.packageName !in pinnedPkgs }.map { it.packageName }
+    }
+    // 本地态与持久化镜像（只写 prefs 不触发重组，故点按／建基线时双写）。
+    var insightSeenTail by remember { mutableStateOf(UiPrefs.getInsightSeenTail(context)) }
+    // 首次运行（seenTail 为 null）静默把当前 tail 存下建基线、不显示（不追认）。
+    LaunchedEffect(insightTail) {
+        if (insightSeenTail == null) {
+            UiPrefs.setInsightSeenTail(context, insightTail)
+            insightSeenTail = insightTail
+        }
+    }
+    // 可见条件：seenTail 已存在，且 tail 里有 seenTail 没有的包，且该包有
+    // 数据理由（复用说明页的理由判定：时段桶 ≥3，或转移 ≥3（沿用说明页的
+    // prevRecent 门，避免点开却是 fallback），或总量 >0；全是 fallback
+    // “暂无你的使用记录”的不算洞察）。
+    val insightVisible = remember(insightTail, insightSeenTail) {
+        val seen = insightSeenTail
+        if (seen == null) {
+            false
+        } else {
+            val seenSet = seen.toSet()
+            val (dow, hour) = AppUsageTracker.currentDowHour()
+            val (prevPkg, prevTime) = AppUsageTracker.prevLaunch(context)
+            val prevRecent = prevPkg.isNotEmpty() &&
+                System.currentTimeMillis() - prevTime <= 10 * 60 * 1000
+            insightTail.any { pkg ->
+                pkg !in seenSet && (
+                    AppUsageTracker.hwCount(context, pkg, dow, hour) >= 3 ||
+                    (prevRecent && AppUsageTracker.transferCount(context, prevPkg, pkg) >= 3) ||
+                    AppUsageTracker.totalCount(context, pkg) > 0
+                )
+            }
+        }
+    }
 
     // 图标点按涟漪用协程域。
     val rippleScope = rememberCoroutineScope()
@@ -561,50 +599,38 @@ fun PullUpDock(
                         }
                     }
                 }
-                // 418：Dock idea 入口换方案——417 的右上角灯泡被首页 rail
-                // 的隐形触控条盖住：WaveRail visible=false 时只关绘制、
-                // 不关触摸，48dp 宽、近乎整屏高，且后组合故压在 Dock 面板
-                // 之上；首页 rail 又是长按才进选择器，轻点直接被吞掉。
-                // 420：418 的圆角 pill 实拍翻车——玻璃面板上的实色填充
-                // 在真机上糊成一团暗渍（像素验过：pill 区颜色≈被压暗的
-                // 山体，不是干净的实色），像随手贴上去的。门面不能这么
-                // 随意：玻璃本身就是容器，不再另套容器——改成直接落在
-                // 玻璃上的 caption（线性灯泡＋“为什么”，白字＋
-                // GlassTextShadow，简报字在壁纸上的同款做法，任意壁纸
-                // 都可读）。位置、触控、点按开说明页一字不动。
-                // 新入口：面板顶部留白条正中的小标签（无容器 caption，
-                // 线性灯泡＋“为什么”两字，白字＋玻璃字阴影）——居中，
-                // 左右 rail 都够不着；落在面板
-                // 顶部留白里（行列底对齐、顶部空 48/52dp），不盖图标、
-                // 不挤行；点按先刷新排序再开说明页。
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .height(48.dp)
-                        .semantics { contentDescription = "为什么是这几个应用" }
-                        .clickable {
-                            whyTick++
-                            showWhySheet = true
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
+                // 422（Bob 2026-11-04）：idea 入口改简——①不要“为什么”三字，
+                // 只剩灯泡；②灯泡移到 Dock 底部：面板 Column 的 bottom 16dp
+                // 内边距条（最后一行图标之下、空条），水平居中；触控盒
+                // 64×24dp、以条中心为准居中（offset 4dp：上探进图标底缘
+                // 4dp、下探出面板 4dp，点按有效、不改面板高、不拦滑动）；
+                // ③常规时隐藏、有数据洞察时才出现（见 insightVisible 定义：
+                // 基线＋新面孔＋数据理由三要素；点按先存 seenTail 再开页）。
+                // 竖屏 BottomCenter、横屏 344dp 定宽内居中同款；D3／意图态
+                // 仍随面板 AnimatedVisibility 隐藏（不动）。
+                if (insightVisible) {
+                    Box(
                         modifier = Modifier
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .align(Alignment.BottomCenter)
+                            .offset(y = 4.dp)
+                            .size(width = 64.dp, height = 24.dp)
+                            .semantics { contentDescription = "为什么是这几个应用" }
+                            .clickable {
+                                // 点灯泡先把当前 tail 存为 seenTail（确认动作），
+                                // 再按原逻辑刷新排序并开说明页（看过就再藏起来，
+                                // 直到下一个新面孔）。
+                                UiPrefs.setInsightSeenTail(context, insightTail)
+                                insightSeenTail = insightTail
+                                whyTick++
+                                showWhySheet = true
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Lightbulb,
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "为什么",
-                            fontSize = AILauncherType.Footnote.fontSize,
-                            color = Color.White,
-                            style = TextStyle(shadow = GlassTextShadow)
                         )
                     }
                 }

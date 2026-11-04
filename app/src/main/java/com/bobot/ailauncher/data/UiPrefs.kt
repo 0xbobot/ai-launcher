@@ -16,6 +16,8 @@ object UiPrefs {
     // 折叠组（419/421）：上次取消时 N/展开态；foldTick 供首页 rail 跟随刷新
     private const val KEY_FOLD_LAST_DECLINED_N = "fold_last_declined_n"
     private const val KEY_FOLD_EXPANDED = "fold_expanded"
+    // idea 灯泡（422）：上次看过说明页时的智能尾巴（逗号拼包名）；null 表从未建立基线
+    private const val KEY_INSIGHT_SEEN_TAIL = "dock_insight_seen_tail"
 
     /** Dock 数据变化通知：置顶增删/排序后 bump，Dock 侧重算 */
     val dockTick = MutableStateFlow(0)
@@ -158,5 +160,17 @@ object UiPrefs {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_FOLD_EXPANDED, expanded).apply()
         foldTick.value++
+    }
+
+    /** idea 灯泡看过的智能尾巴（逗号拼包名）；null 表从未建立基线（首次运行静默建基线） */
+    fun getInsightSeenTail(context: Context): List<String>? {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_INSIGHT_SEEN_TAIL, null) ?: return null
+        return if (raw.isEmpty()) emptyList() else raw.split(",")
+    }
+
+    fun setInsightSeenTail(context: Context, tail: List<String>) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_INSIGHT_SEEN_TAIL, tail.joinToString(",")).apply()
     }
 }
