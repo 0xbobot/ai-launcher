@@ -441,7 +441,8 @@ fun PullUpDock(
                 DisposableEffect(Unit) {
                     onDispose { onDockUnitBoundsChangeLatest(null) }
                 }
-                Column(
+                // 424：玻璃盒（原 Column 改为 Box，承接其全部修饰；灯泡移入盒内，见下）
+                Box(
                     modifier = Modifier
                         // v0.68.97（布局普查批）：冒烟几何断言锚点（Dock 面板整体）
                         .testTag("dock_panel")
@@ -545,94 +546,104 @@ fun PullUpDock(
                                 // 手势清理后松手无动作（横拖跟手与松手确认已随横拖删除）
                             )
                         },
-                    // 横屏首页修：D2 网格盒（270dp）比面板内容宽（312dp）窄，横屏下在面板内居中；
-                    // D1 盒 312dp 恰好占满内容宽，无视觉变化。竖屏保持默认 Start。
-                    horizontalAlignment = if (isLandscapeDock) Alignment.CenterHorizontally else Alignment.Start
                 ) {
-                    // 面板内容区：crossfade + scale，卡片高度用快弹簧跟随
-                    // （2026-11-02：旧 MediumLow 高度弹簧拖尾是上滑卡顿主因之一）。
-                    AnimatedContent(
-                        targetState = state,
-                        transitionSpec = {
-                            (fadeIn(tween(PetMotion.FadeQuick)) +
-                                scaleIn(
-                                    PetMotion.PadStandard,
-                                    initialScale = 0.96f
-                                ))
-                                .togetherWith(fadeOut(tween(MotionTokens.Short)))
-                                .using(
-                                    SizeTransform(clip = false) { _, _ ->
-                                        PetMotion.DockTierSize
-                                    }
-                                )
-                        },
-                        label = "dockContent"
-                    ) { s ->
-                        // v0.68.58（Bob）：内容无背景——背景只在按压时显示（外层控制）
-                        Column(
-                            modifier = Modifier
-                                .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                                .padding(vertical = 16.dp)
-                        ) {
-                        if (s == DockState.D2) {
-                            DockGrid10(
-                                apps = top10,
-                                onLaunch = ::launchApp,
-                                menuApp = popupApp,
-                                onLongPress = { popupApp = it },
-                                onDismissMenu = { popupApp = null },
-                                isLandscape = isLandscapeDock,
-                                onIconPositioned = { pkg, center -> dockIconCenters[pkg] = center }
-                            )
-                        } else {
-                            DockRow4(
-                                apps = top4,
-                                onLaunch = ::launchApp,
-                                menuApp = popupApp,
-                                onLongPress = { popupApp = it },
-                                onDismissMenu = { popupApp = null },
-                                isLandscape = isLandscapeDock,
-                                onIconPositioned = { pkg, center -> dockIconCenters[pkg] = center }
-                            )
-                        }
-                        }
-                    }
-                }
-                // 423（Bob 2026-11-04）：灯泡必须收进 Dock 内部——422 的盒
-                // 下探出面板 4dp（灯泡底缘 1dp 露在玻璃外），改成贴底：
-                // 触控盒 64×20dp、BottomCenter 不加 offset，盒底即面板底，
-                // 灯泡 18dp 居中后落在 [面板底−19dp, 面板底−1dp]，全在
-                // 面板内（上探进图标底缘 4dp 触控／3dp 字形，可忽略），
-                // 不改面板高、不拦滑动。去字、移到底部、按洞察出现三
-                // 点沿用 422（见 insightVisible 定义）。
-                // 竖屏 BottomCenter、横屏 344dp 定宽内居中同款；D3／意图态
-                // 仍随面板 AnimatedVisibility 隐藏（不动）。
-                if (insightVisible) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .size(width = 64.dp, height = 20.dp)
-                            .semantics { contentDescription = "为什么是这几个应用" }
-                            .clickable {
-                                // 点灯泡先把当前 tail 存为 seenTail（确认动作），
-                                // 再按原逻辑刷新排序并开说明页（看过就再藏起来，
-                                // 直到下一个新面孔）。
-                                UiPrefs.setInsightSeenTail(context, insightTail)
-                                insightSeenTail = insightTail
-                                whyTick++
-                                showWhySheet = true
-                            },
-                        contentAlignment = Alignment.Center
+                    // 424：玻璃 Column 改为外层 Box（承接原 Column 全部修饰：
+                    // testTag／对齐／宽度／padding／clip／玻璃／手势，数值与
+                    // 顺序一字不动，padding 仍在 clip／玻璃之前，玻璃仍盖住
+                    // padding 条）；内层 Column 装原全部子项，灯泡移入盒内。
+                    // 横屏首页修口径移到内层 Column：D2 网格盒（270dp）比面板
+                    // 内容宽（312dp）窄，横屏下在面板内居中；D1 盒 312dp 恰好
+                    // 占满内容宽，无视觉变化。竖屏保持默认 Start。
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = if (isLandscapeDock) Alignment.CenterHorizontally else Alignment.Start
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Lightbulb,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        // 面板内容区：crossfade + scale，卡片高度用快弹簧跟随
+                        // （2026-11-02：旧 MediumLow 高度弹簧拖尾是上滑卡顿主因之一）。
+                        AnimatedContent(
+                            targetState = state,
+                            transitionSpec = {
+                                (fadeIn(tween(PetMotion.FadeQuick)) +
+                                    scaleIn(
+                                        PetMotion.PadStandard,
+                                        initialScale = 0.96f
+                                    ))
+                                    .togetherWith(fadeOut(tween(MotionTokens.Short)))
+                                    .using(
+                                        SizeTransform(clip = false) { _, _ ->
+                                            PetMotion.DockTierSize
+                                        }
+                                    )
+                            },
+                            label = "dockContent"
+                        ) { s ->
+                            // v0.68.58（Bob）：内容无背景——背景只在按压时显示（外层控制）
+                            Column(
+                                modifier = Modifier
+                                    .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
+                                    .padding(vertical = 16.dp)
+                            ) {
+                            if (s == DockState.D2) {
+                                DockGrid10(
+                                    apps = top10,
+                                    onLaunch = ::launchApp,
+                                    menuApp = popupApp,
+                                    onLongPress = { popupApp = it },
+                                    onDismissMenu = { popupApp = null },
+                                    isLandscape = isLandscapeDock,
+                                    onIconPositioned = { pkg, center -> dockIconCenters[pkg] = center }
+                                )
+                            } else {
+                                DockRow4(
+                                    apps = top4,
+                                    onLaunch = ::launchApp,
+                                    menuApp = popupApp,
+                                    onLongPress = { popupApp = it },
+                                    onDismissMenu = { popupApp = null },
+                                    isLandscape = isLandscapeDock,
+                                    onIconPositioned = { pkg, center -> dockIconCenters[pkg] = center }
+                                )
+                            }
+                            }
+                        }
+                    } // 内层 Column（装原玻璃 Column 的全部子项）
+                    // 424（Bob 2026-11-04 实拍纠正）：423 的“贴底”贴的是屏
+                    // 幕底，不是玻璃底——灯泡盒是玻璃 Column 的兄弟项，其
+                    // BottomCenter 锚的是外层布局（底＝屏幕底），而玻璃底比
+                    // 屏幕底高导航条一截（实拍 65px），灯泡落在玻璃外面。
+                    // 本批把玻璃 Column 改为外层 Box（承接原全部修饰），灯
+                    // 泡移入盒内做 BottomCenter，灯泡底＝玻璃底由结构保证，
+                    // 不用 offset、不写死 inset 数值。灯泡盒本身除父级外一
+                    // 字不动；去字、移到底部、按洞察出现三点沿用 422（见
+                    // insightVisible 定义）；D3／意图态仍随面板
+                    // AnimatedVisibility 隐藏（不动）。
+                    if (insightVisible) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .size(width = 64.dp, height = 20.dp)
+                                .semantics { contentDescription = "为什么是这几个应用" }
+                                .clickable {
+                                    // 点灯泡先把当前 tail 存为 seenTail（确认动作），
+                                    // 再按原逻辑刷新排序并开说明页（看过就再藏起来，
+                                    // 直到下一个新面孔）。
+                                    UiPrefs.setInsightSeenTail(context, insightTail)
+                                    insightSeenTail = insightTail
+                                    whyTick++
+                                    showWhySheet = true
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Lightbulb,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
-                }
-                } // 外层 Box（面板）
+                } // 玻璃盒（原 Column，承接全部修饰，灯泡在其内）
+                } // 单元盒（定高 dockPanelHeight）
             }
         }
 
