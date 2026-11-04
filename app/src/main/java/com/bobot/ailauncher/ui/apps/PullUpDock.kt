@@ -53,7 +53,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemGestures
@@ -599,21 +598,20 @@ fun PullUpDock(
                         }
                     }
                 }
-                // 422（Bob 2026-11-04）：idea 入口改简——①不要“为什么”三字，
-                // 只剩灯泡；②灯泡移到 Dock 底部：面板 Column 的 bottom 16dp
-                // 内边距条（最后一行图标之下、空条），水平居中；触控盒
-                // 64×24dp、以条中心为准居中（offset 4dp：上探进图标底缘
-                // 4dp、下探出面板 4dp，点按有效、不改面板高、不拦滑动）；
-                // ③常规时隐藏、有数据洞察时才出现（见 insightVisible 定义：
-                // 基线＋新面孔＋数据理由三要素；点按先存 seenTail 再开页）。
+                // 423（Bob 2026-11-04）：灯泡必须收进 Dock 内部——422 的盒
+                // 下探出面板 4dp（灯泡底缘 1dp 露在玻璃外），改成贴底：
+                // 触控盒 64×20dp、BottomCenter 不加 offset，盒底即面板底，
+                // 灯泡 18dp 居中后落在 [面板底−19dp, 面板底−1dp]，全在
+                // 面板内（上探进图标底缘 4dp 触控／3dp 字形，可忽略），
+                // 不改面板高、不拦滑动。去字、移到底部、按洞察出现三
+                // 点沿用 422（见 insightVisible 定义）。
                 // 竖屏 BottomCenter、横屏 344dp 定宽内居中同款；D3／意图态
                 // 仍随面板 AnimatedVisibility 隐藏（不动）。
                 if (insightVisible) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .offset(y = 4.dp)
-                            .size(width = 64.dp, height = 24.dp)
+                            .size(width = 64.dp, height = 20.dp)
                             .semantics { contentDescription = "为什么是这几个应用" }
                             .clickable {
                                 // 点灯泡先把当前 tail 存为 seenTail（确认动作），
