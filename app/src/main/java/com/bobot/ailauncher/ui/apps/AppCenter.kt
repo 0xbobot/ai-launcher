@@ -104,6 +104,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shadow
@@ -570,6 +571,12 @@ fun AppCenterContent(
     var rootPosInRoot by remember {
         mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
     }
+    // 426（Bob 2026-11-04 点 X 回设置页）：morph 按钮位 bounds（胶囊框外，
+    // 点它不算点外面；见根 Box 观察者的 extraBoundsInHost 排除。横屏经
+    // onMorphButtonPositioned 回传同一状态，两面同一时刻只一面在屏上）。
+    var morphButtonBoundsInRoot by remember {
+        mutableStateOf<androidx.compose.ui.geometry.Rect?>(null)
+    }
 
     // 应用中心升级：启动 in-flight 门——500ms 内重复点同一应用只启动一次
     // （结果行 combinedClickable 本身无防抖，系统层合并不可靠）
@@ -675,7 +682,21 @@ fun AppCenterContent(
                     }
                 },
                 focusManager = focusManager,
-                keyboardController = keyboardController
+                keyboardController = keyboardController,
+                // 426：按钮位排除——点 morph 按钮不算点外面，否则点 X 时观察者
+                // 先清焦点，点击读到已失焦就走设置分支（与按钮抢焦点同为必堵项）。
+                extraBoundsInHost = {
+                    morphButtonBoundsInRoot?.let { b ->
+                        listOf(
+                            androidx.compose.ui.geometry.Rect(
+                                b.left - rootPosInRoot.x,
+                                b.top - rootPosInRoot.y,
+                                b.right - rootPosInRoot.x,
+                                b.bottom - rootPosInRoot.y
+                            )
+                        )
+                    } ?: emptyList()
+                }
             )
     ) {
     // v0.68.70（Bob）：横屏判断改用量实际尺寸（LocalConfiguration 也不可靠）
@@ -799,6 +820,10 @@ fun AppCenterContent(
                 // 点 X：有字清空（留输入态，X 还在）、没字退焦（键盘收起，自动变回齿轮）；
                 // 返回／点外面／点完成／点开应用都会失焦，变回齿轮不用每个出口单独处理。
                 // v0.41.9（Bob 选 B）：设置齿轮缩小弱化，仍在右上
+                // 426（Bob 2026-11-04 点 X 回设置页）：按钮不可聚焦＋记 bounds——
+                // 点 X 时焦点不能从输入框被抢走（否则 morph 先变回齿轮、点击读到
+                // false 走设置），且按钮位要从点外面清焦里排除（见根 Box 观察者）。
+                // 圆盘／位置／尺寸／testTag 一律不动，只加这两项。
                 IconButton(
                     onClick = {
                         if (intentFocused) {
@@ -810,6 +835,8 @@ fun AppCenterContent(
                     },
                     // 体检批D ⑥：冒烟语义定位锚点（应用中心设置齿轮）
                     modifier = Modifier.testTag("appcenter_settings")
+                        .focusProperties { canFocus = false }
+                        .onGloballyPositioned { morphButtonBoundsInRoot = it.boundsInRoot() }
                 ) {
                     // Bob 2026-11-03 原型样式：齿轮坐浅色圆盘（原型同款）；
                     // 触控框仍是 IconButton 48dp，圆盘 40dp 只改视觉
@@ -928,6 +955,8 @@ fun AppCenterContent(
                 // 425 齿轮 morph：横屏复用竖屏同一 intentFocused（只读传入，不另起状态）
                 searchFocused = intentFocused,
                 onSearchPositioned = { intentBoundsInRoot = it },
+                // 426：横屏 morph 按钮位 bounds 回传（与竖屏同一排除状态，见根 Box 观察者）
+                onMorphButtonPositioned = { morphButtonBoundsInRoot = it },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
