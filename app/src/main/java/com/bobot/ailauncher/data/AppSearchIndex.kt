@@ -43,6 +43,10 @@ object AppSearchIndex {
         "叫车" to listOf("didi", "t3go", "caocao"),
         "导航" to listOf("autonavi", "baidumap", "tencent.map", "navi"),
         "地图" to listOf("autonavi", "baidumap", "tencent.map"),
+        // 429（Bob 2026-11-05：应用中心搜“查去机场的地铁”应出地图应用）：
+        // 能力池关键字补进映射——地铁走地图（高德/百度/腾讯地图，另含
+        // 专用地铁应用的 metro 片段）。
+        "地铁" to listOf("autonavi", "baidumap", "tencent.map", "metro"),
         "外卖" to listOf("meituan", "ele.me", "eleme"),
         "点餐" to listOf("meituan", "ele.me", "eleme"),
         "购物" to listOf("taobao", "jingdong", "pinduoduo", "vipshop", "suning"),
@@ -65,6 +69,8 @@ object AppSearchIndex {
         "邮件" to listOf("mobimail", "qqmail", "mail", "email"),
         "邮箱" to listOf("mobimail", "qqmail", "mail", "email"),
         "日历" to listOf("calendar"),
+        // 429：能力池关键字——日程走日历（与“日历”同口径）。
+        "日程" to listOf("calendar"),
         "备忘" to listOf("note", "notion", "weread"),
         "记东西" to listOf("note", "notion", "memo"),
         "笔记" to listOf("note", "notion", "youdao"),
@@ -81,6 +87,9 @@ object AppSearchIndex {
         "旅游" to listOf("ctrip", "qunar", "taobao.trip"),
         "订票" to listOf("ctrip", "mobileticket", "qunar"),
         "火车票" to listOf("mobileticket", "ctrip"),
+        // 429：能力池关键字——航班走航旅应用（携程/去哪儿/飞猪/航旅纵横/飞常准，
+        // 另含 flight 通用片段）。
+        "航班" to listOf("ctrip", "qunar", "taobao.trip", "flight", "umetrip", "variflight"),
         "酒店" to listOf("ctrip", "qunar", "meituan"),
         "运动" to listOf("keep", "codoon", "gps"),
         "跑步" to listOf("keep", "codoon"),

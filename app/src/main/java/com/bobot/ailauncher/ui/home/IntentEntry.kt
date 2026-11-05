@@ -440,7 +440,14 @@ fun IntentCapsuleField(
             // 胶囊文字左缘仍落在 386 轴线（内容左缘＋46dp）上，不左移。
             // 应用中心变体（Bob 2026-11-03 原型样式）：start 回 18dp，框内放大镜
             // 20dp＋间隙 10dp 补回 48dp，文字轴线一字不动。
-            .padding(start = if (fusedBackground) 18.dp else 48.dp, end = 16.dp),
+            // 429（Bob 2026-11-05：箭头按钮胶囊内右对齐、工整点）——end padding
+            // 随箭头有无走：箭头在时 0dp，箭头盘（40dp）在 48dp 触控框内居中、
+            // 右缘距胶囊右缘 4dp，与上下 4dp 余量齐平，读成右对齐；箭头不在时
+            // 回 16dp，文字右缘不贴胶囊边（应用中心打字态）。
+            .padding(
+                start = if (fusedBackground) 18.dp else 48.dp,
+                end = if (showSubmitButton || currentKeywordText != null) 0.dp else 16.dp
+            ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 应用中心变体（Bob 2026-11-03 原型样式）：框内放大镜（装饰语义，

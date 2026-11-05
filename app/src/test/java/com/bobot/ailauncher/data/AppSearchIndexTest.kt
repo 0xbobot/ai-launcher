@@ -139,6 +139,54 @@ class AppSearchIndexTest {
         )
     }
 
+    // ---------- 429（Bob 2026-11-05）：能力池关键字补进映射 ----------
+
+    @Test
+    fun `keyword subway finds map apps`() {
+        // 应用中心搜“查去机场的地铁”应出地图应用——整句含“地铁”→
+        // 地图片段命中高德/百度/腾讯地图。
+        val hit = AppSearchIndex.keywordPackagesFor("查去机场的地铁", emptyMap())
+        assertTrue(hit.contains("autonavi"))
+        assertTrue(hit.contains("baidumap"))
+        assertEquals(
+            80,
+            AppSearchIndex.scoreFor("查去机场的地铁", "高德地图", "com.autonavi.minimap", "gaodeditu", "gddt", setOf("autonavi"))
+        )
+    }
+
+    @Test
+    fun `keyword navigation sentence finds map apps`() {
+        // “导航去机场”含“导航”→地图片段（整句子串匹配，不断在能力关键字上）。
+        val hit = AppSearchIndex.keywordPackagesFor("导航去机场", emptyMap())
+        assertTrue(hit.contains("autonavi"))
+        assertEquals(
+            80,
+            AppSearchIndex.scoreFor("导航去机场", "高德地图", "com.autonavi.minimap", "gaodeditu", "gddt", setOf("autonavi"))
+        )
+    }
+
+    @Test
+    fun `keyword flight finds travel apps`() {
+        // “查明天飞上海的航班”含“航班”→航旅片段命中携程。
+        val hit = AppSearchIndex.keywordPackagesFor("查明天飞上海的航班", emptyMap())
+        assertTrue(hit.contains("ctrip"))
+        assertEquals(
+            80,
+            AppSearchIndex.scoreFor("查明天飞上海的航班", "携程旅行", "com.ctrip.ctrip", "xiechenglvxing", "xclx", setOf("ctrip"))
+        )
+    }
+
+    @Test
+    fun `keyword schedule finds calendar`() {
+        // “查我明天的日程”含“日程”→日历片段。
+        val hit = AppSearchIndex.keywordPackagesFor("查我明天的日程", emptyMap())
+        assertTrue(hit.contains("calendar"))
+        assertEquals(
+            80,
+            AppSearchIndex.scoreFor("查我明天的日程", "日历", "com.android.calendar", "rili", "rl", setOf("calendar"))
+        )
+    }
+
     // ---------- scoreFor 六档 ----------
 
     @Test

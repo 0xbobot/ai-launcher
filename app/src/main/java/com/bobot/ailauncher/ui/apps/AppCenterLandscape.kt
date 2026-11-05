@@ -402,6 +402,7 @@ fun AppCenterLandscape(
                     // 425（Bob 2026-11-04，参考视频）：齿轮位 morph（同竖屏）——失焦设置齿轮原样，
                     // 聚焦（输入态）就地变清空；只换图标＋动作＋文案，圆盘／位置／尺寸／testTag 一律不动。
                     // 点 X：有字清空（留输入态，X 还在）、没字退焦（键盘收起，自动变回齿轮）。
+                    // 429：触发改成“聚焦 或 有字”（同竖屏）。
                     // 设置齿轮（Bob：横屏时竖屏的齿轮拿掉，放这里）
                     // F2：与竖屏同一 IconButton + testTag 锚点——此前是裸 Icon
                     // 无锚点，冒烟 §21 到达校验与布局几何断言在横屏测不到本节点、
@@ -411,12 +412,11 @@ fun AppCenterLandscape(
                     // 尺寸／testTag 一律不动，只加这两项）
                     IconButton(
                         onClick = {
-                            if (searchFocused) {
-                                if (searchFieldValue.text.isNotEmpty()) onSearchFieldChange(TextFieldValue(""))
-                                else focusManager.clearFocus()
-                            } else {
-                                onOpenSettings()
-                            }
+                            // 429（同竖屏）：有字点 ✕ 只清空文本；没字且聚焦时点 ✕ 退焦；
+                            // 没字且失焦时点齿轮进设置（不变）。
+                            if (searchFieldValue.text.isNotEmpty()) onSearchFieldChange(TextFieldValue(""))
+                            else if (searchFocused) focusManager.clearFocus()
+                            else onOpenSettings()
                         },
                         modifier = Modifier.testTag("appcenter_settings")
                             .focusProperties { canFocus = false }
@@ -431,7 +431,7 @@ fun AppCenterLandscape(
                                 .background(AILauncherColors.current.Title.copy(alpha = 0.08f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (searchFocused) {
+                            if (searchFocused || searchFieldValue.text.isNotEmpty()) {
                                 Icon(
                                     imageVector = Icons.Filled.Close,
                                     contentDescription = "清空",
