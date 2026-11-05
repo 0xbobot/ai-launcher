@@ -862,6 +862,8 @@ fun AppCenterContent(
                 // 425（Bob 2026-11-04，参考视频）：齿轮位 morph——失焦是设置齿轮原样，
                 // 聚焦（输入态）就地变清空；只换图标＋动作＋文案，圆盘／位置／尺寸／testTag 一律不动。
                 // 点 X：有字清空（留输入态，X 还在）、没字退焦（键盘收起，自动变回齿轮）；
+                // 429（Bob 2026-11-05：箭头填入后失焦有字）：触发改成“聚焦 或 有字”就变 ✕，
+                // 没字且失焦才回齿轮——填入后不用聚焦也能看到 ✕、一点就清空。
                 // 返回／点外面／点完成／点开应用都会失焦，变回齿轮不用每个出口单独处理。
                 // v0.41.9（Bob 选 B）：设置齿轮缩小弱化，仍在右上
                 // 426（Bob 2026-11-04 点 X 回设置页）：按钮不可聚焦＋记 bounds——
@@ -870,12 +872,11 @@ fun AppCenterContent(
                 // 圆盘／位置／尺寸／testTag 一律不动，只加这两项。
                 IconButton(
                     onClick = {
-                        if (intentFocused) {
-                            if (query.isNotEmpty()) onQueryFieldChange(TextFieldValue(""))
-                            else focusManager.clearFocus()
-                        } else {
-                            onOpenSettings()
-                        }
+                        // 429：有字点 ✕ 只清空文本（不进设置页、不强制聚焦）；没字且聚焦时
+                        // 点 ✕ 退焦（回齿轮）；没字且失焦时点齿轮进设置（不变）。
+                        if (query.isNotEmpty()) onQueryFieldChange(TextFieldValue(""))
+                        else if (intentFocused) focusManager.clearFocus()
+                        else onOpenSettings()
                     },
                     // 体检批D ⑥：冒烟语义定位锚点（应用中心设置齿轮）
                     modifier = Modifier.testTag("appcenter_settings")
@@ -891,7 +892,7 @@ fun AppCenterContent(
                             .background(AILauncherColors.current.Title.copy(alpha = 0.08f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (intentFocused) {
+                        if (intentFocused || query.isNotEmpty()) {
                             Icon(
                                 Icons.Filled.Close,
                                 contentDescription = "清空",
@@ -1303,7 +1304,12 @@ fun AppCenterContent(
                             // v0.68.61：横屏隐藏幽灵字母（省竖向空间，不乱）
                             // Bob 2026-11-03：编辑态不再隐藏幽灵字母；透明度
                             // 0.20 → 0.35（Bob 定稿④：可以动、效果优先）
-                            if (index == 0 && !isLandscapeAc) {
+                            // 429（Bob 2026-11-05 晚：427 接管提前＋淡入后留了同字母重影，
+                            // 悬停 overlay 与行内字母同时显示 A+A）——行内字母只在 overlay
+                            // 没显示本组时才画（接管期间只留 overlay 一个）；行完全滚回
+                            // 视口（stuckLetter==null）时行内字母再出现。顶走过渡（overlay
+                            // 的 A 被下一组 B 行顶上去、A 与 B 短暂同现）是标准吸顶、保留。
+                            if (index == 0 && !isLandscapeAc && stuckLetter != letter) {
                                 Text(
                                     text = letter.toString(),
                                     fontFamily = FontFamily.Serif,
