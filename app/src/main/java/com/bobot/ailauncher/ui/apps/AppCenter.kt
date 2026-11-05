@@ -141,6 +141,7 @@ import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.CapabilityRegistry
+import com.bobot.ailauncher.data.CapabilityResolution
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import com.bobot.ailauncher.data.AppUsageTracker
@@ -328,6 +329,22 @@ fun AppCenterContent(
     val searchResults = remember(filterQuery, searchIndex) {
         if (filterQuery.trim().isBlank()) null
         else AppSearchIndex.search(context, filterQuery, searchIndex)
+    }
+    // 内容深链标识（Bob 2026-11-05 晚）：当前这句查询下，点按会走深链直达
+    // 内容的应用包名集合。复用 CapabilityResolution.supportsDeepLink 的
+    // 同一判定（tapSteps 链里含 Deeplink 步即支持），每句查询只算一次；
+    // 竖屏搜索行与横屏共用同一集合（横屏经参数传入，不另算）。查询为空、
+    // 无结果、无能力词、无内容时集合为空，标识自然不出现。
+    val deepLinkSupportedPkgs = remember(filterQuery, searchResults) {
+        val q = filterQuery.trim()
+        if (q.isEmpty() || searchResults.isNullOrEmpty()) emptySet()
+        else {
+            CapabilityRegistry.load(context)
+            val caps = CapabilityRegistry.groups().flatMap { it.capabilities }
+            searchResults.mapNotNull { app ->
+                if (CapabilityResolution.supportsDeepLink(caps, q, app.packageName)) app.packageName else null
+            }.toSet()
+        }
     }
     // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
     // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；
@@ -1021,6 +1038,9 @@ fun AppCenterContent(
                 searchFieldValue = queryField,
                 onSearchFieldChange = ::onQueryFieldChange,
                 searchResults = searchResults,
+                // 内容深链标识：竖屏按本句查询算好的支持集合，横屏搜索行
+                // 共用（横屏不另算，判定口径与竖屏同一套）。
+                deepLinkSupportedPkgs = deepLinkSupportedPkgs,
                 onSearchSubmit = {
                     val q = query.trim()
                     if (q.isNotEmpty()) onAskQizai(q)
@@ -1113,6 +1133,9 @@ fun AppCenterContent(
                                         popupApp = null
                                     },
                                     onHide = ::hideApp,
+                                    // 内容深链标识：这句查询下点按会走深链直达的
+                                    // 应用才出「直达」标签（本句算好的集合里查包名）。
+                                    showDeepLinkBadge = deepLinkSupportedPkgs.contains(app.packageName),
                                     actionsVisible = expandedActionsPkg == app.packageName,
                                     onActionsVisibleChange = { expanded ->
                                         // v0.41.23：与 revealedHidePkg 互斥
