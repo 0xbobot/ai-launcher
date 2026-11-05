@@ -147,6 +147,7 @@ import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
+import com.bobot.ailauncher.ui.theme.pageTextureBackground
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import kotlinx.coroutines.delay
@@ -702,7 +703,10 @@ fun AppCenterContent(
         modifier = modifier
             .fillMaxSize()
             // v0.68.45（走查）：实底纸面——之前透明，主屏大时间透过来盖住列表
-            .background(AILauncherColors.current.Background)
+            // 430（Bob 2026-11-05 晚亲批纹理方向）：实底纸面换成已批纹理背景
+            // （纵向暖灰渐变＋顶部暖光晕＋极淡颗粒，主题感知；仍不透明，0.68.45 的
+            // 遮挡口径不变；竖屏横屏同根 Box，一处覆盖两面）。
+            .pageTextureBackground()
             // v0.68.93：点胶囊外释放焦点（观察不消费，列表滚动/点按照旧）
             .onGloballyPositioned { rootPosInRoot = it.positionInRoot() }
             .clearIntentFocusOnOutsideTap(

@@ -82,6 +82,7 @@ import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.confirmHaptic
+import com.bobot.ailauncher.ui.theme.pageTextureBackground
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import com.bobot.ailauncher.ui.settings.OnGrantedTransition
 import com.bobot.ailauncher.ui.settings.isCalendarGranted
@@ -164,9 +165,12 @@ fun SettingsScreen(
     // 设置页底部上滑回主页已删除（Bob 2026-11-03：避免操作干扰，与应用中心同批）
     LazyColumn(
         // v0.61.1：和应用中心一样的半透明背景（GlassCardStrong，白 88%）
+        // 430（Bob 2026-11-05 晚亲批“设置页面也参考这个”）：半透明底换成已批纹理背景
+        // （与应用中心同一套，主题感知）。设置页是 NavHost 独立目的地、首页不在其后，
+        // 88% 底透出的只是窗口底色，换不透明纹理不改变任何可见内容，只换背景层。
         // v0.68.45：contentPadding 归零，各 item 自带 padding——刊头和应用中心像素对齐
         modifier = Modifier.fillMaxSize()
-            .background(AILauncherColors.current.GlassCardStrong)
+            .pageTextureBackground()
             .statusBarsTopPadding()
             // 刘海避让（Bob 2026-10-25 全页检查）：横屏下挖孔移到两侧边，行内容
             // 左右 20dp 顶不到横屏 cutout 侧边 inset；两侧直接吃 displayCutout
