@@ -9,7 +9,7 @@ import com.bobot.ailauncher.data.Capability
  * daohang 需要目的地这件事从没写进 prompt，缺参只能靠事后追问兜底。
  * 现在带参数 schema 的一行长这样：
  * `daohang: 导航（必填 to=目的地）`、
- * `ditie: 地铁（必填 lat=目的地纬度，必填 lon=目的地经度）`、
+ * `ditie: 地铁（可选 lat=目的地纬度，可选 lon=目的地经度，可选 to=目的地）`、
  * 无参能力保持 `wechat: 微信`。
  */
 object CapabilityHints {

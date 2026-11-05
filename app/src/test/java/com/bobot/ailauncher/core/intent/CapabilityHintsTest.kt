@@ -35,15 +35,16 @@ class CapabilityHintsTest {
                 cap(
                     "ditie", "地铁",
                     listOf(
-                        CapabilityParam("lat", "目的地纬度", required = true),
-                        CapabilityParam("lon", "目的地经度", required = true)
+                        CapabilityParam("lat", "目的地纬度", required = false),
+                        CapabilityParam("lon", "目的地经度", required = false),
+                        CapabilityParam("to", "目的地", required = false)
                     )
                 )
             )
         )
         assertEquals(
             "daohang: 导航（必填 to=目的地）\n" +
-                "ditie: 地铁（必填 lat=目的地纬度，必填 lon=目的地经度）",
+                "ditie: 地铁（可选 lat=目的地纬度，可选 lon=目的地经度，可选 to=目的地）",
             hints
         )
     }
