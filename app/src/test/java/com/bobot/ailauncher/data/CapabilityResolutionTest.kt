@@ -43,21 +43,25 @@ class CapabilityResolutionTest {
         providers = listOf(
             CapabilityProvider(
                 "高德地图", listOf("com.autonavi.minimap"),
-                "amap://route?dlat={lat}&dlon={lon}&t=1"
+                "amap://route?dlat={lat}&dlon={lon}&t=1",
+                "amap://route?sourceApplication=ai-launcher&dname={to}&dev=0&t=1"
             ),
             CapabilityProvider(
                 "腾讯地图", listOf("com.tencent.map"),
-                "qqmap://map/routeplan?type=bus&tocoord={lat},{lon}&referer=ai-launcher"
+                "qqmap://map/routeplan?type=bus&tocoord={lat},{lon}&referer=ai-launcher",
+                null
             ),
             CapabilityProvider(
                 "百度地图", listOf("com.baidu.BaiduMap"),
-                "baidumap://map/direction?destination=latlng:{lat},{lon}&mode=transit&coord_type=gcj02&src=ai-launcher"
+                "baidumap://map/direction?destination=latlng:{lat},{lon}&mode=transit&coord_type=gcj02&src=ai-launcher",
+                "baidumap://map/direction?destination={to}&mode=transit&src=ai-launcher"
             )
         ),
-        geoFallback = GeoFallback.COORD,
+        geoFallback = GeoFallback.COORD_OR_NAME,
         params = listOf(
-            CapabilityParam("lat", "目的地纬度", required = true),
-            CapabilityParam("lon", "目的地经度", required = true)
+            CapabilityParam("lat", "目的地纬度", required = false),
+            CapabilityParam("lon", "目的地经度", required = false),
+            CapabilityParam("to", "目的地", required = false)
         )
     )
 
@@ -281,9 +285,9 @@ class CapabilityResolutionTest {
         assertNull(
             CapabilityResolution.tapSteps(carryingCaps, "导航", "com.autonavi.minimap")
         )
-        // 地铁只有名无坐标：ditie 深链与 geo 都要 lat/lon，填不出
+        // 只有“地铁”没目的地
         assertNull(
-            CapabilityResolution.tapSteps(carryingCaps, "查去机场的地铁", "com.autonavi.minimap")
+            CapabilityResolution.tapSteps(carryingCaps, "查地铁", "com.autonavi.minimap")
         )
         // 打车：没深链也没 geo，没东西可带
         assertNull(
@@ -304,5 +308,152 @@ class CapabilityResolutionTest {
         assertEquals(2, steps.size)
         assertTrue(steps[0] is LaunchStep.Deeplink)
         assertTrue(steps[1] is LaunchStep.Geo)
+    }
+
+    // ---------- 地铁带名：只有名字、没有坐标时也用地铁方式直达 ----------
+
+    @Test
+    fun `tap ditie to airport on amap carries name in transit deeplink`() {
+        // 高德 route 官方格式：dname=终点名称，t=1 公交；与 daohang 的高德模板同一条
+        val steps = CapabilityResolution.tapSteps(
+            carryingCaps, "查去机场的地铁", "com.autonavi.minimap"
+        )!!
+        assertEquals(3, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "高德地图", "com.autonavi.minimap",
+                "amap://route?sourceApplication=ai-launcher&dname=%E6%9C%BA%E5%9C%BA&dev=0&t=1"
+            ),
+            steps[0]
+        )
+        assertEquals(
+            LaunchStep.Geo("geo:0,0?q=%E6%9C%BA%E5%9C%BA", "com.autonavi.minimap"),
+            steps[1]
+        )
+        assertEquals(LaunchStep.OpenApp("高德地图", "com.autonavi.minimap"), steps[2])
+    }
+
+    @Test
+    fun `tap ditie to airport on baidu carries name in transit deeplink`() {
+        // 百度 direction 官方格式：destination 可填名称，mode=transit 公交
+        val steps = CapabilityResolution.tapSteps(
+            carryingCaps, "查去机场的地铁", "com.baidu.BaiduMap"
+        )!!
+        assertEquals(3, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "百度地图", "com.baidu.BaiduMap",
+                "baidumap://map/direction?destination=%E6%9C%BA%E5%9C%BA&mode=transit&src=ai-launcher"
+            ),
+            steps[0]
+        )
+        assertEquals(
+            LaunchStep.Geo("geo:0,0?q=%E6%9C%BA%E5%9C%BA", "com.baidu.BaiduMap"),
+            steps[1]
+        )
+        assertEquals(LaunchStep.OpenApp("百度地图", "com.baidu.BaiduMap"), steps[2])
+    }
+
+    @Test
+    fun `tap ditie to airport on tencent falls back to geo targeted at tencent`() {
+        // 腾讯 routeplan 官方要求 tocoord 坐标、to 只是展示名：没有名称深链，
+        // 退 geo 名称查询（与 daohang 的腾讯处理同一口径），不打开残缺链接
+        val steps = CapabilityResolution.tapSteps(
+            carryingCaps, "查去机场的地铁", "com.tencent.map"
+        )!!
+        assertEquals(2, steps.size)
+        assertEquals(
+            LaunchStep.Geo("geo:0,0?q=%E6%9C%BA%E5%9C%BA", "com.tencent.map"),
+            steps[0]
+        )
+        assertEquals(LaunchStep.OpenApp("腾讯地图", "com.tencent.map"), steps[1])
+    }
+
+    @Test
+    fun `ditie name steps via assistant path carry transit deeplink`() {
+        // 问助手路径（steps）同样受益：名字目的地 → 地铁方式深链在前
+        val steps = CapabilityResolution.steps(
+            ditie, setOf("com.autonavi.minimap"), mapOf("to" to "机场")
+        )
+        assertEquals(3, steps.size)
+        assertTrue(steps[0] is LaunchStep.Deeplink)
+        assertEquals(
+            "amap://route?sourceApplication=ai-launcher&dname=%E6%9C%BA%E5%9C%BA&dev=0&t=1",
+            (steps[0] as LaunchStep.Deeplink).uri
+        )
+        assertTrue(steps[1] is LaunchStep.Geo)
+        assertEquals(LaunchStep.OpenApp("高德地图", "com.autonavi.minimap"), steps[2])
+    }
+
+    @Test
+    fun `ditie coord steps unchanged when coords given`() {
+        // 有坐标时行为不变：坐标深链在前、geo 坐标点在后
+        val steps = CapabilityResolution.steps(
+            ditie, setOf("com.autonavi.minimap"),
+            mapOf("lat" to "39.9042", "lon" to "116.4074")
+        )
+        assertEquals(3, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "高德地图", "com.autonavi.minimap",
+                "amap://route?dlat=39.9042&dlon=116.4074&t=1"
+            ),
+            steps[0]
+        )
+        assertEquals(LaunchStep.Geo("geo:39.9042,116.4074?q=39.9042,116.4074"), steps[1])
+        assertEquals(LaunchStep.OpenApp("高德地图", "com.autonavi.minimap"), steps[2])
+    }
+
+    @Test
+    fun `ditie coord deeplink wins over name when both given`() {
+        val steps = CapabilityResolution.steps(
+            ditie, setOf("com.autonavi.minimap"),
+            mapOf("lat" to "39.9042", "lon" to "116.4074", "to" to "机场")
+        )
+        assertEquals(4, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "高德地图", "com.autonavi.minimap",
+                "amap://route?dlat=39.9042&dlon=116.4074&t=1"
+            ),
+            steps[0]
+        )
+        assertEquals(
+            LaunchStep.Deeplink(
+                "高德地图", "com.autonavi.minimap",
+                "amap://route?sourceApplication=ai-launcher&dname=%E6%9C%BA%E5%9C%BA&dev=0&t=1"
+            ),
+            steps[1]
+        )
+        assertEquals(LaunchStep.Geo("geo:39.9042,116.4074?q=39.9042,116.4074"), steps[2])
+        assertEquals(LaunchStep.OpenApp("高德地图", "com.autonavi.minimap"), steps[3])
+    }
+
+    @Test
+    fun `ditie geo fallback prefers coord then name`() {
+        assertEquals(
+            "geo:39.9042,116.4074?q=39.9042,116.4074",
+            CapabilityResolution.geoUri(ditie, mapOf("lat" to "39.9042", "lon" to "116.4074"))
+        )
+        assertEquals(
+            "geo:0,0?q=%E6%9C%BA%E5%9C%BA",
+            CapabilityResolution.geoUri(ditie, mapOf("to" to "机场"))
+        )
+        assertNull(CapabilityResolution.geoUri(ditie, emptyMap()))
+        // 坐标非法时退名称查询，不拼脏坐标
+        assertEquals(
+            "geo:0,0?q=%E6%9C%BA%E5%9C%BA",
+            CapabilityResolution.geoUri(
+                ditie, mapOf("lat" to "abc", "lon" to "116.4074", "to" to "机场")
+            )
+        )
+    }
+
+    @Test
+    fun `ditie with no destination opens app only`() {
+        val steps = CapabilityResolution.steps(
+            ditie, setOf("com.autonavi.minimap"), emptyMap()
+        )
+        assertEquals(listOf(LaunchStep.OpenApp("高德地图", "com.autonavi.minimap")), steps)
     }
 }

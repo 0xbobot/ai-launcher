@@ -125,16 +125,18 @@ object CapabilityRegistry {
             CapabilityProvider(
                 name = p.optString("name", label).ifBlank { label },
                 packageNames = pkgs,
-                deeplinkTemplate = p.optString("deeplink").ifBlank { null }
+                deeplinkTemplate = p.optString("deeplink").ifBlank { null },
+                deeplinkNameTemplate = p.optString("deeplinkName").ifBlank { null }
             )
         }
     }
 
-    /** 解析能力 JSON 的可选 "geoFallback" 字段（"name"/"coord"，其余一律 NONE） */
+    /** 解析能力 JSON 的可选 "geoFallback" 字段（"name"/"coord"/"coordOrName"，其余一律 NONE） */
     private fun parseGeoFallback(c: JSONObject): GeoFallback =
         when (c.optString("geoFallback", "").trim().lowercase()) {
             "name" -> GeoFallback.NAME
             "coord" -> GeoFallback.COORD
+            "coordorname" -> GeoFallback.COORD_OR_NAME
             else -> GeoFallback.NONE
         }
 

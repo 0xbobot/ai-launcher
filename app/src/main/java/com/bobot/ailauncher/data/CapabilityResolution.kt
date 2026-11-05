@@ -20,7 +20,14 @@ data class CapabilityProvider(
      * null = 这家没有可用的深链（或只有需要坐标的深链而本能力只有名称参数），
      * 它的执行步骤直接是「打开应用本体」。
      */
-    val deeplinkTemplate: String? = null
+    val deeplinkTemplate: String? = null,
+    /**
+     * 该提供方的「名称目的地」深链模板（ditie：只有名字、没有坐标时用；
+     * 与 [deeplinkTemplate] 互为补充，同一家先试坐标模板、再试名称模板）。
+     * null = 这家没有按名字直达的深链（腾讯 routeplan 官方要求 tocoord 坐标，
+     * 名称只能走 geo 兜底），名称路径下它不出深链步。
+     */
+    val deeplinkNameTemplate: String? = null
 )
 
 /** 能力的 geo 意图兜底方式（capabilities.json 的 "geoFallback" 字段） */
@@ -32,7 +39,13 @@ enum class GeoFallback {
     NAME,
 
     /** 用经纬度：geo:<lat>,<lon>?q=<lat>,<lon>（ditie，参数 lat/lon） */
-    COORD
+    COORD,
+
+    /**
+     * 先用经纬度、没有再用名称（ditie：有坐标走坐标点，没坐标有名字时
+     * 走名称查询；两条都不齐备返回 null）。
+     */
+    COORD_OR_NAME
 }
 
 /**
@@ -85,8 +98,9 @@ object CapabilityResolution {
 
     /**
      * 构建有序候选链：
-     * 1. 每个已装提供方（按声明优先序）一个深链步——模板缺参填不出时该提供方
-     *    本轮不出深链步（绝不打开残缺链接，与二批防线同规矩）；
+     * 1. 每个已装提供方（按声明优先序）的深链步——坐标模板先试、名称模板
+     *    再试（ditie），模板缺参填不出时该提供方本轮不出对应深链步
+     *    （绝不打开残缺链接，与二批防线同规矩）；
      * 2. geo 兜底步（能力声明了 geoFallback 且参数齐备时）；
      * 3. 第一个已装提供方的「打开应用本体」步（最终兜底）。
      * 没有任何提供方装了时：只剩 geo 步（若可构造），否则空链。
@@ -102,9 +116,18 @@ object CapabilityResolution {
             if (pkg == null) null else provider to pkg
         }
         for ((provider, pkg) in installedProviders) {
-            val template = provider.deeplinkTemplate ?: continue
-            val uri = DeeplinkTemplate.fill(template, params) ?: continue
-            steps += LaunchStep.Deeplink(provider.name, pkg, uri)
+            provider.deeplinkTemplate?.let { template ->
+                DeeplinkTemplate.fill(template, params)?.let { uri ->
+                    steps += LaunchStep.Deeplink(provider.name, pkg, uri)
+                }
+            }
+            // 名称深链（ditie：只有名字时用地铁/公交方式直达；坐标模板
+            // 填不出时才到这里，同一家坐标步在前、名称步在后）。
+            provider.deeplinkNameTemplate?.let { template ->
+                DeeplinkTemplate.fill(template, params)?.let { uri ->
+                    steps += LaunchStep.Deeplink(provider.name, pkg, uri)
+                }
+            }
         }
         geoUri(cap, params)?.let { steps += LaunchStep.Geo(it) }
         // 打开应用本体是最终兜底；能力关掉 fallbackToLauncher 时不出这一步（老语义）
@@ -129,10 +152,10 @@ object CapabilityResolution {
     }
 
     /**
-     * 只给一家提供方的候选链（432 点按路径）：深链（模板填得出时）→
-     * 定向 geo（能力声明了 geoFallback 且参数齐备时，限定到这家包，不跨
-     * 应用跳）→ 打开这家应用本体。模板缺参填不出时该家不出深链步，
-     * 与 [steps] 同规矩，绝不打开残缺链接。
+     * 只给一家提供方的候选链（432 点按路径）：深链（坐标模板先试、名称模板
+     * 再试，模板填得出时）→ 定向 geo（能力声明了 geoFallback 且参数齐备时，
+     * 限定到这家包，不跨应用跳）→ 打开这家应用本体。模板缺参填不出时该家
+     * 不出深链步，与 [steps] 同规矩，绝不打开残缺链接。
      */
     fun stepsForProvider(
         cap: Capability,
@@ -142,6 +165,11 @@ object CapabilityResolution {
     ): List<LaunchStep> {
         val steps = mutableListOf<LaunchStep>()
         provider.deeplinkTemplate?.let { template ->
+            DeeplinkTemplate.fill(template, params)?.let { uri ->
+                steps += LaunchStep.Deeplink(provider.name, packageName, uri)
+            }
+        }
+        provider.deeplinkNameTemplate?.let { template ->
             DeeplinkTemplate.fill(template, params)?.let { uri ->
                 steps += LaunchStep.Deeplink(provider.name, packageName, uri)
             }
@@ -159,8 +187,8 @@ object CapabilityResolution {
      * 能力的提供方时，返回只给这家用的候选链（深链→定向 geo→打开应用）；
      * 任一条件不满足（没关键字、没目的地、被点应用不是该能力提供方、
      * 深链与 geo 都建不出）返回 null，调用方退回直接打开。
-     * 名字型目的地只填声明了 "to" 的参数（地铁要 lat/lon、只有名填不出，
-     * 按规矩不出深链/geo 步，返回 null 走直接打开）。
+     * 名字型目的地只填声明了 "to" 的参数（ditie 也声明了 "to"：有名字时
+     * 走名称深链/名称 geo，没名字有坐标时走坐标深链/坐标 geo）。
      */
     fun tapSteps(
         capabilities: List<Capability>,
@@ -196,6 +224,14 @@ object CapabilityResolution {
                 val lat = params["lat"]?.trim().orEmpty()
                 val lon = params["lon"]?.trim().orEmpty()
                 geoUriForCoord(lat, lon)
+            }
+            GeoFallback.COORD_OR_NAME -> {
+                val lat = params["lat"]?.trim().orEmpty()
+                val lon = params["lon"]?.trim().orEmpty()
+                geoUriForCoord(lat, lon) ?: run {
+                    val to = params["to"]?.trim().orEmpty()
+                    if (to.isEmpty()) null else geoUriForQuery(to)
+                }
             }
         }
 

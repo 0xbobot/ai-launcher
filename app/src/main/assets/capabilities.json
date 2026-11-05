@@ -135,7 +135,7 @@
           "icon": "directions_subway",
           "id": "ditie",
           "label": "地铁",
-          "note": "三家深链均以坐标直达（腾讯 routeplan 官方格式 tocoord）；没装地图时退 geo 坐标点；需真机验证",
+          "note": "有坐标走坐标深链直达（腾讯 routeplan 官方格式 tocoord）；只有名字时高德/百度走地铁方式名称深链（高德 dname+t=1、百度 destination=名+mode=transit，均按官方 URI 文档），腾讯无名称深链、退 geo 名称查询；需真机验证",
           "packageNames": [
             "com.autonavi.minimap",
             "com.tencent.map",
@@ -147,36 +147,45 @@
               "packageNames": [
                 "com.autonavi.minimap"
               ],
-              "deeplink": "amap://route?sourceApplication=ai-launcher&dlat={lat}&dlon={lon}&dev=0&t=1"
+              "deeplink": "amap://route?sourceApplication=ai-launcher&dlat={lat}&dlon={lon}&dev=0&t=1",
+              "deeplinkName": "amap://route?sourceApplication=ai-launcher&dname={to}&dev=0&t=1"
             },
             {
               "name": "腾讯地图",
               "packageNames": [
                 "com.tencent.map"
               ],
-              "deeplink": "qqmap://map/routeplan?type=bus&tocoord={lat},{lon}&referer=ai-launcher"
+              "deeplink": "qqmap://map/routeplan?type=bus&tocoord={lat},{lon}&referer=ai-launcher",
+              "deeplinkName": null
             },
             {
               "name": "百度地图",
               "packageNames": [
                 "com.baidu.BaiduMap"
               ],
-              "deeplink": "baidumap://map/direction?destination=latlng:{lat},{lon}&mode=transit&coord_type=gcj02&src=ai-launcher"
+              "deeplink": "baidumap://map/direction?destination=latlng:{lat},{lon}&mode=transit&coord_type=gcj02&src=ai-launcher",
+              "deeplinkName": "baidumap://map/direction?destination={to}&mode=transit&src=ai-launcher"
             }
           ],
-          "geoFallback": "coord",
+          "geoFallback": "coordOrName",
           "params": [
             {
               "name": "lat",
               "label": "目的地纬度",
-              "required": true,
+              "required": false,
               "ask": "目的地纬度是多少？"
             },
             {
               "name": "lon",
               "label": "目的地经度",
-              "required": true,
+              "required": false,
               "ask": "目的地经度是多少？"
+            },
+            {
+              "name": "to",
+              "label": "目的地",
+              "required": false,
+              "ask": "地铁去哪儿？"
             }
           ]
         },
