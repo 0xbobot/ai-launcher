@@ -844,6 +844,10 @@ fun AppCenterContent(
                     // 聚焦变 X、失焦回齿轮，全程只剩外面这一个清空（见下齿轮 morph）。
                     showClearButton = false,
                     showSubmitButton = false,
+                    // 428 滚动关键字：应用中心箭头只作关键字的运行钮——点箭头只填入
+                    // 关键字、网格随之过滤，不走 onSubmit（其 onSubmit 是 onAskQizai，
+                    // 会回首页跑意图，与“按关键字过滤应用”相悖）。
+                    keywordSubmitCallsOnSubmit = false,
                     fusedBackground = true,
                     // v0.68.93：焦点外报 + 范围捕获（根 Box 点外部观察者用）
                     onFocusChanged = { intentFocused = it },

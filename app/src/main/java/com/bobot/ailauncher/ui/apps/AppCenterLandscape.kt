@@ -388,6 +388,9 @@ fun AppCenterLandscape(
                         // 425（Bob 2026-11-04，参考视频）：里侧清空去掉，挪到外面齿轮位（同竖屏）
                         showClearButton = false,
                         showSubmitButton = false,
+                        // 428 滚动关键字（同竖屏）：应用中心箭头只作关键字的运行钮，
+                        // 点箭头只填入关键字、网格随之过滤，不走 onSubmit。
+                        keywordSubmitCallsOnSubmit = false,
                         fusedBackground = true,
                         onFocusChanged = onSearchFocusChanged,
                         modifier = Modifier

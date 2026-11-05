@@ -63,6 +63,12 @@ object PetMotion {
     /** Dock 档位快切的高度版（与 DockTierOffset 同参数，IntSize 专用——SizeTransform 要的就是 IntSize）。 */
     val DockTierSize = spring<IntSize>(dampingRatio = 1f, stiffness = 1200f)
 
+    /**
+     * 输入框关键字纵向轮换（428）：与 PadStandard 同参数（临界阻尼、无过冲、
+     * 约 250ms），IntOffset 专用——当前条往上滑出、下一条从下滑入。
+     */
+    val KeywordSlide = spring<IntOffset>(dampingRatio = 1f, stiffness = Spring.StiffnessMedium)
+
     // ---- 高级感收敛（2026-11-02，Bob 全批）：以下 11 条原为各处行内自造规格，
     // 参数与原值逐字相同、仅位置收进家族，行为零变化；新增档不许再各自发明。
     // 统一不是同参数（见文件头注释）：不同身体就该有不同的弹簧。
