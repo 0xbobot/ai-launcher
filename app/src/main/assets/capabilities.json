@@ -473,8 +473,66 @@
             "com.google.android.apps.youtube.music"
           ],
           "deeplink": null,
+          "providers": [
+            {
+              "name": "QQ音乐",
+              "packageNames": [
+                "com.tencent.qqmusic"
+              ],
+              "deeplink": null,
+              "deeplinkName": null
+            },
+            {
+              "name": "网易云音乐",
+              "packageNames": [
+                "com.netease.cloudmusic"
+              ],
+              "deeplink": null,
+              "deeplinkName": null
+            },
+            {
+              "name": "酷狗音乐",
+              "packageNames": [
+                "com.kugou.android"
+              ],
+              "deeplink": null,
+              "deeplinkName": null
+            },
+            {
+              "name": "Spotify",
+              "packageNames": [
+                "com.spotify.music"
+              ],
+              "deeplink": null,
+              "deeplinkName": "spotify:search:{query}"
+            },
+            {
+              "name": "Apple Music",
+              "packageNames": [
+                "com.apple.android.music"
+              ],
+              "deeplink": null,
+              "deeplinkName": null
+            },
+            {
+              "name": "YouTube Music",
+              "packageNames": [
+                "com.google.android.apps.youtube.music"
+              ],
+              "deeplink": null,
+              "deeplinkName": "https://music.youtube.com/search?q={query}"
+            }
+          ],
+          "params": [
+            {
+              "name": "query",
+              "label": "内容",
+              "required": false,
+              "ask": "想听什么？"
+            }
+          ],
           "fallbackToLauncher": true,
-          "note": "需真机验证"
+          "note": "Spotify 走官方 spotify:search 深链、YouTube Music 走 music.youtube.com 搜索 App Link；QQ音乐/网易云/酷狗/Apple Music 无已核实官方深链，点按只打开应用；需真机验证"
         },
         {
           "id": "shipin",
@@ -487,8 +545,50 @@
             "com.google.android.youtube"
           ],
           "deeplink": null,
+          "providers": [
+            {
+              "name": "抖音",
+              "packageNames": [
+                "com.ss.android.ugc.aweme"
+              ],
+              "deeplink": null,
+              "deeplinkName": null
+            },
+            {
+              "name": "快手",
+              "packageNames": [
+                "com.smile.gifmaker"
+              ],
+              "deeplink": null,
+              "deeplinkName": null
+            },
+            {
+              "name": "哔哩哔哩",
+              "packageNames": [
+                "tv.danmaku.bili"
+              ],
+              "deeplink": null,
+              "deeplinkName": "https://search.bilibili.com/all?keyword={query}"
+            },
+            {
+              "name": "YouTube",
+              "packageNames": [
+                "com.google.android.youtube"
+              ],
+              "deeplink": null,
+              "deeplinkName": "https://www.youtube.com/results?search_query={query}"
+            }
+          ],
+          "params": [
+            {
+              "name": "query",
+              "label": "内容",
+              "required": false,
+              "ask": "想看什么？"
+            }
+          ],
           "fallbackToLauncher": true,
-          "note": "需真机验证"
+          "note": "哔哩哔哩走 search.bilibili.com 搜索 App Link、YouTube 走 youtube.com 搜索 App Link；抖音/快手无已核实官方搜索深链，点按只打开应用；爱奇艺/腾讯视频/优酷未声明为 shipin 提供方且无已核实深链，点按只打开应用；需真机验证"
         }
       ],
       "icon": "movie",
