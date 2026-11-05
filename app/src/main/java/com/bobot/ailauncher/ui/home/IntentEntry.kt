@@ -6,8 +6,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -122,6 +128,7 @@ import com.bobot.ailauncher.ui.pet.TodayEventsHolder
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.MotionTokens
+import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -251,6 +258,9 @@ internal class IntentCardShape(
 }
 
 
+// 428 滚动关键字：空闲时每条关键字在输入框内停留的时长（轮换节拍）。
+private const val KEYWORD_ROTATE_INTERVAL_MS = 3000L
+
 /**
  * 意图胶囊输入行（2026-10-21 新规格：胶囊与应用中心搜索合二为一的同一组件）。
  *
@@ -303,7 +313,13 @@ fun IntentCapsuleField(
     // 意图页优化（2026-10-30，Bob 已批 §二 A1）：提交钮的无障碍文案——
     // 首页默认“交给助手去办”（点它就是把这句话交给助手办，不是下一页、
     // 不是搜一下）；应用中心胶囊无提交钮，不传。
-    submitContentDescription: String = "交给助手去办"
+    submitContentDescription: String = "交给助手去办",
+    // 428 滚动关键字：空输入显示关键字时，点提交箭头是否在填入后走 onSubmit。
+    // 首页默认 true（填入后跑意图）；应用中心传 false——只填入、网格随之过滤
+    // （应用中心箭头是关键字的运行钮，不是问七仔；其 onSubmit 是 onAskQizai，
+    // 会回首页跑意图，与“按关键字过滤应用”相悖，故不走 onSubmit；填入后
+    // “问七仔”行照常出现，想跑意图再点那行）。
+    keywordSubmitCallsOnSubmit: Boolean = true
 ) {
     val focusRequester = remember { FocusRequester() }
     // v0.68.102（310 冻结修复二轮）：key 改为 requestFocusOnMount 本身——
@@ -314,9 +330,64 @@ fun IntentCapsuleField(
     LaunchedEffect(requestFocusOnMount) {
         if (requestFocusOnMount) focusRequester.requestFocus()
     }
+    // 428 滚动关键字：空闲时输入框内轮换显示能力关键字（取代静态占位），
+    // 点提交箭头填入并提交；只在空输入且未聚焦时转动，一聚焦／一打字就停。
+    val context = LocalContext.current
+    val installedEpoch by InstalledApps.epoch.collectAsState()
+    // 关键字池：首页示例行同一池（SlotTemplates.buildExpandedExamples），
+    // nextEvent 传 null（会议提醒是上下文派生，不进轮换）；按
+    // filterExecutable 只留本机能做的能力，不许诺做不到的；顺序把 Bob 点的
+    // 三条（导航／刷视频／聊天）放最前面，其余按池子原顺序。
+    val keywordPool = remember(installedEpoch) {
+        CapabilityRegistry.load(context)
+        val executableIds = CapabilityRegistry.executableCapabilities(context).map { it.id }.toSet()
+        val pool = SlotTemplates.buildExpandedExamples(
+            CapabilityRegistry.find("daohang"),
+            CapabilityRegistry.find("dache"),
+            null,
+            System.currentTimeMillis()
+        )
+        val filtered = SlotTemplates.filterExecutable(pool, executableIds)
+        val headIds = listOf("nav", "shipin", "liaotian")
+        val head = headIds.mapNotNull { id -> filtered.firstOrNull { it.id == id } }
+        head + filtered.filter { it.id !in headIds }
+    }
+    var isCapsuleFocused by remember { mutableStateOf(false) }
+    var keywordIndex by remember { mutableIntStateOf(0) }
+    // 只在空闲时滚动：空输入且未聚焦（键盘没起来）；一聚焦／一打字就停。
+    val rotating = value.text.isEmpty() && !isCapsuleFocused && keywordPool.isNotEmpty()
+    val currentKeywordText: String? = if (rotating) {
+        keywordPool.getOrNull(keywordIndex % keywordPool.size)?.exampleFillText()
+    } else null
+    val reduceMotion = rememberReduceMotion()
+    // 轮换节拍：每条 KEYWORD_ROTATE_INTERVAL_MS 一换；rotating 翻 false 时
+    // effect 随 key 取消，计时立即停，不轮询、不另起协程。
+    LaunchedEffect(rotating, keywordPool) {
+        if (!rotating) return@LaunchedEffect
+        while (true) {
+            delay(KEYWORD_ROTATE_INTERVAL_MS)
+            if (keywordPool.isEmpty()) return@LaunchedEffect
+            keywordIndex = (keywordIndex + 1) % keywordPool.size
+        }
+    }
+    // 关键字提交：填入后须等状态回流（宿主 fieldValue 已是关键字）再走
+    // onSubmit，否则宿主读到的还是旧空文本；LaunchedEffect(value.text)
+    // 在回流后的重组跑这一步。填入被宿主丢弃时（现两宿主都直通状态，
+    // 不会发生），pending 在下次文本变化时清掉，不误触发。
+    var pendingKeywordSubmit by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(value.text) {
+        val pending = pendingKeywordSubmit
+        if (pending != null) {
+            pendingKeywordSubmit = null
+            if (value.text == pending) onSubmit()
+        }
+    }
     // composing 中（拼音未上屏）禁止提交：组合区间的拉丁字母不是用户最终输入
     val composing = value.composition != null
-    val canSubmit = value.text.isNotBlank() && !planning && !composing
+    // 428：空输入显示关键字时箭头可用（点它填入关键字并提交）；有字时箭头是
+    // 正常提交（现状不变）。关键字只在空输入未聚焦时出现，故此时无 composing。
+    val canSubmit = !planning && !composing &&
+        (value.text.isNotBlank() || currentKeywordText != null)
     Row(
         modifier = modifier
             // F 批：几何网锚点（整胶囊 bounds——layout_check 的坐沿/包含
@@ -385,6 +456,17 @@ fun IntentCapsuleField(
             )
             Spacer(modifier = Modifier.width(10.dp))
         }
+        // 占位文案色（静态占位与滚动关键字共用）：
+        // 2026-10-25 胶囊去深色连带：玻璃胶囊是中间调（深色模式
+        // 下深色 Hint 中灰约 0xFF6B6560 在其上对比度仅约 1.1:1、
+        // 几乎看不见），占位改 Title 降 alpha——深浅两档在玻璃
+        // 上都可读；应用中心变体（实心底）沿用 Hint，一字不动。
+        // 2026-10-27 暗黑可读：深色 Title 只降到 0.85（0.6 在玻璃上发虚），浅色仍 0.6。
+        // 2026-10-28 意图页设计评审第 2 轮 P2-2（与 P1-8 同根因）：
+        // 浅色占位在蜜桃色底实测约 3.87:1＜4.5，浅色亦抬到 0.85
+        // （与深色同值、仍弱于正文 Title 全 alpha），同底复测约 7.47:1。
+        val placeholderColor = if (solidBackground) AILauncherColors.current.Title.copy(alpha = 0.85f)
+            else AILauncherColors.current.Hint
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
@@ -394,7 +476,11 @@ fun IntentCapsuleField(
                 // 暴露为 uiautomator resource-id；对用户界面零影响）
                 .testTag("intent_input")
                 .focusRequester(focusRequester)
-                .onFocusChanged { onFocusChanged(it.isFocused) }
+                .onFocusChanged {
+                    // 428：胶囊内部也记焦点——关键字只在未聚焦时轮换；宿主回调原样转发。
+                    isCapsuleFocused = it.isFocused
+                    onFocusChanged(it.isFocused)
+                }
                 // R3-C 无障碍：Planning 时给 TalkBack 一个状态说明（"思考中"），
                 // 不必等结果条出现才知道提交已受理
                 .semantics {
@@ -416,23 +502,43 @@ fun IntentCapsuleField(
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (value.text.isEmpty()) {
-                        Text(
-                            text = placeholder,
-                            fontSize = AILauncherType.Body.fontSize,
-                            // 2026-10-25 胶囊去深色连带：玻璃胶囊是中间调（深色模式
-                            // 下深色 Hint 中灰约 0xFF6B6560 在其上对比度仅约 1.1:1、
-                            // 几乎看不见），占位改 Title 降 alpha——深浅两档在玻璃
-                            // 上都可读；应用中心变体（实心底）沿用 Hint，一字不动。
-                            // 2026-10-27 暗黑可读：深色 Title 只降到 0.85（0.6 在玻璃上发虚），浅色仍 0.6。
-                            // 2026-10-28 意图页设计评审第 2 轮 P2-2（与 P1-8 同根因）：
-                            // 浅色占位在蜜桃色底实测约 3.87:1＜4.5，浅色亦抬到 0.85
-                            // （与深色同值、仍弱于正文 Title 全 alpha），同底复测约 7.47:1。
-                            color = if (solidBackground) AILauncherColors.current.Title.copy(alpha = 0.85f)
-                            else AILauncherColors.current.Hint,
-                            // R3-A：大字体下占位文案单行省略，不溢出胶囊
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        if (currentKeywordText != null) {
+                            // 428 滚动关键字：空闲时轮换显示能力关键字（取代静态占位）；
+                            // 纵向滚动（当前条往上滑出、下一条从下滑入），减动态时直接贴合。
+                            AnimatedContent(
+                                targetState = currentKeywordText,
+                                contentAlignment = Alignment.CenterStart,
+                                transitionSpec = {
+                                    if (reduceMotion) {
+                                        fadeIn(animationSpec = tween(0)) togetherWith
+                                            fadeOut(animationSpec = tween(0))
+                                    } else {
+                                        (slideInVertically(animationSpec = PetMotion.KeywordSlide) { it } +
+                                            fadeIn(tween(PetMotion.FadeQuick, easing = MotionTokens.Easing))) togetherWith
+                                        (slideOutVertically(animationSpec = PetMotion.KeywordSlide) { -it } +
+                                            fadeOut(tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)))
+                                    }
+                                },
+                                label = "keywordRotate"
+                            ) { keyword ->
+                                Text(
+                                    text = keyword,
+                                    fontSize = AILauncherType.Body.fontSize,
+                                    color = placeholderColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = placeholder,
+                                fontSize = AILauncherType.Body.fontSize,
+                                color = placeholderColor,
+                                // R3-A：大字体下占位文案单行省略，不溢出胶囊
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                     innerTextField()
                 }
@@ -470,12 +576,26 @@ fun IntentCapsuleField(
         // 提交区：Planning 时换轻量进度（文字保留、不可重复提交）
         // R3-C 无障碍：触控目标 48dp（外框可点），金色视觉圆仍 40dp
         // 应用中心变体不画此钮（见 showSubmitButton）
-        if (showSubmitButton) Box(
+        // 428 滚动关键字：应用中心 showSubmitButton=false 时，箭头只在空输入
+        // 显示关键字时出现（关键字的运行钮）；一打字／一聚焦就藏回（408 决定
+        // 不动：应用中心打字搜索不用箭头）。首页 showSubmitButton=true，箭头常显不变。
+        if (showSubmitButton || currentKeywordText != null) Box(
             modifier = Modifier
                 .size(48.dp)
                 // 体检批D ⑥：冒烟语义定位锚点（提交钮）
                 .testTag("intent_submit")
-                .clickable(enabled = canSubmit) { onSubmit() },
+                .clickable(enabled = canSubmit) {
+                    // 428：关键字在场时点箭头 = 填入当前关键字并提交（首页跑意图；
+                    // 应用中心只填入、网格随之过滤，见 keywordSubmitCallsOnSubmit）。
+                    // 点输入框本身只聚焦（Row 的 clickable），绝不填入、不触发。
+                    val kw = currentKeywordText
+                    if (kw != null && value.text.isEmpty()) {
+                        onValueChange(TextFieldValue(kw, TextRange(kw.length)))
+                        if (keywordSubmitCallsOnSubmit) pendingKeywordSubmit = kw
+                    } else {
+                        onSubmit()
+                    }
+                },
             contentAlignment = Alignment.Center
         ) {
             Box(
