@@ -15,8 +15,12 @@ import kotlin.random.Random
 /**
  * 430：已批纹理方向（Bob 2026-11-05 晚亲批“就按这个，设置页面也参考这个”；
  * 原型 texture_v1.png，生成脚本 ~/workspace/texture_prototype.py）。
+ * 浅色加深（Bob 2026-11-05 晚“纹理在浅色模式下看不出来”；原型
+ * texture_light_v1.png，生成脚本 ~/workspace/texture_light_prototype.py）：
+ * 浅色渐变底 #ECE7DC → #E2D8C4、光晕峰值 0.14 → 0.20、颗粒 0.05 → 0.08，
+ * 以“浅色下清楚可见、仍是背景”为限；深色值已批，一字不动。
  * 页面背景三层，都淡，以不抢列表可读性为限：
- * ① 纵向暖灰渐变 ② 顶部柔和暖光晕 ③ 极淡颗粒（均匀 ±28、平铺、5%）。
+ * ① 纵向暖灰渐变 ② 顶部柔和暖光晕 ③ 极淡颗粒（均匀 ±28、平铺、深色 5% / 浅色 8%）。
  * 主题感知（跟随深/浅切换），只做背景层——调用点把原 `.background(...)` 换成
  * 本修饰符即可，布局/内容/交互/文字颜色一律不动。
  */
@@ -25,10 +29,14 @@ fun Modifier.pageTextureBackground(): Modifier {
     val isDark = AILauncherColors.current.isDark
     // 深色按原型值（顶 #211E1A → 底 #0A0A0B，平均亮度与原 Background #1A1815 相当）；
     // 浅色同一结构换浅暖灰系（顶略暖亮 → 底主题暖灰，平均 ≈ 原 #F4F2EE，卡片/文字对比度不动）。
+    // 浅色加深：底 #ECE7DC → #E2D8C4（两端拉开，暖灰更显；最深底上主文字对比度仍 >10:1）。
     val gradientTop = if (isDark) Color(0xFF211E1A) else Color(0xFFF8F5F0)
-    val gradientBottom = if (isDark) Color(0xFF0A0A0B) else Color(0xFFECE7DC)
-    // 暖光晕：原型暖琥珀 (92,58,26)；深色峰值约 0.22、浅色约 0.14（浅底上暖色更显）。
-    val glowAlpha = if (isDark) 0.22f else 0.14f
+    val gradientBottom = if (isDark) Color(0xFF0A0A0B) else Color(0xFFE2D8C4)
+    // 暖光晕：原型暖琥珀 (92,58,26)；深色峰值约 0.22（已批，不动）、浅色 0.14 → 0.20
+    // （往深色靠但不过；浅底上暖色更显，顶部暖意清楚可见）。
+    val glowAlpha = if (isDark) 0.22f else 0.20f
+    // 颗粒：深色 0.05（已批，不动）、浅色 0.05 → 0.08（细颗粒看得见，仍是背景）。
+    val grainAlpha = if (isDark) 0.05f else 0.08f
     val grainBitmap = remember { makeGrainBitmap() }
     val grainBrush = remember(grainBitmap) {
         ShaderBrush(
@@ -53,8 +61,8 @@ fun Modifier.pageTextureBackground(): Modifier {
                 radius = size.width * 0.8f,
             )
         )
-        // ③ 极淡颗粒（平铺，约 5%——与原型 effect_noise σ28 @ 5% 同量级）。
-        drawRect(brush = grainBrush, alpha = 0.05f)
+        // ③ 颗粒（平铺；深色约 5%、浅色约 8%——与原型同量级，浅色下细颗粒看得见）。
+        drawRect(brush = grainBrush, alpha = grainAlpha)
     }
 }
 
