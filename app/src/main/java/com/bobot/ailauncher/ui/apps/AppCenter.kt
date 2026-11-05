@@ -396,8 +396,8 @@ fun AppCenterContent(
         }
     }
 
-    // v0.41.8：手动吸顶——当前组首行滚出顶部后，悬停 overlay 接管显示；
-    // 下一组首行接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走）
+    // v0.41.8：手动吸顶——当前组首行刚开始滚出顶部（offset>0），悬停 overlay
+    // 就接管显示；下一组首行接近顶部时把悬停字母往上顶走（Bob：滚动悬停/顶走）
     val stuckLetter: Char? by remember(azGroups, foldVisible, foldHeaderIndex) {
         derivedStateOf {
             val firstIdx = listState.firstVisibleItemIndex
@@ -408,8 +408,17 @@ fun AppCenterContent(
                 .filter { it.value <= firstIdx }
                 .maxByOrNull { it.value }
                 ?.key ?: return@derivedStateOf null
-            // 该组首行还在视口内时不悬停，直接用行内的真字母
-            if (firstIdx > (letterAnchors[current] ?: 0)) current else null
+            // 427（Bob：A 先隐藏再弹出来）：首行刚开始滚出（offset>0）就接管，
+            // 不再等首行完全滚出——行内字母在 offset 44dp 已被完全裁掉
+            // （60dp 行、字母顶边 16dp、高约 28dp），旧条件到 60dp 才接管，
+            // 中间 16dp 两个字母都不显示，overlay 又是硬出现，所以闪；
+            // 提前接管后 overlay 落在行内字母原位（offset==0 时行内字母顶边
+            // 正好 16dp），行内字母随行滑走，顺滑吸顶。offset==0 时仍不悬停
+            // （行内字母正在原位显示）。
+            val anchor = letterAnchors[current] ?: 0
+            if (firstIdx > anchor) current
+            else if (firstIdx == anchor && listState.firstVisibleItemScrollOffset > 0) current
+            else null
         }
     }
     // 顶走位移：下一组首行进入顶部区域时，悬停字母被往上顶（负值）；
@@ -455,8 +464,9 @@ fun AppCenterContent(
         animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
         label = "stuckPush"
     )
-    // v0.41.28（Bob）：隐藏分组的幽灵眼也要悬停——隐藏头滚出顶部后，
-    // 幽灵眼接管悬停，直到滚出隐藏分组
+    // v0.41.28（Bob）：隐藏分组的幽灵眼也要悬停——隐藏头刚开始滚出
+    // 就接管（427，同字母：等整行滚出才接管会在行内眼被裁掉后留 12dp
+    // 左右的无幽灵窗口）；幽灵眼接管悬停，直到滚出隐藏分组
     val stuckHidden: Boolean by remember(hiddenApps, hiddenUnlocked) {
         derivedStateOf {
             if (hiddenApps.isEmpty()) return@derivedStateOf false
@@ -465,7 +475,7 @@ fun AppCenterContent(
             val firstKey = if (hiddenUnlocked) "h:${hiddenApps.first().packageName}"
                 else "hidden-locked"
             val first = vis.firstOrNull { it.key == firstKey }
-            val firstGone = first == null || first.offset + first.size < 0
+            val firstGone = first == null || first.offset < 0
             val hiddenVisible = vis.any {
                 it.key == "hidden-locked" ||
                 (it.key is String && (it.key as String).startsWith("h:"))
@@ -473,14 +483,14 @@ fun AppCenterContent(
             firstGone && hiddenVisible
         }
     }
-    // 折叠组（419）：折叠段幽灵——组头滚出顶部后接管，直到滚出折叠段；
-    // 与 stuckHidden 同理（组头已走＋段内仍有可见项）
+    // 折叠组（419）：折叠段幽灵——组头刚开始滚出就接管（427，同字母），
+    // 直到滚出折叠段；与 stuckHidden 同理（组头已走＋段内仍有可见项）
     val stuckFold: Boolean by remember(foldVisible, foldHeaderIndex) {
         derivedStateOf {
             if (!foldVisible) return@derivedStateOf false
             val vis = listState.layoutInfo.visibleItemsInfo
             val first = vis.firstOrNull { it.key == "fold-header" }
-            val firstGone = first == null || first.offset + first.size < 0
+            val firstGone = first == null || first.offset < 0
             val foldInView = vis.any {
                 it.key == "fold-header" || it.key == "sp:fold" || it.key == "fold-foot" ||
                     (it.key is String && (it.key as String).startsWith("f:"))
@@ -510,8 +520,8 @@ fun AppCenterContent(
         animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
         label = "foldPush"
     )
-    // v0.41.31（Bob）：Dock 分区幽灵 ★ 悬停——第一行滚出顶部后接管，
-    // 直到滚出 Dock 分区；与 stuckHidden 同理
+    // v0.41.31（Bob）：Dock 分区幽灵 ★ 悬停——第一行刚开始滚出就接管
+    // （427，同字母），直到滚出 Dock 分区；与 stuckHidden 同理
     // v0.41.32：dock 头已并入第一行
     val stuckDock: Boolean by remember(dockApps) {
         derivedStateOf {
@@ -520,7 +530,7 @@ fun AppCenterContent(
             // v0.41.32：dock 头已并入第一行
             val firstKey = "d:${dockApps.first().packageName}"
             val first = vis.firstOrNull { it.key == firstKey }
-            val firstGone = first == null || first.offset + first.size < 0
+            val firstGone = first == null || first.offset < 0
             val dockVisible = vis.any {
                 it.key is String && (it.key as String).startsWith("d:")
             }
@@ -545,6 +555,32 @@ fun AppCenterContent(
         targetValue = dockPushPx,
         animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
         label = "dockPush"
+    )
+    // 427：悬停幽灵淡入——接管点提前到“刚开始滚出”后，overlay 出现时
+    // 行内幽灵还在视口内滑走；alpha 从 0 淡入（与 stuckPushPx 同一
+    // PetMotion.PadStandard），不硬弹出来。减动态时直接贴合
+    // （沿用既有口径）。alpha 状态提在分支外，使分支挂载时已有 0 的
+    // 初值可淡入；分支卸载即瞬时消失（此时行内幽灵正在原位显示，
+    // 或下一分支已接管，看不出）。
+    val stuckLetterAlpha by animateFloatAsState(
+        targetValue = if (stuckLetter != null) 1f else 0f,
+        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
+        label = "stuckLetterAlpha"
+    )
+    val stuckDockAlpha by animateFloatAsState(
+        targetValue = if (stuckDock) 1f else 0f,
+        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
+        label = "stuckDockAlpha"
+    )
+    val stuckHiddenAlpha by animateFloatAsState(
+        targetValue = if (stuckHidden) 1f else 0f,
+        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
+        label = "stuckHiddenAlpha"
+    )
+    val stuckFoldAlpha by animateFloatAsState(
+        targetValue = if (stuckFold) 1f else 0f,
+        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
+        label = "stuckFoldAlpha"
     )
     // v0.41.31（Bob）：打开应用中心默认从 A（首个字母组）开始，不显示 Dock 分区；
     // 除非用户点 rail ★ 才去看 Dock
@@ -1236,7 +1272,7 @@ fun AppCenterContent(
                 // A-Z 列表（v0.41.0 B 方案）
                 // v0.41.8：每组 = 应用行 + 组间间距（字母不再独占一行，Bob）。
                 // 每组首行左侧留白放幽灵字母（正向 padding，不用负 offset）；
-                // 首行滚出顶部后由悬停 overlay 接管（手动吸顶，见 stuckLetter）
+                // 首行刚开始滚出就由悬停 overlay 接管（手动吸顶，见 stuckLetter）
                 // 应用中心升级：catalog 为空时显示加载弱提示（替代空列表）
                 if (catalog == null) {
                     item(key = "catalog-loading") {
@@ -1642,8 +1678,8 @@ fun AppCenterContent(
                 item { Spacer(modifier = Modifier.height(16.dp)) }
                 } // else 非搜索态：分类区 + A-Z 列表
             }
-            // v0.41.8：悬停幽灵字母——只在当前组首行滚出顶部后显示，下一组首行
-            // 接近时被顶走；外层 clipToBounds 保证不会顶到搜索栏上面（Bob）。
+            // v0.41.8：悬停幽灵字母——当前组首行刚开始滚出就接管显示（427），
+            // 下一组首行接近时被顶走；外层 clipToBounds 保证不会顶到搜索栏上面（Bob）。
             // 应用中心升级：透明度跟行内幽灵字母同为 0.35；Bob 2026-11-03 起编辑态不再隐藏
             val sl = stuckLetter
             // Bob 2026-11-03：搜索态无分组可指示，悬停字母不显示
@@ -1655,7 +1691,7 @@ fun AppCenterContent(
                         imageVector = Icons.Filled.Star,
                         // 体检批D ⑨：悬停幽灵（纯视觉）标装饰语义
                         contentDescription = null,
-                        tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
+                        tint = AILauncherColors.current.Title.copy(alpha = 0.14f * stuckDockAlpha),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 24.dp, top = 16.dp)
@@ -1670,7 +1706,7 @@ fun AppCenterContent(
                             else Icons.Filled.VisibilityOff,
                         // 体检批D ⑨：悬停幽灵（纯视觉）标装饰语义
                         contentDescription = null,
-                        tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
+                        tint = AILauncherColors.current.Title.copy(alpha = 0.14f * stuckHiddenAlpha),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 24.dp, top = 16.dp)
@@ -1683,7 +1719,7 @@ fun AppCenterContent(
                     Text(
                         text = "不常用",
                         fontSize = AILauncherType.Callout.fontSize,
-                        color = AILauncherColors.current.Title.copy(alpha = 0.35f),
+                        color = AILauncherColors.current.Title.copy(alpha = 0.35f * stuckFoldAlpha),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 24.dp, top = 16.dp)
@@ -1694,7 +1730,7 @@ fun AppCenterContent(
                         text = sl.toString(),
                         fontFamily = FontFamily.Serif,
                         fontSize = 40.sp,
-                        color = AILauncherColors.current.Title.copy(alpha = 0.35f),
+                        color = AILauncherColors.current.Title.copy(alpha = 0.35f * stuckLetterAlpha),
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 24.dp, top = 16.dp)
