@@ -10,6 +10,10 @@
 
 ---
 
+## v1.0.37（versionCode 434）— 2026-11-05
+
+地铁带名：只有名字、没有坐标时也用地铁方式进地图（Bob 2026-11-05 晚批“重点研究跑通这个”）。高德/百度补名称深链：高德 amap://route?dname=机场&t=1、百度 baidumap://map/direction?destination=机场&mode=transit（均按官方 URI 文档）；腾讯 routeplan 官方要求 tocoord 坐标、无名称深链，退 geo 名称查询（geo:0,0?q=机场，限定到腾讯包）。ditie 声明 to 参数（可选，lat/lon 改可选，问助手追问门不再因缺坐标卡住名字查询），geoFallback 加 COORD_OR_NAME；解析层加 deeplinkNameTemplate，坐标模板先试、名称模板再试，点按与问助手两路同受益；有坐标时行为不变，建不出时退回直接打开、绝不打开残缺链接。
+
 ## v1.0.36（versionCode 433）— 2026-11-05
 
 浅色纹理加深（Bob 2026-11-05 晚“纹理在浅色模式下看不出来”）：只动 PageTexture.kt 浅色分支——渐变底 #ECE7DC → #E2D8C4（两端拉开）、顶部暖光晕峰值 0.14 → 0.20（往深色 0.22 靠但不过）、颗粒 alpha 0.05 → 0.08；深色值已批一字不动。浅色下清楚可见、仍是背景，主文字对比度仍 >10:1（最深底 12.5:1）。
