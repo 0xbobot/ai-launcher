@@ -43,8 +43,11 @@ sealed interface LaunchStep {
     /** 用深链直达提供方应用内页面（意图限定到该包） */
     data class Deeplink(val providerName: String, val packageName: String, val uri: String) : LaunchStep
 
-    /** 通用 geo 意图（不限定包，系统里任一地图类应用都能接） */
-    data class Geo(val uri: String) : LaunchStep
+    /**
+     * 通用 geo 意图；packageName 为 null 时不限定包（问助手老口径，系统里
+     * 任一地图类应用都能接），非 null 时限定到该包（432 点按路径，不跨应用跳）。
+     */
+    data class Geo(val uri: String, val packageName: String? = null) : LaunchStep
 
     /** 打开提供方应用本体（主页） */
     data class OpenApp(val providerName: String, val packageName: String) : LaunchStep
@@ -110,6 +113,74 @@ object CapabilityResolution {
                 steps += LaunchStep.OpenApp(provider.name, pkg)
             }
         }
+        return steps
+    }
+
+    /** 432：从整句抠目的地——第一个“去/到”后面、到分隔符为止的一段。 */
+    private val DESTINATION_AFTER_MARKER = Regex("[去到]([^去到，,、；:！？。\\s的]+)")
+    /** 问句里的空目的地（“导航去哪儿”没有真目的地，不许拼进深链） */
+    private val JUNK_DESTINATIONS = setOf("哪儿", "哪里", "哪", "那里", "这儿", "这里", "那儿")
+
+    fun parseDestination(query: String): String? {
+        val match = DESTINATION_AFTER_MARKER.find(query) ?: return null
+        val dest = match.groupValues.getOrNull(1)?.trim().orEmpty()
+        if (dest.isEmpty() || dest in JUNK_DESTINATIONS) return null
+        return dest
+    }
+
+    /**
+     * 只给一家提供方的候选链（432 点按路径）：深链（模板填得出时）→
+     * 定向 geo（能力声明了 geoFallback 且参数齐备时，限定到这家包，不跨
+     * 应用跳）→ 打开这家应用本体。模板缺参填不出时该家不出深链步，
+     * 与 [steps] 同规矩，绝不打开残缺链接。
+     */
+    fun stepsForProvider(
+        cap: Capability,
+        provider: CapabilityProvider,
+        packageName: String,
+        params: Map<String, String>
+    ): List<LaunchStep> {
+        val steps = mutableListOf<LaunchStep>()
+        provider.deeplinkTemplate?.let { template ->
+            DeeplinkTemplate.fill(template, params)?.let { uri ->
+                steps += LaunchStep.Deeplink(provider.name, packageName, uri)
+            }
+        }
+        geoUri(cap, params)?.let { steps += LaunchStep.Geo(it, packageName) }
+        if (cap.fallbackToLauncher) {
+            steps += LaunchStep.OpenApp(provider.name, packageName)
+        }
+        return steps
+    }
+
+    /**
+     * 432：应用中心点搜索结果的“带目的地”解析（纯函数，可单测）。
+     * 整句含带参能力的 label（如“导航”）且能抠出目的地、且被点应用是该
+     * 能力的提供方时，返回只给这家用的候选链（深链→定向 geo→打开应用）；
+     * 任一条件不满足（没关键字、没目的地、被点应用不是该能力提供方、
+     * 深链与 geo 都建不出）返回 null，调用方退回直接打开。
+     * 名字型目的地只填声明了 "to" 的参数（地铁要 lat/lon、只有名填不出，
+     * 按规矩不出深链/geo 步，返回 null 走直接打开）。
+     */
+    fun tapSteps(
+        capabilities: List<Capability>,
+        query: String,
+        packageName: String
+    ): List<LaunchStep>? {
+        // 只考虑带参能力（能带目的地的才值得解析；无参能力点按永远直接打开）
+        val cap = capabilities
+            .filter { it.params.isNotEmpty() && query.contains(it.label) }
+            .maxByOrNull { it.label.length } ?: return null
+        val dest = parseDestination(query) ?: return null
+        if (dest == cap.label) return null
+        val provider = effectiveProviders(cap)
+            .firstOrNull { packageName in it.packageNames } ?: return null
+        val params =
+            if (cap.params.any { it.name == "to" }) mapOf("to" to dest) else emptyMap()
+        val steps = stepsForProvider(cap, provider, packageName, params)
+        // 深链与 geo 都建不出 = 没东西可带（地铁只有名无坐标、打车没深链没
+        // geo），退回直接打开；只剩 OpenApp 的链与直接打开等价，不必绕注册表。
+        if (steps.none { it is LaunchStep.Deeplink || it is LaunchStep.Geo }) return null
         return steps
     }
 

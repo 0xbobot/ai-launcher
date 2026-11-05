@@ -304,6 +304,21 @@ object CapabilityRegistry {
         return launchCapability(context, cap, params) is LaunchOutcome.Opened
     }
 
+    /**
+     * 432：应用中心点搜索结果的“带目的地”启动。整句含能力关键字＋目的地、
+     * 且被点应用是该能力的提供方时，按只给这家的候选链执行（深链→定向
+     * geo→打开应用）；建不出（没目的地/没模板/缺参）返回 false，调用方
+     * 退回直接打开。不跨应用跳：链里不含别家提供方的深链，geo 也限定到
+     * 被点包。问助手路径（resolveAndLaunch / launchCapability）一字不动。
+     */
+    fun launchTappedApp(context: Context, query: String, packageName: String): Boolean {
+        load(context)
+        val steps = CapabilityResolution.tapSteps(
+            groups().flatMap { it.capabilities }, query, packageName
+        ) ?: return false
+        return executeSteps(context, steps) is LaunchOutcome.Opened
+    }
+
     // ---------- v0.68.88：按已装应用动态绑定 ----------
 
     /** 能力执行结果三态，供 [com.bobot.ailauncher.core.action.ActionEngine] 选诚实文案 */
@@ -382,6 +397,11 @@ object CapabilityRegistry {
         if (geoStep != null && steps.none { it !is LaunchStep.Geo } && !hasGeoHandler(context, geoStep.uri)) {
             return LaunchOutcome.NoProvider
         }
+        return executeSteps(context, steps)
+    }
+
+    /** 按候选链逐个尝试，第一个成功即停；全部失败返回 Failed */
+    private fun executeSteps(context: Context, steps: List<LaunchStep>): LaunchOutcome {
         for (step in steps) {
             val label = tryStep(context, step)
             if (label != null) return LaunchOutcome.Opened(label)
@@ -404,6 +424,9 @@ object CapabilityRegistry {
 
         is LaunchStep.Geo -> try {
             val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(step.uri))
+            // 432 点按路径：geo 限定到被点的那家应用，不跨应用跳；问助手
+            // 老链的 Geo 没带包（null），这里不动，仍由系统选处理者。
+            if (step.packageName != null) intent.setPackage(step.packageName)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             val handler = context.packageManager.queryIntentActivities(intent, 0).firstOrNull()
             if (handler == null) {

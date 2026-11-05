@@ -185,4 +185,124 @@ class CapabilityResolutionTest {
         assertTrue(hints.contains("daohang: 导航"))
         assertFalse(hints.contains("wechat"))
     }
+
+    // ---------- 432：点搜索结果带目的地（parseDestination + tapSteps） ----------
+
+    private val dache = Capability(
+        id = "dache",
+        label = "打车",
+        iconName = "",
+        packageNames = listOf("com.sdu.didi.psnger", "com.didapassenger"),
+        deeplinkTemplate = null,
+        geoFallback = GeoFallback.NONE,
+        params = listOf(CapabilityParam("to", "目的地", required = true))
+    )
+
+    private val carryingCaps = listOf(daohang, ditie, dache)
+
+    @Test
+    fun `parseDestination takes text after qu or dao`() {
+        assertEquals("机场", CapabilityResolution.parseDestination("导航去机场"))
+        assertEquals("机场", CapabilityResolution.parseDestination("查去机场的地铁"))
+        assertEquals("机场", CapabilityResolution.parseDestination("导航到机场"))
+        assertEquals("公司", CapabilityResolution.parseDestination("从机场去公司"))
+        assertEquals("首都机场T3", CapabilityResolution.parseDestination("导航去首都机场T3"))
+    }
+
+    @Test
+    fun `parseDestination returns null without a real destination`() {
+        assertNull(CapabilityResolution.parseDestination("只有导航"))
+        assertNull(CapabilityResolution.parseDestination("导航"))
+        assertNull(CapabilityResolution.parseDestination("导航去哪儿"))
+        assertNull(CapabilityResolution.parseDestination("导航去哪里"))
+    }
+
+    @Test
+    fun `tap nav to airport on amap carries destination in deeplink`() {
+        val steps = CapabilityResolution.tapSteps(
+            carryingCaps, "导航去机场", "com.autonavi.minimap"
+        )!!
+        assertEquals(3, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "高德地图", "com.autonavi.minimap",
+                "amap://route?sourceApplication=ai-launcher&dname=%E6%9C%BA%E5%9C%BA&dev=0&t=1"
+            ),
+            steps[0]
+        )
+        assertEquals(
+            LaunchStep.Geo("geo:0,0?q=%E6%9C%BA%E5%9C%BA", "com.autonavi.minimap"),
+            steps[1]
+        )
+        assertEquals(LaunchStep.OpenApp("高德地图", "com.autonavi.minimap"), steps[2])
+    }
+
+    @Test
+    fun `tap nav to airport on baidu carries destination in deeplink`() {
+        val steps = CapabilityResolution.tapSteps(
+            carryingCaps, "导航去机场", "com.baidu.BaiduMap"
+        )!!
+        assertEquals(3, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "百度地图", "com.baidu.BaiduMap",
+                "baidumap://map/direction?destination=%E6%9C%BA%E5%9C%BA&mode=driving&src=ai-launcher"
+            ),
+            steps[0]
+        )
+        assertEquals(
+            LaunchStep.Geo("geo:0,0?q=%E6%9C%BA%E5%9C%BA", "com.baidu.BaiduMap"),
+            steps[1]
+        )
+        assertEquals(LaunchStep.OpenApp("百度地图", "com.baidu.BaiduMap"), steps[2])
+    }
+
+    @Test
+    fun `tap nav to airport on tencent falls back to geo targeted at tencent`() {
+        // 腾讯没有名称深链（routeplan 要坐标）：链 = 定向 geo -> 打开腾讯地图本体
+        val steps = CapabilityResolution.tapSteps(
+            carryingCaps, "导航去机场", "com.tencent.map"
+        )!!
+        assertEquals(2, steps.size)
+        assertEquals(
+            LaunchStep.Geo("geo:0,0?q=%E6%9C%BA%E5%9C%BA", "com.tencent.map"),
+            steps[0]
+        )
+        assertEquals(LaunchStep.OpenApp("腾讯地图", "com.tencent.map"), steps[1])
+    }
+
+    @Test
+    fun `tap returns null when nothing can be carried`() {
+        // 点非地图应用：不是该能力的提供方
+        assertNull(
+            CapabilityResolution.tapSteps(carryingCaps, "导航去机场", "com.tencent.mm")
+        )
+        // 只有“导航”没目的地
+        assertNull(
+            CapabilityResolution.tapSteps(carryingCaps, "导航", "com.autonavi.minimap")
+        )
+        // 地铁只有名无坐标：ditie 深链与 geo 都要 lat/lon，填不出
+        assertNull(
+            CapabilityResolution.tapSteps(carryingCaps, "查去机场的地铁", "com.autonavi.minimap")
+        )
+        // 打车：没深链也没 geo，没东西可带
+        assertNull(
+            CapabilityResolution.tapSteps(carryingCaps, "打车去机场", "com.sdu.didi.psnger")
+        )
+        // 目的地就是能力名本身（“出去导航”）：不是真目的地
+        assertNull(
+            CapabilityResolution.tapSteps(carryingCaps, "出去导航", "com.autonavi.minimap")
+        )
+    }
+
+    @Test
+    fun `tap steps drop open-app when fallbackToLauncher off`() {
+        val noFallback = daohang.copy(fallbackToLauncher = false)
+        val steps = CapabilityResolution.tapSteps(
+            listOf(noFallback), "导航去机场", "com.autonavi.minimap"
+        )!!
+        assertEquals(2, steps.size)
+        assertTrue(steps[0] is LaunchStep.Deeplink)
+        assertTrue(steps[1] is LaunchStep.Geo)
+    }
 }

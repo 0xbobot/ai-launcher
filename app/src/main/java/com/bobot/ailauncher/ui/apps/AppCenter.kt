@@ -139,6 +139,7 @@ import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
+import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import com.bobot.ailauncher.data.AppUsageTracker
@@ -636,6 +637,14 @@ fun AppCenterContent(
         keyboardController?.hide()
         AppUsageTracker.recordLaunch(context, app.packageName)
         inactiveTick++
+        // 432（Bob 2026-11-05：点搜索结果要把目的地带进地图）：整句含能力
+        // 关键字＋目的地、且被点应用是该能力的提供方时，走该家深链（深链→
+        // 定向 geo→打开应用）；建不出（没目的地/没模板/缺参）时返回 false，
+        // 退回下面直接打开，绝不打开残缺链接。横屏经 onLaunch 共用同一入口。
+        val query = queryField.text.trim()
+        if (query.isNotEmpty() &&
+            CapabilityRegistry.launchTappedApp(context, query, app.packageName)
+        ) return
         try {
             val intent = context.packageManager
                 .getLaunchIntentForPackage(app.packageName)
