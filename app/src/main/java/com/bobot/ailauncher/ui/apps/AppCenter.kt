@@ -329,6 +329,22 @@ fun AppCenterContent(
         if (filterQuery.trim().isBlank()) null
         else AppSearchIndex.search(context, filterQuery, searchIndex)
     }
+    // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
+    // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；
+    // 吸顶仍由悬停 overlay 实现
+    // Bob 2026-11-03 回滚：锚点回 409 加过滤前——只按完整列表算
+    // （Dock 分区在前、每组＋1 组间呼吸），不再跟搜索结果走
+    // 前移到搜索 effect 之前：取消输入态的落点（下）要读它
+    val letterAnchors = remember(azGroups, dockSectionSize) {
+        val m = mutableMapOf<Char, Int>()
+        var idx = dockSectionSize // v0.41.31：Dock 分区在前，字母锚点后移
+        azGroups.forEach { (letter, apps) ->
+            m[letter] = idx
+            idx += apps.size + 1
+        }
+        m
+    }
+
     // 开始搜索时滚到顶部；退出搜索时恢复进入前位置
     val listState = rememberLazyListState()
     // 应用中心升级：退出搜索恢复进入前位置（只记首次进入搜索前的位置，
@@ -341,26 +357,20 @@ fun AppCenterContent(
             hadSearched = true
             listState.scrollToItem(0)
         } else if (hadSearched) {
-            listState.scrollToItem(savedListPosition)
+            // 取消输入态后统一落到 A 组（Bob 2026-11-05）：不再恢复进入前
+            // 位置。进入前位置常是 0——首帧 catalog 为空时默认定位到 A
+            // 的一次滚动被空耗（见下 dockInitialScrollDone），列表停在
+            // 收藏区，savedListPosition 记下 0，恢复即落到收藏。
+            // A 组没有时退到首个字母组，再没有才退回进入前位置。
+            val aAnchor = letterAnchors['A']
+                ?: letterAnchors[letters.firstOrNull()]
+                ?: savedListPosition
+            listState.scrollToItem(aAnchor)
         }
     }
 
     val nested = rememberPullDownConnection(listState, onPullDownState.value)
 
-    // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
-    // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；
-    // 吸顶仍由悬停 overlay 实现
-    // Bob 2026-11-03 回滚：锚点回 409 加过滤前——只按完整列表算
-    // （Dock 分区在前、每组＋1 组间呼吸），不再跟搜索结果走
-    val letterAnchors = remember(azGroups, dockSectionSize) {
-        val m = mutableMapOf<Char, Int>()
-        var idx = dockSectionSize // v0.41.31：Dock 分区在前，字母锚点后移
-        azGroups.forEach { (letter, apps) ->
-            m[letter] = idx
-            idx += apps.size + 1
-        }
-        m
-    }
     // v0.41.31：隐藏分区第一个 item 的绝对 index（供 rail 眼睛按钮跳转）
     // v0.41.32：隐藏头已并入第一行，index 不变
     val azTotalItems = remember(azGroups) { azGroups.sumOf { it.second.size + 1 } }
@@ -589,7 +599,11 @@ fun AppCenterContent(
     // 除非用户点 rail ★ 才去看 Dock
     var dockInitialScrollDone by remember { mutableStateOf(false) }
     LaunchedEffect(letterAnchors) {
-        if (!dockInitialScrollDone) {
+        if (!dockInitialScrollDone && letters.firstOrNull() != null) {
+            // 只有字母组就绪时才消耗一次定位；首帧 catalog 为空（快照在
+            // IO 构建，AppCatalog.snapshot 初值 null）时不消耗，等 catalog
+            // 到位、letterAnchors 变化后再定位到 A——否则一次定位被空耗，
+            // 列表停在收藏区（item 0），搜索开始时 savedListPosition 记下 0。
             dockInitialScrollDone = true
             val firstAnchor = letterAnchors[letters.firstOrNull()] ?: 0
             if (firstAnchor > 0) listState.scrollToItem(firstAnchor)
