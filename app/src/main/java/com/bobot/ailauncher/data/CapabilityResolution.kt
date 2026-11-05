@@ -293,6 +293,21 @@ object CapabilityResolution {
         return steps
     }
 
+    /**
+     * 内容深链标识判定（纯函数，可单测）：点按该应用是否会走一条带内容/
+     * 目的地的深链。复用 [tapSteps] 的同一判定——候选链里含 Deeplink 步即
+     * 支持；tapSteps 为 null（没能力词/没内容/不是提供方/深链与 geo 都
+     * 建不出）即不支持。只认 Deeplink 步：纯 geo 兜底（如腾讯地铁的名称
+     * geo、腾讯导航的名称 geo）不是深链，不标——标识的意思是“这家有已
+     * 核实的深链模板，点按直达内容”，不是“点按带了点什么”。
+     */
+    fun supportsDeepLink(
+        capabilities: List<Capability>,
+        query: String,
+        packageName: String
+    ): Boolean =
+        tapSteps(capabilities, query, packageName)?.any { it is LaunchStep.Deeplink } == true
+
     /** 按能力声明的 geoFallback 构造 geo URI；参数缺失/非法返回 null */
     fun geoUri(cap: Capability, params: Map<String, String>): String? =
         when (cap.geoFallback) {

@@ -684,4 +684,45 @@ class CapabilityResolutionTest {
         )
         assertEquals(listOf(LaunchStep.OpenApp("Spotify", "com.spotify.music")), steps)
     }
+
+    // ---------- 内容深链标识：supportsDeepLink ----------
+
+    @Test
+    fun `badge shows for bilibili on show title but not iqiyi or douyin`() {
+        assertTrue(CapabilityResolution.supportsDeepLink(contentCaps, "我想看《狂飙》", "tv.danmaku.bili"))
+        assertTrue(CapabilityResolution.supportsDeepLink(contentCaps, "我想看《狂飙》", "com.google.android.youtube"))
+        // 爱奇艺不是 shipin 提供方、抖音无搜索深链模板：点按只打开首页，不标
+        assertFalse(CapabilityResolution.supportsDeepLink(contentCaps, "我想看《狂飙》", "com.qiyi.video"))
+        assertFalse(CapabilityResolution.supportsDeepLink(contentCaps, "我想看《狂飙》", "com.ss.android.ugc.aweme"))
+    }
+
+    @Test
+    fun `badge shows for spotify on singer but not qq music`() {
+        assertTrue(CapabilityResolution.supportsDeepLink(contentCaps, "我想听周杰伦的歌", "com.spotify.music"))
+        assertTrue(CapabilityResolution.supportsDeepLink(contentCaps, "我想听周杰伦的歌", "com.google.android.apps.youtube.music"))
+        // QQ音乐/网易云无搜索深链模板：点按只打开首页，不标
+        assertFalse(CapabilityResolution.supportsDeepLink(contentCaps, "我想听周杰伦的歌", "com.tencent.qqmusic"))
+        assertFalse(CapabilityResolution.supportsDeepLink(contentCaps, "我想听周杰伦的歌", "com.netease.cloudmusic"))
+    }
+
+    @Test
+    fun `badge hidden when query has no real content`() {
+        assertFalse(CapabilityResolution.supportsDeepLink(contentCaps, "我想听歌", "com.spotify.music"))
+        assertFalse(CapabilityResolution.supportsDeepLink(contentCaps, "我想看视频", "tv.danmaku.bili"))
+    }
+
+    @Test
+    fun `badge hidden for plain search without capability`() {
+        assertFalse(CapabilityResolution.supportsDeepLink(contentCaps, "微信", "com.tencent.mm"))
+        assertFalse(CapabilityResolution.supportsDeepLink(contentCaps, "微信", "tv.danmaku.bili"))
+    }
+
+    @Test
+    fun `badge counts deeplink only geo-only tencent gets no badge`() {
+        // 高德有名称深链模板：标；腾讯只有名称 geo 兜底（不是深链）：不标
+        assertTrue(CapabilityResolution.supportsDeepLink(carryingCaps, "查去机场的地铁", "com.autonavi.minimap"))
+        assertFalse(CapabilityResolution.supportsDeepLink(carryingCaps, "查去机场的地铁", "com.tencent.map"))
+        assertTrue(CapabilityResolution.supportsDeepLink(carryingCaps, "导航去机场", "com.autonavi.minimap"))
+        assertFalse(CapabilityResolution.supportsDeepLink(carryingCaps, "导航去机场", "com.tencent.map"))
+    }
 }

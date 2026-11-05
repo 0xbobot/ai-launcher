@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
@@ -102,6 +103,10 @@ internal fun AppRow(
     // （系统应用信息页），不触发行点按；收起时 ⓘ 消失。
     showInfoIcon: Boolean = false,
     onInfoClick: (() -> Unit)? = null,
+    // 内容深链标识（Bob 2026-11-05 晚）：搜索结果行里，点按会走深链直达
+    // 内容的应用出「直达」小标签；只打开首页的没有。调用方按当前查询算好
+    // 再传（CapabilityResolution.supportsDeepLink），默认不显示。
+    showDeepLinkBadge: Boolean = false,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -322,9 +327,17 @@ internal fun AppRow(
                     color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    // ⓘ 在行尾时占满剩余宽，把行尾元素顶到行尾
-                    modifier = if (showInfoIcon && onInfoClick != null) Modifier.weight(1f) else Modifier
+                    // ⓘ 在行尾时占满剩余宽，把行尾元素顶到行尾；「直达」标签
+                    // 同理——有标签时名字同样占满剩余宽，标签落到行尾。
+                    modifier = if ((showInfoIcon && onInfoClick != null) || showDeepLinkBadge) Modifier.weight(1f) else Modifier
                 )
+                // 内容深链标识：小字标签「直达」——点按这家直接进到查询的那份
+                // 内容。只在搜索结果行出现（调用方按查询算好再传）；拖动弱化
+                // 时跟内容一起淡；本身不是可点目标，不抢行点按。
+                if (showDeepLinkBadge) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    DeepLinkBadge(modifier = Modifier.graphicsLayer { alpha = contentAlpha })
+                }
                 // v0.68.180：展开态行尾 ⓘ（Dock 标题行同款位置与图标）。
                 // IconButton 自带 48dp 触控框；内层 clickable 消费点按，不触发行点按。
                 if (showInfoIcon && onInfoClick != null) {
@@ -462,6 +475,35 @@ internal fun AppRow(
     }
 
     // v0.41.27：方案 B——内容滑动露出底层按钮；右滑隐藏确认框已删除，点眼睛直接隐藏
+}
+
+/**
+ * 内容深链标识（竖屏 AppRow 与横屏 LandscapeAppRow 共用）：小字标签「直达」。
+ * 样式：Caption（12sp，token 最小字号）＋ Hint 色 ＋ 细线描边圆角、无底色，
+ * 不抢眼；不用 emoji、不用金色（金色只留主操作）；横向内边距 8dp（8dp 网格），
+ * 纵向不另加内边距（字行高 18sp＋描边即约 20dp 高，行内垂直居中）。
+ */
+@Composable
+internal fun DeepLinkBadge(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .border(
+                width = 1.dp,
+                color = AILauncherColors.current.Hint.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(4.dp)
+            )
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "直达",
+            fontSize = AILauncherType.Caption.fontSize,
+            lineHeight = AILauncherType.Caption.lineHeight,
+            color = AILauncherColors.current.Hint,
+            maxLines = 1
+        )
+    }
 }
 
 /** 分组 key：a-z/A-Z→大写；中文→拼音首字母大写（GB2312 区位边界法，无需第三方库）；数字及其他→'#' */

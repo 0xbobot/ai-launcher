@@ -120,6 +120,9 @@ fun AppCenterLandscape(
     searchFieldValue: TextFieldValue,
     onSearchFieldChange: (TextFieldValue) -> Unit,
     searchResults: List<AppInfo>?,
+    // 内容深链标识（Bob 2026-11-05 晚）：竖屏按本句查询算好的支持集合，
+    // 横屏搜索行共用（横屏不另算，判定口径与竖屏同一套）。
+    deepLinkSupportedPkgs: Set<String> = emptySet(),
     onSearchSubmit: () -> Unit,
     // 应用中心升级：索引加载中标记（空结果文案区分"索引加载中"与"真无匹配"）
     indexLoading: Boolean = false,
@@ -523,7 +526,10 @@ fun AppCenterLandscape(
                                     // Bob 2026-11-03：行距压缩——横屏搜索行同步走紧凑行
                                     LandscapeAppRow(
                                         app = app, onLaunch = onLaunch,
-                                        compact = true
+                                        compact = true,
+                                        // 内容深链标识：这句查询下点按会走深链
+                                        // 直达的应用才出「直达」标签。
+                                        showDeepLinkBadge = deepLinkSupportedPkgs.contains(app.packageName)
                                     )
                                 }
                             }
@@ -833,7 +839,11 @@ private fun LandscapeAppRow(
     onLaunch: (AppInfo) -> Unit,
     modifier: Modifier = Modifier,
     // 应用中心升级：键盘弹出时行高 60→56dp（图标 48dp 不动）
-    compact: Boolean = false
+    compact: Boolean = false,
+    // 内容深链标识（Bob 2026-11-05 晚）：搜索结果行里，点按会走深链直达
+    // 内容的应用出「直达」小标签；只打开首页的没有。调用方按当前查询算好
+    // 再传（与竖屏 AppRow 同款标签、同一判定），默认不显示。
+    showDeepLinkBadge: Boolean = false
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -860,6 +870,12 @@ private fun LandscapeAppRow(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
+        // 内容深链标识：小字标签「直达」（与竖屏 AppRow 同款）；本身不是
+        // 可点目标，不抢行点按。
+        if (showDeepLinkBadge) {
+            Spacer(modifier = Modifier.width(8.dp))
+            DeepLinkBadge()
+        }
     }
 }
 
