@@ -136,6 +136,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.data.ActionUsageTracker
 import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
@@ -642,17 +643,27 @@ fun AppCenterContent(
         // 定向 geo→打开应用）；建不出（没目的地/没模板/缺参）时返回 false，
         // 退回下面直接打开，绝不打开残缺链接。横屏经 onLaunch 共用同一入口。
         val query = queryField.text.trim()
-        if (query.isNotEmpty() &&
+        val opened = if (query.isNotEmpty() &&
             CapabilityRegistry.launchTappedApp(context, query, app.packageName)
-        ) return
-        try {
-            val intent = context.packageManager
-                .getLaunchIntentForPackage(app.packageName)
-                ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-            if (intent != null) context.startActivity(intent)
-        } catch (_: Exception) {
-            IslandToasts.show("无法打开「${app.label}」")
+        ) {
+            true
+        } else {
+            try {
+                val intent = context.packageManager
+                    .getLaunchIntentForPackage(app.packageName)
+                    ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                if (intent != null) {
+                    context.startActivity(intent)
+                    true
+                } else false
+            } catch (_: Exception) {
+                IslandToasts.show("无法打开「${app.label}」")
+                false
+            }
         }
+        // 智能滚动关键字：能力动作成功打开应用才记（点按深链/定向 geo/
+        // 直接打开任一成功都算；失败、或点的不是该能力提供方时不记）。
+        ActionUsageTracker.recordTapAction(context, query, app.packageName, opened)
     }
 
     // 右滑隐藏（手势签名：右滑=少），HiddenApps.version +1 后列表自动重算

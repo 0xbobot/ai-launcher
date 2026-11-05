@@ -182,6 +182,27 @@ object CapabilityResolution {
     }
 
     /**
+     * 点按动作解析（纯函数，可单测）：整句含带参能力的 label（如“导航”）且
+     * 能抠出目的地、目的地不是能力名本身、且被点应用是该能力的提供方时，
+     * 返回（能力，目的地）；否则 null。供 [tapSteps] 与动作记录（智能滚动
+     * 关键字：只记真实能力动作）共用同一匹配口径，不各写一套。
+     */
+    fun tapAction(
+        capabilities: List<Capability>,
+        query: String,
+        packageName: String
+    ): Pair<Capability, String>? {
+        // 只考虑带参能力（能带目的地的才值得解析；无参能力点按永远直接打开）
+        val cap = capabilities
+            .filter { it.params.isNotEmpty() && query.contains(it.label) }
+            .maxByOrNull { it.label.length } ?: return null
+        val dest = parseDestination(query) ?: return null
+        if (dest == cap.label) return null
+        if (effectiveProviders(cap).none { packageName in it.packageNames }) return null
+        return cap to dest
+    }
+
+    /**
      * 432：应用中心点搜索结果的“带目的地”解析（纯函数，可单测）。
      * 整句含带参能力的 label（如“导航”）且能抠出目的地、且被点应用是该
      * 能力的提供方时，返回只给这家用的候选链（深链→定向 geo→打开应用）；
@@ -195,12 +216,7 @@ object CapabilityResolution {
         query: String,
         packageName: String
     ): List<LaunchStep>? {
-        // 只考虑带参能力（能带目的地的才值得解析；无参能力点按永远直接打开）
-        val cap = capabilities
-            .filter { it.params.isNotEmpty() && query.contains(it.label) }
-            .maxByOrNull { it.label.length } ?: return null
-        val dest = parseDestination(query) ?: return null
-        if (dest == cap.label) return null
+        val (cap, dest) = tapAction(capabilities, query, packageName) ?: return null
         val provider = effectiveProviders(cap)
             .firstOrNull { packageName in it.packageNames } ?: return null
         val params =
