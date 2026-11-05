@@ -399,7 +399,13 @@ object CapabilityRegistry {
         if (geoStep != null && steps.none { it !is LaunchStep.Geo } && !hasGeoHandler(context, geoStep.uri)) {
             return LaunchOutcome.NoProvider
         }
-        return executeSteps(context, steps)
+        val outcome = executeSteps(context, steps)
+        // 智能滚动关键字：能力动作成功打开应用才记（深链发出/应用打开成功
+        // 才算；目的地取 "to" 参数，无则只记能力本身）。
+        ActionUsageTracker.recordIfOpened(
+            context, outcome is LaunchOutcome.Opened, cap.id, params["to"]
+        )
+        return outcome
     }
 
     /** 按候选链逐个尝试，第一个成功即停；全部失败返回 Failed */

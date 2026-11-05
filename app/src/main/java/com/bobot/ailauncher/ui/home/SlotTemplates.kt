@@ -229,6 +229,46 @@ object SlotTemplates {
     ): List<SlotTemplate> =
         templates.filter { it.capabilityId == null || it.capabilityId in executableIds }
 
+    /**
+     * 智能滚动关键字·个性动作显示文案（纯函数）：把一条已记动作（能力＋目的地）
+     * 还原成一句可填入输入框的自然文案，与静态池同一口径。
+     * - 模板有 "to" 槽位（导航/打车）→ 槽位填目的地（"导航去机场"）。
+     * - 固定句含默认地点（"机场"，如地铁句）→ 换成记录的目的地（"查去公司的地铁"）。
+     * - 无目的地 → 模板原句；无模板 → 能力 label（有目的地则 "label去目的地"）。
+     */
+    fun actionPhrase(
+        template: SlotTemplate?,
+        capabilityLabel: String,
+        destination: String?
+    ): String {
+        if (template == null) {
+            return if (destination.isNullOrBlank()) capabilityLabel
+            else capabilityLabel + "去" + destination
+        }
+        if (!destination.isNullOrBlank() && template.slots().any { it.param == "to" }) {
+            return template.copy(defaults = template.defaults + ("to" to destination))
+                .exampleFillText()
+        }
+        val sentence = template.chipText()
+        if (destination.isNullOrBlank()) return sentence
+        if (DEFAULT_DESTINATION in sentence) return sentence.replaceFirst(DEFAULT_DESTINATION, destination)
+        return sentence
+    }
+
+    /**
+     * 智能滚动关键字·清单混合（纯函数）：个性动作（当前时间最相关，最多 3 条）
+     * 在前、静态能力词在后；个性文案与静态句重复时静态那条去重（同一句不轮两遍）。
+     * 没个性动作时原样返回静态池（行为不变）。
+     */
+    fun mergeKeywordPools(
+        personalized: List<SlotTemplate>,
+        static: List<SlotTemplate>
+    ): List<SlotTemplate> {
+        if (personalized.isEmpty()) return static
+        val seen = personalized.map { it.exampleFillText() }.toSet()
+        return personalized + static.filter { it.exampleFillText() !in seen }
+    }
+
     /** HH:mm（与封面条/提醒文案同一格式口径）。 */
     fun fmtHHmm(ms: Long): String =
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))

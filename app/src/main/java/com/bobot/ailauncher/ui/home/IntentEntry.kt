@@ -111,6 +111,7 @@ import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.core.action.ActionRequest
 import com.bobot.ailauncher.core.intent.IntentCoordinator
 import com.bobot.ailauncher.core.intent.IntentUiState
+import com.bobot.ailauncher.data.ActionUsageTracker
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.AppUsageTracker
@@ -338,7 +339,7 @@ fun IntentCapsuleField(
     // nextEvent 传 null（会议提醒是上下文派生，不进轮换）；按
     // filterExecutable 只留本机能做的能力，不许诺做不到的；顺序把 Bob 点的
     // 三条（导航／刷视频／聊天）放最前面，其余按池子原顺序。
-    val keywordPool = remember(installedEpoch) {
+    val staticKeywordPool = remember(installedEpoch) {
         CapabilityRegistry.load(context)
         val executableIds = CapabilityRegistry.executableCapabilities(context).map { it.id }.toSet()
         val pool = SlotTemplates.buildExpandedExamples(
@@ -351,6 +352,29 @@ fun IntentCapsuleField(
         val headIds = listOf("nav", "shipin", "liaotian")
         val head = headIds.mapNotNull { id -> filtered.firstOrNull { it.id == id } }
         head + filtered.filter { it.id !in headIds }
+    }
+    // 智能滚动关键字：用户当前时间最相关的个性动作（最多 3 条）在前、静态
+    // 能力词在后；没历史／当前时间没匹配的动作时就是纯静态池（行为不变）。
+    // 个性动作随记录与时间变——remember key 跟动作版本与当前星期×小时走，
+    // 记一条／换一小时就重算；平时不重算，轮换节拍不受影响。个性动作只留
+    // 本机仍能做的能力（与静态池同一过滤口径）；点按方式与 B 方案一致
+    // （填入＋触发，箭头逻辑一字不动）。
+    val actionVersion by ActionUsageTracker.version.collectAsState()
+    val (currentDow, currentHour) = ActionUsageTracker.currentDowHour()
+    val keywordPool = remember(installedEpoch, currentDow, currentHour, actionVersion) {
+        val executableIds = CapabilityRegistry.executableCapabilities(context).map { it.id }.toSet()
+        val personalized = ActionUsageTracker.topActions(context)
+            .filter { it.capabilityId in executableIds }
+            .map { action ->
+                val template = staticKeywordPool.firstOrNull { it.capabilityId == action.capabilityId }
+                val label = CapabilityRegistry.find(action.capabilityId)?.label ?: action.capabilityId
+                SlotTemplates.fixedTemplate(
+                    id = "action_${action.capabilityId}_${action.destination.orEmpty()}",
+                    capabilityId = action.capabilityId,
+                    sentence = SlotTemplates.actionPhrase(template, label, action.destination)
+                )
+            }
+        SlotTemplates.mergeKeywordPools(personalized, staticKeywordPool)
     }
     var isCapsuleFocused by remember { mutableStateOf(false) }
     var keywordIndex by remember { mutableIntStateOf(0) }
