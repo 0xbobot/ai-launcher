@@ -204,6 +204,60 @@ class CapabilityResolutionTest {
 
     private val carryingCaps = listOf(daohang, ditie, dache)
 
+    // ---------- 内容深链：音乐/视频（query 参数 + 名称搜索模板） ----------
+
+    private val yinyue = Capability(
+        id = "yinyue",
+        label = "音乐",
+        iconName = "",
+        packageNames = listOf(
+            "com.tencent.qqmusic", "com.netease.cloudmusic", "com.kugou.android",
+            "com.spotify.music", "com.apple.android.music",
+            "com.google.android.apps.youtube.music"
+        ),
+        deeplinkTemplate = null,
+        providers = listOf(
+            CapabilityProvider("QQ音乐", listOf("com.tencent.qqmusic"), null, null),
+            CapabilityProvider("网易云音乐", listOf("com.netease.cloudmusic"), null, null),
+            CapabilityProvider("酷狗音乐", listOf("com.kugou.android"), null, null),
+            CapabilityProvider("Spotify", listOf("com.spotify.music"), null, "spotify:search:{query}"),
+            CapabilityProvider("Apple Music", listOf("com.apple.android.music"), null, null),
+            CapabilityProvider(
+                "YouTube Music", listOf("com.google.android.apps.youtube.music"),
+                null, "https://music.youtube.com/search?q={query}"
+            )
+        ),
+        geoFallback = GeoFallback.NONE,
+        params = listOf(CapabilityParam("query", "内容", required = false))
+    )
+
+    private val shipin = Capability(
+        id = "shipin",
+        label = "视频",
+        iconName = "",
+        packageNames = listOf(
+            "com.ss.android.ugc.aweme", "com.smile.gifmaker",
+            "tv.danmaku.bili", "com.google.android.youtube"
+        ),
+        deeplinkTemplate = null,
+        providers = listOf(
+            CapabilityProvider("抖音", listOf("com.ss.android.ugc.aweme"), null, null),
+            CapabilityProvider("快手", listOf("com.smile.gifmaker"), null, null),
+            CapabilityProvider(
+                "哔哩哔哩", listOf("tv.danmaku.bili"),
+                null, "https://search.bilibili.com/all?keyword={query}"
+            ),
+            CapabilityProvider(
+                "YouTube", listOf("com.google.android.youtube"),
+                null, "https://www.youtube.com/results?search_query={query}"
+            )
+        ),
+        geoFallback = GeoFallback.NONE,
+        params = listOf(CapabilityParam("query", "内容", required = false))
+    )
+
+    private val contentCaps = listOf(yinyue, shipin)
+
     @Test
     fun `parseDestination takes text after qu or dao`() {
         assertEquals("机场", CapabilityResolution.parseDestination("导航去机场"))
@@ -455,5 +509,179 @@ class CapabilityResolutionTest {
             ditie, setOf("com.autonavi.minimap"), emptyMap()
         )
         assertEquals(listOf(LaunchStep.OpenApp("高德地图", "com.autonavi.minimap")), steps)
+    }
+
+    // ---------- 内容深链：音乐“周杰伦” / 视频“狂飙” ----------
+
+    @Test
+    fun `parseContent extracts singer from listen sentence`() {
+        assertEquals("周杰伦", CapabilityResolution.parseContent("我想听周杰伦的歌"))
+        assertEquals("周杰伦", CapabilityResolution.parseContent("我想听周杰伦"))
+        assertEquals("周杰伦", CapabilityResolution.parseContent("播放周杰伦"))
+        assertEquals("告白气球", CapabilityResolution.parseContent("我想听《告白气球》"))
+    }
+
+    @Test
+    fun `parseContent extracts show title from watch sentence`() {
+        assertEquals("狂飙", CapabilityResolution.parseContent("我想看《狂飙》"))
+        assertEquals("狂飙", CapabilityResolution.parseContent("我想看狂飙"))
+        assertEquals("狂飙", CapabilityResolution.parseContent("追狂飙"))
+    }
+
+    @Test
+    fun `parseContent returns null without real content`() {
+        assertNull(CapabilityResolution.parseContent("我想听歌"))
+        assertNull(CapabilityResolution.parseContent("我想看视频"))
+        assertNull(CapabilityResolution.parseContent("导航去机场"))
+        assertNull(CapabilityResolution.parseContent("周杰伦"))
+    }
+
+    @Test
+    fun `tap music on spotify carries singer in official search deeplink`() {
+        val steps = CapabilityResolution.tapSteps(
+            contentCaps, "我想听周杰伦的歌", "com.spotify.music"
+        )!!
+        assertEquals(2, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "Spotify", "com.spotify.music",
+                "spotify:search:%E5%91%A8%E6%9D%B0%E4%BC%A6"
+            ),
+            steps[0]
+        )
+        assertEquals(LaunchStep.OpenApp("Spotify", "com.spotify.music"), steps[1])
+    }
+
+    @Test
+    fun `tap music on youtube music carries singer in search app link`() {
+        val steps = CapabilityResolution.tapSteps(
+            contentCaps, "我想听周杰伦的歌", "com.google.android.apps.youtube.music"
+        )!!
+        assertEquals(2, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "YouTube Music", "com.google.android.apps.youtube.music",
+                "https://music.youtube.com/search?q=%E5%91%A8%E6%9D%B0%E4%BC%A6"
+            ),
+            steps[0]
+        )
+        assertEquals(
+            LaunchStep.OpenApp("YouTube Music", "com.google.android.apps.youtube.music"),
+            steps[1]
+        )
+    }
+
+    @Test
+    fun `tap music on qq music without template returns null and opens app`() {
+        // QQ音乐无已核实官方深链：没东西可带，tapSteps 返回 null，调用方直接打开
+        assertNull(
+            CapabilityResolution.tapSteps(
+                contentCaps, "我想听周杰伦的歌", "com.tencent.qqmusic"
+            )
+        )
+        assertNull(
+            CapabilityResolution.tapSteps(
+                contentCaps, "我想听周杰伦的歌", "com.netease.cloudmusic"
+            )
+        )
+    }
+
+    @Test
+    fun `tap video on bilibili carries show title in search app link`() {
+        val steps = CapabilityResolution.tapSteps(
+            contentCaps, "我想看《狂飙》", "tv.danmaku.bili"
+        )!!
+        assertEquals(2, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "哔哩哔哩", "tv.danmaku.bili",
+                "https://search.bilibili.com/all?keyword=%E7%8B%82%E9%A3%99"
+            ),
+            steps[0]
+        )
+        assertEquals(LaunchStep.OpenApp("哔哩哔哩", "tv.danmaku.bili"), steps[1])
+    }
+
+    @Test
+    fun `tap video on youtube carries show title in search app link`() {
+        val steps = CapabilityResolution.tapSteps(
+            contentCaps, "我想看《狂飙》", "com.google.android.youtube"
+        )!!
+        assertEquals(2, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "YouTube", "com.google.android.youtube",
+                "https://www.youtube.com/results?search_query=%E7%8B%82%E9%A3%99"
+            ),
+            steps[0]
+        )
+        assertEquals(LaunchStep.OpenApp("YouTube", "com.google.android.youtube"), steps[1])
+    }
+
+    @Test
+    fun `tap video on douyin without template returns null and opens app`() {
+        // 抖音/快手无已核实官方搜索深链：没东西可带，调用方直接打开
+        assertNull(
+            CapabilityResolution.tapSteps(
+                contentCaps, "我想看《狂飙》", "com.ss.android.ugc.aweme"
+            )
+        )
+        assertNull(
+            CapabilityResolution.tapSteps(
+                contentCaps, "我想看《狂飙》", "com.smile.gifmaker"
+            )
+        )
+    }
+
+    @Test
+    fun `tap content returns null for wrong provider or no content`() {
+        // 点视频应用听音乐：不是该能力的提供方
+        assertNull(
+            CapabilityResolution.tapSteps(
+                contentCaps, "我想听周杰伦的歌", "tv.danmaku.bili"
+            )
+        )
+        // 点音乐应用看视频：不是该能力的提供方
+        assertNull(
+            CapabilityResolution.tapSteps(
+                contentCaps, "我想看《狂飙》", "com.spotify.music"
+            )
+        )
+        // 只有“想听歌”没具体内容
+        assertNull(
+            CapabilityResolution.tapSteps(
+                contentCaps, "我想听歌", "com.spotify.music"
+            )
+        )
+        // 只有“想看视频”没具体内容
+        assertNull(
+            CapabilityResolution.tapSteps(
+                contentCaps, "我想看视频", "tv.danmaku.bili"
+            )
+        )
+    }
+
+    @Test
+    fun `music query steps via assistant path carry search deeplink`() {
+        // 问助手路径（steps）同样受益：query 参数 → 名称搜索深链在前
+        val steps = CapabilityResolution.steps(
+            yinyue, setOf("com.spotify.music"), mapOf("query" to "周杰伦")
+        )
+        assertEquals(2, steps.size)
+        assertEquals(
+            LaunchStep.Deeplink(
+                "Spotify", "com.spotify.music", "spotify:search:%E5%91%A8%E6%9D%B0%E4%BC%A6"
+            ),
+            steps[0]
+        )
+        assertEquals(LaunchStep.OpenApp("Spotify", "com.spotify.music"), steps[1])
+    }
+
+    @Test
+    fun `music with no query opens app only`() {
+        val steps = CapabilityResolution.steps(
+            yinyue, setOf("com.spotify.music"), emptyMap()
+        )
+        assertEquals(listOf(LaunchStep.OpenApp("Spotify", "com.spotify.music")), steps)
     }
 }

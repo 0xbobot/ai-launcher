@@ -152,6 +152,46 @@ object CapabilityResolution {
     }
 
     /**
+     * 内容型能力（音乐/视频）的触发词：整句含这些词之一才认作该能力的内容动作。
+     * 与 label 不同——“我想听周杰伦的歌”里没有“音乐”二字，但有“听/歌”。
+     * 只做识别用，真正的内容由 [parseContent] 抠；被点应用还必须是该能力的
+     * 提供方（tapAction 里再校验），误触发面很小。
+     */
+    private val CONTENT_TRIGGERS = mapOf(
+        "yinyue" to listOf("听", "歌", "播放", "音乐"),
+        "shipin" to listOf("看", "剧", "电影", "追", "视频")
+    )
+
+    /** 不是真内容：光说“想听歌/想看视频”没有具体内容，不许带进深链 */
+    private val JUNK_CONTENTS = setOf("歌", "音乐", "视频", "剧", "电影", "曲", "片")
+
+    /**
+     * 从整句抠内容（歌手/歌名、剧名等）：书名号优先，其次“听 X 的歌 / 播放 X /
+     * 想听 X / 想看 X / 看 X / 追 X”。返回首个非空且非 junk 的内容，否则 null。
+     */
+    private val CONTENT_PATTERNS = listOf(
+        Regex("《([^》]+)》"),
+        Regex("听(.+?)的歌"),
+        Regex("播放(.+?)(?:的歌)?$"),
+        Regex("想听(.+?)(?:的歌)?$"),
+        Regex("听(.+?)(?:的歌)?$"),
+        Regex("想看(.+?)$"),
+        Regex("看(.+?)$"),
+        Regex("追(.+?)(?:剧)?$")
+    )
+
+    fun parseContent(query: String): String? {
+        for (pattern in CONTENT_PATTERNS) {
+            val raw = pattern.find(query)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            val content = raw.trimEnd(
+                '，', ',', '、', '；', ';', ':', '：', '！', '!', '？', '?', '。', ' '
+            )
+            if (content.isNotEmpty() && content !in JUNK_CONTENTS) return content
+        }
+        return null
+    }
+
+    /**
      * 只给一家提供方的候选链（432 点按路径）：深链（坐标模板先试、名称模板
      * 再试，模板填得出时）→ 定向 geo（能力声明了 geoFallback 且参数齐备时，
      * 限定到这家包，不跨应用跳）→ 打开这家应用本体。模板缺参填不出时该家
@@ -182,34 +222,53 @@ object CapabilityResolution {
     }
 
     /**
-     * 点按动作解析（纯函数，可单测）：整句含带参能力的 label（如“导航”）且
-     * 能抠出目的地、目的地不是能力名本身、且被点应用是该能力的提供方时，
-     * 返回（能力，目的地）；否则 null。供 [tapSteps] 与动作记录（智能滚动
-     * 关键字：只记真实能力动作）共用同一匹配口径，不各写一套。
+     * 点按动作解析（纯函数，可单测）：两条口径，目的地优先、内容其次。
+     * 1. 目的地口径（432）：整句含带参能力的 label（如“导航”）且能抠出目的地、
+     *    目的地不是能力名本身、且被点应用是该能力的提供方时，返回（能力，目的地）。
+     * 2. 内容口径（音乐/视频）：带 query 参数的能力，整句含该能力的触发词
+     *    （如“听/歌”→音乐、“看/剧”→视频）且能抠出具体内容、且被点应用是
+     *    该能力的提供方时，返回（能力，内容）。
+     * 任一口径都不满足返回 null。供 [tapSteps] 与动作记录（智能滚动关键字：
+     * 只记真实能力动作）共用同一匹配口径，不各写一套。
      */
     fun tapAction(
         capabilities: List<Capability>,
         query: String,
         packageName: String
     ): Pair<Capability, String>? {
-        // 只考虑带参能力（能带目的地的才值得解析；无参能力点按永远直接打开）
-        val cap = capabilities
+        // 1. 目的地口径（432 原逻辑不动，最长 label 优先；失败则落到内容口径，
+        //    不直接 return null——“我想听歌”这种 label 在句里但无目的地时，
+        //    内容口径同样抠不出内容，最终仍是 null，行为不变）
+        val destCap = capabilities
             .filter { it.params.isNotEmpty() && query.contains(it.label) }
+            .maxByOrNull { it.label.length }
+        if (destCap != null) {
+            val dest = parseDestination(query)
+            if (dest != null && dest != destCap.label &&
+                effectiveProviders(destCap).any { packageName in it.packageNames }
+            ) return destCap to dest
+        }
+        // 2. 内容口径：能抠出具体内容、整句含该能力的触发词、被点应用是提供方
+        val content = parseContent(query) ?: return null
+        val contentCap = capabilities
+            .filter { it.params.any { p -> p.name == "query" } }
+            .filter { cap -> CONTENT_TRIGGERS[cap.id].orEmpty().any { query.contains(it) } }
+            .filter { effectiveProviders(it).any { packageName in it.packageNames } }
             .maxByOrNull { it.label.length } ?: return null
-        val dest = parseDestination(query) ?: return null
-        if (dest == cap.label) return null
-        if (effectiveProviders(cap).none { packageName in it.packageNames }) return null
-        return cap to dest
+        if (content == contentCap.label) return null
+        return contentCap to content
     }
 
     /**
-     * 432：应用中心点搜索结果的“带目的地”解析（纯函数，可单测）。
-     * 整句含带参能力的 label（如“导航”）且能抠出目的地、且被点应用是该
-     * 能力的提供方时，返回只给这家用的候选链（深链→定向 geo→打开应用）；
-     * 任一条件不满足（没关键字、没目的地、被点应用不是该能力提供方、
-     * 深链与 geo 都建不出）返回 null，调用方退回直接打开。
-     * 名字型目的地只填声明了 "to" 的参数（ditie 也声明了 "to"：有名字时
-     * 走名称深链/名称 geo，没名字有坐标时走坐标深链/坐标 geo）。
+     * 432：应用中心点搜索结果的“带目的地/带内容”解析（纯函数，可单测）。
+     * 整句含带参能力的 label 且能抠出目的地、或含内容能力的触发词且能抠出
+     * 具体内容、且被点应用是该能力的提供方时，返回只给这家用的候选链
+     * （深链→定向 geo→打开应用）；任一条件不满足（没关键字、没目的地/
+     * 内容、被点应用不是该能力提供方、深链与 geo 都建不出）返回 null，
+     * 调用方退回直接打开。
+     * 目的地填声明了 "to" 的参数、内容填声明了 "query" 的参数（ditie 也
+     * 声明了 "to"：有名字时走名称深链/名称 geo，没名字有坐标时走坐标深链/
+     * 坐标 geo；音乐/视频声明 "query"，内容进搜索深链）。
      */
     fun tapSteps(
         capabilities: List<Capability>,
@@ -219,8 +278,14 @@ object CapabilityResolution {
         val (cap, dest) = tapAction(capabilities, query, packageName) ?: return null
         val provider = effectiveProviders(cap)
             .firstOrNull { packageName in it.packageNames } ?: return null
-        val params =
-            if (cap.params.any { it.name == "to" }) mapOf("to" to dest) else emptyMap()
+        // 目的地填 "to"、内容填 "query"：按能力声明的参数名填，不另造机制。
+        // 只填一个——点按动作只带一份内容/目的地。
+        val paramName = when {
+            cap.params.any { it.name == "to" } -> "to"
+            cap.params.any { it.name == "query" } -> "query"
+            else -> null
+        }
+        val params = paramName?.let { mapOf(it to dest) } ?: emptyMap()
         val steps = stepsForProvider(cap, provider, packageName, params)
         // 深链与 geo 都建不出 = 没东西可带（地铁只有名无坐标、打车没深链没
         // geo），退回直接打开；只剩 OpenApp 的链与直接打开等价，不必绕注册表。
