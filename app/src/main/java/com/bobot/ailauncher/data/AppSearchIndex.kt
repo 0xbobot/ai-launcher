@@ -60,8 +60,18 @@ object AppSearchIndex {
         // YouTube Music；「听歌」再补 kuwo 与「音乐」对齐。
         "音乐" to listOf("cloudmusic", "qqmusic", "kugou", "kuwo", "music"),
         "听歌" to listOf("cloudmusic", "qqmusic", "kugou", "kuwo", "music"),
+        // 搜索同义词批（Bob 2026-11-05：搜“我想听周杰伦的歌”得 0 款，
+        // 改成“音乐”才出 5 款——“歌”没进映射；与内容抽取 parseContent
+        // “听X的歌”口径对齐）。“歌曲”由“歌”子串覆盖，单独立项便于查。
+        "歌" to listOf("cloudmusic", "qqmusic", "kugou", "kuwo", "music"),
+        "歌曲" to listOf("cloudmusic", "qqmusic", "kugou", "kuwo", "music"),
         "视频" to listOf("qiyi.video", "qqlive", "youku", "mgtv.tv", "bili", "youtube"),
         "看剧" to listOf("qiyi.video", "qqlive", "youku", "mgtv.tv"),
+        // 搜索同义词批（Bob 2026-11-05）：同类缺口——“追剧/看电影/订机票”
+        // 等常见说法里的能力词不在映射里，整句搜不到。
+        // “剧”走“看剧”同款（剧集应用）；“电影”走“视频”同款。
+        "剧" to listOf("qiyi.video", "qqlive", "youku", "mgtv.tv"),
+        "电影" to listOf("qiyi.video", "qqlive", "youku", "mgtv.tv", "bili", "youtube"),
         "拍照" to listOf("mtxx", "lemon", "camera"),
         "修图" to listOf("mtxx", "lemon"),
         "浏览器" to listOf("quark", "ucmobile", "chrome", "browser"),
@@ -87,11 +97,17 @@ object AppSearchIndex {
         "旅游" to listOf("ctrip", "qunar", "taobao.trip"),
         "订票" to listOf("ctrip", "mobileticket", "qunar"),
         "火车票" to listOf("mobileticket", "ctrip"),
+        // 搜索同义词批：常见说法“高铁”不含“火车票”，整句搜不到。
+        "高铁" to listOf("mobileticket", "ctrip"),
         // 429：能力池关键字——航班走航旅应用（携程/去哪儿/飞猪/航旅纵横/飞常准，
         // 另含 flight 通用片段）。
         "航班" to listOf("ctrip", "qunar", "taobao.trip", "flight", "umetrip", "variflight"),
+        // 搜索同义词批：常见说法“订机票”不含“航班/订票”，整句搜不到。
+        "机票" to listOf("ctrip", "qunar", "taobao.trip", "flight", "umetrip", "variflight"),
         "酒店" to listOf("ctrip", "qunar", "meituan"),
         "运动" to listOf("keep", "codoon", "gps"),
+        // 搜索同义词批：常见说法“健身”不含“运动/跑步”，整句搜不到。
+        "健身" to listOf("keep", "codoon", "gps"),
         "跑步" to listOf("keep", "codoon"),
         "输入法" to listOf("inputmethod", "sogou", "iflytek"),
         "天气" to listOf("weather"),

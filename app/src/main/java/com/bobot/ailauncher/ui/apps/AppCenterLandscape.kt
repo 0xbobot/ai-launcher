@@ -68,6 +68,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -509,13 +510,19 @@ fun AppCenterLandscape(
                             item(key = "search-empty") {
                                 Text(
                                     // 应用中心升级：索引缺失与真无匹配区分文案
+                                    // 搜索同义词批（Bob 2026-11-05）：空态居中、一行——
+                                    // 全宽居中、maxLines=1+省略号；文案略缩（同竖屏）。
+                                    // 列本身已有 16dp 横向边距，Text 不再另加左右边距。
                                     text = if (indexLoading) "应用列表还没准备好，请稍后再试"
-                                        else "没有找到「${searchFieldValue.text.trim()}」相关的应用",
+                                        else "没有找到「${searchFieldValue.text.trim()}」相关应用",
                                     fontSize = AILauncherType.Callout.fontSize,
                                     color = AILauncherColors.current.Hint,
-                                    modifier = Modifier.padding(
-                                        top = 32.dp, start = 16.dp, end = 16.dp
-                                    )
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 32.dp)
                                 )
                             }
                         } else {
