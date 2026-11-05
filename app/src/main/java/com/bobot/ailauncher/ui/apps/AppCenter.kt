@@ -1093,13 +1093,20 @@ fun AppCenterContent(
                         item(key = "search-empty") {
                             Text(
                                 // 应用中心升级：索引缺失与真无匹配区分文案
+                                // 搜索同义词批（Bob 2026-11-05）：空态居中、一行——
+                                // 去掉跟随应用行的 72/64dp 大缩进，改全宽居中、
+                                // maxLines=1+省略号；文案略缩（“相关的”→“相关”）
+                                // 以求一行放得下。字号不变（Callout）。
                                 text = if (catalog == null) "应用列表还没准备好，请稍后再试"
-                                    else "没有找到「${filterQuery.trim()}」相关的应用",
+                                    else "没有找到「${filterQuery.trim()}」相关应用",
                                 fontSize = AILauncherType.Callout.fontSize,
                                 color = AILauncherColors.current.Hint,
-                                modifier = Modifier.padding(
-                                    top = 32.dp, start = 72.dp, end = 64.dp
-                                )
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 32.dp, start = 16.dp, end = 16.dp)
                             )
                         }
                     } else {

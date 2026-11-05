@@ -187,6 +187,53 @@ class AppSearchIndexTest {
         )
     }
 
+    // ---------- 搜索同义词批（Bob 2026-11-05） ----------
+
+    @Test
+    fun `keyword song finds music apps`() {
+        // “我想听周杰伦的歌”含“歌”→音乐片段，与“音乐”同结果；
+        // 之前“歌”不在映射里，整句搜到 0 款（Bob 真机实拍）。
+        val hit = AppSearchIndex.keywordPackagesFor("我想听周杰伦的歌", emptyMap())
+        assertTrue(hit.contains("cloudmusic"))
+        assertTrue(hit.contains("qqmusic"))
+        assertTrue(hit.contains("music"))
+        val music = AppSearchIndex.keywordPackagesFor("我想听周杰伦的音乐", emptyMap())
+        assertEquals(music, hit)
+        // “歌曲”同口径；单字“歌”也命中
+        assertTrue(AppSearchIndex.keywordPackagesFor("我想听周杰伦的歌曲", emptyMap()).contains("music"))
+        assertTrue(AppSearchIndex.keywordPackagesFor("歌", emptyMap()).contains("music"))
+        assertEquals(
+            80,
+            AppSearchIndex.scoreFor("我想听周杰伦的歌", "Spotify", "com.spotify.music", "spotify", "s", setOf("music"))
+        )
+    }
+
+    @Test
+    fun `keyword drama and movie find video apps`() {
+        // “追剧”含“剧”→剧集应用（与“看剧”同款）；“我想看电影”含“电影”→视频应用。
+        val drama = AppSearchIndex.keywordPackagesFor("追剧", emptyMap())
+        assertTrue(drama.contains("qiyi.video"))
+        assertTrue(drama.contains("youku"))
+        val movie = AppSearchIndex.keywordPackagesFor("我想看电影", emptyMap())
+        assertTrue(movie.contains("qiyi.video"))
+        assertTrue(movie.contains("bili"))
+        assertTrue(movie.contains("youtube"))
+    }
+
+    @Test
+    fun `keyword ticket synonyms find travel apps`() {
+        // “订机票”含“机票”→航旅应用；“高铁”→火车票应用；“健身”→运动应用。
+        val flight = AppSearchIndex.keywordPackagesFor("订机票", emptyMap())
+        assertTrue(flight.contains("ctrip"))
+        assertTrue(flight.contains("flight"))
+        val rail = AppSearchIndex.keywordPackagesFor("高铁", emptyMap())
+        assertTrue(rail.contains("mobileticket"))
+        assertTrue(rail.contains("ctrip"))
+        val fitness = AppSearchIndex.keywordPackagesFor("健身", emptyMap())
+        assertTrue(fitness.contains("keep"))
+        assertTrue(fitness.contains("codoon"))
+    }
+
     // ---------- scoreFor 六档 ----------
 
     @Test
