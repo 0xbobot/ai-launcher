@@ -314,4 +314,94 @@ class AppSearchIndexTest {
         val out = AppSearchIndex.rank(listOf(a, miss, b), "高德", emptySet()) { 0.0 }
         assertEquals(listOf("pkg.a", "pkg.b"), out.map { it.packageName })
     }
+
+    // ---------- 反馈闭环（Bob 2026-11-06：识别不到时，重试/选应用） ----------
+
+    @Test
+    fun `looksLikeIntent catches intent sentences`() {
+        assertTrue(AppSearchIndex.looksLikeIntent("我想看《狂飙》"))
+        assertTrue(AppSearchIndex.looksLikeIntent("打开微信"))
+        assertTrue(AppSearchIndex.looksLikeIntent("帮我订一张去北京的机票"))
+        assertTrue(AppSearchIndex.looksLikeIntent("帮我查一下天气"))
+    }
+
+    @Test
+    fun `looksLikeIntent rejects plain app names and gibberish`() {
+        assertFalse(AppSearchIndex.looksLikeIntent("不存在的应用"))
+        assertFalse(AppSearchIndex.looksLikeIntent("asdfgh"))
+        assertFalse(AppSearchIndex.looksLikeIntent("微信"))
+        assertFalse(AppSearchIndex.looksLikeIntent(""))
+        assertFalse(AppSearchIndex.looksLikeIntent("   "))
+    }
+
+    @Test
+    fun `hasKeywordMatch distinguishes covered and uncovered intents`() {
+        // “机票”是关键词（439）→命中；“我想看《狂飙》”无关键词→不命中。
+        assertTrue(AppSearchIndex.hasKeywordMatch("帮我订一张去北京的机票", emptyMap()))
+        assertFalse(AppSearchIndex.hasKeywordMatch("我想看《狂飙》", emptyMap()))
+        assertFalse(AppSearchIndex.hasKeywordMatch("", emptyMap()))
+    }
+
+    @Test
+    fun `shouldShowRetryPrompt only for uncovered intents`() {
+        assertTrue(AppSearchIndex.shouldShowRetryPrompt("我想看《狂飙》", false))
+        assertFalse(AppSearchIndex.shouldShowRetryPrompt("我想看《狂飙》", true))
+        assertFalse(AppSearchIndex.shouldShowRetryPrompt("帮我订一张去北京的机票", true))
+        assertFalse(AppSearchIndex.shouldShowRetryPrompt("不存在的应用", false))
+        assertFalse(AppSearchIndex.shouldShowRetryPrompt("asdfgh", false))
+    }
+
+    @Test
+    fun `rankChooserApps returns everything with relevance first`() {
+        val wechat = entry("com.tencent.mm", "微信", "weixin", "wx")
+        val alipay = entry("com.eg.android.AlipayGphone", "支付宝", "zhifubao", "zfb")
+        val clock = entry("com.android.deskclock", "时钟", "shizhong", "sz")
+        // “微信”名称命中（100）排第一；其余 0 分也不过滤，按频次排。
+        val usage = mapOf("com.eg.android.AlipayGphone" to 5.0, "com.android.deskclock" to 1.0)
+        val out = AppSearchIndex.rankChooserApps("微信", emptySet(), listOf(clock, alipay, wechat)) { usage[it] ?: 0.0 }
+        assertEquals(
+            listOf("com.tencent.mm", "com.eg.android.AlipayGphone", "com.android.deskclock"),
+            out.map { it.packageName }
+        )
+    }
+
+    @Test
+    fun `rankChooserApps blank query falls back to usage order`() {
+        val a = entry("pkg.a", "甲", "jia", "j")
+        val b = entry("pkg.b", "乙", "yi", "y")
+        val usage = mapOf("pkg.a" to 1.0, "pkg.b" to 9.0)
+        val out = AppSearchIndex.rankChooserApps("", emptySet(), listOf(a, b)) { usage[it] ?: 0.0 }
+        assertEquals(listOf("pkg.b", "pkg.a"), out.map { it.packageName })
+    }
+
+    @Test
+    fun `applyUserMapping moves the taught app to the front`() {
+        val wechat = entry("com.tencent.mm", "微信", "weixin", "wx")
+        val alipay = entry("com.eg.android.AlipayGphone", "支付宝", "zhifubao", "zfb")
+        val iqiyi = entry("com.iqiyi", "爱奇艺", "aiqiyi", "aqy")
+        val index = listOf(wechat, alipay, iqiyi)
+        // 已在结果里：提到最前面，其余顺序不变。
+        val out = AppSearchIndex.applyUserMapping(
+            listOf(alipay.app, wechat.app), index, "com.iqiyi"
+        )
+        assertEquals(
+            listOf("com.iqiyi", "com.eg.android.AlipayGphone", "com.tencent.mm"),
+            out.map { it.packageName }
+        )
+        // 不在结果里（空结果）：补到最前面。
+        val outEmpty = AppSearchIndex.applyUserMapping(emptyList(), index, "com.iqiyi")
+        assertEquals(listOf("com.iqiyi"), outEmpty.map { it.packageName })
+    }
+
+    @Test
+    fun `applyUserMapping leaves results alone without a mapping`() {
+        val wechat = entry("com.tencent.mm", "微信", "weixin", "wx")
+        val alipay = entry("com.eg.android.AlipayGphone", "支付宝", "zhifubao", "zfb")
+        val index = listOf(wechat, alipay)
+        val results = listOf(alipay.app, wechat.app)
+        assertEquals(results, AppSearchIndex.applyUserMapping(results, index, null))
+        assertEquals(results, AppSearchIndex.applyUserMapping(results, index, ""))
+        // 被映射的应用不在索引里：原样返回。
+        assertEquals(results, AppSearchIndex.applyUserMapping(results, index, "com.not.installed"))
+    }
 }
