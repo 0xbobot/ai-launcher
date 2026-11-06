@@ -128,6 +128,11 @@ fun AppCenterLandscape(
     // 应用中心升级：索引加载中标记（空结果文案区分"索引加载中"与"真无匹配"）
     indexLoading: Boolean = false,
     onAskQizai: (String) -> Unit,
+    // 反馈闭环（Bob 2026-11-06）：空态重试提示——调用点（AppCenter.kt）
+    // 传入竖屏同一状态、同一触发口径、同一行（FeedbackRetryRow），横屏不另算。
+    showRetryPrompt: Boolean = false,
+    retryLoading: Boolean = false,
+    onRetryClick: () -> Unit = {},
     // 与竖屏同一套焦点礼仪（v0.68.93）：焦点外报 + 范围捕获，
     // 供 AppCenter 根 Box 的点外部清焦观察者使用
     onSearchFocusChanged: (Boolean) -> Unit = {},
@@ -508,22 +513,31 @@ fun AppCenterLandscape(
                     ) {
                         if (results.isEmpty()) {
                             item(key = "search-empty") {
-                                Text(
-                                    // 应用中心升级：索引缺失与真无匹配区分文案
-                                    // 搜索同义词批（Bob 2026-11-05）：空态居中、一行——
-                                    // 全宽居中、maxLines=1+省略号；文案略缩（同竖屏）。
-                                    // 列本身已有 16dp 横向边距，Text 不再另加左右边距。
-                                    text = if (indexLoading) "应用列表还没准备好，请稍后再试"
-                                        else "没有找到「${searchFieldValue.text.trim()}」相关应用",
-                                    fontSize = AILauncherType.Callout.fontSize,
-                                    color = AILauncherColors.current.Hint,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 32.dp)
-                                )
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        // 应用中心升级：索引缺失与真无匹配区分文案
+                                        // 搜索同义词批（Bob 2026-11-05）：空态居中、一行——
+                                        // 全宽居中、maxLines=1+省略号；文案略缩（同竖屏）。
+                                        // 列本身已有 16dp 横向边距，Text 不再另加左右边距。
+                                        text = if (indexLoading) "应用列表还没准备好，请稍后再试"
+                                            else "没有找到「${searchFieldValue.text.trim()}」相关应用",
+                                        fontSize = AILauncherType.Callout.fontSize,
+                                        color = AILauncherColors.current.Hint,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 32.dp)
+                                    )
+                                    // 反馈闭环（Bob 2026-11-06）：与竖屏同一行、同一口径。
+                                    if (showRetryPrompt) {
+                                        FeedbackRetryRow(
+                                            loading = retryLoading,
+                                            onClick = onRetryClick
+                                        )
+                                    }
+                                }
                             }
                         } else {
                             // 注：不用 items(results, key=)/trailing lambda——本文件上下文里

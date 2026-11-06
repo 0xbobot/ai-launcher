@@ -184,9 +184,12 @@ object AppSearchIndex {
         if (q.isBlank()) return index.map { it.app }
         ensureKeywordsLoaded(context)
         val keywordPkgs = keywordPackagesFor(q, keywordPinyin)
-        return rank(index, q, keywordPkgs) { pkg ->
+        val ranked = rank(index, q, keywordPkgs) { pkg ->
             AppUsageTracker.usageScoreForSearch(context, pkg)
         }
+        // 反馈闭环（Bob 2026-11-06）：这句以前被用户在选择器里点名过，
+        // 直接把那家提到最前面（查不到映射时原样返回）。
+        return applyUserMapping(ranked, index, UserIntentMapping.lookup(context, q))
     }
 
     /**
@@ -212,6 +215,115 @@ object AppSearchIndex {
                 }
             }
         }
+    }
+
+    // ---------- 反馈闭环（Bob 2026-11-06：识别不到时，让用户重试/选应用） ----------
+
+    /**
+     * 意图句标记：查询含任一标记或书名号时，像一句意图（而不是单纯的应用名）。
+     * 覆盖本批已见的句式（“我想看《狂飙》”含 想/看/《》；“打开微信”含 开；
+     * “帮我订一张去北京的机票”含 帮/订/去），也兜底将来类似说法。
+     */
+    private val INTENT_MARKERS = listOf(
+        "想", "要", "帮", "去", "听", "看", "订", "查",
+        "找", "给", "开", "播", "搜", "买", "点", "发", "做", "办"
+    )
+
+    /** 查询是否像一句意图（纯逻辑，可单测）：含意图标记或书名号。 */
+    fun looksLikeIntent(query: String): Boolean {
+        val q = query.trim()
+        if (q.isEmpty()) return false
+        if (q.contains("《") || q.contains("》")) return true
+        return INTENT_MARKERS.any { q.contains(it) }
+    }
+
+    /** 查询是否命中任一自然语言关键词（生产入口，需 Context 读拼音字典）。 */
+    fun hasKeywordMatch(context: Context, query: String): Boolean {
+        val q = query.trim().lowercase().replace(" ", "")
+        if (q.isEmpty()) return false
+        ensureKeywordsLoaded(context)
+        return hasKeywordMatch(q, keywordPinyin)
+    }
+
+    /** 可测入口：显式传拼音字典（测试直接传合成表）。 */
+    internal fun hasKeywordMatch(
+        q: String,
+        keywordPinyin: Map<String, List<String>>
+    ): Boolean = q.isNotEmpty() && keywordPackagesFor(q, keywordPinyin).isNotEmpty()
+
+    /**
+     * 识别不到时的重试提示是否出现（纯逻辑，可单测）：像一句意图、且本地
+     * 关键词没命中。调用方另行要求“0 结果且索引已就绪”（空态本身的条件）。
+     * “不存在的应用”/“asdfgh”没有意图标记，不出现；“帮我订一张去北京的
+     * 机票”有标记但“机票”是关键词（439），不出现。
+     */
+    fun shouldShowRetryPrompt(query: String, hasKeywordMatch: Boolean): Boolean =
+        looksLikeIntent(query) && !hasKeywordMatch
+
+    /**
+     * 选择器排序（反馈闭环·用户选应用）：把已装应用按与查询的相关程度排，
+     * 相关度高的在前。打分复用 [scoreFor]（名称/关键词/拼音/子序列同口径），
+     * 同分按使用频次破同分（[usageOf]，生产传 AppUsageTracker 口径），
+     * 再并列按名称稳定排序；不过滤——用户要找的应用哪怕 0 分也要能选到。
+     */
+    fun rankChooserApps(
+        context: Context,
+        query: String,
+        index: List<Entry>,
+        usageOf: (String) -> Double
+    ): List<AppInfo> {
+        val q = query.trim().lowercase().replace(" ", "")
+        ensureKeywordsLoaded(context)
+        return rankChooserApps(q, keywordPackagesFor(q, keywordPinyin), index, usageOf)
+    }
+
+    /** 可测入口：显式传归一化查询与关键词包集合。 */
+    internal fun rankChooserApps(
+        q: String,
+        keywordPkgs: Set<String>,
+        index: List<Entry>,
+        usageOf: (String) -> Double
+    ): List<AppInfo> {
+        // 空查询不走 scoreFor（"".contains("") 恒真会把全员打成 100 分）：
+        // 直接按使用频次排，名称作稳定底。
+        if (q.isBlank()) {
+            return index.map { it.app }
+                .sortedWith(
+                    compareByDescending<AppInfo> { usageOf(it.packageName) }
+                        .thenBy { it.label.toString() }
+                )
+        }
+        data class Hit(val app: AppInfo, val score: Int, val usage: Double)
+        val hits = index.map { e ->
+            val name = e.app.label.toString().lowercase().replace(" ", "")
+            val pkg = e.app.packageName.lowercase()
+            Hit(
+                e.app,
+                scoreFor(q, name, pkg, e.pinyinFull, e.pinyinInitials, keywordPkgs),
+                usageOf(e.app.packageName)
+            )
+        }
+        return hits.sortedWith(
+            compareByDescending<Hit> { it.score }
+                .thenByDescending { it.usage }
+                .thenBy { it.app.label.toString() }
+        ).map { it.app }
+    }
+
+    /**
+     * 用户教的映射生效（纯逻辑，可单测）：被映射的应用提到最前面；
+     * 没映射、或被映射的应用不在索引里时，原样返回。空结果时把被映射的
+     * 应用补到最前面（下次同句搜到它）。
+     */
+    internal fun applyUserMapping(
+        results: List<AppInfo>,
+        index: List<Entry>,
+        mappedPkg: String?
+    ): List<AppInfo> {
+        if (mappedPkg.isNullOrBlank()) return results
+        val mapped = index.firstOrNull { it.app.packageName == mappedPkg }?.app
+            ?: return results
+        return listOf(mapped) + results.filter { it.packageName != mappedPkg }
     }
 
     /** 体检批D ⑥：纯逻辑接缝——单个条目的六档命中分（0 表示未命中），档位口径见类头注释。 */

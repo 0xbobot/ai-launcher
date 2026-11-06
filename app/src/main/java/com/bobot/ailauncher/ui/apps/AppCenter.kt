@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.draw.clipToBounds
@@ -78,6 +79,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -148,6 +153,11 @@ import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.HiddenApps
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.data.DeepLinkServiceReport
+import com.bobot.ailauncher.data.LlmCallResult
+import com.bobot.ailauncher.data.LlmConfig
+import com.bobot.ailauncher.data.LlmRouter
+import com.bobot.ailauncher.data.UserIntentMapping
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.pageTextureBackground
@@ -155,6 +165,7 @@ import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import java.text.Collator
 import java.util.Locale
 import kotlin.math.exp
@@ -173,7 +184,9 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * - v0.22：分类区取消（Bob 决定，等需要时再重新设计）；AllAppsScreen 死代码删除
  * - 手势签名：左滑=多 / 右滑=少
  */
-@OptIn(ExperimentalFoundationApi::class)
+// 反馈闭环（Bob 2026-11-06）：选择器用 ModalBottomSheet（实验 API），
+// 与 PullUpDock 同款——这里补 ExperimentalMaterial3Api。
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun AppCenterContent(
     onOpenSettings: () -> Unit,
@@ -326,25 +339,56 @@ fun AppCenterContent(
     // v0.25.5：Niagara 式——拖动直接滚完整列表，不做内容过滤，松手零位移
     // v0.68.95（F-04）：索引随仓库快照在 IO 构建（基于同一份可见集），组合期只读。
     val searchIndex = catalog?.index ?: emptyList()
-    val searchResults = remember(filterQuery, searchIndex) {
+    // 反馈闭环（Bob 2026-11-06：识别不到时，让用户重试/选应用）：
+    // 空态“有应用能打开，重试”→点一下大模型再确认一次→仍认不出就选应用。
+    // mappingVersion：用户教的映射存一次 +1，挂进搜索 remember 的 key，
+    // 存完同一句立即重算（映射提到最前面）。
+    val mappingVersion by UserIntentMapping.version.collectAsState()
+    var retryLoading by remember { mutableStateOf(false) }
+    var llmRetryResults by remember { mutableStateOf<List<AppInfo>?>(null) }
+    var showChooser by remember { mutableStateOf(false) }
+    var chooserApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
+    var lastLlmCapabilityId by remember { mutableStateOf<String?>(null) }
+    // 换句就清掉重试态（LLM 结果/选择器/加载态都只属于上一句）。
+    LaunchedEffect(filterQuery) {
+        llmRetryResults = null
+        showChooser = false
+        retryLoading = false
+        lastLlmCapabilityId = null
+    }
+    val searchResults = remember(filterQuery, searchIndex, mappingVersion) {
         if (filterQuery.trim().isBlank()) null
         else AppSearchIndex.search(context, filterQuery, searchIndex)
     }
+    // LLM 重试认出意图后，用这份结果盖掉本地搜索结果（用户再点行仍走
+    // launchApp，深链照常带；换句即清，见上）。
+    val displayResults = llmRetryResults ?: searchResults
     // 内容深链标识（Bob 2026-11-05 晚）：当前这句查询下，点按会走深链直达
     // 内容的应用包名集合。复用 CapabilityResolution.supportsDeepLink 的
     // 同一判定（tapSteps 链里含 Deeplink 步即支持），每句查询只算一次；
     // 竖屏搜索行与横屏共用同一集合（横屏经参数传入，不另算）。查询为空、
     // 无结果、无能力词、无内容时集合为空，标识自然不出现。
-    val deepLinkSupportedPkgs = remember(filterQuery, searchResults) {
+    // 反馈闭环：按 displayResults 算（LLM 重试结果也要标“直达”）。
+    val deepLinkSupportedPkgs = remember(filterQuery, displayResults) {
         val q = filterQuery.trim()
-        if (q.isEmpty() || searchResults.isNullOrEmpty()) emptySet()
+        if (q.isEmpty() || displayResults.isNullOrEmpty()) emptySet()
         else {
             CapabilityRegistry.load(context)
             val caps = CapabilityRegistry.groups().flatMap { it.capabilities }
-            searchResults.mapNotNull { app ->
+            displayResults.mapNotNull { app ->
                 if (CapabilityResolution.supportsDeepLink(caps, q, app.packageName)) app.packageName else null
             }.toSet()
         }
+    }
+    // 反馈闭环·重试提示是否出现（Bob 2026-11-06）：0 结果且索引已就绪，
+    // 且这句像一句意图、本地关键词没命中。随便搜个不存在的应用名不出现。
+    val showRetryPrompt = remember(filterQuery, searchResults, catalog) {
+        val q = filterQuery.trim()
+        catalog != null && q.isNotEmpty() && searchResults?.isEmpty() == true &&
+            AppSearchIndex.shouldShowRetryPrompt(
+                q,
+                AppSearchIndex.hasKeywordMatch(context, q)
+            )
     }
     // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
     // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；
@@ -660,10 +704,13 @@ fun AppCenterContent(
         onAskQizai(q)
     }
     // v0.25.2：松手滚动——等列表恢复全量重组完成后再滚，避免打在旧内容上
-    fun launchApp(app: AppInfo) {
+    // 反馈闭环：返回是否真的打开了（选择器点选后要凭它决定上报 outcome）。
+    // 其余调用点仍当 Unit 用（Kotlin 允许 Boolean 函数赋给 () -> Unit 的
+    // 形参，点按行为不变）。
+    fun launchApp(app: AppInfo): Boolean {
         val now = System.currentTimeMillis()
         val last = lastLaunch
-        if (last != null && last.first == app.packageName && now - last.second < 500L) return
+        if (last != null && last.first == app.packageName && now - last.second < 500L) return false
         lastLaunch = app.packageName to now
         focusManager.clearFocus()
         keyboardController?.hide()
@@ -695,6 +742,102 @@ fun AppCenterContent(
         // 智能滚动关键字：能力动作成功打开应用才记（点按深链/定向 geo/
         // 直接打开任一成功都算；失败、或点的不是该能力提供方时不记）。
         ActionUsageTracker.recordTapAction(context, query, app.packageName, opened)
+        return opened
+    }
+
+    // ---------- 反馈闭环（Bob 2026-11-06） ----------
+
+    // 选应用：先收键盘、清焦点，sheet 才看得全；已装应用按与查询的相关程度排。
+    // 注意顺序：openChooser 定义在 onRetryClick 之前——Kotlin 本地函数不提升，
+    // onRetryClick 里调 openChooser，定义在后会报 Unresolved reference。
+    fun openChooser() {
+        val q = filterQuery.trim()
+        if (q.isEmpty()) return
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        chooserApps = AppSearchIndex.rankChooserApps(context, q, searchIndex) { pkg ->
+            AppUsageTracker.usageScoreForSearch(context, pkg)
+        }
+        showChooser = true
+    }
+
+    // “有应用能打开，重试”：点一下，大模型再确认一次。复用“问助手”同一条
+    // LLM 意图解析——LlmRouter.route，同端点、同 Key、同能力白名单；
+    // 不经过 IntentCoordinator，因为那条路会离开应用中心回首页提交，
+    // 重试要留在应用中心出结果。认出意图→把该能力的已装应用列成结果；
+    // 仍认不出（"none"/报错/没配 Key）→进选应用。
+    fun onRetryClick() {
+        if (retryLoading) return
+        val q = filterQuery.trim()
+        if (q.isEmpty()) return
+        retryLoading = true
+        scope.launch {
+            // 没配 Key 时大模型跑不了，直接进选应用（用户仍可手动选）。
+            if (!LlmConfig.hasKey(context)) {
+                retryLoading = false
+                openChooser()
+                return@launch
+            }
+            CapabilityRegistry.load(context)
+            val result = LlmRouter.route(
+                LlmConfig.getBaseUrl(context),
+                LlmConfig.getApiKey(context),
+                LlmConfig.getModel(context),
+                q,
+                CapabilityRegistry.validIds()
+            )
+            when (result) {
+                is LlmCallResult.Ok -> {
+                    val capId = result.route.capabilityId
+                    lastLlmCapabilityId = capId.takeIf { it != "none" }
+                    if (capId == "none") {
+                        retryLoading = false
+                        openChooser()
+                    } else {
+                        val cap = CapabilityRegistry.find(capId)
+                        val apps = cap?.let { c ->
+                            CapabilityResolution.effectiveProviders(c)
+                                .flatMap { p -> p.packageNames }
+                                .distinct()
+                                .mapNotNull { pkg ->
+                                    searchIndex.firstOrNull { it.app.packageName == pkg }?.app
+                                }
+                        }.orEmpty()
+                        if (apps.isNotEmpty()) {
+                            // 按使用频次排（同搜索排序口径：频次高的在前），
+                            // 声明序作稳定底。只列结果、不自动打开——
+                            // 用户再点一行，仍走 launchApp（深链照常带）。
+                            llmRetryResults = apps.sortedByDescending {
+                                AppUsageTracker.usageScoreForSearch(context, it.packageName)
+                            }
+                            retryLoading = false
+                        } else {
+                            retryLoading = false
+                            openChooser()
+                        }
+                    }
+                }
+                is LlmCallResult.Err -> {
+                    retryLoading = false
+                    openChooser()
+                }
+            }
+        }
+    }
+
+    // 用户在选择器里点了一个应用：先存本机映射（以后同句能认出来），
+    // 再打开（launchApp 已有的深链/记频次逻辑照常走），最后 best-effort
+    // 上报给深链服务——上报在 IO 线程、失败不报错、不影响映射与打开。
+    fun onChooserPick(app: AppInfo) {
+        val q = filterQuery.trim()
+        showChooser = false
+        if (q.isEmpty()) return
+        val capId = lastLlmCapabilityId
+        UserIntentMapping.save(context, q, app.packageName)
+        val opened = launchApp(app)
+        scope.launch(Dispatchers.IO) {
+            DeepLinkServiceReport.reportUserMapping(q, app.packageName, capId, opened)
+        }
     }
 
     // 右滑隐藏（手势签名：右滑=少），HiddenApps.version +1 后列表自动重算
@@ -849,8 +992,9 @@ fun AppCenterContent(
                 Text(
                     // 应用中心升级：catalog 为空时不显示"0 款"空列表，改弱提示
                     // Bob 2026-11-03：数字跟当前列表走——搜索态显示过滤后条数
+                    // 反馈闭环：LLM 重试出结果后，当前列表是 displayResults。
                     text = if (catalog == null) "正在加载…"
-                        else "${searchResults?.size ?: azApps.size} 款 · 右侧滑字母直达",
+                        else "${displayResults?.size ?: azApps.size} 款 · 右侧滑字母直达",
                     fontSize = AILauncherType.Caption.fontSize,
                     color = AILauncherColors.current.Hint,
                     modifier = Modifier.padding(top = 8.dp)
@@ -1003,7 +1147,7 @@ fun AppCenterContent(
             AppCenterLandscape(
                 azGroups = azGroups,
                 letters = letters,
-                totalCount = searchResults?.size ?: azApps.size,
+                totalCount = displayResults?.size ?: azApps.size,
                 favApps = dockApps,
                 hiddenApps = hiddenApps,
                 hiddenUnlocked = hiddenUnlocked,
@@ -1037,7 +1181,9 @@ fun AppCenterContent(
                 // 组件/提交/焦点礼仪与竖屏同一套（见 AppCenterLandscape）
                 searchFieldValue = queryField,
                 onSearchFieldChange = ::onQueryFieldChange,
-                searchResults = searchResults,
+                // 反馈闭环（Bob 2026-11-06）：横屏也用 displayResults
+                // （LLM 重试结果要进横屏列表），空态重试提示两向共用。
+                searchResults = displayResults,
                 // 内容深链标识：竖屏按本句查询算好的支持集合，横屏搜索行
                 // 共用（横屏不另算，判定口径与竖屏同一套）。
                 deepLinkSupportedPkgs = deepLinkSupportedPkgs,
@@ -1050,6 +1196,11 @@ fun AppCenterContent(
                 // 横屏首页修：把主屏 picker 会话状态透传给横屏 rail 门（同竖屏 AppCenter.kt:1419）
                 homeTarget = homeTarget,
                 onAskQizai = onAskQizai,
+                // 反馈闭环（Bob 2026-11-06）：横屏空态重试提示——
+                // 与竖屏同一状态、同一触发口径、同一行。
+                showRetryPrompt = showRetryPrompt,
+                retryLoading = retryLoading,
+                onRetryClick = ::onRetryClick,
                 onSearchFocusChanged = { intentFocused = it },
                 // 425 齿轮 morph：横屏复用竖屏同一 intentFocused（只读传入，不另起状态）
                 searchFocused = intentFocused,
@@ -1086,16 +1237,17 @@ fun AppCenterContent(
                 // v0.40.0：底部留出手势条高度，避免末行被手势条盖住
                 contentPadding = PaddingValues(bottom = 96.dp)
             ) {
-                val results = searchResults
+                val results = displayResults
                 if (results != null) {
                     // 搜索态：只显示搜索结果（拼音/首字母/自然语言/模糊）
                     if (results.isEmpty()) {
                         item(key = "search-empty") {
-                            Text(
-                                // 应用中心升级：索引缺失与真无匹配区分文案
-                                // 搜索同义词批（Bob 2026-11-05）：空态居中、一行——
-                                // 去掉跟随应用行的 72/64dp 大缩进，改全宽居中、
-                                // maxLines=1+省略号；文案略缩（“相关的”→“相关”）
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    // 应用中心升级：索引缺失与真无匹配区分文案
+                                    // 搜索同义词批（Bob 2026-11-05）：空态居中、一行——
+                                    // 去掉跟随应用行的 72/64dp 大缩进，改全宽居中、
+                                    // maxLines=1+省略号；文案略缩（“相关的”→“相关”）
                                 // 以求一行放得下。字号不变（Callout）。
                                 text = if (catalog == null) "应用列表还没准备好，请稍后再试"
                                     else "没有找到「${filterQuery.trim()}」相关应用",
@@ -1108,6 +1260,16 @@ fun AppCenterContent(
                                     .fillMaxWidth()
                                     .padding(top = 32.dp, start = 16.dp, end = 16.dp)
                             )
+                                // 反馈闭环（Bob 2026-11-06）：0 结果且意图没被识别时，
+                                // 在空态文案下给“有应用能打开，重试”——点一下大模型
+                                // 再确认一次。文案就是 Bob 给的话，不用内部词。
+                                if (showRetryPrompt) {
+                                    FeedbackRetryRow(
+                                        loading = retryLoading,
+                                        onClick = ::onRetryClick
+                                    )
+                                }
+                            }
                         }
                     } else {
                         items(results, key = { "s:${it.packageName}" }) { app ->
@@ -2019,6 +2181,105 @@ fun AppCenterContent(
     }
     } // Box
     } // else 竖屏单列
+
+    // 反馈闭环（Bob 2026-11-06）：大模型仍认不出时，让用户选应用——
+    // 标题就是 Bob 给的话“这个场景要用什么应用去响应？”。
+    // sheet 挂在 AppCenterContent 层（不挂竖屏/横屏分支），两向共用；
+    // 样式跟 idea 说明 sheet（PullUpDock）同一套：Card 底、拖拽柄、横向 20dp。
+    if (showChooser) {
+        ModalBottomSheet(
+            onDismissRequest = { showChooser = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = AILauncherColors.current.Card,
+            dragHandle = { BottomSheetDefaults.DragHandle() }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp)
+            ) {
+                Text(
+                    text = "这个场景要用什么应用去响应？",
+                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    fontWeight = FontWeight.Bold,
+                    color = AILauncherColors.current.Title,
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp)
+                ) {
+                    items(chooserApps, key = { it.packageName }) { app ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onChooserPick(app) }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AppIconImage(
+                                drawable = app.icon,
+                                contentDescription = app.label.toString(),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = app.label.toString(),
+                                fontSize = AILauncherType.BodyLarge.fontSize,
+                                color = AILauncherColors.current.Title,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 反馈闭环·重试提示行（Bob 2026-11-06：空态“有应用能打开，重试”）。
+ * 样式跟“问助手”行同一套（Footnote、Title 75%、Medium、金色 16dp 箭头、
+ * 48dp 最小触控高），竖屏/横屏共用。空态文案是居中的，这里也居中
+ * （不跟“问助手”行左对齐——那是列表行，这里是空态动作）。
+ * 加载中显示“正在确认…”，不可点。
+ */
+@Composable
+internal fun FeedbackRetryRow(
+    loading: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(enabled = !loading) { onClick() }
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = if (loading) "正在确认…" else "有应用能打开，重试",
+            fontSize = AILauncherType.Footnote.fontSize,
+            color = AILauncherColors.current.Title.copy(alpha = 0.75f),
+            fontWeight = FontWeight.Medium
+        )
+        if (!loading) {
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = AILauncherColors.current.Accent,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
 }
 
 /**
