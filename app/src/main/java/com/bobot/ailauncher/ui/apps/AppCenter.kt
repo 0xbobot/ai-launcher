@@ -381,14 +381,14 @@ fun AppCenterContent(
         }
     }
     // 反馈闭环·重试提示是否出现（Bob 2026-11-06）：0 结果且索引已就绪，
-    // 且这句像一句意图、本地关键词没命中。随便搜个不存在的应用名不出现。
+    // 且这句像一句意图。随便搜个不存在的应用名不出现。
+    // 441 口径修正：不再以“本地关键词没命中”为闸——关键词在表里也不代表
+    // 有已装应用接得住（“想看新闻”：关键词“新闻”命中，但没装新闻应用，
+    // 搜索仍 0 条）；进了空态就说明没找到，提示就该出现。
     val showRetryPrompt = remember(filterQuery, searchResults, catalog) {
         val q = filterQuery.trim()
         catalog != null && q.isNotEmpty() && searchResults?.isEmpty() == true &&
-            AppSearchIndex.shouldShowRetryPrompt(
-                q,
-                AppSearchIndex.hasKeywordMatch(context, q)
-            )
+            AppSearchIndex.shouldShowRetryPrompt(q)
     }
     // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
     // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；

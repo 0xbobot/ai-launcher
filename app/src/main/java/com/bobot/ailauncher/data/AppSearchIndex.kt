@@ -237,28 +237,19 @@ object AppSearchIndex {
         return INTENT_MARKERS.any { q.contains(it) }
     }
 
-    /** 查询是否命中任一自然语言关键词（生产入口，需 Context 读拼音字典）。 */
-    fun hasKeywordMatch(context: Context, query: String): Boolean {
-        val q = query.trim().lowercase().replace(" ", "")
-        if (q.isEmpty()) return false
-        ensureKeywordsLoaded(context)
-        return hasKeywordMatch(q, keywordPinyin)
-    }
-
-    /** 可测入口：显式传拼音字典（测试直接传合成表）。 */
-    internal fun hasKeywordMatch(
-        q: String,
-        keywordPinyin: Map<String, List<String>>
-    ): Boolean = q.isNotEmpty() && keywordPackagesFor(q, keywordPinyin).isNotEmpty()
-
     /**
-     * 识别不到时的重试提示是否出现（纯逻辑，可单测）：像一句意图、且本地
-     * 关键词没命中。调用方另行要求“0 结果且索引已就绪”（空态本身的条件）。
-     * “不存在的应用”/“asdfgh”没有意图标记，不出现；“帮我订一张去北京的
-     * 机票”有标记但“机票”是关键词（439），不出现。
+     * 识别不到时的重试提示是否出现（纯逻辑，可单测）：只要这句像一句意图。
+     * 调用方另行要求“0 结果且索引已就绪”（空态本身的条件）。
+     * 441 口径修正（Bob 2026-11-07 真机报“想看新闻”0 条却没提示）：旧口径
+     * 另加“且本地关键词没命中”一闸，但关键词只查“表里有没有这个词”，
+     * 不查“有没有已装应用接得住”——“新闻”在表里（→news/toutiao/
+     * tencent.news），Bob 没装这几家，搜索仍是 0 条，提示却被压住。
+     * 关键词真找到已装应用时本来就有结果、不会进空态；进了空态就说明
+     * 没找到，提示就该出现。所以这一闸删掉，只看像不像一句意图。
+     * “不存在的应用”/“asdfgh”没有意图标记，不出现。
      */
-    fun shouldShowRetryPrompt(query: String, hasKeywordMatch: Boolean): Boolean =
-        looksLikeIntent(query) && !hasKeywordMatch
+    fun shouldShowRetryPrompt(query: String): Boolean =
+        looksLikeIntent(query)
 
     /**
      * 选择器排序（反馈闭环·用户选应用）：把已装应用按与查询的相关程度排，
