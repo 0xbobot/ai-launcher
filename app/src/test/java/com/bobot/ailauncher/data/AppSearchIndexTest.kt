@@ -335,20 +335,25 @@ class AppSearchIndexTest {
     }
 
     @Test
-    fun `hasKeywordMatch distinguishes covered and uncovered intents`() {
-        // “机票”是关键词（439）→命中；“我想看《狂飙》”无关键词→不命中。
-        assertTrue(AppSearchIndex.hasKeywordMatch("帮我订一张去北京的机票", emptyMap()))
-        assertFalse(AppSearchIndex.hasKeywordMatch("我想看《狂飙》", emptyMap()))
-        assertFalse(AppSearchIndex.hasKeywordMatch("", emptyMap()))
+    fun `shouldShowRetryPrompt for any intent-like query in empty state`() {
+        // 441 口径修正：进了空态就说明没已装应用接得住，关键词在不在表里
+        // 不再是闸——“我想看《狂飙》”“帮我订一张去北京的机票”带关键词也出提示。
+        assertTrue(AppSearchIndex.shouldShowRetryPrompt("我想看《狂飙》"))
+        assertTrue(AppSearchIndex.shouldShowRetryPrompt("帮我订一张去北京的机票"))
+        assertFalse(AppSearchIndex.shouldShowRetryPrompt("不存在的应用"))
+        assertFalse(AppSearchIndex.shouldShowRetryPrompt("asdfgh"))
     }
 
     @Test
-    fun `shouldShowRetryPrompt only for uncovered intents`() {
-        assertTrue(AppSearchIndex.shouldShowRetryPrompt("我想看《狂飙》", false))
-        assertFalse(AppSearchIndex.shouldShowRetryPrompt("我想看《狂飙》", true))
-        assertFalse(AppSearchIndex.shouldShowRetryPrompt("帮我订一张去北京的机票", true))
-        assertFalse(AppSearchIndex.shouldShowRetryPrompt("不存在的应用", false))
-        assertFalse(AppSearchIndex.shouldShowRetryPrompt("asdfgh", false))
+    fun `shouldShowRetryPrompt for covered keyword with no installed app`() {
+        // 回归（Bob 2026-11-07 真机）：“想看新闻”——关键词“新闻”在表里
+        // （→news/toutiao/tencent.news），但用户没装这几家，搜索 0 条，
+        // 空态里提示必须出现。
+        assertTrue(AppSearchIndex.keywordPackagesFor("想看新闻", emptyMap()).contains("news"))
+        assertTrue(AppSearchIndex.shouldShowRetryPrompt("想看新闻"))
+        // 同理：“帮我订一张去北京的机票”——“机票”在表里，但无已装航班应用时也出提示。
+        assertTrue(AppSearchIndex.keywordPackagesFor("帮我订一张去北京的机票", emptyMap()).contains("ctrip"))
+        assertTrue(AppSearchIndex.shouldShowRetryPrompt("帮我订一张去北京的机票"))
     }
 
     @Test
