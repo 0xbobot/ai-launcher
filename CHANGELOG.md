@@ -10,6 +10,10 @@
 
 ---
 
+## v1.0.44（versionCode 441）— 2026-11-07
+
+修复重试提示触发口径（Bob 2026-11-07 真机）：搜“想看新闻”得 0 条，空态里没有“有应用能打开，重试”。根因：shouldShowRetryPrompt = looksLikeIntent && !hasKeywordMatch，而“新闻”本身就是关键词（→news/toutiao/tencent.news），hasKeywordMatch 为真把提示压住了；但 Bob 没装这几家新闻应用，搜索仍是 0 条。口径错在 hasKeywordMatch 只查“关键词在不在表里”，没查“有没有已装应用接得住”。修法：shouldShowRetryPrompt 简化为只看 looksLikeIntent，删掉无调用的 hasKeywordMatch 两 overload；AppCenter.kt 的 showRetryPrompt 同步简化；横屏复用竖屏同一值，不另改。单测：翻转 shouldShowRetryPrompt 断言（带关键词也出提示），加“想看新闻”回归单测。文案、LLM 重试、选择器、映射、上报一律不动。
+
 ## v1.0.43（versionCode 440）— 2026-11-06
 
 识别不到时的反馈闭环（Bob 2026-11-06）：搜“我想看《狂飙》”得 0 款、本地同义词盖不住所有说法。空态在“没有找到「X」相关应用”下加可点提示“有应用能打开，重试”，只在意图没被识别时出现（像一句意图、且本地关键词没命中；随便搜个不存在的应用名不出现）。点一下用大模型（复用问助手同一条 LlmRouter.route）再确认一次，认出意图就把该能力的已装应用列成结果；仍认不出就弹选择器“这个场景要用什么应用去响应？”，已装应用按相关程度排，点选后存本机映射（SharedPreferences intent_mapping，归一化整句→包名，下次同句提到最前面），并 best-effort 上报深链服务 /v1/report（服务未部署时不发请求、不报错）。
