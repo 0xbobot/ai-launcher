@@ -10,6 +10,10 @@
 
 ---
 
+## v1.0.45（versionCode 442）— 2026-11-07
+
+通用重试提示触发口径（Bob 2026-11-07 中午真机）：搜“玩游戏”得 0 条，空态里还是没有“有应用能打开，重试”。根因：441 的 looksLikeIntent 是 18 个标记的硬编码词表，“玩”不在表里就漏；“打车”“刷视频”同理，词表就是场景清单，一个一个补永远补不完。修法：把词表闸整个去掉，提示出现的条件只剩空态本身（索引已就绪 + 查询非空 + 搜索 0 结果）；意图判断交给点按后的大模型（认不出进选择器）。代价：搜一个不存在的应用名也会出现提示，点它仍有回收价值。删 INTENT_MARKERS/looksLikeIntent/shouldShowRetryPrompt；单测删 4 组词表断言，加通用回归单测。文案、LLM 重试、选择器、映射、上报一律不动。
+
 ## v1.0.44（versionCode 441）— 2026-11-07
 
 修复重试提示触发口径（Bob 2026-11-07 真机）：搜“想看新闻”得 0 条，空态里没有“有应用能打开，重试”。根因：shouldShowRetryPrompt = looksLikeIntent && !hasKeywordMatch，而“新闻”本身就是关键词（→news/toutiao/tencent.news），hasKeywordMatch 为真把提示压住了；但 Bob 没装这几家新闻应用，搜索仍是 0 条。口径错在 hasKeywordMatch 只查“关键词在不在表里”，没查“有没有已装应用接得住”。修法：shouldShowRetryPrompt 简化为只看 looksLikeIntent，删掉无调用的 hasKeywordMatch 两 overload；AppCenter.kt 的 showRetryPrompt 同步简化；横屏复用竖屏同一值，不另改。单测：翻转 shouldShowRetryPrompt 断言（带关键词也出提示），加“想看新闻”回归单测。文案、LLM 重试、选择器、映射、上报一律不动。
