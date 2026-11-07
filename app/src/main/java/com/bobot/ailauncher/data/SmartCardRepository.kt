@@ -29,6 +29,9 @@ object SmartCardRepository {
     private const val KEY_LAST_SMS_REFRESH = "last_sms_refresh_ms"
     /** 引导卡片只出现一次（设计稿 §4.7）：看完（滑完全部）或点 × 关掉即记下，不再弹 */
     private const val KEY_GUIDE_SEEN = "guide_seen"
+    /** 引导卡片的“忽略”（设计稿 §4.2，449/v1.2.2）：单张永久不再出现。
+     * 与“滑走”不同——滑走只是本轮沉底/看完才记一次，忽略是当即永久记下。 */
+    private const val KEY_GUIDE_DISMISSED = "guide_dismissed"
 
     /** 短信重读节流：5 分钟内不重复查短信库（查询本身便宜，但没必要每分钟查） */
     private const val SMS_REFRESH_MIN_INTERVAL_MS = 5L * 60 * 1000
@@ -88,6 +91,17 @@ object SmartCardRepository {
     /** 记下引导卡片已看过（只出现一次） */
     fun markGuideSeen(context: Context) {
         prefs(context).edit().putBoolean(KEY_GUIDE_SEEN, true).apply()
+    }
+
+    /** 点过“忽略”的引导卡 id（永久不再出现） */
+    fun dismissedGuideIds(context: Context): Set<String> =
+        prefs(context).getStringSet(KEY_GUIDE_DISMISSED, emptySet())
+            ?.toSet() ?: emptySet()
+
+    /** 忽略一张引导卡：当即永久记下（不是滑走，不是只记本轮） */
+    fun dismissGuideCard(context: Context, card: SmartCard) {
+        val next = dismissedGuideIds(context) + card.id
+        prefs(context).edit().putStringSet(KEY_GUIDE_DISMISSED, next).apply()
     }
 
     /** 点下一步动作算处理完一张（仓库层立即摘掉，UI 侧先播离场动画再调这里） */
