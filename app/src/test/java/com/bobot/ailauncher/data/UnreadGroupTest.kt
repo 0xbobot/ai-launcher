@@ -85,23 +85,23 @@ class UnreadGroupTest {
 
     @Test
     fun `groupAppsByLetter - letter disappears when all its apps moved out`() {
-        val apps = listOf(app("wx", "微信"), app("sms", "短信"), app("tel", "电话"))
+        val apps = listOf(app("a1", "Alpha"), app("b1", "Beta"), app("c1", "Gamma"))
         val keyOf: (AppInfo) -> Char = { it.label.first().uppercaseChar() }
         assertEquals(
-            listOf('微', '短', '电'),
+            listOf('A', 'B', 'G'),
             groupAppsByLetter(apps, keyOf).map { it.first }
         )
-        // 微信进了未读组、从字母组移出后，“微”组变空、rail 字母自动消失
-        val rest = groupAppsByLetter(withoutPkgs(apps, setOf("wx")), keyOf)
-        assertEquals(listOf('短', '电'), rest.map { it.first })
+        // Alpha 进了未读组、从字母组移出后，“A”组变空、rail 字母自动消失
+        val rest = groupAppsByLetter(withoutPkgs(apps, setOf("a1")), keyOf)
+        assertEquals(listOf('B', 'G'), rest.map { it.first })
     }
 
     @Test
     fun `groupAppsByLetter - hash sorts last`() {
-        val apps = listOf(app("x", "123"), app("wx", "微信"))
-        val keyOf: (AppInfo) -> Char = { if (it.label.first().isDigit()) '#' else '微' }
+        val apps = listOf(app("x", "123"), app("a", "Apple"))
+        val keyOf: (AppInfo) -> Char = { if (it.label.first().isDigit()) '#' else 'A' }
         assertEquals(
-            listOf('微', '#'),
+            listOf('A', '#'),
             groupAppsByLetter(apps, keyOf).map { it.first }
         )
     }
