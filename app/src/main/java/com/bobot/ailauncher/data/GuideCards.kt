@@ -1,91 +1,164 @@
 package com.bobot.ailauncher.data
 
 /**
- * 首次加载的引导卡片（设计稿 §4.7，448/v1.2.1，Bob 2026-11-07 晚定）：
- * 用户升到带卡片叠层的版本后第一次看到首页时，叠层位置出现一叠引导卡片
- * （而不是空着）。只出现一次。
+ * 首次加载的引导卡片（设计稿 §4.7，448/v1.2.1 起；v3 按权限重做，455/v1.2.8，
+ * Bob 2026-11-08 凌晨 verdict）：
  *
- * - 每张先讲用户为什么要做这件事（得到什么、免了什么麻烦），再讲要
- *   连接哪个来源（设计稿 §4.7 v2，Bob 2026-11-07 晚真机 verdict 后重写：
- *   旧文案只写功能描述、用户看不懂为什么要干这个）。
- * - 文案按 Bob 的两条写（讲清楚、不用内部黑话、不造新词），不拿用户的
- *   真实短信内容当例子（没有尾号、金额、真实地点）。
- * - 复用真卡片同一套模型与叠层 UI（kind = GUIDE，动作为 Connect）；
- *   宿主在真卡片为空且引导未看过时才展示，见 SmartCardStackHost。
- * - 接上某个来源后，对应引导卡消失（宿主按授权状态过滤）；有真事项时
- *   真卡片顶掉整叠引导卡（宿主只在真卡片为空时展示引导卡）。
+ * v3 不再按场景分四张，改按权限分、一权限一张（消息、通知、日历、联系人、
+ * 电话拨号器）。每张讲三件事：这是什么（来源标签＝权限名）、为什么要连
+ * （fact 先讲连上能得到什么）、连上之后会发生什么（fact＋prep：会出现
+ * 哪些卡片、什么时候出现、数据只在本地处理）。场景（账单、体检预约、
+ * 未接来电、快递航班）写进对应权限卡片的 fact 里，当“连上之后你会看到”
+ * 的例子，不单独成卡。
+ *
+ * 文案按 Bob 的两条写（讲清楚、不用内部黑话、不造新词），不拿用户的
+ * 真实短信内容当例子（没有尾号、金额、真实地点）。
+ *
+ * 复用真卡片同一套模型与叠层 UI（kind = GUIDE，动作为 Connect）；
+ * 宿主在真卡片为空且引导未看过时才展示，见 SmartCardStackHost。
+ *
+ * 接上某个权限后，对应引导卡先显示“已连接”＋接下来会发生什么（3 秒），
+ * 再消失；其他权限的引导卡留着（452 的问题：连一个权限整叠全消失，
+ * 根因在 SmartCardStackHost：已接上的权限被静默过滤＋guide_seen 在
+ * 引导列表一空就记下，全程没有任何反馈）。有真事项时真卡片顶掉整叠
+ * 引导卡（宿主只在真卡片为空时展示引导卡）。
  */
 private fun guideCard(
     id: String,
-    scenarioLabel: String,
+    sourceLabel: String,
     fact: String,
-    sourceLine: String,
+    prep: String,
     connectorKey: String
 ): SmartCard = SmartCard(
     id = id,
     kind = SmartCardKind.GUIDE,
-    sourceLabel = scenarioLabel,
+    sourceLabel = sourceLabel,
     fact = fact,
-    prep = sourceLine,
+    prep = prep,
     actionLabel = "连接",
     sortMs = 0L,
     deadlineMs = Long.MAX_VALUE,
     action = SmartCardAction.Connect(connectorKey),
-    sourceKey = id,
-    appearFromMs = 0L
+    sourceKey = id
 )
 
-/** 四张引导卡（固定顺序）：账单到期、体检预约、未接来电、快递航班。
- * 文案 v2（设计稿 §4.7，逐字用，不改词句）：先讲为什么，再讲要连接哪个来源。 */
+/** 按权限分的引导卡片，固定顺序：消息、通知、日历、联系人、电话拨号器。 */
 fun guideCards(): List<SmartCard> = listOf(
     guideCard(
-        id = "guide|bill",
-        scenarioLabel = "账单到期",
-        fact = "不想错过还款日？到期前两天我提醒你。",
-        sourceLine = "需要连接消息",
+        id = "guide|message",
+        sourceLabel = "消息",
+        fact = "连接消息后：信用卡快到期、体检预约快到了，我会提前提醒你。",
+        prep = "读短信里的账单和预约，只在本地处理",
         connectorKey = UiPrefs.CONNECTOR_MESSAGE
     ),
     guideCard(
-        id = "guide|appointment",
-        scenarioLabel = "体检预约",
-        fact = "体检和预约别忘，提前一天告诉你，要准备的都列好。",
-        sourceLine = "需要连接消息",
-        connectorKey = UiPrefs.CONNECTOR_MESSAGE
-    ),
-    guideCard(
-        id = "guide|missed-call",
-        scenarioLabel = "未接来电",
-        fact = "没接到的电话别错过，点一下就能回拨。",
-        sourceLine = "需要连接通知",
+        id = "guide|notification",
+        sourceLabel = "通知",
+        fact = "连接通知后：没接到的电话、包裹到了、航班要飞了，我会给你一张卡片，点一下就能处理。",
+        prep = "只读通知内容，只在本地处理",
         connectorKey = UiPrefs.CONNECTOR_NOTIFICATION
     ),
     guideCard(
-        id = "guide|delivery",
-        scenarioLabel = "快递航班",
-        fact = "包裹到了、航班要飞了，我提前告诉你。",
-        sourceLine = "需要连接通知",
+        id = "guide|calendar",
+        sourceLabel = "日历",
+        fact = "连接日历后：会议会出现在简报里，到时间提醒你。",
+        prep = "只读当天的日程，只在本地处理",
+        connectorKey = UiPrefs.CONNECTOR_CALENDAR
+    ),
+    guideCard(
+        id = "guide|contacts",
+        sourceLabel = "联系人",
+        fact = "连接联系人后：来电和短信里的号码会显示名字。",
+        prep = "只用来把号码显示成名字，只在本地处理",
+        connectorKey = UiPrefs.CONNECTOR_CONTACTS
+    ),
+    guideCard(
+        id = "guide|phone",
+        sourceLabel = "电话拨号器",
+        fact = "回拨只进拨号盘，不会直接拨出去。",
+        prep = "随通知一起开，不另要权限",
         connectorKey = UiPrefs.CONNECTOR_NOTIFICATION
     )
 )
 
 /**
- * 当前应展示的引导卡（纯函数）：已接上来源的卡不再出现（接上后这张引导卡
- * 即完成使命）；滑走过的卡本轮不再出现（滑完全部即看完，宿主随即记一次）；
- * 点过“忽略”的卡永久不再出现（忽略＝我知道了，这张不用了，不追问——
- * 设计稿 §4.2，449/v1.2.2；dismissedIds 由仓库层从偏好里读）。
- * 两个来源都已接上时返回空表——没什么可引导的。
+ * 可见的引导卡片（纯函数，单测锁死）：
+ * 已接上的权限，其卡片不再出现；横滑跳过的只本轮沉底（下次还在）；
+ * 点过“忽略”的永久不再出现。
+ * 电话拨号器随通知一起开：通知一接上，电话拨号器卡也不再出现。
  */
 fun visibleGuideCards(
     messageGranted: Boolean,
     notificationGranted: Boolean,
+    calendarGranted: Boolean = false,
+    contactsGranted: Boolean = false,
     swipedIds: Set<String> = emptySet(),
     dismissedIds: Set<String> = emptySet()
 ): List<SmartCard> = guideCards().filter { card ->
-    val action = card.action as? SmartCardAction.Connect ?: return@filter false
-    val granted = when (action.connectorKey) {
-        UiPrefs.CONNECTOR_MESSAGE -> messageGranted
-        UiPrefs.CONNECTOR_NOTIFICATION -> notificationGranted
+    val granted = when (card.id) {
+        "guide|message" -> messageGranted
+        "guide|notification", "guide|phone" -> notificationGranted
+        "guide|calendar" -> calendarGranted
+        "guide|contacts" -> contactsGranted
         else -> true
     }
     !granted && card.id !in swipedIds && card.id !in dismissedIds
+}
+
+/** 某张引导卡用的连接器 key；电话拨号器卡随通知一起开，key 是通知。 */
+fun connectorKeyForGuideId(id: String): String? =
+    guideCards().find { it.id == id }?.let {
+        (it.action as? SmartCardAction.Connect)?.connectorKey
+    }
+
+/** 用某个连接器的引导卡 id（电话拨号器与通知共用通知 key，故可能多张）。 */
+fun guideIdsForConnector(connectorKey: String): List<String> =
+    guideCards().filter {
+        (it.action as? SmartCardAction.Connect)?.connectorKey == connectorKey
+    }.map { it.id }
+
+/** 某个连接器是否已接上；电话拨号器随通知一起开，跟通知走。 */
+fun isGuideConnectorGranted(
+    connectorKey: String,
+    messageGranted: Boolean,
+    notificationGranted: Boolean,
+    calendarGranted: Boolean,
+    contactsGranted: Boolean
+): Boolean = when (connectorKey) {
+    UiPrefs.CONNECTOR_MESSAGE -> messageGranted
+    UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE -> notificationGranted
+    UiPrefs.CONNECTOR_CALENDAR -> calendarGranted
+    UiPrefs.CONNECTOR_CONTACTS -> contactsGranted
+    else -> true
+}
+
+/** 接上某个权限后，接下来会发生什么（一句话，写进“已连接”反馈卡）。 */
+fun connectedNextStep(connectorKey: String): String = when (connectorKey) {
+    UiPrefs.CONNECTOR_MESSAGE -> "有账单或预约短信时，这里会提前提醒你"
+    UiPrefs.CONNECTOR_NOTIFICATION -> "有未接来电、包裹或航班提醒时，这里会出现一张卡片，点一下就能处理"
+    UiPrefs.CONNECTOR_CALENDAR -> "会议会出现在简报里，到时间提醒你"
+    UiPrefs.CONNECTOR_CONTACTS -> "来电和短信里的号码会显示名字"
+    UiPrefs.CONNECTOR_PHONE -> "回拨只进拨号盘，不会直接拨出去"
+    else -> ""
+}
+
+/**
+ * 接上权限后显示的“已连接”反馈卡：同一张卡（id 不变），只换文案——
+ * fact 是“已连接”，prep 是一句接下来会发生什么。没有动作按钮，
+ * 3 秒后自动离开（宿主负责记永久忽略）。
+ */
+fun connectedGuideCard(card: SmartCard): SmartCard {
+    val key = (card.action as? SmartCardAction.Connect)?.connectorKey
+        ?: return card
+    // 电话拨号器卡随通知一起开（action key 是通知），但“已连接”反馈要讲
+    // 电话拨号器自己的下一步——按卡片 id 分，不是按 action key 分。
+    val step = if (card.id == "guide|phone") {
+        connectedNextStep(UiPrefs.CONNECTOR_PHONE)
+    } else {
+        connectedNextStep(key)
+    }
+    return card.copy(
+        fact = "已连接",
+        prep = step
+    )
 }
