@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.data
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
  *   关掉后该来源的卡片立即停用。
  */
 object SmartCardRepository {
+    private const val TAG = "SmartCardRepository"
     private val _cards = MutableStateFlow<List<SmartCard>>(emptyList())
     val cards: StateFlow<List<SmartCard>> = _cards.asStateFlow()
 
@@ -105,20 +107,48 @@ object SmartCardRepository {
     }
 
     private fun buildSmsCards(context: Context, nowMs: Long): List<SmartCard> {
-        if (!UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_MESSAGE)) return emptyList()
-        if (!SmsRepository.hasSmsPermission(context)) return emptyList()
+        if (!UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_MESSAGE)) {
+            Log.d(TAG, "buildSmsCards: message connector off, 0 cards")
+            return emptyList()
+        }
+        if (!SmsRepository.hasSmsPermission(context)) {
+            Log.d(TAG, "buildSmsCards: no READ_SMS permission, 0 cards")
+            return emptyList()
+        }
         val out = mutableListOf<SmartCard>()
-        for (sms in SmsRepository.loadRecentSms(context)) {
+        val smsList = SmsRepository.loadRecentSms(context)
+        var billCount = 0
+        var apptCount = 0
+        for (sms in smsList) {
             val bill = parseBillSms(sms.body, sms.address, nowMs)
             if (bill != null) {
                 out += billCard(bill, sms.address, context)
+                billCount++
                 continue
             }
             val appt = parseAppointmentSms(sms.body, nowMs)
-            if (appt != null) out += appointmentCard(appt, sms.address, context, nowMs)
+            if (appt != null) {
+                out += appointmentCard(appt, sms.address, context, nowMs)
+                apptCount++
+            }
         }
+        // 仅调试可见：下次“卡片没出现”先看这行——读到 N 条、解析出 M 张，
+        // 不用再靠猜是短信没读到、解析灭了还是显示门拦了（448）。
+        Log.d(TAG, "buildSmsCards: read=${smsList.size} sms, bills=$billCount, appts=$apptCount")
         return out
     }
+
+    /** 账单卡去重键：银行＋金额＋到期日（448：尾号可选，真实短信常不写尾号，
+     * 故尾号不再进键；短信版与通知版共用同一键，去重后短信版优先）。 */
+    private fun billKey(bill: ParsedBill): String {
+        val dueStart = startOfDayMs(bill.dueDayEndMs)
+        return "bill|${bill.bank}|${bill.amountFen}|$dueStart"
+    }
+
+    /** 账单卡文案：有尾号才写尾号，无尾号不硬凑（448）。 */
+    private fun billFact(bill: ParsedBill): String =
+        if (bill.tail4 != null) "${bill.bank}尾号 ${bill.tail4} 有 ${bill.amountText} 待还，${bill.dueLabel}到期"
+        else "${bill.bank}有 ${bill.amountText} 待还，${bill.dueLabel}到期"
 
     private fun billCard(
         bill: ParsedBill,
@@ -126,12 +156,12 @@ object SmartCardRepository {
         context: Context
     ): SmartCard {
         val dueStart = startOfDayMs(bill.dueDayEndMs)
-        val key = "bill|${bill.bank}|${bill.tail4}|${bill.amountFen}|$dueStart"
+        val key = billKey(bill)
         return SmartCard(
             id = key,
             kind = SmartCardKind.BILL,
             sourceLabel = "短信",
-            fact = "${bill.bank}尾号 ${bill.tail4} 有 ${bill.amountText} 待还，${bill.dueLabel}到期",
+            fact = billFact(bill),
             prep = null,
             actionLabel = "去还款",
             sortMs = bill.dueDayEndMs,
@@ -182,12 +212,12 @@ object SmartCardRepository {
         n: SimpleNotification
     ): SmartCard {
         val dueStart = startOfDayMs(bill.dueDayEndMs)
-        val key = "bill|${bill.bank}|${bill.tail4}|${bill.amountFen}|$dueStart"
+        val key = billKey(bill)
         return SmartCard(
             id = key,
             kind = SmartCardKind.BILL,
             sourceLabel = "短信",
-            fact = "${bill.bank}尾号 ${bill.tail4} 有 ${bill.amountText} 待还，${bill.dueLabel}到期",
+            fact = billFact(bill),
             prep = null,
             actionLabel = "去还款",
             sortMs = bill.dueDayEndMs,
