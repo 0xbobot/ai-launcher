@@ -157,6 +157,7 @@ import com.bobot.ailauncher.data.DeepLinkServiceReport
 import com.bobot.ailauncher.data.LlmCallResult
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
+import com.bobot.ailauncher.data.MarketGuide
 import com.bobot.ailauncher.data.UserIntentMapping
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -349,12 +350,16 @@ fun AppCenterContent(
     var showChooser by remember { mutableStateOf(false) }
     var chooserApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
     var lastLlmCapabilityId by remember { mutableStateOf<String?>(null) }
-    // 换句就清掉重试态（LLM 结果/选择器/加载态都只属于上一句）。
+    // 443（Bob 2026-11-07 下午）：大模型认出意图但本机没装对应应用时，
+    // 空态出应用市场指引，搜索词存在这里（null = 不出指引）。
+    var marketGuideTerm by remember { mutableStateOf<String?>(null) }
+    // 换句就清掉重试态（LLM 结果/选择器/加载态/市场指引都只属于上一句）。
     LaunchedEffect(filterQuery) {
         llmRetryResults = null
         showChooser = false
         retryLoading = false
         lastLlmCapabilityId = null
+        marketGuideTerm = null
     }
     val searchResults = remember(filterQuery, searchIndex, mappingVersion) {
         if (filterQuery.trim().isBlank()) null
@@ -766,8 +771,9 @@ fun AppCenterContent(
     // “有应用能打开，重试”：点一下，大模型再确认一次。复用“问助手”同一条
     // LLM 意图解析——LlmRouter.route，同端点、同 Key、同能力白名单；
     // 不经过 IntentCoordinator，因为那条路会离开应用中心回首页提交，
-    // 重试要留在应用中心出结果。认出意图→把该能力的已装应用列成结果；
-    // 仍认不出（"none"/报错/没配 Key）→进选应用。
+    // 重试要留在应用中心出结果。三支分流（MarketGuide.decideLlmRetry）：
+    // 认出意图且有已装提供方→列成结果；认出意图但一个都没装→应用市场
+    // 指引（443，不进选择器）；仍认不出（"none"/报错/没配 Key）→进选应用。
     fun onRetryClick() {
         if (retryLoading) return
         val q = filterQuery.trim()
@@ -797,25 +803,32 @@ fun AppCenterContent(
                         openChooser()
                     } else {
                         val cap = CapabilityRegistry.find(capId)
-                        val apps = cap?.let { c ->
-                            CapabilityResolution.effectiveProviders(c)
-                                .flatMap { p -> p.packageNames }
-                                .distinct()
-                                .mapNotNull { pkg ->
+                        val installedPkgs =
+                            searchIndex.map { it.app.packageName }.toSet()
+                        when (val outcome =
+                            MarketGuide.decideLlmRetry(cap, installedPkgs, q)) {
+                            is MarketGuide.LlmRetryOutcome.InstalledApps -> {
+                                val apps = outcome.packageNames.mapNotNull { pkg ->
                                     searchIndex.firstOrNull { it.app.packageName == pkg }?.app
                                 }
-                        }.orEmpty()
-                        if (apps.isNotEmpty()) {
-                            // 按使用频次排（同搜索排序口径：频次高的在前），
-                            // 声明序作稳定底。只列结果、不自动打开——
-                            // 用户再点一行，仍走 launchApp（深链照常带）。
-                            llmRetryResults = apps.sortedByDescending {
-                                AppUsageTracker.usageScoreForSearch(context, it.packageName)
+                                // 按使用频次排（同搜索排序口径：频次高的在前），
+                                // 声明序作稳定底。只列结果、不自动打开——
+                                // 用户再点一行，仍走 launchApp（深链照常带）。
+                                llmRetryResults = apps.sortedByDescending {
+                                    AppUsageTracker.usageScoreForSearch(context, it.packageName)
+                                }
+                                marketGuideTerm = null
+                                retryLoading = false
                             }
-                            retryLoading = false
-                        } else {
-                            retryLoading = false
-                            openChooser()
+                            is MarketGuide.LlmRetryOutcome.MarketGuide -> {
+                                llmRetryResults = null
+                                marketGuideTerm = outcome.searchTerm
+                                retryLoading = false
+                            }
+                            MarketGuide.LlmRetryOutcome.ChooseApp -> {
+                                retryLoading = false
+                                openChooser()
+                            }
                         }
                     }
                 }
@@ -824,6 +837,15 @@ fun AppCenterContent(
                     openChooser()
                 }
             }
+        }
+    }
+
+    // 443：点应用市场指引行——打开应用市场搜相关应用（先试本机商店的
+    // market://，没有再回退 Play 网页）；两条都打不开时 toast 一句。
+    fun onMarketGuideClick() {
+        val term = marketGuideTerm ?: return
+        if (!MarketGuide.openMarketSearch(context, term)) {
+            IslandToasts.show("打不开应用市场")
         }
     }
 
@@ -1203,6 +1225,9 @@ fun AppCenterContent(
                 showRetryPrompt = showRetryPrompt,
                 retryLoading = retryLoading,
                 onRetryClick = ::onRetryClick,
+                // 443：横屏空态市场指引——与竖屏同一状态、同一行。
+                marketGuideTerm = marketGuideTerm,
+                onMarketGuideClick = ::onMarketGuideClick,
                 onSearchFocusChanged = { intentFocused = it },
                 // 425 齿轮 morph：横屏复用竖屏同一 intentFocused（只读传入，不另起状态）
                 searchFocused = intentFocused,
@@ -1265,7 +1290,16 @@ fun AppCenterContent(
                                 // 反馈闭环（Bob 2026-11-06）：0 结果且意图没被识别时，
                                 // 在空态文案下给“有应用能打开，重试”——点一下大模型
                                 // 再确认一次。文案就是 Bob 给的话，不用内部词。
-                                if (showRetryPrompt) {
+                                // 443：大模型已认出意图、但本机没装对应应用时，
+                                // 重试行不再出现（再点也是同一结论），改出应用市场
+                                // 指引行——点一下去应用市场搜相关应用、自己安装。
+                                val guideTerm = marketGuideTerm
+                                if (guideTerm != null) {
+                                    MarketGuideRow(
+                                        term = guideTerm,
+                                        onClick = ::onMarketGuideClick
+                                    )
+                                } else if (showRetryPrompt) {
                                     FeedbackRetryRow(
                                         loading = retryLoading,
                                         onClick = ::onRetryClick
@@ -2242,6 +2276,46 @@ fun AppCenterContent(
                 }
             }
         }
+    }
+}
+
+/**
+ * 443·应用市场指引行（Bob 2026-11-07 下午：大模型认出意图、但本机没装
+ * 对应应用时，指引用户去应用市场自己安装）。
+ * 样式跟 FeedbackRetryRow 同一套（Footnote、Title 75%、Medium、金色 16dp
+ * 箭头、48dp 最小触控高），竖屏/横屏共用；文案只用用户听得懂的话，
+ * 不用“能力/提供方/映射”这类内部词。搜索词过长时一行省略。
+ */
+@Composable
+internal fun MarketGuideRow(
+    term: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "去应用市场搜「$term」",
+            fontSize = AILauncherType.Footnote.fontSize,
+            color = AILauncherColors.current.Title.copy(alpha = 0.75f),
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = null,
+            tint = AILauncherColors.current.Accent,
+            modifier = Modifier.size(16.dp)
+        )
     }
 }
 

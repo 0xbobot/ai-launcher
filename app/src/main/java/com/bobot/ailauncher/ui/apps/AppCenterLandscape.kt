@@ -133,6 +133,10 @@ fun AppCenterLandscape(
     showRetryPrompt: Boolean = false,
     retryLoading: Boolean = false,
     onRetryClick: () -> Unit = {},
+    // 443：横屏空态市场指引——调用点（AppCenter.kt）传入竖屏同一状态、
+    // 同一行（MarketGuideRow），横屏不另算、不另起状态。
+    marketGuideTerm: String? = null,
+    onMarketGuideClick: () -> Unit = {},
     // 与竖屏同一套焦点礼仪（v0.68.93）：焦点外报 + 范围捕获，
     // 供 AppCenter 根 Box 的点外部清焦观察者使用
     onSearchFocusChanged: (Boolean) -> Unit = {},
@@ -531,7 +535,15 @@ fun AppCenterLandscape(
                                             .padding(top = 32.dp)
                                     )
                                     // 反馈闭环（Bob 2026-11-06）：与竖屏同一行、同一口径。
-                                    if (showRetryPrompt) {
+                                    // 443：大模型已认出意图、但本机没装对应应用时，
+                                    // 重试行不再出现，改出应用市场指引行（同竖屏）。
+                                    val guideTerm = marketGuideTerm
+                                    if (guideTerm != null) {
+                                        MarketGuideRow(
+                                            term = guideTerm,
+                                            onClick = onMarketGuideClick
+                                        )
+                                    } else if (showRetryPrompt) {
                                         FeedbackRetryRow(
                                             loading = retryLoading,
                                             onClick = onRetryClick
