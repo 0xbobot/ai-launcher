@@ -158,7 +158,11 @@ import com.bobot.ailauncher.data.LlmCallResult
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.MarketGuide
+import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UserIntentMapping
+import com.bobot.ailauncher.data.deriveUnreadApps
+import com.bobot.ailauncher.data.groupAppsByLetter
+import com.bobot.ailauncher.data.withoutPkgs
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.pageTextureBackground
@@ -265,14 +269,22 @@ fun AppCenterContent(
     // 逐字一致：去自己/去隐藏 + Collator(CHINA) 排序）；装卸时快照在后台换代，
     // 结果到了才换表，组合期不再整表同步重建。
     val azApps = catalog?.visibleApps ?: emptyList()
+    // 未读组（Bob 2026-11-07 晚）：角标 > 0 的应用排到 A 前面最优先显示。
+    // badgeCounts 是角标计数口径（451：三路最大值），本批只读它，不改计数。
+    val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
+    val unreadApps = remember(azApps, badgeCounts) { deriveUnreadApps(azApps, badgeCounts) }
+    val unreadMemberPkgs = remember(unreadApps) { unreadApps.map { it.packageName }.toSet() }
+    val unreadVisible = unreadApps.isNotEmpty()
     // 折叠组（419）：不活跃集——可见 = azApps（已去隐藏、去自己）；共享规则
     // （AppUsageTracker.inactiveMembers：系统 UsageStats 优先，没授权退回
     // 自己记的＋首次见到宽限；固定位永远不进）。inactiveTick 由 launchApp
     // 在真实启动时 +1，逼出重组（否则回应用中心时 N 不刷新）。
     // 一键隐藏按钮的 N 与折叠组成员同源（同一规则、同一集合）。
     var inactiveTick by remember { mutableIntStateOf(0) }
-    val inactiveTargets = remember(azApps, dockTick, inactiveTick) {
-        AppUsageTracker.inactiveMembers(context, azApps)
+    val inactiveTargets = remember(azApps, dockTick, inactiveTick, unreadMemberPkgs) {
+        // 未读组：有角标的应用不进折叠组——未读消息即不算“不常用”，
+        // 只在未读组出现（与进组后从字母组移出同一做法）。
+        withoutPkgs(AppUsageTracker.inactiveMembers(context, azApps), unreadMemberPkgs)
     }
     // 折叠组（421 安静版）：本地态与持久化镜像——动作须当场见效（只写 prefs
     // 不触发重组，列表不会立刻变），故两态本地持有、动作时双写。
@@ -288,19 +300,17 @@ fun AppCenterContent(
     val foldMembers = if (foldSuppressed) emptyList() else inactiveTargets
     val foldVisible = foldMembers.isNotEmpty()
     val foldMemberPkgs = remember(foldMembers) { foldMembers.map { it.packageName }.toSet() }
-    val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps, foldMemberPkgs) {
-        val map = linkedMapOf<Char, MutableList<AppInfo>>()
+    val azGroups: List<Pair<Char, List<AppInfo>>> = remember(azApps, foldMemberPkgs, unreadMemberPkgs) {
         // 拼音首字母分组：用字典（20924 字），GB2312 区位码做兜底
         val pinyinOf: (Char) -> Char = { c ->
             val fromDict = AppSearchIndex.pinyinInitialOf(context, c)
             if (fromDict != '#') fromDict else pinyinInitial(c)
         }
-        val rest = if (foldMemberPkgs.isEmpty()) azApps
-            else azApps.filter { it.packageName !in foldMemberPkgs }
-        rest.forEach { app ->
-            map.getOrPut(groupKey(app.label, pinyinOf)) { mutableListOf() }.add(app)
-        }
-        map.toList().sortedWith(compareBy({ if (it.first == '#') 1 else 0 }, { it.first }))
+        // 进折叠组 / 未读组的应用从字母组移出（只在一处出现）；某字母
+        // 的应用全被移走时该字母组变空、rail 字母自动消失（与折叠组一致）。
+        val rest = if (foldMemberPkgs.isEmpty() && unreadMemberPkgs.isEmpty()) azApps
+            else azApps.filter { it.packageName !in foldMemberPkgs && it.packageName !in unreadMemberPkgs }
+        groupAppsByLetter(rest) { app -> groupKey(app.label, pinyinOf) }
     }
     // Bob 2026-11-03 回滚：字母导航回 409 加过滤前——letters 只取 azGroups
     // （有应用字母集），不再跟搜索结果走；搜索态 rail 按上一条已隐藏
@@ -403,9 +413,14 @@ fun AppCenterContent(
     // Bob 2026-11-03 回滚：锚点回 409 加过滤前——只按完整列表算
     // （Dock 分区在前、每组＋1 组间呼吸），不再跟搜索结果走
     // 前移到搜索 effect 之前：取消输入态的落点（下）要读它
-    val letterAnchors = remember(azGroups, dockSectionSize) {
+    // 未读组段占位：组头 1 项＋ N 行＋组间呼吸 1 项（始终展开、无组底行）；
+    // N==0 时不占位。未读段在 Dock 分区之后、A 组之前，字母锚点随之
+    // 后移，折叠/隐藏段锚点亦然。
+    val unreadSectionSize = if (unreadVisible) unreadApps.size + 2 else 0
+    val unreadHeaderIndex = dockSectionSize
+    val letterAnchors = remember(azGroups, dockSectionSize, unreadSectionSize) {
         val m = mutableMapOf<Char, Int>()
-        var idx = dockSectionSize // v0.41.31：Dock 分区在前，字母锚点后移
+        var idx = dockSectionSize + unreadSectionSize // v0.41.31：Dock 分区在前，字母锚点后移；未读段又占一段
         azGroups.forEach { (letter, apps) ->
             m[letter] = idx
             idx += apps.size + 1
@@ -425,15 +440,17 @@ fun AppCenterContent(
             hadSearched = true
             listState.scrollToItem(0)
         } else if (hadSearched) {
-            // 取消输入态后统一落到 A 组（Bob 2026-11-05）：不再恢复进入前
+            // 取消输入态后统一落到列表顶（Bob 2026-11-05）：不再恢复进入前
             // 位置。进入前位置常是 0——首帧 catalog 为空时默认定位到 A
             // 的一次滚动被空耗（见下 dockInitialScrollDone），列表停在
             // 收藏区，savedListPosition 记下 0，恢复即落到收藏。
+            // 未读组在则落未读组、否则落 A（437 的“落 A”改成“第一组”）。
             // A 组没有时退到首个字母组，再没有才退回进入前位置。
-            val aAnchor = letterAnchors['A']
-                ?: letterAnchors[letters.firstOrNull()]
-                ?: savedListPosition
-            listState.scrollToItem(aAnchor)
+            val firstAnchor = if (unreadVisible) unreadHeaderIndex
+                else letterAnchors['A']
+                    ?: letterAnchors[letters.firstOrNull()]
+                    ?: savedListPosition
+            listState.scrollToItem(firstAnchor)
         }
     }
 
@@ -446,7 +463,7 @@ fun AppCenterContent(
     // 组间呼吸 1 项；收起 2 项、展开 3＋N 项；压制或 N==0 时不占位。
     // 隐藏段锚点随之移位。
     val foldSectionSize = if (foldVisible) (if (foldExpandedState) 3 + foldMembers.size else 2) else 0
-    val foldHeaderIndex = dockSectionSize + azTotalItems
+    val foldHeaderIndex = dockSectionSize + unreadSectionSize + azTotalItems
     val hiddenHeaderIndex = foldHeaderIndex + foldSectionSize
 
     // v0.67.13（Bob）：主屏 picker 连续驱动——手指不松开时持续跟随滚动
@@ -619,15 +636,23 @@ fun AppCenterContent(
         }
     }
     // v0.41.31：Dock 悬停被 A 顶走（与字母顶走逻辑一致）
-    val dockPushPx: Float by remember(dockApps, azGroups) {
+    val dockPushPx: Float by remember(dockApps, azGroups, unreadVisible, unreadHeaderIndex) {
         derivedStateOf {
             if (!stuckDock) return@derivedStateOf 0f
             @Suppress("UNUSED_EXPRESSION")
             listState.firstVisibleItemScrollOffset
-            val firstLetter = letters.firstOrNull() ?: return@derivedStateOf 0f
-            val anchor = letterAnchors[firstLetter] ?: return@derivedStateOf 0f
-            val vis = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == anchor }
-            val off = vis?.offset?.toFloat() ?: return@derivedStateOf 0f
+            // 未读组在时，Dock 悬停由未读组头顶走（未读组紧跟 Dock 之后）；
+            // 否则仍由首个字母组顶走（旧口径）。
+            val off = if (unreadVisible) {
+                listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.index == unreadHeaderIndex }
+                    ?.offset?.toFloat() ?: return@derivedStateOf 0f
+            } else {
+                val firstLetter = letters.firstOrNull() ?: return@derivedStateOf 0f
+                val anchor = letterAnchors[firstLetter] ?: return@derivedStateOf 0f
+                listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == anchor }
+                    ?.offset?.toFloat() ?: return@derivedStateOf 0f
+            }
             val pushZonePx = with(density) { 48.dp.toPx() }
             if (off < pushZonePx) off - pushZonePx else 0f
         }
@@ -663,17 +688,60 @@ fun AppCenterContent(
         animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
         label = "stuckFoldAlpha"
     )
+    // 未读组：未读段幽灵——组头刚开始滚出就接管（427，同字母/折叠），
+    // 直到滚出未读段；与 stuckFold 同理（组头已走＋段内仍有可见项）。
+    val stuckUnread: Boolean by remember(unreadVisible, unreadHeaderIndex) {
+        derivedStateOf {
+            if (!unreadVisible) return@derivedStateOf false
+            val vis = listState.layoutInfo.visibleItemsInfo
+            val first = vis.firstOrNull { it.key == "unread-header" }
+            val firstGone = first == null || first.offset < 0
+            val unreadInView = vis.any {
+                it.key == "unread-header" || it.key == "sp:unread" ||
+                    (it.key is String && (it.key as String).startsWith("u:"))
+            }
+            firstGone && unreadInView
+        }
+    }
+    // 未读组：未读幽灵被首个字母组顶走（与 Dock 幽灵被 A 顶走同逻辑）；
+    // 无字母组时不顶（幽灵随滚出自然消失）。
+    val unreadPushPx: Float by remember(unreadVisible, letters) {
+        derivedStateOf {
+            if (!stuckUnread) return@derivedStateOf 0f
+            @Suppress("UNUSED_EXPRESSION")
+            listState.firstVisibleItemScrollOffset
+            val firstLetter = letters.firstOrNull() ?: return@derivedStateOf 0f
+            val anchor = letterAnchors[firstLetter] ?: return@derivedStateOf 0f
+            val off = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.index == anchor }
+                ?.offset?.toFloat() ?: return@derivedStateOf 0f
+            val pushZonePx = with(density) { 48.dp.toPx() }
+            if (off < pushZonePx) off - pushZonePx else 0f
+        }
+    }
+    val animatedUnreadPushPx by animateFloatAsState(
+        targetValue = unreadPushPx,
+        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
+        label = "unreadPush"
+    )
+    val stuckUnreadAlpha by animateFloatAsState(
+        targetValue = if (stuckUnread) 1f else 0f,
+        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
+        label = "stuckUnreadAlpha"
+    )
     // v0.41.31（Bob）：打开应用中心默认从 A（首个字母组）开始，不显示 Dock 分区；
     // 除非用户点 rail ★ 才去看 Dock
     var dockInitialScrollDone by remember { mutableStateOf(false) }
-    LaunchedEffect(letterAnchors) {
-        if (!dockInitialScrollDone && letters.firstOrNull() != null) {
+    LaunchedEffect(letterAnchors, unreadVisible) {
+        if (!dockInitialScrollDone && (letters.firstOrNull() != null || unreadVisible)) {
             // 只有字母组就绪时才消耗一次定位；首帧 catalog 为空（快照在
             // IO 构建，AppCatalog.snapshot 初值 null）时不消耗，等 catalog
-            // 到位、letterAnchors 变化后再定位到 A——否则一次定位被空耗，
+            // 到位、letterAnchors 变化后再定位——否则一次定位被空耗，
             // 列表停在收藏区（item 0），搜索开始时 savedListPosition 记下 0。
+            // 打开应用中心默认落在列表顶：未读组在则未读组、否则 A。
             dockInitialScrollDone = true
-            val firstAnchor = letterAnchors[letters.firstOrNull()] ?: 0
+            val firstAnchor = if (unreadVisible) unreadHeaderIndex
+                else letterAnchors[letters.firstOrNull()] ?: 0
             if (firstAnchor > 0) listState.scrollToItem(firstAnchor)
         }
     }
@@ -1178,6 +1246,9 @@ fun AppCenterContent(
                 // 折叠组（419/421）：状态由调用点传入（横屏不另起一套）；
                 // foldMembers 已含压制与 N>0 门，横屏直接用。
                 foldApps = foldMembers,
+                // 未读组：状态由调用点传入（横屏不另起一套）；unreadApps
+                // 已按未读数排好序、含 N>0 门，横屏直接用。
+                unreadApps = unreadApps,
                 foldExpanded = foldExpandedState,
                 onToggleFold = {
                     val next = !foldExpandedState
@@ -1556,6 +1627,83 @@ fun AppCenterContent(
                             )
                         )
                     }
+                }
+                // 未读组（Bob 2026-11-07 晚）：A 组之前最优先；始终展开、不折叠；
+                // 组头“未读 · N 个”对齐折叠组“不常用 · N 个”样式（BodyLarge、
+                // Title 色、无 chevron、不可点）；行复用 AppRow（角标照常画、
+                // 长按菜单与生长式展开都在），组内按未读数从大到小排；
+                // N==0 时整组不出现，列表仍从 A 开始。搜索态不走这里（搜索
+                // 结果分支在上），取消搜索后落点见 LaunchedEffect(searching)。
+                if (unreadVisible) {
+                    item(key = "unread-header") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 72.dp, end = 64.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "未读 · ${unreadApps.size} 个",
+                                fontSize = AILauncherType.BodyLarge.fontSize,
+                                color = AILauncherColors.current.Title,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    itemsIndexed(unreadApps, key = { _, app -> "u:${app.packageName}" }) { _, app ->
+                        Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
+                            // 未读组内无幽灵字母（不是字母组）；行结构与 A-Z 行一致
+                            val isPopupExpandedX = popupApp?.packageName == app.packageName
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 72.dp, end = 64.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(
+                                        if (isPopupExpandedX) AILauncherColors.current.Card
+                                        else Color.Transparent
+                                    )
+                            ) {
+                                AppRow(
+                                    app = app,
+                                    onLaunch = { launchApp(app) },
+                                    compact = true,
+                                    onLongClick = {
+                                        hapticView.confirmHaptic()
+                                        popupApp = app
+                                    },
+                                    showInfoIcon = isPopupExpandedX,
+                                    onInfoClick = {
+                                        openAppDetailsPage(context, app.packageName)
+                                        popupApp = null
+                                    },
+                                    onHide = ::hideApp,
+                                    actionsVisible = expandedActionsPkg == app.packageName,
+                                    onActionsVisibleChange = { expanded ->
+                                        expandedActionsPkg =
+                                            if (expanded) app.packageName
+                                            else if (expandedActionsPkg == app.packageName) null
+                                            else expandedActionsPkg
+                                    }
+                                )
+                                AnimatedVisibility(
+                                    visible = isPopupExpandedX,
+                                    enter = expandVertically() +
+                                        fadeIn(),
+                                    exit = shrinkVertically() +
+                                        fadeOut()
+                                ) {
+                                    AppShortcutInline(
+                                        app = app,
+                                        onDismiss = { popupApp = null }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    item(key = "sp:unread") { Spacer(modifier = Modifier.height(16.dp)) }
                 }
                 azGroups.forEach { (letter, apps) ->
                     itemsIndexed(apps, key = { _, app -> "a:${app.packageName}" }) { index, app ->
@@ -2001,6 +2149,18 @@ fun AppCenterContent(
                             .padding(start = 24.dp, top = 16.dp)
                             .offset { IntOffset(0, animatedFoldPushPx.roundToInt()) }
                     )
+                } else if (stuckUnread) {
+                    // 未读组：未读段悬停——“未读”文字（同折叠组“不常用”口径，
+                    // Callout 档塞进幽灵留白）
+                    Text(
+                        text = "未读",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Title.copy(alpha = 0.35f * stuckUnreadAlpha),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 24.dp, top = 16.dp)
+                            .offset { IntOffset(0, animatedUnreadPushPx.roundToInt()) }
+                    )
                 } else if (sl != null && !isLandscapeAc) {
                     Text(
                         text = sl.toString(),
@@ -2027,7 +2187,7 @@ fun AppCenterContent(
             // 同在此门内，一并隐藏；搜索结束恢复全量字母
             // 折叠组（419）：字母全被折掉时 rail 仍可达折叠专位（否则 Fold
             // 专位在恰恰需要它时不可达）；空目录时 letters 与 fold 皆空，门仍关。
-            if ((letters.isNotEmpty() || foldVisible) && homeTarget == null && searchResults == null) {
+            if ((letters.isNotEmpty() || foldVisible || unreadVisible) && homeTarget == null && searchResults == null) {
                 // 左侧隐形区触发时，右侧可见 rail 跟随显示波浪
                 var mirrorIndex by remember { mutableStateOf<Int?>(null) }
                 // Niagara 做法：直接滚完整列表，不做内容过滤；松手时列表本来就在位置上，零位移
@@ -2095,8 +2255,8 @@ fun AppCenterContent(
                 // buildRailItems（RailItems.kt），构造与此前逐字一致，仅换调用。
                 // Bob 2026-11-03 回滚：👁 门回 409 加过滤前——只看隐藏分区非空
                 // （搜索态 rail 按上一条已隐藏，此门不再区分搜索态）
-                val railItems = remember(dockApps, letters, hiddenApps, foldVisible) {
-                    buildRailItems(dockApps.isNotEmpty(), letters, hiddenApps.isNotEmpty(), hasFold = foldVisible)
+                val railItems = remember(dockApps, letters, hiddenApps, foldVisible, unreadVisible) {
+                    buildRailItems(dockApps.isNotEmpty(), letters, hiddenApps.isNotEmpty(), hasFold = foldVisible, hasUnread = unreadVisible)
                 }
                 // 收藏/隐藏时的脉冲目标
                 val pulseItem = when (flashTarget) {
@@ -2114,6 +2274,8 @@ fun AppCenterContent(
                         is RailItem.Eye -> scope.launch { listState.scrollToItem(hiddenHeaderIndex) }
                         // 折叠组（419）：收纳盒专位 → 折叠组头锚点
                         is RailItem.Fold -> scope.launch { listState.scrollToItem(foldHeaderIndex) }
+                        // 未读组：信封专位 → 未读组头锚点
+                        is RailItem.Unread -> scope.launch { listState.scrollToItem(unreadHeaderIndex) }
                         is RailItem.Letter -> glideToLetter(item.char)
                         is RailItem.Separator -> {}
                     }

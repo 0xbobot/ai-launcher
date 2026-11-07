@@ -109,6 +109,9 @@ fun AppCenterLandscape(
     // foldApps 已含压制与 N>0 门，横屏直接用。
     foldApps: List<AppInfo> = emptyList(),
     foldExpanded: Boolean = false,
+    // 未读组（Bob 2026-11-07 晚）：状态由调用点传入（竖屏同款，不得另起一套）；
+    // unreadApps 已按未读数排好序、含 N>0 门，横屏直接用。
+    unreadApps: List<AppInfo> = emptyList(),
     onToggleFold: () -> Unit = {},
     // 折叠组（421 安静版）：组底“取消折叠”——调用点传入竖屏同一双写逻辑。
     onUnfold: () -> Unit = {},
@@ -212,7 +215,7 @@ fun AppCenterLandscape(
         // v0.68.75（Bob）：收藏放最前、隐藏放最后，核心功能不能丢
         // hiddenUnlocked 必须进 key：解锁前后隐藏列形态不同（锁定占位 ↔
         // 应用列），否则解锁后列流不重建。
-        val columns = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, rowsPerCol) {
+        val columns = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, unreadApps, rowsPerCol) {
             val cols = mutableListOf<MutableList<FlowItem>>()
             var cur = mutableListOf<FlowItem>()
             fun colCap(): Int = rowsPerCol
@@ -226,6 +229,21 @@ fun AppCenterLandscape(
                 var cap = colCap() - 1
                 var count = 0
                 favApps.forEach { app ->
+                    if (count >= cap) {
+                        flush(); cap = colCap(); count = 0
+                    }
+                    cur.add(FlowItem.App(app)); count++
+                }
+            }
+            // 未读组（Bob 2026-11-07 晚）：收藏之后、A 组之前最优先；始终展开、
+            // 不折叠；区头“未读 · N 个”同收藏/隐藏区头样式，组内应用按列流续排。
+            // 搜索态不走列流，未读组不参与。
+            if (unreadApps.isNotEmpty()) {
+                flush()
+                cur.add(FlowItem.SectionHeader("未读 · ${unreadApps.size} 个"))
+                var cap = colCap() - 1
+                var count = 0
+                unreadApps.forEach { app ->
                     if (count >= cap) {
                         flush(); cap = colCap(); count = 0
                     }
@@ -313,6 +331,12 @@ fun AppCenterLandscape(
             columns.indexOfFirst { col -> col.any { it is FlowItem.FoldHeader } }
                 .takeIf { it >= 0 }
         }
+        // 未读组：信封专位 → 未读区头所在列
+        val unreadColIdx = remember(columns) {
+            columns.indexOfFirst { col ->
+                col.any { it is FlowItem.SectionHeader && it.title.startsWith("未读") }
+            }.takeIf { it >= 0 }
+        }
 
         fun scrollToLetter(letter: Char) {
             letterToCol[letter]?.let { idx ->
@@ -320,14 +344,28 @@ fun AppCenterLandscape(
             }
         }
 
-        // 初始从首个有应用的字母开始（Bob 2026-10-24 + 字母 B 方案）：
-        // 只在首次进入且非搜索态时定位一次到首个有应用的字母列（A 有
-        // 应用时就是 A 列）；收藏列仍在，点 ★ 回去。守卫保证不与用户
-        // 后续滚动打架、不影响搜索态。
+        // 初始落在列表顶（Bob 2026-10-24 + 字母 B 方案 + 未读组）：
+        // 只在首次进入且非搜索态时定位一次——未读组在则未读列、否则首个
+        // 有应用的字母列（A 有应用时就是 A 列）；收藏列仍在，点 ★ 回去。
+        // 守卫保证不与用户后续滚动打架、不影响搜索态。
         LaunchedEffect(columns, searchResults) {
             if (!initialScrollDone && searchResults == null) {
                 initialScrollDone = true
-                val target = ('A'..'Z').firstNotNullOfOrNull { letterToCol[it] }
+                val target = unreadColIdx
+                    ?: ('A'..'Z').firstNotNullOfOrNull { letterToCol[it] }
+                if (target != null) rowState.scrollToItem(target)
+            }
+        }
+
+        // 取消搜索后落到列表顶：未读组在则未读列、否则首个字母列（同竖屏
+        // 437 口径改后；此前横屏取消搜索后停在进入前位置，与竖屏不一致）。
+        var hadSearched by remember { mutableStateOf(false) }
+        LaunchedEffect(searchResults) {
+            if (searchResults != null) {
+                hadSearched = true
+            } else if (hadSearched) {
+                val target = unreadColIdx
+                    ?: ('A'..'Z').firstNotNullOfOrNull { letterToCol[it] }
                 if (target != null) rowState.scrollToItem(target)
             }
         }
@@ -759,8 +797,8 @@ fun AppCenterLandscape(
                 // buildRailItems（RailItems.kt），构造与此前逐字一致，仅换调用；
                 // letters 即调用点按 azGroups 派生的有应用字母集（与竖屏同源）。
                 // Bob 2026-11-03 回滚：👁 门回 409 加过滤前——只看隐藏分区非空
-                items = remember(favApps, hiddenApps, letters, foldApps) {
-                    buildRailItems(favApps.isNotEmpty(), letters, hiddenApps.isNotEmpty(), hasFold = foldApps.isNotEmpty())
+                items = remember(favApps, hiddenApps, letters, foldApps, unreadApps) {
+                    buildRailItems(favApps.isNotEmpty(), letters, hiddenApps.isNotEmpty(), hasFold = foldApps.isNotEmpty(), hasUnread = unreadApps.isNotEmpty())
                 },
                 onActiveItem = { item ->
                     when (item) {
@@ -796,6 +834,12 @@ fun AppCenterLandscape(
                         // 折叠组（419）：收纳盒专位 → 折叠区头所在列
                         is RailItem.Fold -> {
                             foldColIdx?.let { idx ->
+                                scope.launch { rowState.animateScrollToItem(idx) }
+                            }
+                        }
+                        // 未读组：信封专位 → 未读区头所在列
+                        is RailItem.Unread -> {
+                            unreadColIdx?.let { idx ->
                                 scope.launch { rowState.animateScrollToItem(idx) }
                             }
                         }
