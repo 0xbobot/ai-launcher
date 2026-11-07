@@ -39,6 +39,7 @@ object AILauncherColors {
         val Accent: Color = Color(0xFFC9A227)      // sparkle 金（深浅通用）
         val AccentSoft: Color = if (isDark) Color(0xFF3A3226) else Color(0xFFF6ECD4)
         val Success: Color = Color(0xFF4C9A52)     // 成功绿（深浅通用）
+        val Alert: Color = Color(0xFFE5484D)       // 未读角标红（深浅通用）
         val Divider: Color = if (isDark) Color(0xFF3A362F) else Color(0xFFE8E2D9)
 
         // ---- 玻璃拟态（v0.11）：半透明底色 + 系统壁纸透出；API 31+ 叠加 Window 真实背景模糊 ----
