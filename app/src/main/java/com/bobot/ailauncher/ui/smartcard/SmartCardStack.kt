@@ -51,6 +51,11 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.bobot.ailauncher.data.connectedGuideCard
+import com.bobot.ailauncher.data.connectorKeyForGuideId
+import com.bobot.ailauncher.data.guideCards
+import com.bobot.ailauncher.data.guideIdsForConnector
+import com.bobot.ailauncher.data.isGuideConnectorGranted
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SmartCard
 import com.bobot.ailauncher.data.SmartCardAction
@@ -64,12 +69,17 @@ import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.settings.OnGrantedTransition
+import com.bobot.ailauncher.ui.settings.isCalendarGranted
+import com.bobot.ailauncher.ui.settings.isContactsGranted
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.settings.isSmsGranted
 import com.bobot.ailauncher.ui.settings.openNotificationSettings
+import com.bobot.ailauncher.ui.settings.rememberCalendarPermissionOpener
+import com.bobot.ailauncher.ui.settings.rememberContactsPermissionOpener
 import com.bobot.ailauncher.ui.settings.rememberPermissionState
 import com.bobot.ailauncher.ui.settings.rememberSmsPermissionOpener
 import com.bobot.ailauncher.util.rebindListener
+import kotlinx.coroutines.delay
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.MotionTokens
@@ -92,11 +102,14 @@ import kotlin.math.abs
  * 走已有的深链/启动路径直接执行）。忽略真卡片即记处理完（截止点前不再
  * 出现）；忽略引导卡即永久记下这张（不是滑走，滑走只是本轮沉底）。
  *
- * 引导卡片（设计稿 §4.7，448）：真卡片为空、且引导还没看过时，叠层位置
- * 出现一叠引导卡片（而不是空着），只出现一次。点 × 整叠消失、不再出现；
- * 一张张滑过去看完也记一次；点“连接”走 §5 流程（消息先显著披露再弹
- * 系统框，通知跳系统设置页）；接上来源后对应引导卡消失，有真事项时真
- * 卡片顶掉整叠引导卡。文案 v2（449）：先讲为什么，再讲要连接哪个来源。
+ * 引导卡片（设计稿 §4.7，448；v3 按权限重做，455）：真卡片为空、且引导
+ * 还没看过时，叠层位置出现一叠引导卡片（而不是空着），只出现一次。
+ * 按权限分五张（消息、通知、日历、联系人、电话拨号器）；点 × 整叠消失、
+ * 不再出现；一张张滑过去看完也记一次；点“连接”走 §5 流程（消息/联系人
+ * 先显著披露再弹系统框，日历直接弹，通知跳系统设置页）；接上某个权限后
+ * 对应卡先显示“已连接”＋接下来会发生什么（3 秒）再消失，其他引导卡
+ * 留着；有真事项时真卡片顶掉整叠引导卡。文案 v3：每张讲三件事——这是
+ * 什么、为什么要连、连上之后会发生什么。
  */
 @Composable
 fun SmartCardStackHost() {
@@ -127,7 +140,11 @@ fun SmartCardStackHost() {
     val smsGranted = rememberPermissionState { isSmsGranted(context) }
     val notificationGranted =
         rememberPermissionState { isNotificationAccessGranted(context) }
+    val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
+    val contactsGranted = rememberPermissionState { isContactsGranted(context) }
     val openSms = rememberSmsPermissionOpener(smsGranted)
+    val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
+    val openContacts = rememberContactsPermissionOpener(contactsGranted)
     // 消息刚接上就立即重读短信（不然真卡片要等下次回桌面才出现、顶不掉引导卡）
     OnGrantedTransition(smsGranted.value) {
         SmartCardRepository.refreshSms(context, force = true)
@@ -155,32 +172,103 @@ fun SmartCardStackHost() {
     var dismissedGuideIds by remember {
         mutableStateOf(SmartCardRepository.dismissedGuideIds(context))
     }
-    var guideDisclosure by remember { mutableStateOf(false) }
+    // 显著披露要针对哪个连接器（消息/联系人先讲清再弹系统框，日历直接弹、
+    // 通知/电话拨号器跳系统设置页）；null＝没在弹。
+    var disclosureConnector by remember { mutableStateOf<String?>(null) }
+    // 用户在叠层里点了“继续”的卡（等授权结果）；接上后先显示“已连接”
+    // 反馈再离开。只对“用户在叠层里点了继续”的卡给反馈；在设置里接上
+    // 的权限，其卡片直接消失、不补反馈。
+    var pendingConnectIds by remember { mutableStateOf(setOf<String>()) }
+    // 正在显示“已连接”反馈的卡（3 秒后离开）。
+    var connectedIds by remember { mutableStateOf(setOf<String>()) }
     val guides = visibleGuideCards(
         messageGranted = smsGranted.value,
         notificationGranted = notificationGranted.value,
+        calendarGranted = calendarGranted.value,
+        contactsGranted = contactsGranted.value,
         swipedIds = swipedGuideIds,
         dismissedIds = dismissedGuideIds
     )
-    // 没什么可引导的（来源都已接上，或全部滑完了/忽略完了）即记一次，不再弹
-    LaunchedEffect(guides.isEmpty(), guideSeen) {
-        if (guides.isEmpty() && !guideSeen) {
+    // 接上某个权限后，对应引导卡先显示“已连接”＋接下来会发生什么（3 秒），
+    // 再消失——用户点了连接不能是懵的（设计稿 §4.7 v3）。
+    LaunchedEffect(
+        smsGranted.value, notificationGranted.value,
+        calendarGranted.value, contactsGranted.value
+    ) {
+        val newly = pendingConnectIds.filter { id ->
+            val key = connectorKeyForGuideId(id) ?: return@filter false
+            isGuideConnectorGranted(
+                key,
+                smsGranted.value, notificationGranted.value,
+                calendarGranted.value, contactsGranted.value
+            )
+        }
+        if (newly.isNotEmpty()) {
+            pendingConnectIds -= newly.toSet()
+            connectedIds += newly.toSet()
+        }
+    }
+    // “已连接”反馈停留 3 秒后离开（记永久忽略，不再出现）。
+    LaunchedEffect(connectedIds) {
+        if (connectedIds.isNotEmpty()) {
+            delay(3000)
+            val leaving = connectedIds
+            leaving.forEach { id ->
+                guideCards().find { it.id == id }?.let {
+                    SmartCardRepository.dismissGuideCard(context, it)
+                }
+            }
+            dismissedGuideIds += leaving
+            connectedIds = emptySet()
+        }
+    }
+    val connectedCards = guideCards()
+        .filter { it.id in connectedIds }
+        .map { connectedGuideCard(it) }
+    // 反馈卡排在最前面（刚接上的事立刻看得见），其余引导卡留着。
+    val displayed = connectedCards + guides
+    // 叠层空下来才记一次（看完、忽略完、或全部接上且反馈已给完）：整叠只在
+    // 首次出现。注意不要按 guides.isEmpty() 记——接上最后一个权限时 guides
+    // 先空、反馈卡还在显示，那时记下会把反馈也吞掉（452 的问题：连一个
+    // 权限整叠全消失，根因有二：①已接上的权限被静默过滤——Bob 设备上通知
+    // 在 452 测试前已接上，首屏只剩两张消息卡，连上消息即清空；②这行 latch
+    // 在引导列表一空就记 guide_seen，全程没有任何反馈，用户点了连接是懵的）。
+    LaunchedEffect(displayed.isEmpty(), guideSeen) {
+        if (displayed.isEmpty() && !guideSeen) {
             SmartCardRepository.markGuideSeen(context)
             guideSeen = true
         }
     }
-    if (guideSeen || guides.isEmpty()) return
+    if (guideSeen || displayed.isEmpty()) return
     SmartCardStack(
-        cards = guides,
+        cards = displayed,
+        connectedIds = connectedIds,
         onAction = { card ->
-            when ((card.action as? SmartCardAction.Connect)?.connectorKey) {
-                UiPrefs.CONNECTOR_MESSAGE -> guideDisclosure = true
-                UiPrefs.CONNECTOR_NOTIFICATION -> openNotificationSettings(context)
+            val key = (card.action as? SmartCardAction.Connect)?.connectorKey
+                ?: return@SmartCardStack true
+            pendingConnectIds += card.id
+            when (key) {
+                UiPrefs.CONNECTOR_MESSAGE ->
+                    disclosureConnector = UiPrefs.CONNECTOR_MESSAGE
+                UiPrefs.CONNECTOR_CONTACTS ->
+                    disclosureConnector = UiPrefs.CONNECTOR_CONTACTS
+                UiPrefs.CONNECTOR_CALENDAR -> openCalendar()
+                UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
+                    openNotificationSettings(context)
                 else -> Unit
             }
             true
         },
-        onSkip = { card -> swipedGuideIds += card.id },
+        onSkip = { card ->
+            if (card.id in connectedIds) {
+                // 滑走“已连接”反馈卡＝直接记永久忽略，不再出现
+                SmartCardRepository.dismissGuideCard(context, card)
+                dismissedGuideIds += card.id
+                connectedIds -= card.id
+            } else {
+                swipedGuideIds += card.id
+            }
+        },
         onIgnore = { card ->
             SmartCardRepository.dismissGuideCard(context, card)
             dismissedGuideIds += card.id
@@ -190,11 +278,16 @@ fun SmartCardStackHost() {
             guideSeen = true
         }
     )
-    if (guideDisclosure) {
-        // 显著披露（§5.4，同设置页“接上消息”原文）：先讲清要什么、为什么，
-        // 用户点“同意”后再弹系统框；不要另起一套。
+    // 显著披露（§5.4，同设置页原文）：先讲清要什么、为什么，用户点
+    // “同意”后再弹系统框；不要另起一套。点“取消”或划掉＝这次不连，
+    // 对应卡片留在叠层里（pending 清掉，不给“已连接”反馈）。
+    fun cancelDisclosure(key: String) {
+        disclosureConnector = null
+        pendingConnectIds -= guideIdsForConnector(key).toSet()
+    }
+    if (disclosureConnector == UiPrefs.CONNECTOR_MESSAGE) {
         AlertDialog(
-            onDismissRequest = { guideDisclosure = false },
+            onDismissRequest = { cancelDisclosure(UiPrefs.CONNECTOR_MESSAGE) },
             title = {
                 Text(
                     text = "接上消息",
@@ -211,7 +304,10 @@ fun SmartCardStackHost() {
                 )
             },
             confirmButton = {
-                TextButton(onClick = { guideDisclosure = false; openSms() }) {
+                TextButton(onClick = {
+                    disclosureConnector = null
+                    openSms()
+                }) {
                     Text(
                         text = "同意",
                         fontSize = AILauncherType.Callout.fontSize,
@@ -221,7 +317,53 @@ fun SmartCardStackHost() {
                 }
             },
             dismissButton = {
-                TextButton(onClick = { guideDisclosure = false }) {
+                TextButton(onClick = {
+                    cancelDisclosure(UiPrefs.CONNECTOR_MESSAGE)
+                }) {
+                    Text(
+                        text = "取消",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Hint
+                    )
+                }
+            }
+        )
+    }
+    if (disclosureConnector == UiPrefs.CONNECTOR_CONTACTS) {
+        AlertDialog(
+            onDismissRequest = { cancelDisclosure(UiPrefs.CONNECTOR_CONTACTS) },
+            title = {
+                Text(
+                    text = "接上联系人",
+                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title
+                )
+            },
+            text = {
+                Text(
+                    text = "要把未接来电的号码显示成名字。只按号码查姓名，不读其他联系人信息。",
+                    fontSize = AILauncherType.Body.fontSize,
+                    color = AILauncherColors.current.Body
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    disclosureConnector = null
+                    openContacts()
+                }) {
+                    Text(
+                        text = "同意",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Accent,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    cancelDisclosure(UiPrefs.CONNECTOR_CONTACTS)
+                }) {
                     Text(
                         text = "取消",
                         fontSize = AILauncherType.Callout.fontSize,
@@ -260,7 +402,10 @@ fun SmartCardStack(
     onSkip: (SmartCard) -> Unit,
     onIgnore: (SmartCard) -> Unit,
     modifier: Modifier = Modifier,
-    onClose: (() -> Unit)? = null
+    onClose: (() -> Unit)? = null,
+    // 正在显示“已连接”反馈的卡：不画动作行（没有“连接”可点），
+    // 只显示“已连接”＋接下来会发生什么。
+    connectedIds: Set<String> = emptySet()
 ) {
     if (cards.isEmpty()) return
     val top = cards[0]
@@ -287,6 +432,7 @@ fun SmartCardStack(
                             onSkip = onSkip,
                             onIgnore = onIgnore,
                             onClose = onClose,
+                            hideActionRow = top.id in connectedIds,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("smart_card_top")
@@ -303,6 +449,7 @@ fun SmartCardStack(
                                 onActionClick = {},
                                 onIgnoreClick = {},
                                 onCloseClick = null,
+                                hideActionRow = card.id in connectedIds,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .graphicsLayer {
@@ -358,7 +505,8 @@ private fun TopSmartCard(
     onSkip: (SmartCard) -> Unit,
     onIgnore: (SmartCard) -> Unit,
     onClose: (() -> Unit)?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    hideActionRow: Boolean = false
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -374,6 +522,7 @@ private fun TopSmartCard(
         onActionClick = { onAction(card) },
         onIgnoreClick = { onIgnore(card) },
         onCloseClick = onClose,
+        hideActionRow = hideActionRow,
         modifier = modifier
             .graphicsLayer {
                 translationX = offsetX.value
@@ -448,7 +597,10 @@ private fun SmartCardView(
     onActionClick: () -> Unit,
     onIgnoreClick: () -> Unit,
     onCloseClick: (() -> Unit)?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // “已连接”反馈卡：不画动作行（忽略/连接两个按钮与露边提示都不画），
+    // 只留来源标签＋“已连接”＋接下来会发生什么。
+    hideActionRow: Boolean = false
 ) {
     val shape = RoundedCornerShape(20.dp)
     Column(
@@ -513,49 +665,51 @@ private fun SmartCardView(
                 lineHeight = AILauncherType.Footnote.lineHeight
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (showAction) {
-                // 忽略：我知道了，卡片消失、不再出现、不追问（设计稿 §4.2）
-                TextButton(
-                    onClick = onIgnoreClick,
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) {
-                    Text(
-                        text = "忽略",
-                        fontSize = AILauncherType.Callout.fontSize,
-                        fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.current.Hint
-                    )
-                }
-                // 继续：卡片定义的下一步动作（去还款 / 回拨 / 看预约 /
-                // 查看；引导卡是“连接”）。金色只留主操作（去 AI 味四条）。
-                TextButton(
-                    onClick = onActionClick,
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) {
+        if (!hideActionRow) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (showAction) {
+                    // 忽略：我知道了，卡片消失、不再出现、不追问（设计稿 §4.2）
+                    TextButton(
+                        onClick = onIgnoreClick,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        Text(
+                            text = "忽略",
+                            fontSize = AILauncherType.Callout.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Hint
+                        )
+                    }
+                    // 继续：卡片定义的下一步动作（去还款 / 回拨 / 看预约 /
+                    // 查看；引导卡是“连接”）。金色只留主操作（去 AI 味四条）。
+                    TextButton(
+                        onClick = onActionClick,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        Text(
+                            text = card.actionLabel,
+                            fontSize = AILauncherType.Callout.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Accent
+                        )
+                    }
+                } else {
+                    // 露边卡：按钮够不着，只留动作名作下一张的提示（与 448 同款）。
+                    // 露边只露 8dp，这行基本看不见，不占布局。
                     Text(
                         text = card.actionLabel,
                         fontSize = AILauncherType.Callout.fontSize,
                         fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.current.Accent
+                        color = AILauncherColors.current.Accent,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 16.dp)
                     )
                 }
-            } else {
-                // 露边卡：按钮够不着，只留动作名作下一张的提示（与 448 同款）。
-                // 露边只露 8dp，这行基本看不见，不占布局。
-                Text(
-                    text = card.actionLabel,
-                    fontSize = AILauncherType.Callout.fontSize,
-                    fontWeight = FontWeight.Medium,
-                    color = AILauncherColors.current.Accent,
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .padding(horizontal = 16.dp)
-                )
             }
         }
     }
