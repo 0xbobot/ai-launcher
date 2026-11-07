@@ -86,6 +86,8 @@ internal sealed interface RailItem {
     data object Eye : RailItem
     // 折叠组（419）：收纳盒专位，点按滚到折叠组头
     data object Fold : RailItem
+    // 未读组（Bob 2026-11-07 晚）：信封专位，点按滚到未读组头
+    data object Unread : RailItem
     // v0.68.13（Bob）：分隔线——图标组和字母组之间的视觉分隔，不可触摸
     data object Separator : RailItem
 }
@@ -547,6 +549,11 @@ internal fun WaveRail(
                                 color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
                             )
+                            // 未读组：信封，同款细描边
+                            RailItem.Unread -> UnreadGlyph(
+                                color = AILauncherColors.current.Title.copy(alpha = 0.6f),
+                                modifier = waveMod
+                            )
                             is RailItem.Letter -> StarGlyph(
                                 color = AILauncherColors.current.Title.copy(alpha = 0.6f),
                                 modifier = waveMod
@@ -642,6 +649,11 @@ internal fun WaveRail(
                         )
                         // 折叠组（419）：收纳盒气泡，同款细描边
                         RailItem.Fold -> FoldGlyph(
+                            color = AILauncherColors.current.Title,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        // 未读组：信封气泡，同款细描边
+                        RailItem.Unread -> UnreadGlyph(
                             color = AILauncherColors.current.Title,
                             modifier = Modifier.size(24.dp)
                         )
@@ -831,6 +843,46 @@ private fun FoldGlyph(
             color = color,
             start = Offset(w * 0.35f, h * 0.59f),
             end = Offset(w * 0.65f, h * 0.59f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+/**
+ * 未读组：线性信封——与房子/星星/眼睛/收纳盒同款细描边+圆角。
+ * 外框 + 封口两条斜线（左右上角向中下收），14dp 下仍可辨。
+ */
+@Composable
+private fun UnreadGlyph(
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.08f
+        val style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        // 信封外框
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.08f, h * 0.22f),
+            size = Size(w * 0.84f, h * 0.56f),
+            cornerRadius = CornerRadius(w * 0.06f, w * 0.06f),
+            style = style
+        )
+        // 封口：左右上角向中下收
+        drawLine(
+            color = color,
+            start = Offset(w * 0.08f, h * 0.22f),
+            end = Offset(w * 0.50f, h * 0.55f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.92f, h * 0.22f),
+            end = Offset(w * 0.50f, h * 0.55f),
             strokeWidth = stroke,
             cap = StrokeCap.Round
         )

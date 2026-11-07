@@ -530,6 +530,9 @@ private fun HomeHost(
                         // 折叠组（419）：首页 rail 不带 Fold 专位（hasFold 默认 false），
                         // 此分支仅为 sealed 穷尽——运行时恒不可达。
                         is RailItem.Fold -> {}
+                        // 未读组：首页 rail 不带 Unread 专位（hasUnread 默认 false），
+                        // 此分支仅为 sealed 穷尽——运行时恒不可达。
+                        is RailItem.Unread -> {}
                         is RailItem.Separator -> {}
                     }
                 },
