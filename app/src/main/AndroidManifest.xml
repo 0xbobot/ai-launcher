@@ -89,6 +89,19 @@
             </intent-filter>
         </service>
 
+        <!-- 角标广播探针（Bob 2026-11-08 凌晨：实测，不要只推理）：只收不发。
+             ShortcutBadger 发广播前用 queryBroadcastReceivers 找接收方，
+             只找得到 manifest 里声明的 receiver；exported=true 才能收到
+             别的应用发的广播。收到后只记数，不触发任何操作。 -->
+        <receiver
+            android:name=".data.BadgeBroadcastReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BADGE_COUNT_UPDATE" />
+                <action android:name="me.leolin.shortcutbadger.BADGE_COUNT_UPDATE" />
+            </intent-filter>
+        </receiver>
+
         <!-- v0.40.0：低电量守护前台服务已删除（常驻通知打扰），改为 LauncherApp 里
              跟随进程生命周期的动态广播监听 -->
 

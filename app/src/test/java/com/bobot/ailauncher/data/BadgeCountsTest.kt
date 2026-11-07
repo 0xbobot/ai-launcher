@@ -195,4 +195,99 @@ class BadgeCountsTest {
         )
         assertTrue(combined.isEmpty())
     }
+
+    // ---------- 短信数双包归属（Bob 2026-11-08 凌晨：归属加固作兜底） ----------
+
+    @Test
+    fun `combineBadgeCounts - same sms package recorded once`() {
+        // 默认短信包与可见短信应用是同一包：短信数只记一处。
+        val combined = combineBadgeCounts(
+            notifCounts = emptyMap(),
+            numberMax = emptyMap(),
+            smsUnread = 6,
+            smsPackages = listOf("com.example.sms", "com.example.sms")
+        )
+        assertEquals(mapOf("com.example.sms" to 6), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - different sms packages both get the count`() {
+        // 默认短信包与可见短信应用不同：两处都记上，各取最大值。
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.sms" to 2),
+            numberMax = emptyMap(),
+            smsUnread = 6,
+            smsPackages = listOf("com.example.sms", "com.example.sms2")
+        )
+        assertEquals(
+            mapOf("com.example.sms" to 6, "com.example.sms2" to 6),
+            combined
+        )
+    }
+
+    @Test
+    fun `combineBadgeCounts - null default only visible sms app gets the count`() {
+        val combined = combineBadgeCounts(
+            notifCounts = emptyMap(),
+            numberMax = emptyMap(),
+            smsUnread = 6,
+            smsPackages = listOf("com.example.sms2")
+        )
+        assertEquals(mapOf("com.example.sms2" to 6), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - zero sms count enters no map`() {
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.chat" to 2),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = listOf("com.example.sms", "com.example.sms2")
+        )
+        assertEquals(mapOf("com.example.chat" to 2), combined)
+    }
+
+    // ---------- 探针第四路（角标广播 + ZTE provider） ----------
+
+    @Test
+    fun `combineBadgeCounts - probe counts merge with max`() {
+        // 探针读到飞书 125：与通知 0 条、number 0 取最大，进第四路。
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.chat" to 2),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            extraCounts = mapOf("com.example.feishu" to 125)
+        )
+        assertEquals(
+            mapOf("com.example.chat" to 2, "com.example.feishu" to 125),
+            combined
+        )
+        assertEquals("99+", formatBadgeCount(combined.getValue("com.example.feishu")))
+    }
+
+    @Test
+    fun `combineBadgeCounts - probe count does not override larger local count`() {
+        // 探针 3 条 < 通知 8 条，取 8。
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.chat" to 8),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            extraCounts = mapOf("com.example.chat" to 3)
+        )
+        assertEquals(mapOf("com.example.chat" to 8), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - empty probe counts change nothing`() {
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.chat" to 2),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            extraCounts = emptyMap()
+        )
+        assertEquals(mapOf("com.example.chat" to 2), combined)
+    }
 }
