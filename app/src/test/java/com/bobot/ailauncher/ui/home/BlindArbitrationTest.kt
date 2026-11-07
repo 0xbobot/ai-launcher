@@ -44,4 +44,26 @@ class BlindArbitrationTest {
         assertTrue(blindStartExcluded(Offset(540f, 1500f), cardRect, panelRect))
         assertFalse(blindStartExcluded(Offset(540f, 900f), cardRect, panelRect))
     }
+
+    @Test
+    fun cardStackRect_excludesStackPointOnly() {
+        // 449/v1.2.2：叠层区的手势不转发盲操——横滑卡片不再弹扇形/直开相机。
+        // 叠层在竖屏 1080×2400 上约占 y 1200..1700（会行下方独立一段）。
+        val stackRect = Rect(left = 0f, top = 1200f, right = 1080f, bottom = 1700f)
+        assertTrue(blindStartExcluded(Offset(540f, 1500f), null, null, stackRect))
+        assertFalse(blindStartExcluded(Offset(540f, 900f), null, null, stackRect))
+        assertFalse(blindStartExcluded(Offset(540f, 2100f), null, null, stackRect))
+    }
+
+    @Test
+    fun cardStackRect_nullNeverExcludes() {
+        assertFalse(blindStartExcluded(Offset(540f, 1500f), null, null, null))
+    }
+
+    @Test
+    fun cardStackRect_zeroAreaNeverExcludes() {
+        // 叠层为空时槽位零高度、bounds 零面积：不误拦主页背景手势。
+        val zeroRect = Rect(left = 0f, top = 1500f, right = 1080f, bottom = 1500f)
+        assertFalse(blindStartExcluded(Offset(540f, 1500f), null, null, zeroRect))
+    }
 }

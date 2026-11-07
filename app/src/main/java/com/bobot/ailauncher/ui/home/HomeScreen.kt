@@ -101,13 +101,20 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * 矩形或 Dock 矩形内时不转发盲操。纯函数，单测锁死。374 批的教训：
  * 谓词本身没错，错的是传入的 Dock 矩形——PullUpDock 外层 modifier 根为
  * fillMaxSize，捕获的整屏矩形使本谓词对一切起点都返回 true、扇形全屏失效。
+ * 449/v1.2.2：智能卡片叠层矩形也排除在外——叠层横滑是它自己的手势，
+ * 绝不能再触发扇形（448 实拍：横滑卡片时扇形“拍照”弹出、还打开了相机）。
  */
 internal fun blindStartExcluded(
     start: androidx.compose.ui.geometry.Offset,
     intentRect: androidx.compose.ui.geometry.Rect?,
     dockRect: androidx.compose.ui.geometry.Rect?,
+    cardStackRect: androidx.compose.ui.geometry.Rect? = null,
 ): Boolean =
-    (intentRect?.contains(start) == true) || (dockRect?.contains(start) == true)
+    (intentRect?.contains(start) == true) ||
+        (dockRect?.contains(start) == true) ||
+        // 叠层为空时槽位零高度、bounds 零面积：isEmpty 守卫，不误拦背景手势
+        //（不依赖 Rect.contains 对零面积矩形的边界语义）。
+        (cardStackRect?.let { !it.isEmpty && it.contains(start) } == true)
 
 @Composable
 fun HomeScreen(
@@ -158,6 +165,13 @@ fun HomeScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     var intentFocused by remember { mutableStateOf(false) }
     var intentBoundsInRoot by remember {
+        mutableStateOf<androidx.compose.ui.geometry.Rect?>(null)
+    }
+    // 449/v1.2.2（智能卡片叠层手势仲裁）：叠层范围用卡片槽位包裹 Box 的
+    // boundsInRoot 捕获（与意图/Dock 同口径，见根 Box 观察者）；叠层为空
+    // （无卡、无引导卡）时槽位零高度，bounds 是零面积矩形、contains 恒
+    // false，不会误拦主页背景手势。
+    var cardStackBoundsInRoot by remember {
         mutableStateOf<androidx.compose.ui.geometry.Rect?>(null)
     }
     var rootPosInRoot by remember {
@@ -555,12 +569,29 @@ fun HomeScreen(
                 // 意图卡片区／Dock 区内起始的手势不转发盲操：示例行横滚、
                 // 卡片内点滑、Dock 区手势都不再弹扇形／直开相机；纵向
                 // fallback（上滑 D3／下滑通知）不受影响，仍按原逻辑走。
+                // 449/v1.2.2：智能卡片叠层区也一样排除在外——叠层横滑是
+                // 它自己的手势（detectHorizontalDragGestures 跳过沉底），
+                // 父层再认一次就是 448 实拍的扇形＋相机。且叠层区的手势
+                // 连纵向 fallback 也不走：斜滑带上分量时 fallback 会误开
+                // 应用中心（448 视频里应用中心就是这么开的），叠层区的手
+                // 势归叠层自己，纵向在叠层上本来就没意义。意图/Dock 区的
+                // 纵向 fallback 口径不动（只叠层区禁纵向）。
                 // 注意：pointerInput key 只有 blindCtl、块不重启，故参数原值
                 // 会 stale——意图挂载门读 intentInputModeLatest（见 201 行
                 // rememberUpdatedState），bounds／尺寸读 remember 态本身。
                 // 意图区挂载门与槽位可见性同口径（竖屏即 mode，横屏加
                 // landscapeSlotReady），防止退态滞留 bounds 误拦主页背景手势。
                 var gestureExcludedFromBlind = false
+                var gestureOnCardStack = false
+                fun cardStackLocal(): androidx.compose.ui.geometry.Rect? =
+                    cardStackBoundsInRoot?.let { b ->
+                        androidx.compose.ui.geometry.Rect(
+                            b.left - rootPosInRoot.x,
+                            b.top - rootPosInRoot.y,
+                            b.right - rootPosInRoot.x,
+                            b.bottom - rootPosInRoot.y
+                        )
+                    }
                 fun blindExclusionContains(start: androidx.compose.ui.geometry.Offset): Boolean {
                     val intentMounted = intentInputModeLatest &&
                         (homeSize.width <= homeSize.height || landscapeSlotReady)
@@ -580,19 +611,25 @@ fun HomeScreen(
                             b.bottom - rootPosInRoot.y
                         )
                     }
-                    return blindStartExcluded(start, intentLocal, dockLocal)
+                    return blindStartExcluded(
+                        start, intentLocal, dockLocal, cardStackLocal()
+                    )
                 }
                 detectDragGestures(
                     onDragStart = { start ->
                         totalX = 0f; totalY = 0f
+                        gestureOnCardStack = cardStackLocal()?.let {
+                            !it.isEmpty && it.contains(start)
+                        } == true
                         gestureExcludedFromBlind = blindExclusionContains(start)
                         if (!gestureExcludedFromBlind) blindCtl.onStart()
                     },
                     onDragEnd = {
                         // v0.68.0：盲操消费掉的手势不再走纵向逻辑；仲裁排除的
                         // 手势未起 blind 跟踪，不调 onEnd（恒按未消费走纵向逻辑）。
+                        // 449：叠层区的手势除外——纵向也不走，归叠层自己。
                         val blindConsumed = !gestureExcludedFromBlind && blindCtl.onEnd()
-                        if (!blindConsumed) {
+                        if (!blindConsumed && !gestureOnCardStack) {
                             when {
                                 // 上滑 → D3（y 为负是上滑）
                                 totalY < -swipeThresholdPx -> {
@@ -876,7 +913,16 @@ fun HomeScreen(
                 inputActive = intentInputMode,
                 // 智能卡片（447）：叠层槽位——会行下方独立一段，无卡零高度，
                 // 输入态与简报一起淡出。
-                cardStack = { SmartCardStackHost() },
+                // 449/v1.2.2：包裹 Box 捕获叠层 boundsInRoot，供盲操手势仲裁
+                // 用（叠层区的手势不转发盲操、也不走纵向 fallback）；无卡时
+                // 槽位零高度、bounds 零面积，contains 恒 false，不误拦背景。
+                cardStack = {
+                    Box(
+                        modifier = Modifier.onGloballyPositioned { coords ->
+                            cardStackBoundsInRoot = coords.boundsInRoot()
+                        }
+                    ) { SmartCardStackHost() }
+                },
                 // v0.68.99（R-1 修订）：输入态填充 PetZone 的 intentSlot（.97
                 // 槽位：hero 与会行之间、横屏左区）——静态时 AnimatedVisibility
                 // 零高度、封面只剩简报+Dock；包裹 Box 捕获意图区范围供 .93
