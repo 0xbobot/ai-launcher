@@ -14,15 +14,16 @@ import com.bobot.ailauncher.data.AppSearchIndex
  * 构造本身没有第二份实现可供漂移。
  *
  * 构造（与此前应用中心竖屏／横屏逐字一致）：
- * 房子；有 Dock 应用时分隔＋★；分隔；有应用字母；有折叠组时分隔＋收纳盒；
- * 有隐藏应用时分隔＋👁。折叠专位在字母与隐藏之间，与主列表段顺序一致
- * （A-Z → 折叠组 → 隐藏区）。
+ * 房子；有 Dock 应用时分隔＋★；分隔；有未读组时信封＋分隔；有应用字母；
+ * 有折叠组时分隔＋收纳盒；有隐藏应用时分隔＋👁。折叠专位在字母与隐藏之间，
+ * 未读专位在字母之前，与主列表段顺序一致（未读 → A-Z → 折叠组 → 隐藏区）。
  */
 internal fun buildRailItems(
     hasDock: Boolean,
     letters: List<Char>,
     hasHidden: Boolean,
     hasFold: Boolean = false,
+    hasUnread: Boolean = false,
 ): List<RailItem> = buildList {
     add(RailItem.House)
     if (hasDock) {
@@ -30,6 +31,10 @@ internal fun buildRailItems(
         add(RailItem.Star)
     }
     add(RailItem.Separator)
+    if (hasUnread) {
+        add(RailItem.Unread)
+        add(RailItem.Separator)
+    }
     letters.forEach { add(RailItem.Letter(it)) }
     if (hasFold) {
         add(RailItem.Separator)
