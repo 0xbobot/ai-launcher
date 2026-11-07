@@ -187,9 +187,9 @@ fun MainScreen() {
             )
         }
         composable("settings") {
-            SettingsScreen(
-                onBack = { navController.popBackStack() }
-            )
+            // 返回箭头已删（Bob 2026-11-07）：系统返回键/手势由 NavController
+            // 自动退回（NavHost 目的地），不再经 onBack 参数。
+            SettingsScreen()
         }
     }
     // v0.68.51（Bob）：灵动岛 Toast 宿主——移到 NavHost 外，最顶层
