@@ -558,6 +558,28 @@ fun PullUpDock(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = if (isLandscapeDock) Alignment.CenterHorizontally else Alignment.Start
                     ) {
+                        // 拖拽把手（Bob 2026-11-07）：玻璃盒内部顶部一条横线，标示 Dock
+                        // 可手按住拖动。标准 bottom-sheet 抓手：32×4dp 全圆角小条，
+                        // 水平居中（显式居中，不随本 Column 横屏 Center／竖屏 Start
+                        // 的对齐走）；纯视觉指示，不加点击、不加手势——从把手起拖
+                        // 仍走玻璃盒的 pointerInput 换档（纯视觉子项不挡触摸）。
+                        // 高度预算：把手块 20dp（上 8 + 条 4 + 下 8），从内容 Column
+                        // 的上下内边距 32dp 里吸收（顶部归零、底部剩 12dp）；应用行
+                        // 下移 4dp，档位定高 136/184dp 不变。
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp, bottom = 8.dp)
+                                .testTag("dock_handle"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 32.dp, height = 4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(AILauncherColors.current.Hint.copy(alpha = 0.5f))
+                            )
+                        }
                         // 面板内容区：crossfade + scale，卡片高度用快弹簧跟随
                         // （2026-11-02：旧 MediumLow 高度弹簧拖尾是上滑卡顿主因之一）。
                         AnimatedContent(
@@ -578,10 +600,13 @@ fun PullUpDock(
                             label = "dockContent"
                         ) { s ->
                             // v0.68.58（Bob）：内容无背景——背景只在按压时显示（外层控制）
+                            // 拖拽把手批：上下内边距 32dp 收成 12dp（顶部 0 + 底部 12），
+                            // 吸掉把手块的 20dp（上 8 + 条 4 + 下 8）；应用行下移 4dp，
+                            // 档位定高 136/184dp 不变。把手与内容之间 8dp（把手块的下间隙）。
                             Column(
                                 modifier = Modifier
                                     .let { if (isLandscapeDock) it.wrapContentSize() else it.fillMaxWidth() }
-                                    .padding(vertical = 16.dp)
+                                    .padding(top = 0.dp, bottom = 12.dp)
                             ) {
                             if (s == DockState.D2) {
                                 DockGrid10(
