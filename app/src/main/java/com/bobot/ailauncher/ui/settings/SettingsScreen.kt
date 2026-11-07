@@ -370,12 +370,12 @@ fun SettingsScreen() {
             }
         }
 
-        // 分区：应用——版本（检查更新 + 加入测试计划）
+        // 分区：版本（检查更新 + 加入测试计划）
         item {
-            SettingsSectionTitle("应用")
+            SettingsSectionTitle("版本")
         }
 
-        // 关于
+        // 版本
         item {
             var checking by remember { mutableStateOf(false) }
             var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
