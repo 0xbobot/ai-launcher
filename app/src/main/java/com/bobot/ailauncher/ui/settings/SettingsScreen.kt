@@ -3,6 +3,7 @@
 package com.bobot.ailauncher.ui.settings
 
 import android.content.Intent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -58,18 +58,21 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
+import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.CrashLog
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmKeyStore
@@ -95,6 +98,7 @@ import com.bobot.ailauncher.ui.settings.rememberPermissionState
 import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
@@ -104,7 +108,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import com.bobot.ailauncher.ui.island.IslandToasts
@@ -116,9 +119,7 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * - 文案全部用户视角
  */
 @Composable
-fun SettingsScreen(
-    onBack: () -> Unit,
-) {
+fun SettingsScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var apiKey by remember { mutableStateOf(LlmConfig.getApiKey(context)) }
@@ -198,33 +199,15 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            // v0.68.45：杂志刊头——和应用中心完全一致（28.dp 左 / 8.dp 顶 / 32.sp 宋体）
-            // v0.68.46：返回行（‹ ）——整行可点，无独立按钮，刊头干净
+            // 杂志刊头——与应用中心完全一致（24.dp 左 / 8.dp 顶 / 32.sp 宋体）。
+            // 返回箭头已删（Bob 2026-11-07）：系统返回键/手势仍经 NavController
+            // 退回（设置页是 NavHost 独立目的地）；键盘由系统返回自行收起，
+            // 不再需要离开前手动清焦。
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 32.dp, end = 16.dp, top = 8.dp)
+                    .padding(start = 24.dp, end = 16.dp, top = 8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                        // F-08：离开设置页前先清焦 + 收键盘，不把键盘带到上一页
-                        onClick = {
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
-                            onBack()
-                        }
-                    )
-                ) {
-                    Text(
-                        text = "‹ ",
-                        fontSize = AILauncherType.Callout.fontSize,
-                        color = AILauncherColors.current.Accent,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
                 Text(
                     text = "设置",
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
@@ -236,111 +219,160 @@ fun SettingsScreen(
             }
         }
 
-        // 引导批（2026-10-27）：设置 → 权限常驻页——引导里跳过/拒绝后随时
-        // 可补授权（最后一页承诺了“以后随时可在设置 → 权限里设”，不做这页
-        // 承诺就落空）。复用引导第 2 屏同一套状态行与跳转逻辑（ON_RESUME
-        // 重读、日历授权框、通知监听设置页、默认桌面系统设置页）；不新增
-        // 其他设置项。
+        // 分区：助手——让助手更聪明（大模型 API Key）
         item {
-            val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
-            val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
-            val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
-            val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
-            OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
-            // 2026-11-02 设置分区：权限卡可折叠——有未开项默认展开（让人一眼
-            // 看到要补什么），三项全开默认收起（标题行只留已开启计数）。
-            // 展开/收起口径与「让助手更聪明」「崩溃记录」同款：标题行点按 +
-            // 上下箭头 + tick 震动。
-            val grantedCount = listOf(
-                defaultGranted.value, calendarGranted.value, notificationGranted.value
-            ).count { it }
-            var permExpanded by remember { mutableStateOf(grantedCount < 3) }
+            SettingsSectionTitle("助手")
+        }
+
+        // 让助手更聪明（收起一层）
+        item {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+                modifier = Modifier
+                    .padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
+                    // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
+                    // F-10：点按补 tick（走 Haptics 两档门面）。
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
                                 view.tickHaptic()
-                                permExpanded = !permExpanded
+                                llmExpanded = !llmExpanded
                             },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "权限",
+                                text = "让助手更聪明",
                                 fontSize = AILauncherType.BodyLarge.fontSize,
                                 fontWeight = FontWeight.Medium,
                                 color = AILauncherColors.current.Title
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = if (permExpanded) "首页要看到日程和消息、按 Home 键回来，需要这几项。随时能改。"
-                                    else "已开启 $grantedCount/3，点按展开",
+                                text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
                                 fontSize = AILauncherType.Footnote.fontSize,
                                 color = AILauncherColors.current.Hint,
                                 lineHeight = 18.sp
                             )
                         }
                         Icon(
-                            if (permExpanded) Icons.Filled.KeyboardArrowUp
+                            if (llmExpanded) Icons.Filled.KeyboardArrowUp
                             else Icons.Filled.KeyboardArrowDown,
-                            contentDescription = if (permExpanded) "收起" else "展开",
+                            contentDescription = if (llmExpanded) "收起" else "展开",
                             tint = AILauncherColors.current.Hint
                         )
                     }
-                    if (permExpanded) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    SettingsPermissionRow(
-                        title = "默认桌面",
-                        desc = "按 Home 键回到 AI 桌面",
-                        granted = defaultGranted.value,
-                        doneText = "已设为默认",
-                        todoText = "尚未设为默认",
-                        actionText = "去设置",
-                        onOpen = { openHomeSettings(context) }
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    SettingsPermissionRow(
-                        title = "日历",
-                        desc = "首页显示今天的会、开会前提醒、点一下加入",
-                        granted = calendarGranted.value,
-                        doneText = "已开启",
-                        todoText = "尚未开启",
-                        actionText = "去开启",
-                        onOpen = openCalendar
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    SettingsPermissionRow(
-                        title = "消息提醒",
-                        desc = "要回的消息整理到首页，不漏掉",
-                        granted = notificationGranted.value,
-                        doneText = "已开启",
-                        todoText = "尚未开启",
-                        actionText = "去开启",
-                        onOpen = { openNotificationSettings(context) }
-                    )
+                    if (llmExpanded) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = apiKey,
+                            onValueChange = { apiKey = it; persist() },
+                            label = { Text("大模型 API Key") },
+                            placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = baseUrl,
+                            onValueChange = { baseUrl = it; persist() },
+                            label = { Text("接口地址") },
+                            placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
+                        )
+                        Text(
+                            text = "一般不用改。用别的服务商才需要换",
+                            fontSize = AILauncherType.Caption.fontSize,
+                            color = AILauncherColors.current.Hint,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = model,
+                            onValueChange = { model = it; persist() },
+                            label = { Text("用哪个模型") },
+                            placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
+                        )
+                        Text(
+                            text = "填你 API Key 对应的模型名，比如 deepseek-flash",
+                            fontSize = AILauncherType.Caption.fontSize,
+                            color = AILauncherColors.current.Hint,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                if (testing) return@Button
+                                // F-10：主按钮 = confirm 档
+                                view.confirmHaptic()
+                                persist()
+                                if (apiKey.isBlank()) {
+                                    IslandToasts.show("请先填写大模型 API Key")
+                                    return@Button
+                                }
+                                testing = true
+                                scope.launch {
+                                    val err = LlmConnectionTester.testConnection(
+                                        baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
+                                        apiKey,
+                                        model.ifBlank { LlmConfig.DEFAULT_MODEL }
+                                    )
+                                    testing = false
+                                    IslandToasts.show(err ?: "连接成功")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
+                        ) {
+                            Text(if (testing) "测试中…" else "测试连接")
+                        }
+                        // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
+                        // 明文降级时醒目提示 + 给得出下一步，不再静默回退
+                        when (keyStatus.mode) {
+                            LlmKeyStore.StorageMode.ENCRYPTED -> Text(
+                                text = "✓ API Key 已加密存储在本机",
+                                fontSize = AILauncherType.Caption.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                            LlmKeyStore.StorageMode.PLAIN_FALLBACK -> Column(
+                                modifier = Modifier.padding(top = 8.dp)
+                            ) {
+                                Text(
+                                    text = "加密出了点问题，你的 Key 现在没有加密保存",
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = "重启手机后回到这里，Key 会自动尝试恢复加密；" +
+                                        "仍不行的话，删掉 API Key 重新粘贴保存一次。",
+                                    fontSize = AILauncherType.Caption.fontSize,
+                                    color = AILauncherColors.current.Hint,
+                                    lineHeight = 17.sp,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+                            LlmKeyStore.StorageMode.EMPTY -> Unit
+                        }
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // 2026-11-02 设置分区：更新相关的两项放同一分区（检查更新 +
-        // 加入测试计划），分区标题只作视觉分组，不改任何卡片逻辑。
+        // 分区：应用——版本（检查更新 + 加入测试计划）
         item {
-            Text(
-                text = "版本",
-                fontSize = AILauncherType.Footnote.fontSize,
-                fontWeight = FontWeight.Medium,
-                color = AILauncherColors.current.Hint,
-                modifier = Modifier.padding(horizontal = 24.dp)
-            )
+            SettingsSectionTitle("应用")
         }
 
         // 关于
@@ -564,153 +596,110 @@ fun SettingsScreen(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // 让助手更聪明（收起一层）
+        // 分区：权限——默认桌面 / 日历 / 消息提醒
         item {
+            SettingsSectionTitle("权限")
+        }
+
+        // 引导批（2026-10-27）：设置 → 权限常驻页——引导里跳过/拒绝后随时
+        // 可补授权（最后一页承诺了“以后随时可在设置 → 权限里设”，不做这页
+        // 承诺就落空）。复用引导第 2 屏同一套状态行与跳转逻辑（ON_RESUME
+        // 重读、日历授权框、通知监听设置页、默认桌面系统设置页）；不新增
+        // 其他设置项。
+        item {
+            val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
+            val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
+            val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
+            val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
+            OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
+            // 2026-11-02 设置分区：权限卡可折叠——有未开项默认展开（让人一眼
+            // 看到要补什么），三项全开默认收起（标题行只留已开启计数）。
+            // 展开/收起口径与「让助手更聪明」「崩溃记录」同款：标题行点按 +
+            // 上下箭头 + tick 震动。
+            val grantedCount = listOf(
+                defaultGranted.value, calendarGranted.value, notificationGranted.value
+            ).count { it }
+            var permExpanded by remember { mutableStateOf(grantedCount < 3) }
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier
-                    .padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
-                    // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
-                    // F-10：点按补 tick（走 Haptics 两档门面）。
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
                                 view.tickHaptic()
-                                llmExpanded = !llmExpanded
+                                permExpanded = !permExpanded
                             },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "让助手更聪明",
+                                text = "权限",
                                 fontSize = AILauncherType.BodyLarge.fontSize,
                                 fontWeight = FontWeight.Medium,
                                 color = AILauncherColors.current.Title
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
+                                text = if (permExpanded) "首页要看到日程和消息、按 Home 键回来，需要这几项。随时能改。"
+                                    else "已开启 $grantedCount/3，点按展开",
                                 fontSize = AILauncherType.Footnote.fontSize,
                                 color = AILauncherColors.current.Hint,
                                 lineHeight = 18.sp
                             )
                         }
                         Icon(
-                            if (llmExpanded) Icons.Filled.KeyboardArrowUp
+                            if (permExpanded) Icons.Filled.KeyboardArrowUp
                             else Icons.Filled.KeyboardArrowDown,
-                            contentDescription = if (llmExpanded) "收起" else "展开",
+                            contentDescription = if (permExpanded) "收起" else "展开",
                             tint = AILauncherColors.current.Hint
                         )
                     }
-                    if (llmExpanded) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        OutlinedTextField(
-                            value = apiKey,
-                            onValueChange = { apiKey = it; persist() },
-                            label = { Text("大模型 API Key") },
-                            placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = baseUrl,
-                            onValueChange = { baseUrl = it; persist() },
-                            label = { Text("接口地址") },
-                            placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
-                        )
-                        Text(
-                            text = "一般不用改。用别的服务商才需要换",
-                            fontSize = AILauncherType.Caption.fontSize,
-                            color = AILauncherColors.current.Hint,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = model,
-                            onValueChange = { model = it; persist() },
-                            label = { Text("用哪个模型") },
-                            placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
-                        )
-                        Text(
-                            text = "填你 API Key 对应的模型名，比如 deepseek-flash",
-                            fontSize = AILauncherType.Caption.fontSize,
-                            color = AILauncherColors.current.Hint,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = {
-                                if (testing) return@Button
-                                // F-10：主按钮 = confirm 档
-                                view.confirmHaptic()
-                                persist()
-                                if (apiKey.isBlank()) {
-                                    IslandToasts.show("请先填写大模型 API Key")
-                                    return@Button
-                                }
-                                testing = true
-                                scope.launch {
-                                    val err = LlmConnectionTester.testConnection(
-                                        baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
-                                        apiKey,
-                                        model.ifBlank { LlmConfig.DEFAULT_MODEL }
-                                    )
-                                    testing = false
-                                    IslandToasts.show(err ?: "连接成功")
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
-                        ) {
-                            Text(if (testing) "测试中…" else "测试连接")
-                        }
-                        // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
-                        // 明文降级时醒目提示 + 给得出下一步，不再静默回退
-                        when (keyStatus.mode) {
-                            LlmKeyStore.StorageMode.ENCRYPTED -> Text(
-                                text = "✓ API Key 已加密存储在本机",
-                                fontSize = AILauncherType.Caption.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                            LlmKeyStore.StorageMode.PLAIN_FALLBACK -> Column(
-                                modifier = Modifier.padding(top = 8.dp)
-                            ) {
-                                Text(
-                                    text = "加密出了点问题，你的 Key 现在没有加密保存",
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                Text(
-                                    text = "重启手机后回到这里，Key 会自动尝试恢复加密；" +
-                                        "仍不行的话，删掉 API Key 重新粘贴保存一次。",
-                                    fontSize = AILauncherType.Caption.fontSize,
-                                    color = AILauncherColors.current.Hint,
-                                    lineHeight = 17.sp,
-                                    modifier = Modifier.padding(top = 8.dp)
-                                )
-                            }
-                            LlmKeyStore.StorageMode.EMPTY -> Unit
-                        }
+                    if (permExpanded) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    SettingsPermissionRow(
+                        title = "默认桌面",
+                        desc = "按 Home 键回到 AI 桌面",
+                        granted = defaultGranted.value,
+                        doneText = "已设为默认",
+                        todoText = "尚未设为默认",
+                        actionText = "去设置",
+                        onOpen = { openHomeSettings(context) }
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    SettingsPermissionRow(
+                        title = "日历",
+                        desc = "首页显示今天的会、开会前提醒、点一下加入",
+                        granted = calendarGranted.value,
+                        doneText = "已开启",
+                        todoText = "尚未开启",
+                        actionText = "去开启",
+                        onOpen = openCalendar
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    SettingsPermissionRow(
+                        title = "消息提醒",
+                        desc = "要回的消息整理到首页，不漏掉",
+                        granted = notificationGranted.value,
+                        doneText = "已开启",
+                        todoText = "尚未开启",
+                        actionText = "去开启",
+                        onOpen = { openNotificationSettings(context) }
+                    )
                     }
                 }
             }
+        }
+
+        // 分区：诊断——崩溃记录
+        item {
+            SettingsSectionTitle("诊断")
         }
 
         // v0.68.100（卫生批）：崩溃记录——侧载没有 Play Console，崩溃在这里
@@ -868,9 +857,66 @@ fun SettingsScreen(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
         }
+        // 分区：关于——落款
+        item {
+            SettingsSectionTitle("关于")
+        }
+
+        // 落款 / 关于：手写体 bobot 词标（Bob 2026-11-07 发来的图，
+        // 同款矢量版 bobot-wordmark.svg 的透明底渲染，1372x632，#a13f04）
+        // + 联系邮箱。词标是图片资产（res/drawable/bobot_wordmark.png），
+        // 不是排版文字；点邮箱打开邮件应用写信。
+        item {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.bobot_wordmark),
+                    contentDescription = "bobot",
+                    modifier = Modifier.width(140.dp).aspectRatio(1372f / 632f),
+                    contentScale = ContentScale.Fit
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = {
+                        view.tickHaptic()
+                        val mail = Intent(Intent.ACTION_SENDTO).apply {
+                            data = android.net.Uri.parse("mailto:0xbobot@gmail.com")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        runCatching { context.startActivity(mail) }
+                            .onFailure { IslandToasts.show("没有可用的邮箱应用") }
+                    },
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        text = "0xbobot@gmail.com",
+                        fontSize = AILauncherType.Body.fontSize,
+                        color = AILauncherColors.current.Accent
+                    )
+                }
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
+
     }
+}
+
+/**
+ * 设置页分区标题：与应用中心分区标题同一语言
+ * （Footnote / Medium / Hint / 左右 24dp）。
+ */
+@Composable
+private fun SettingsSectionTitle(text: String) {
+    Text(
+        text = text,
+        fontSize = AILauncherType.Footnote.fontSize,
+        fontWeight = FontWeight.Medium,
+        color = AILauncherColors.current.Hint,
+        modifier = Modifier.padding(horizontal = 24.dp)
+    )
 }
 
 /**
