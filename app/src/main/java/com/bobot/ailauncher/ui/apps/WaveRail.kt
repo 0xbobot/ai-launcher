@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -43,7 +44,9 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInRoot
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.MotionTokens
 import com.bobot.ailauncher.ui.theme.PetMotion
@@ -95,6 +98,25 @@ internal sealed interface RailItem {
 internal fun railIndexAt(y: Float, railTopPx: Float, railHpx: Float, size: Int): Int {
     if (size <= 0 || railHpx <= 0f) return 0
     return (((y - railTopPx) / railHpx) * size).toInt().coerceIn(0, size - 1)
+}
+
+/**
+ * 智能卡片叠层带换算（451，纯函数，JVM 单测覆盖见 RailCardBandTest）：
+ * 卡片叠层在根坐标里的上下缘 → rail 本地坐标里的带。[cardBandInRoot]
+ * 为 (top, bottom) 根坐标 px，[railTopInRoot] 为 rail 顶在根坐标里的 y，
+ * [railHeightPx] 为 rail 高。返回 (top, bottom) 本地 px（已夹到
+ * [0, railHeightPx]）；无卡、或带与 rail 无交集时返回 null（不断带）。
+ */
+internal fun cardBandInRail(
+    cardBandInRoot: Pair<Float, Float>?,
+    railTopInRoot: Float,
+    railHeightPx: Float
+): Pair<Float, Float>? {
+    if (cardBandInRoot == null || railHeightPx <= 0f) return null
+    val top = (cardBandInRoot.first - railTopInRoot).coerceIn(0f, railHeightPx)
+    val bottom = (cardBandInRoot.second - railTopInRoot).coerceIn(0f, railHeightPx)
+    if (bottom <= top) return null
+    return top to bottom
 }
 
 /**
@@ -158,6 +180,10 @@ internal fun WaveRail(
     // v0.68.23（Bob）：主屏 picker 长按后拖拽（避免与桌面手势冲突），统一滑动体验
     requireLongPress: Boolean = false,
     onLongPressStart: () -> Unit = {},
+    // 451：卡片叠层带（根坐标上下缘 px）——首页传卡片带，触摸层在卡带处断开，
+    // 卡片右侧按钮的点按不再被 48dp 隐形触发条偷走；默认 null（应用中心等
+    // 不传），触摸层整条不断。
+    cardStackBandPx: Pair<Float, Float>? = null,
     // 横屏应用中心修（Bob 2026-10-24）：rail 占比与字母字号可参——
     // 竖屏保持 0.85/12sp/14sp 不动；横屏传 0.95/14sp/16sp（v0.55.3 教训：
     // G/S 底部被截断就是行高不够，14sp 字至少配 16sp 行高）。
@@ -178,6 +204,8 @@ internal fun WaveRail(
     // 右侧 rail：波浪/气泡往左（向内）；左侧 rail：往右（向内）
     val dirSign = if (side == RailSide.RIGHT) -1f else 1f
     var activeIndex by remember { mutableIntStateOf(-1) }
+    // 451：rail 顶在根坐标里的 y（卡带换算用；onGloballyPositioned 写）。
+    var railTopInRoot by remember { mutableStateOf(0f) }
     // v0.41.1：点按后的延迟收波浪任务——点按不能立刻 onRelease，
     // 否则右侧 rail 的 stopGlide 会把刚启动的 animateScrollToItem 直接掐掉
     var tapReleaseJob by remember { mutableStateOf<Job?>(null) }
@@ -217,9 +245,16 @@ internal fun WaveRail(
         modifier = modifier
             .fillMaxHeight()
             .width(railWidth)
+            .onGloballyPositioned { coords ->
+                // 451：rail 顶在根坐标里的 y，供卡带换算用。
+                railTopInRoot = coords.positionInRoot().y
+            }
     ) {
         val hPx = constraints.maxHeight.toFloat()
         if (hPx <= 0f || items.isEmpty()) return@BoxWithConstraints
+        // 451：卡片带（rail 本地坐标，null = 不断带）——卡片叠层在根坐标里的
+        // 上下缘减 rail 顶，夹到 rail 高度内；无卡或带与 rail 无交集时为 null。
+        val band = cardBandInRail(cardStackBandPx, railTopInRoot, hPx)
         // Bob 2026-11-03：字母少时 rail 不拉满——行高封顶 32dp，整列靠下收紧；
         // 字母多时行高低于封顶，仍按原比例铺满（不变）。仅可见 rail 封顶，
         // 左侧隐形触发区行高仍不封顶，但同套底部对齐（触摸映射对齐）。
@@ -308,74 +343,102 @@ internal fun WaveRail(
 
         // 触摸层：点按与纵向拖动
         // v0.68.23（Bob）：主屏 picker 长按后拖拽，统一滑动体验
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(items, hPx, requireLongPress) {
-                    if (requireLongPress) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { offset ->
-                                hapticView.confirmHaptic()
-                                onLongPressStart()
-                                cancelPendingTapRelease()
-                                emitItem(indexAt(offset.y))
-                            },
-                            onDrag = { change, _ ->
-                                change.consume()
-                                handleDragY(change.position.y)
-                            },
-                            onDragEnd = {
-                                activeIndex = -1
-                                onRelease()
-                            },
-                            onDragCancel = {
-                                activeIndex = -1
-                                onRelease()
-                            }
-                        )
-                    } else {
-                        detectTapGestures(onTap = { offset ->
-                            // 点按：直接跳转
-                            val i = indexAt(offset.y)
+        // 451：卡带断开——首页 picker 的 48dp 隐形长按触发条全高盖在 HomeScreen
+        // 之上，卡片右侧按钮（连接/×）落在条内时点按会被条偷走、到不了卡片
+        // （449 实拍：连接点三次、× 点后均无反应，无涟漪、无位移；横滑正常是
+        // 因为起笔在卡片中部、条外）。卡带内不挂触摸层（点按落到卡片），带外
+        // 仍挂（长按开 picker）；长按后拖过卡带靠手势捕获续流，picker 选字母
+        // 不受影响（home 的 picker 只走长按拖拽、不靠点选）。无卡时 band 为
+        // null，不断带（现状）。两段共用同一套检测器（railTouch），key 里带
+        // band——卡片出现/消失/换高度时触摸层重启。
+        val railTouch = Modifier
+            .pointerInput(items, hPx, requireLongPress, band) {
+                if (requireLongPress) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { offset ->
+                            hapticView.confirmHaptic()
+                            onLongPressStart()
                             cancelPendingTapRelease()
-                            activeIndex = -1 // 允许点按重复触发同一字母
-                            emitItem(i)
-                            // v0.41.1：等滚动落定再收波浪——立刻 onRelease 的话，
-                            // 右侧 rail 的 stopGlide 会把刚启动的 animateScrollToItem
-                            // （近距离字母）直接掐掉，导致列表不动、波浪卡住；
-                            // 左侧 rail 的 onRelease 只清 mirrorIndex 不掐任务，所以左侧正常
-                            tapReleaseJob = scope.launch {
-                                delay(500)
-                                activeIndex = -1
-                                onRelease()
-                            }
-                        })
-                    }
+                            emitItem(indexAt(offset.y))
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            handleDragY(change.position.y)
+                        },
+                        onDragEnd = {
+                            activeIndex = -1
+                            onRelease()
+                        },
+                        onDragCancel = {
+                            activeIndex = -1
+                            onRelease()
+                        }
+                    )
+                } else {
+                    detectTapGestures(onTap = { offset ->
+                        // 点按：直接跳转
+                        val i = indexAt(offset.y)
+                        cancelPendingTapRelease()
+                        activeIndex = -1 // 允许点按重复触发同一字母
+                        emitItem(i)
+                        // v0.41.1：等滚动落定再收波浪——立刻 onRelease 的话，
+                        // 右侧 rail 的 stopGlide 会把刚启动的 animateScrollToItem
+                        // （近距离字母）直接掐掉，导致列表不动、波浪卡住；
+                        // 左侧 rail 的 onRelease 只清 mirrorIndex 不掐任务，所以左侧正常
+                        tapReleaseJob = scope.launch {
+                            delay(500)
+                            activeIndex = -1
+                            onRelease()
+                        }
+                    })
                 }
-                .pointerInput(items, hPx, requireLongPress) {
-                    if (!requireLongPress) {
-                        detectVerticalDragGestures(
-                            onDragStart = { offset ->
-                                // 点按后立刻转拖动：掐掉点按的延迟收波浪，拖动接管
-                                cancelPendingTapRelease()
-                                emitItem(indexAt(offset.y))
-                            },
-                            onDragEnd = {
-                                activeIndex = -1
-                                onRelease()
-                            },
-                            onDragCancel = {
-                                activeIndex = -1
-                                onRelease()
-                            },
-                            onVerticalDrag = { change, _ ->
-                                change.consume()
-                                handleDragY(change.position.y)
-                            }
-                        )
-                    }
+            }
+            .pointerInput(items, hPx, requireLongPress, band) {
+                if (!requireLongPress) {
+                    detectVerticalDragGestures(
+                        onDragStart = { offset ->
+                            // 点按后立刻转拖动：掐掉点按的延迟收波浪，拖动接管
+                            cancelPendingTapRelease()
+                            emitItem(indexAt(offset.y))
+                        },
+                        onDragEnd = {
+                            activeIndex = -1
+                            onRelease()
+                        },
+                        onDragCancel = {
+                            activeIndex = -1
+                            onRelease()
+                        },
+                        onVerticalDrag = { change, _ ->
+                            change.consume()
+                            handleDragY(change.position.y)
+                        }
+                    )
                 }
-        )
+            }
+        if (band == null) {
+            Box(modifier = Modifier.fillMaxSize().then(railTouch))
+        } else {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { band.first.toDp() })
+                        .then(railTouch)
+                )
+                Spacer(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { (band.second - band.first).toDp() })
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .then(railTouch)
+                )
+            }
+        }
 
         // 字母列：紧凑靠下，常显（visible=false 的隐形触发区不绘制）
         if (visible) {
@@ -611,6 +674,9 @@ internal fun AppRail(
     requireLongPress: Boolean = false,
     onLongPressStart: () -> Unit = {},
     visible: Boolean = true,
+    // 451：卡片叠层带（根坐标上下缘 px）——首页传卡片带，WaveRail 把触摸层
+    // 在卡带处断开；应用中心不传（默认 null，触摸层整条不断）。
+    cardStackBandPx: Pair<Float, Float>? = null,
     // 横屏应用中心修（Bob 2026-10-24）：rail 高度可参——默认 400dp（竖屏
     // 不动）；传 null 则不写死高度、跟随调用方容器（横屏满高，根因是
     // 400dp 写死在横屏屏高不足时上下裁掉首尾字母）。
@@ -640,6 +706,7 @@ internal fun AppRail(
         requireLongPress = requireLongPress,
         onLongPressStart = onLongPressStart,
         visible = visible,
+        cardStackBandPx = cardStackBandPx,
         railFraction = railFraction,
         letterFontSize = letterFontSize,
         letterLineHeight = letterLineHeight,

@@ -919,7 +919,13 @@ fun HomeScreen(
                 cardStack = {
                     Box(
                         modifier = Modifier.onGloballyPositioned { coords ->
-                            cardStackBoundsInRoot = coords.boundsInRoot()
+                            val bounds = coords.boundsInRoot()
+                            cardStackBoundsInRoot = bounds
+                            // 451：同时把叠层上下缘发给 UiPrefs，供首页 picker
+                            // 触摸层断带用；无卡时槽位零高度、bounds 零面积，发 null。
+                            UiPrefs.cardStackBandPx.value =
+                                if (bounds.isEmpty) null
+                                else (bounds.top to bounds.bottom)
                         }
                     ) { SmartCardStackHost() }
                 },

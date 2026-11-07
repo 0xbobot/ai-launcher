@@ -403,6 +403,8 @@ private fun HomeHost(
         val scope = rememberCoroutineScope()
         var pickerActive by remember { mutableStateOf(false) }
         var pickerIndex by remember { mutableIntStateOf(-1) }
+        // 451：卡片叠层带（根坐标上下缘 px），传给首页 picker 断带用；无卡为 null。
+        val cardStackBandPx by UiPrefs.cardStackBandPx.collectAsState()
         var d3Opened by remember { mutableStateOf(false) }
         // v0.68.24（Bob）：picker 房子也支持上拉手势，不中断
         var pickerHousePull by remember { mutableStateOf(0f) }
@@ -548,6 +550,9 @@ private fun HomeHost(
                     pickerHousePull = 0f
                     pickerHouseArmed = true
                 },
+                // 451：卡片叠层带（根坐标上下缘 px）——WaveRail 把触摸层在卡带处
+                // 断开，卡片右侧按钮的点按不再被 48dp 隐形触发条偷走。
+                cardStackBandPx = cardStackBandPx,
                 housePull = pickerHousePull,
                 onHousePull = { p ->
                     if (pickerHouseArmed) {
