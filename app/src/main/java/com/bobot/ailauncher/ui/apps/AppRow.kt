@@ -69,9 +69,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.NotificationRepository
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.ui.components.AppBadge
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.island.IslandToasts
@@ -117,6 +119,9 @@ internal fun AppRow(
     // v0.35.0：Dock 置顶切换——已置顶则移出，未置顶则追加到末尾（Dock 里按此顺序排最前）
     val dockTick by UiPrefs.dockTick.collectAsState()
     val isPinned = remember(dockTick) { UiPrefs.getDockPinned(context).contains(app.packageName) }
+    // 未读角标（Bob 2026-11-07 晚）：通知监听汇总的该包条数；>0 才显示。
+    val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
+    val badgeCount = badgeCounts[app.packageName] ?: 0
 
     fun togglePin() {
         val cur = UiPrefs.getDockPinned(context).toMutableList()
@@ -312,14 +317,28 @@ internal fun AppRow(
                     .padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AppIconImage(
-                    drawable = app.icon,
-                    contentDescription = app.label.toString(),
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .graphicsLayer { alpha = contentAlpha }
-                )
+                // 未读角标：叠在图标右上角、微微压住角；纯视觉覆盖层，不抢行点按；
+                // 拖动弱化时跟内容一起淡（与图标同 contentAlpha）。
+                Box(modifier = Modifier.size(44.dp)) {
+                    AppIconImage(
+                        drawable = app.icon,
+                        contentDescription = app.label.toString(),
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .graphicsLayer { alpha = contentAlpha }
+                    )
+                    if (badgeCount > 0) {
+                        AppBadge(
+                            count = badgeCount,
+                            height = 18.dp,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 4.dp, y = (-4).dp)
+                                .graphicsLayer { alpha = contentAlpha }
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = app.label.toString(),

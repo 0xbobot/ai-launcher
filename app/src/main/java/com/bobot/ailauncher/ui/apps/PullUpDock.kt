@@ -53,6 +53,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemGestures
@@ -95,7 +96,9 @@ import kotlinx.coroutines.launch
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
 import com.bobot.ailauncher.data.InstalledApps
+import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.ui.components.AppBadge
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.DockLightParams
 import com.bobot.ailauncher.ui.glass.glassSurface
@@ -861,6 +864,7 @@ private fun DockRow4(
                     app = app,
                     iconSize = iconSize,
                     corner = 12.dp,
+                    badgeHeight = 20.dp,
                     menuApp = menuApp,
                     onLaunch = onLaunch,
                     onLongPress = onLongPress,
@@ -907,6 +911,7 @@ private fun DockGrid10(
                             app = app,
                             iconSize = 46.dp,
                             corner = 12.dp,
+                            badgeHeight = 18.dp,
                             menuApp = menuApp,
                             onLaunch = onLaunch,
                             onLongPress = onLongPress,
@@ -930,6 +935,8 @@ private fun DockIconButton(
     app: AppInfo,
     iconSize: Dp,
     corner: Dp,
+    // 未读角标高度（Bob 2026-11-07 晚）：D1 56dp 图标→20dp，D2 46dp 图标→18dp。
+    badgeHeight: Dp = 20.dp,
     menuApp: AppInfo?,
     onLaunch: (AppInfo) -> Unit,
     onLongPress: (AppInfo) -> Unit,
@@ -939,6 +946,9 @@ private fun DockIconButton(
     onIconPositioned: (String, Offset) -> Unit = { _, _ -> }
 ) {
     val hapticView = LocalView.current
+    // 未读角标（Bob 2026-11-07 晚）：通知监听汇总的该包条数；>0 才显示。
+    val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
+    val badgeCount = badgeCounts[app.packageName] ?: 0
     Box(modifier = modifier
         .onGloballyPositioned { coords ->
             onIconPositioned(
@@ -966,6 +976,18 @@ private fun DockIconButton(
                     }
                 )
         )
+        // 未读角标：叠在图标右上角、微微压住角；纯视觉覆盖层，不加点击、
+        // 不消费触摸（点按仍走图标本身，长按菜单不受影响）。高度按图标尺寸走
+        // （D1 56dp 图标→20dp，D2 46dp 图标→18dp，调用方传 badgeHeight）。
+        if (badgeCount > 0) {
+            AppBadge(
+                count = badgeCount,
+                height = badgeHeight,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 4.dp, y = (-4).dp)
+            )
+        }
         AppPopupMenu(
             app = app,
             expanded = menuApp == app,

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,7 +76,9 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.data.AppInfo
+import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.ui.components.AppBadge
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -878,6 +882,9 @@ private fun LandscapeAppRow(
     // 再传（与竖屏 AppRow 同款标签、同一判定），默认不显示。
     showDeepLinkBadge: Boolean = false
 ) {
+    // 未读角标（Bob 2026-11-07 晚）：通知监听汇总的该包条数；>0 才显示。
+    val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
+    val badgeCount = badgeCounts[app.packageName] ?: 0
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
@@ -887,13 +894,25 @@ private fun LandscapeAppRow(
             .clickable { onLaunch(app) }
             .padding(horizontal = 8.dp)
     ) {
-        AppIconImage(
-            drawable = app.icon,
-            contentDescription = null,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(12.dp))
-        )
+        // 未读角标：叠在图标右上角、微微压住角；纯视觉覆盖层，不抢行点按。
+        Box(modifier = Modifier.size(48.dp)) {
+            AppIconImage(
+                drawable = app.icon,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
+            if (badgeCount > 0) {
+                AppBadge(
+                    count = badgeCount,
+                    height = 18.dp,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 4.dp, y = (-4).dp)
+                )
+            }
+        }
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = app.label.toString(),

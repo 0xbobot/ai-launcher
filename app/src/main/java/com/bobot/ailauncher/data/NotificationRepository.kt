@@ -26,12 +26,21 @@ object NotificationRepository {
     private val _notifications = MutableStateFlow<List<SimpleNotification>>(emptyList())
     val notifications: StateFlow<List<SimpleNotification>> = _notifications.asStateFlow()
 
+    /** 每包未读条数（角标用，Bob 2026-11-07 晚）：由 LauncherNotificationService
+     *  从完整在用通知列表汇总；空 map = 无角标。展示列表只取最新 20 条，计数不共用它。 */
+    private val _badgeCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val badgeCounts: StateFlow<Map<String, Int>> = _badgeCounts.asStateFlow()
+
     /** 监听服务是否已连接（授权发生在 App 运行中时，系统可能尚未回调 onListenerConnected） */
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
     fun update(list: List<SimpleNotification>) {
         _notifications.value = list
+    }
+
+    fun updateBadgeCounts(counts: Map<String, Int>) {
+        _badgeCounts.value = counts
     }
 
     /** 本地忽略一条通知（从首页移除；该应用有新通知时仍会重新出现） */

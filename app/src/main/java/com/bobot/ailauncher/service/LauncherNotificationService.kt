@@ -7,6 +7,7 @@ import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.core.event.LauncherEvent
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SimpleNotification
+import com.bobot.ailauncher.data.aggregateBadgeCounts
 
 /**
  * 通知监听服务：通知事件的生产者。
@@ -61,11 +62,13 @@ class LauncherNotificationService : NotificationListenerService() {
 
     private fun pushActiveNotifications() {
         try {
-            val list = activeNotifications
-                .filter { it.isClearable && !it.isOngoing }
-                .mapNotNull { sbn -> sbn.toSimpleNotification() }
-                .sortedByDescending { it.time }
-                .take(20)
+            val active = activeNotifications.filter { it.isClearable && !it.isOngoing }
+            // 角标计数（Bob 2026-11-07 晚）：从完整在用通知列表汇总，不 take(20)——
+            // 展示列表只取最新 20 条，计数若共用它，“125 条”会被截成 20 条以内。
+            // （toSimpleNotification 只丢标题正文都空的条目——这类通知无可读内容。）
+            val all = active.mapNotNull { sbn -> sbn.toSimpleNotification() }
+            NotificationRepository.updateBadgeCounts(aggregateBadgeCounts(all))
+            val list = all.sortedByDescending { it.time }.take(20)
             NotificationRepository.update(list)
         } catch (_: SecurityException) {
             // 权限被撤销时静默忽略，首页会显示空态引导
