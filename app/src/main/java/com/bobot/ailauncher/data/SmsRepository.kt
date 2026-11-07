@@ -83,6 +83,28 @@ object SmsRepository {
             emptyList()
         }
     }
+    /**
+     * 短信库未读数（角标用，Bob 2026-11-07 晚：角标要的是应用的未读数据）。
+     * 收件箱里 read=0 的短信条数——最准的短信未读数，不受通知栏清掉影响。
+     * 只计数不读内容。无权限/异常返回 0（调用方按“本路无信号”处理）。
+     */
+    fun countUnreadSms(context: Context): Int {
+        if (!hasSmsPermission(context)) {
+            Log.d(TAG, "countUnreadSms: no READ_SMS permission, 0")
+            return 0
+        }
+        return try {
+            context.contentResolver.query(
+                Telephony.Sms.Inbox.CONTENT_URI,
+                arrayOf(Telephony.Sms._ID),
+                "${Telephony.Sms.READ} = 0",
+                null, null
+            )?.use { cursor -> cursor.count } ?: 0
+        } catch (e: Exception) {
+            Log.d(TAG, "countUnreadSms failed, 0", e)
+            0
+        }
+    }
 }
 
 /**

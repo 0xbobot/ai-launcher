@@ -76,4 +76,123 @@ class BadgeCountsTest {
         // 文案层再收成 "99+"（Bob 亲选口径）。
         assertEquals("99+", formatBadgeCount(counts.getValue("com.example.chat")))
     }
+
+    // ---------- 通知 number 最大值 ----------
+
+    @Test
+    fun `aggregateNumberMax - empty gives empty map`() {
+        assertTrue(aggregateNumberMax(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun `aggregateNumberMax - zero number ignored`() {
+        // 未设 number 为 0，不参与取最大。
+        val numbers = listOf("com.example.a" to 0, "com.example.b" to 5)
+        assertEquals(mapOf("com.example.b" to 5), aggregateNumberMax(numbers))
+    }
+
+    @Test
+    fun `aggregateNumberMax - max per package`() {
+        val numbers = listOf(
+            "com.example.a" to 3,
+            "com.example.a" to 15,
+            "com.example.a" to 7,
+            "com.example.b" to 125
+        )
+        assertEquals(
+            mapOf("com.example.a" to 15, "com.example.b" to 125),
+            aggregateNumberMax(numbers)
+        )
+    }
+
+    // ---------- 三路合并 ----------
+
+    @Test
+    fun `combineBadgeCounts - notification count alone is the fallback`() {
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.a" to 3),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            defaultSmsPackage = null
+        )
+        assertEquals(mapOf("com.example.a" to 3), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - number wins when larger than notification count`() {
+        // 应用自报未读数 125 > 在用通知 2 条，取 125（文案层收成 "99+"）。
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.chat" to 2),
+            numberMax = mapOf("com.example.chat" to 125),
+            smsUnread = 0,
+            defaultSmsPackage = null
+        )
+        assertEquals(125, combined.getValue("com.example.chat"))
+        assertEquals("99+", formatBadgeCount(combined.getValue("com.example.chat")))
+    }
+
+    @Test
+    fun `combineBadgeCounts - notification count wins when larger than number`() {
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.chat" to 8),
+            numberMax = mapOf("com.example.chat" to 3),
+            smsUnread = 0,
+            defaultSmsPackage = null
+        )
+        assertEquals(mapOf("com.example.chat" to 8), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - sms unread applies only to default sms package`() {
+        // 短信库 15 条未读：默认短信应用包取 max(15, 通知 2 条) = 15；
+        // 其他包不受短信数影响。
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf(
+                "com.example.sms" to 2,
+                "com.example.chat" to 4
+            ),
+            numberMax = emptyMap(),
+            smsUnread = 15,
+            defaultSmsPackage = "com.example.sms"
+        )
+        assertEquals(
+            mapOf("com.example.sms" to 15, "com.example.chat" to 4),
+            combined
+        )
+    }
+
+    @Test
+    fun `combineBadgeCounts - sms package with no notifications still shows unread`() {
+        // 通知栏已清（通知 0 条、number 0），短信库仍有 15 条未读——
+        // 这正是 Bob 真机报的场景：短信没角标的根因。
+        val combined = combineBadgeCounts(
+            notifCounts = emptyMap(),
+            numberMax = emptyMap(),
+            smsUnread = 15,
+            defaultSmsPackage = "com.example.sms"
+        )
+        assertEquals(mapOf("com.example.sms" to 15), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - sms unread ignored without default package`() {
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.chat" to 2),
+            numberMax = emptyMap(),
+            smsUnread = 15,
+            defaultSmsPackage = null
+        )
+        assertEquals(mapOf("com.example.chat" to 2), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - all zero gives empty map`() {
+        val combined = combineBadgeCounts(
+            notifCounts = emptyMap(),
+            numberMax = mapOf("com.example.a" to 0),
+            smsUnread = 0,
+            defaultSmsPackage = "com.example.sms"
+        )
+        assertTrue(combined.isEmpty())
+    }
 }
