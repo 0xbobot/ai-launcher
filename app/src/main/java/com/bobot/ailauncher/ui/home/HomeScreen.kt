@@ -72,6 +72,7 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.PanelAccessibilityService
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
+import com.bobot.ailauncher.ui.smartcard.SmartCardStackHost
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
@@ -873,6 +874,9 @@ fun HomeScreen(
                 // v0.68.101：PetZone 已纯文字简报；inputActive
                 // 驱动简报紧凑（D-1）与横屏 hero 让位。
                 inputActive = intentInputMode,
+                // 智能卡片（447）：叠层槽位——会行下方独立一段，无卡零高度，
+                // 输入态与简报一起淡出。
+                cardStack = { SmartCardStackHost() },
                 // v0.68.99（R-1 修订）：输入态填充 PetZone 的 intentSlot（.97
                 // 槽位：hero 与会行之间、横屏左区）——静态时 AnimatedVisibility
                 // 零高度、封面只剩简报+Dock；包裹 Box 捕获意图区范围供 .93

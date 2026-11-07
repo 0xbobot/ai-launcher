@@ -1,5 +1,7 @@
 package com.bobot.ailauncher.data
 
+import android.content.Context
+import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,4 +42,9 @@ object NotificationRepository {
     fun setConnected(connected: Boolean) {
         _isConnected.value = connected
     }
+
+    /** 通知读取权限是否已开启（数据层口径，供卡片仓库与设置页共用） */
+    fun hasAccess(context: Context): Boolean =
+        NotificationManagerCompat.getEnabledListenerPackages(context)
+            .contains(context.packageName)
 }
