@@ -20,7 +20,9 @@ enum class SmartCardKind {
     /** 未接来电回拨（只走通知，不读通话记录） */
     MISSED_CALL,
     /** 快递/外卖/航班等有时效的通知 */
-    NOTIFICATION
+    NOTIFICATION,
+    /** 首次加载的引导卡（设计稿 §4.7）：介绍场景、引导接来源，不是一件真事项 */
+    GUIDE
 }
 
 /** 卡片的下一步动作：点它就算处理完一张。 */
@@ -36,6 +38,11 @@ sealed class SmartCardAction {
 
     /** 点通知自带的 contentIntent，直达应用内页面（快递取件码/航班值机等） */
     data class OpenNotification(val pendingIntent: PendingIntent?) : SmartCardAction()
+
+    /** 引导卡的“连接”：去接上某个来源（UiPrefs 连接器 key）。
+     * 不走 performAction——接来源要弹应用内显著披露/系统框，得由宿主
+     * 拿 opener 执行；performAction 里遇见它只返回 false（防御分支）。 */
+    data class Connect(val connectorKey: String) : SmartCardAction()
 }
 
 data class SmartCard(
@@ -76,6 +83,7 @@ internal fun kindRank(kind: SmartCardKind): Int = when (kind) {
     SmartCardKind.APPOINTMENT -> 1
     SmartCardKind.MISSED_CALL -> 2
     SmartCardKind.NOTIFICATION -> 3
+    SmartCardKind.GUIDE -> 4
 }
 
 /**

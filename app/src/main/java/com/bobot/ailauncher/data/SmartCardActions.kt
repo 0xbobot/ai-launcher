@@ -140,6 +140,9 @@ object SmartCardActions {
                         false
                     }
                 }
+                // 引导卡的“连接”由宿主拦截、走 opener 执行，永不进这里；
+                // 万一漏网也不 markDone、不打开任何东西。
+                is SmartCardAction.Connect -> false
             }
         } catch (_: Exception) {
             false

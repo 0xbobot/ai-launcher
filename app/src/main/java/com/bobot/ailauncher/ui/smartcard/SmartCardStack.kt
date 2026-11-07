@@ -14,10 +14,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -47,10 +52,20 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SmartCard
+import com.bobot.ailauncher.data.SmartCardAction
 import com.bobot.ailauncher.data.SmartCardActions
 import com.bobot.ailauncher.data.SmartCardRepository
+import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.data.visibleGuideCards
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.ui.rememberNowMillis
+import com.bobot.ailauncher.ui.settings.OnGrantedTransition
+import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
+import com.bobot.ailauncher.ui.settings.isSmsGranted
+import com.bobot.ailauncher.ui.settings.openNotificationSettings
+import com.bobot.ailauncher.ui.settings.rememberPermissionState
+import com.bobot.ailauncher.ui.settings.rememberSmsPermissionOpener
+import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.MotionTokens
@@ -65,6 +80,12 @@ import kotlin.math.abs
  * 叠层交互：多张卡叠成一摞，最上面一张完整显示、下面露个边（最多露两张）；
  * 点下一步动作算处理完一张、卡片消失；横滑跳过沉到摞底、轮到最后再出现；
  * 全部处理完或跳过后区域清空、不留占位条。
+ *
+ * 引导卡片（设计稿 §4.7，448）：真卡片为空、且引导还没看过时，叠层位置
+ * 出现一叠引导卡片（而不是空着），只出现一次。点 × 整叠消失、不再出现；
+ * 一张张滑过去看完也记一次；点“连接”走 §5 流程（消息先显著披露再弹
+ * 系统框，通知跳系统设置页）；接上来源后对应引导卡消失，有真事项时真
+ * 卡片顶掉整叠引导卡。
  */
 @Composable
 fun SmartCardStackHost() {
@@ -90,28 +111,121 @@ fun SmartCardStackHost() {
     LaunchedEffect(notifications, nowMillis) {
         SmartCardRepository.refresh(context, notifications, nowMillis)
     }
-    if (cards.isEmpty()) return
-    SmartCardStack(
-        cards = cards,
-        onAction = { card ->
-            val opened = SmartCardActions.performAction(context, card)
-            if (!opened) IslandToasts.show("没能打开")
-            opened
-        },
-        onSkip = { card -> SmartCardRepository.skip(context, card) }
+    // 引导卡片要用的权限状态与 opener：必须放在下面的提前返回之前——
+    // remember 调用在重组间顺序要稳定，不能只在真卡片为空的分支里才跑。
+    val smsGranted = rememberPermissionState { isSmsGranted(context) }
+    val notificationGranted =
+        rememberPermissionState { isNotificationAccessGranted(context) }
+    val openSms = rememberSmsPermissionOpener(smsGranted)
+    // 消息刚接上就立即重读短信（不然真卡片要等下次回桌面才出现、顶不掉引导卡）
+    OnGrantedTransition(smsGranted.value) {
+        SmartCardRepository.refreshSms(context, force = true)
+    }
+    // 应用运行中去设置里开通知读取权限时系统不回调，在这里重绑监听
+    OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
+    if (cards.isNotEmpty()) {
+        SmartCardStack(
+            cards = cards,
+            onAction = { card ->
+                val opened = SmartCardActions.performAction(context, card)
+                if (!opened) IslandToasts.show("没能打开")
+                opened
+            },
+            onSkip = { card -> SmartCardRepository.skip(context, card) }
+        )
+        return
+    }
+    // 真卡片为空时才轮到引导卡片（而不是空着）。
+    var guideSeen by remember {
+        mutableStateOf(SmartCardRepository.isGuideSeen(context))
+    }
+    var swipedGuideIds by remember { mutableStateOf(setOf<String>()) }
+    var guideDisclosure by remember { mutableStateOf(false) }
+    val guides = visibleGuideCards(
+        messageGranted = smsGranted.value,
+        notificationGranted = notificationGranted.value,
+        swipedIds = swipedGuideIds
     )
+    // 没什么可引导的（来源都已接上，或全部滑完了）即记一次，不再弹
+    LaunchedEffect(guides.isEmpty(), guideSeen) {
+        if (guides.isEmpty() && !guideSeen) {
+            SmartCardRepository.markGuideSeen(context)
+            guideSeen = true
+        }
+    }
+    if (guideSeen || guides.isEmpty()) return
+    SmartCardStack(
+        cards = guides,
+        onAction = { card ->
+            when ((card.action as? SmartCardAction.Connect)?.connectorKey) {
+                UiPrefs.CONNECTOR_MESSAGE -> guideDisclosure = true
+                UiPrefs.CONNECTOR_NOTIFICATION -> openNotificationSettings(context)
+                else -> Unit
+            }
+            true
+        },
+        onSkip = { card -> swipedGuideIds += card.id },
+        onClose = {
+            SmartCardRepository.markGuideSeen(context)
+            guideSeen = true
+        }
+    )
+    if (guideDisclosure) {
+        // 显著披露（§5.4，同设置页“接上消息”原文）：先讲清要什么、为什么，
+        // 用户点“同意”后再弹系统框；不要另起一套。
+        AlertDialog(
+            onDismissRequest = { guideDisclosure = false },
+            title = {
+                Text(
+                    text = "接上消息",
+                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title
+                )
+            },
+            text = {
+                Text(
+                    text = "要读短信里的账单和体检预约提醒。只读近 7 天的短信，只解析账单、预约这两类，解析完不存原文、不发到别处。",
+                    fontSize = AILauncherType.Body.fontSize,
+                    color = AILauncherColors.current.Body
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { guideDisclosure = false; openSms() }) {
+                    Text(
+                        text = "同意",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Accent,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { guideDisclosure = false }) {
+                    Text(
+                        text = "取消",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Hint
+                    )
+                }
+            }
+        )
+    }
 }
 
 /**
  * 卡片叠层：最上面一张完整显示，下面两张露个边（8dp 一层）。
  * 点动作立即执行（不拖 250ms 动画等开应用）；横滑跳过播离场动画再沉底。
+ * onClose 非空时（引导卡片模式）在叠层上方放一个 ×：点一下整叠消失，
+ * 不再出现；仍在叠层自己的槽位里，不另开浮层。
  */
 @Composable
 fun SmartCardStack(
     cards: List<SmartCard>,
     onAction: (SmartCard) -> Boolean,
     onSkip: (SmartCard) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClose: (() -> Unit)? = null
 ) {
     if (cards.isEmpty()) return
     val top = cards[0]
@@ -122,9 +236,25 @@ fun SmartCardStack(
         if (topHeightPx > 0) topHeightPx.toDp() else 160.dp
     }
     Column(modifier = modifier.fillMaxWidth()) {
-        // 与简报会行同款段间距（32dp，大于简报内部 24dp 段间距，8dp 网格）：
-        // 卡片作为独立一段站得住。
-        Spacer(modifier = Modifier.height(32.dp))
+        if (onClose != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "关闭",
+                        tint = AILauncherColors.current.Hint
+                    )
+                }
+            }
+        } else {
+            // 与简报会行同款段间距（32dp，大于简报内部 24dp 段间距，8dp 网格）：
+            // 卡片作为独立一段站得住。
+            Spacer(modifier = Modifier.height(32.dp))
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
