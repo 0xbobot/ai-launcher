@@ -42,6 +42,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.data.CalendarRepository
+import com.bobot.ailauncher.data.SmartCardRepository
+import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.glass.GlassPolicy
 import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
 import com.bobot.ailauncher.ui.home.BriefMeetingRow
@@ -86,7 +88,10 @@ fun PetZone(
     // 构图与无槽一致；输入态由 HomeScreen 填充 IntentEntry。早先的底部浮层
     // 方案在横屏会跨进 hero 区（矩阵 landphone 腿实测 overlap），流式槽位靠
     // 布局分区天然不重叠，且与 .97 几何基线同构。
-    intentSlot: @Composable () -> Unit = {}
+    intentSlot: @Composable () -> Unit = {},
+    // 智能卡片（447）：叠层槽位——会行下方、独立一段；无卡时零高度，
+    // 构图与无槽一致；输入态与简报一起淡出（卡片是首页内容，不是输入内容）。
+    cardStack: @Composable () -> Unit = {}
 ) {
     // v0.30.0：天气微动作
     val weatherDesc by com.bobot.ailauncher.data.WeatherState.desc.collectAsState()
@@ -150,6 +155,9 @@ fun PetZone(
         }
     }
     val context = LocalContext.current
+    // 智能卡片（447）：日历连接器开关——关掉后简报会行（日历来源的卡片面）
+    // 立即停用；PetZone 的 resumeTick 会在回桌面时重组，本处随之重读。
+    val calendarEnabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CALENDAR)
     // v0.67.6：删除 15 分钟日程轮询（省电原则）
     // 改为一次性任务：TodaySection 数据管线的会议提醒调度（开会前 30/15 分钟
     // 各一次）；日历数据变化时重算，边界刷新天然兜底（防任务被杀）
@@ -165,13 +173,24 @@ fun PetZone(
     // 意图改进一批：下一会议同步到共享 holder——首页意图入口的零打字建议面要读
     // （会议数据原本只活在本 Composable 的状态里，IntentEntry 够不着）；
     // PetZone 离场时清空，避免建议面读到陈旧会议。TODAY 数据流本身不改。
-    LaunchedEffect(coverNextEvent) { TodayEventsHolder.update(coverNextEvent) }
+    // 智能卡片（447）：日历连接器关掉后，建议面也不应再报这场会——与会行同门。
+    LaunchedEffect(coverNextEvent, calendarEnabled) {
+        TodayEventsHolder.update(if (calendarEnabled) coverNextEvent else null)
+    }
     // v0.68.93（布局与交互 Loop 一批④）：会议呈现状态与数据同源上报——呈现点
     // 的渲染条件就是 coverNextEvent != null（.99 起为简报会行 BriefMeetingRow，
     // 原 NextUpStrip），呈现的事件 id 与 coverNextEvent.eventId 同拍写入/清空，
     // 供建议面按 id 去重（去重契约随呈现点迁移不变）。
-    LaunchedEffect(coverNextEvent) {
-        TodayEventsHolder.updatePresentedNextEventId(coverNextEvent?.eventId)
+    // 智能卡片（447）：日历连接器关掉后会行不呈现，建议面也不应再报这场会——
+    // 呈现 id 与会行同门（calendarEnabled），且会行出现即算日历来源用过一次
+    // （设置连接器列表的“最后使用时间”用）。
+    LaunchedEffect(coverNextEvent, calendarEnabled) {
+        TodayEventsHolder.updatePresentedNextEventId(
+            if (calendarEnabled) coverNextEvent?.eventId else null
+        )
+        if (coverNextEvent != null && calendarEnabled) {
+            SmartCardRepository.recordCalendarUsed(context)
+        }
     }
     DisposableEffect(Unit) {
         onDispose {
@@ -367,7 +386,8 @@ fun PetZone(
                 )
             ) else androidx.compose.animation.ExitTransition.None
         ) {
-            if (coverNextEvent != null) {
+            // 智能卡片（447）：日历连接器关掉后会行不呈现（断开后卡片立即停用该来源）。
+            if (coverNextEvent != null && calendarEnabled) {
                 // 418（Bob）：简报与日程之间留白——16dp 时分隔线贴着简报
                 // 正文、两段读成一块；提到 32dp（大于简报内部 24dp 的段间
                 // 距，8dp 网格），日程作为独立一段站得住。
@@ -383,6 +403,34 @@ fun PetZone(
                     // 分钟对齐，标签与选会至多在同一分钟边界内先后翻转。
                     nowMillis = coverNowMillis
                 )
+            }
+        }
+        // 智能卡片（447）：叠层槽位——会行下方、独立一段，与简报一起在输入态
+        // 淡出（竖屏区块切换用 None、横屏沿用 fade，与会行同款）；无卡时
+        // SmartCardStackHost 零高度、不留占位。
+        androidx.compose.animation.AnimatedVisibility(
+            visible = !inputActive,
+            enter = if (isLandscapeCover) androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
+            ) else androidx.compose.animation.EnterTransition.None,
+            exit = if (isLandscapeCover) androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(
+                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
+                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
+                )
+            ) else androidx.compose.animation.ExitTransition.None
+        ) {
+            if (isLandscapeCover) {
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.fillMaxWidth(coverLeftFrac)
+                ) {
+                    cardStack()
+                }
+            } else {
+                cardStack()
             }
         }
         // 输入态专注·集成：专注态下末尾留白与列尾气泡宿主均不挂载——

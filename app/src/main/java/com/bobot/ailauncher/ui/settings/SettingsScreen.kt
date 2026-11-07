@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -47,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -73,7 +75,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.R
+import com.bobot.ailauncher.data.ConnectorState
 import com.bobot.ailauncher.data.CrashLog
+import com.bobot.ailauncher.data.SmartCardRepository
+import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.data.buildConnectorStates
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmKeyStore
 import com.bobot.ailauncher.data.LlmConnectionTester
@@ -89,12 +95,16 @@ import com.bobot.ailauncher.ui.theme.pageTextureBackground
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import com.bobot.ailauncher.ui.settings.OnGrantedTransition
 import com.bobot.ailauncher.ui.settings.isCalendarGranted
+import com.bobot.ailauncher.ui.settings.isContactsGranted
 import com.bobot.ailauncher.ui.settings.isDefaultLauncher
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
+import com.bobot.ailauncher.ui.settings.isSmsGranted
 import com.bobot.ailauncher.ui.settings.openHomeSettings
 import com.bobot.ailauncher.ui.settings.openNotificationSettings
 import com.bobot.ailauncher.ui.settings.rememberCalendarPermissionOpener
+import com.bobot.ailauncher.ui.settings.rememberContactsPermissionOpener
 import com.bobot.ailauncher.ui.settings.rememberPermissionState
+import com.bobot.ailauncher.ui.settings.rememberSmsPermissionOpener
 import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import kotlinx.coroutines.launch
@@ -697,6 +707,183 @@ fun SettingsScreen() {
             }
         }
 
+        // 分区：提醒来源——智能卡片的五个本机连接器（447，设计稿 §2/§5）
+        // 各自单独接、有明确理由、随时可断；数据只在手机上处理，不发到别处。
+        item {
+            SettingsSectionTitle("提醒来源")
+        }
+
+        item {
+            val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
+            val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
+            val smsGranted = rememberPermissionState { isSmsGranted(context) }
+            val contactsGranted = rememberPermissionState { isContactsGranted(context) }
+            val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
+            val openSms = rememberSmsPermissionOpener(smsGranted)
+            val openContacts = rememberContactsPermissionOpener(contactsGranted)
+            // 消息刚接上就立即重读短信（不然卡片要等下次回桌面才出现）
+            OnGrantedTransition(smsGranted.value) {
+                SmartCardRepository.refreshSms(context, force = true)
+            }
+            // 显著披露：先讲清要什么、为什么，用户点“同意”后再弹系统框
+            // （设计稿 §5.4：显著披露在第一次请求权限之前）。
+            var disclosure by remember { mutableStateOf<String?>(null) }
+            // 开关切换后重算列表（开关写 UiPrefs，不走组合状态）
+            var connectorTick by remember { mutableIntStateOf(0) }
+            val connectorStates = remember(
+                calendarGranted.value, notificationGranted.value,
+                smsGranted.value, contactsGranted.value, connectorTick
+            ) { buildConnectorStates(context) }
+            val byKey = connectorStates.associateBy { it.key }
+            fun toggle(key: String, enabled: Boolean) {
+                UiPrefs.setConnectorEnabled(context, key, enabled)
+                connectorTick++
+            }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "首页智能卡片的数据来源，各自单独接、随时能断。只在手机上处理，不发到别处。",
+                        fontSize = AILauncherType.Footnote.fontSize,
+                        color = AILauncherColors.current.Hint,
+                        lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { state ->
+                        SettingsConnectorRow(
+                            state = state,
+                            granted = notificationGranted.value,
+                            actionText = "去开启",
+                            onOpen = { openNotificationSettings(context) },
+                            onToggle = { toggle(state.key, it) }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    byKey[UiPrefs.CONNECTOR_CALENDAR]?.let { state ->
+                        SettingsConnectorRow(
+                            state = state,
+                            granted = calendarGranted.value,
+                            actionText = "去开启",
+                            onOpen = openCalendar,
+                            onToggle = { toggle(state.key, it) }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    byKey[UiPrefs.CONNECTOR_MESSAGE]?.let { state ->
+                        SettingsConnectorRow(
+                            state = state,
+                            granted = smsGranted.value,
+                            actionText = "接上",
+                            onOpen = { disclosure = "sms" },
+                            onToggle = { toggle(state.key, it) }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    byKey[UiPrefs.CONNECTOR_PHONE]?.let { state ->
+                        SettingsConnectorRow(
+                            state = state,
+                            granted = notificationGranted.value,
+                            actionText = if (notificationGranted.value) null else "去开启",
+                            onOpen = { openNotificationSettings(context) },
+                            onToggle = { toggle(state.key, it) }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    byKey[UiPrefs.CONNECTOR_CONTACTS]?.let { state ->
+                        SettingsConnectorRow(
+                            state = state,
+                            granted = contactsGranted.value,
+                            actionText = "接上",
+                            onOpen = { disclosure = "contacts" },
+                            onToggle = { toggle(state.key, it) }
+                        )
+                    }
+                }
+            }
+            if (disclosure == "sms") {
+                AlertDialog(
+                    onDismissRequest = { disclosure = null },
+                    title = {
+                        Text(
+                            text = "接上消息",
+                            fontSize = AILauncherType.BodyLarge.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Title
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "要读短信里的账单和体检预约提醒。只读近 7 天的短信，只解析账单、预约这两类，解析完不存原文、不发到别处。",
+                            fontSize = AILauncherType.Body.fontSize,
+                            color = AILauncherColors.current.Body
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { disclosure = null; openSms() }) {
+                            Text(
+                                text = "同意",
+                                fontSize = AILauncherType.Callout.fontSize,
+                                color = AILauncherColors.current.Accent,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { disclosure = null }) {
+                            Text(
+                                text = "取消",
+                                fontSize = AILauncherType.Callout.fontSize,
+                                color = AILauncherColors.current.Hint
+                            )
+                        }
+                    }
+                )
+            }
+            if (disclosure == "contacts") {
+                AlertDialog(
+                    onDismissRequest = { disclosure = null },
+                    title = {
+                        Text(
+                            text = "接上联系人",
+                            fontSize = AILauncherType.BodyLarge.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Title
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "要把未接来电的号码显示成名字。只按号码查姓名，不读其他联系人信息。",
+                            fontSize = AILauncherType.Body.fontSize,
+                            color = AILauncherColors.current.Body
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { disclosure = null; openContacts() }) {
+                            Text(
+                                text = "同意",
+                                fontSize = AILauncherType.Callout.fontSize,
+                                color = AILauncherColors.current.Accent,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { disclosure = null }) {
+                            Text(
+                                text = "取消",
+                                fontSize = AILauncherType.Callout.fontSize,
+                                color = AILauncherColors.current.Hint
+                            )
+                        }
+                    }
+                )
+            }
+        }
+
         // 分区：诊断——崩溃记录
         item {
             SettingsSectionTitle("诊断")
@@ -901,6 +1088,80 @@ fun SettingsScreen() {
             }
         }
 
+    }
+}
+
+/**
+ * 设置 → 提醒来源的一行（447）：标题＋它提供什么＋开关＋状态行＋接上按钮。
+ * 开关是用户侧断开（关掉后该来源的卡片立即停用，权限本身不动，重接不用再跑
+ * 系统设置）；权限未开时才给“去开启/接上”按钮，已接上只显示状态。
+ * 触控：开关走 Material3 默认 48dp 热区，按钮走 TextButton。
+ */
+@Composable
+private fun SettingsConnectorRow(
+    state: ConnectorState,
+    granted: Boolean,
+    actionText: String?,
+    onOpen: (() -> Unit)?,
+    onToggle: (Boolean) -> Unit
+) {
+    val view = LocalView.current
+    val statusText = when {
+        !granted -> "未接上"
+        !state.enabled -> "已关闭"
+        else -> "已接上 · ${state.lastUsedLabel}"
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = state.name,
+                    fontSize = AILauncherType.Body.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = state.desc,
+                    fontSize = AILauncherType.Footnote.fontSize,
+                    color = AILauncherColors.current.Hint,
+                    lineHeight = 18.sp
+                )
+            }
+            Switch(
+                checked = state.enabled,
+                onCheckedChange = { view.tickHaptic(); onToggle(it) }
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = null,
+                tint = if (granted && state.enabled) AILauncherColors.current.Success
+                    else AILauncherColors.current.Hint,
+                modifier = Modifier
+                    .size(16.dp)
+                    .semantics { invisibleToUser() }
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = statusText,
+                fontSize = AILauncherType.Footnote.fontSize,
+                color = if (granted && state.enabled) AILauncherColors.current.Success
+                    else AILauncherColors.current.Hint
+            )
+            if (!granted && actionText != null && onOpen != null) {
+                Spacer(modifier = Modifier.width(16.dp))
+                TextButton(onClick = { view.tickHaptic(); onOpen() }) {
+                    Text(
+                        text = actionText,
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Accent
+                    )
+                }
+            }
+        }
     }
 }
 
