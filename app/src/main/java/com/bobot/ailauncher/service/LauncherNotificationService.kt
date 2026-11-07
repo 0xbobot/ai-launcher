@@ -1,13 +1,20 @@
 package com.bobot.ailauncher.service
 
 import android.app.Notification
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Telephony
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.core.event.LauncherEvent
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SimpleNotification
+import com.bobot.ailauncher.data.SmsRepository
 import com.bobot.ailauncher.data.aggregateBadgeCounts
+import com.bobot.ailauncher.data.aggregateNumberMax
+import com.bobot.ailauncher.data.combineBadgeCounts
 
 /**
  * 通知监听服务：通知事件的生产者。
@@ -17,15 +24,66 @@ import com.bobot.ailauncher.data.aggregateBadgeCounts
  */
 class LauncherNotificationService : NotificationListenerService() {
 
+    /** 短信库变化观察者（角标用）：短信在应用里读了/删了会触发角标重算，
+     * 通知事件覆盖不到“应用内读短信”的场景。只在监听已连接且授了 READ_SMS 时注册。 */
+    private var smsObserverRegistered = false
+    private val smsObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            recomputeBadgeCounts()
+        }
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         NotificationRepository.setConnected(true)
         pushActiveNotifications()
+        registerSmsObserver()
     }
 
     override fun onListenerDisconnected() {
+        unregisterSmsObserver()
         super.onListenerDisconnected()
         NotificationRepository.setConnected(false)
+    }
+
+    override fun onDestroy() {
+        unregisterSmsObserver()
+        super.onDestroy()
+    }
+
+    private fun registerSmsObserver() {
+        if (smsObserverRegistered) return
+        // 未授 READ_SMS 时短信数恒为 0，观察无意义，跳过；授权后下次连接时再注册。
+        if (!SmsRepository.hasSmsPermission(this)) return
+        try {
+            contentResolver.registerContentObserver(
+                Telephony.Sms.CONTENT_URI, true, smsObserver
+            )
+            smsObserverRegistered = true
+        } catch (_: Exception) {
+            // 注册失败不影响通知通道，角标仍由通知事件驱动
+        }
+    }
+
+    private fun unregisterSmsObserver() {
+        if (!smsObserverRegistered) return
+        try {
+            contentResolver.unregisterContentObserver(smsObserver)
+        } catch (_: Exception) {
+            // 未注册或已注销，忽略
+        }
+        smsObserverRegistered = false
+    }
+
+    /** 角标重算（短信库变化触发）：从在用通知列表重算三路信号并合并推送。 */
+    private fun recomputeBadgeCounts() {
+        try {
+            val active = activeNotifications.filter { it.isClearable && !it.isOngoing }
+            val all = active.mapNotNull { sbn -> sbn.toSimpleNotification() }
+            updateBadgeCounts(active, all)
+        } catch (_: SecurityException) {
+            // 未连接时静默忽略
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
@@ -67,12 +125,39 @@ class LauncherNotificationService : NotificationListenerService() {
             // 展示列表只取最新 20 条，计数若共用它，“125 条”会被截成 20 条以内。
             // （toSimpleNotification 只丢标题正文都空的条目——这类通知无可读内容。）
             val all = active.mapNotNull { sbn -> sbn.toSimpleNotification() }
-            NotificationRepository.updateBadgeCounts(aggregateBadgeCounts(all))
+            updateBadgeCounts(active, all)
             val list = all.sortedByDescending { it.time }.take(20)
             NotificationRepository.update(list)
         } catch (_: SecurityException) {
             // 权限被撤销时静默忽略，首页会显示空态引导
         }
+    }
+
+    /**
+     * 角标三路合并（Bob 2026-11-07 晚：角标要的是应用的未读数据，不是通知栏的
+     * 消息数；通知栏的数保留作兜底）。每包取最大值：
+     * ① 短信库未读数（仅默认短信应用包，需 READ_SMS）② 通知 number 最大值
+     * （应用自报未读数）③ 在用通知条数（兜底）。
+     */
+    private fun updateBadgeCounts(
+        active: List<StatusBarNotification>,
+        all: List<SimpleNotification>
+    ) {
+        // number 从原始列表取（toSimpleNotification 会丢标题正文都空的条目，
+        // 但 number 仍是有效的未读信号）。
+        val numberMax = aggregateNumberMax(
+            active.map { it.packageName to it.notification.number }
+        )
+        val notifCounts = aggregateBadgeCounts(all)
+        val defaultSms = try {
+            Telephony.Sms.getDefaultSmsPackage(this)
+        } catch (_: Exception) {
+            null
+        }
+        val smsUnread = SmsRepository.countUnreadSms(this)
+        NotificationRepository.updateBadgeCounts(
+            combineBadgeCounts(notifCounts, numberMax, smsUnread, defaultSms)
+        )
     }
 
     private fun StatusBarNotification.toSimpleNotification(): SimpleNotification? {
