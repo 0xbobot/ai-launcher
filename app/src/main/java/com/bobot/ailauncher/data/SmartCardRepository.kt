@@ -27,6 +27,8 @@ object SmartCardRepository {
     private const val KEY_SKIPPED_PREFIX = "skipped_"
     private const val KEY_LAST_USED_PREFIX = "last_used_"
     private const val KEY_LAST_SMS_REFRESH = "last_sms_refresh_ms"
+    /** 引导卡片只出现一次（设计稿 §4.7）：看完（滑完全部）或点 × 关掉即记下，不再弹 */
+    private const val KEY_GUIDE_SEEN = "guide_seen"
 
     /** 短信重读节流：5 分钟内不重复查短信库（查询本身便宜，但没必要每分钟查） */
     private const val SMS_REFRESH_MIN_INTERVAL_MS = 5L * 60 * 1000
@@ -77,6 +79,15 @@ object SmartCardRepository {
         if (changed) editor.apply()
         // 跳过顺序按当时跳过的先后（截止点越早跳得越早）
         return withDeadline.sortedBy { it.second }.map { it.first }
+    }
+
+    /** 引导卡片是否已看过（看完或点 × 关掉后为 true，之后不再出现） */
+    fun isGuideSeen(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_GUIDE_SEEN, false)
+
+    /** 记下引导卡片已看过（只出现一次） */
+    fun markGuideSeen(context: Context) {
+        prefs(context).edit().putBoolean(KEY_GUIDE_SEEN, true).apply()
     }
 
     /** 点下一步动作算处理完一张（仓库层立即摘掉，UI 侧先播离场动画再调这里） */
@@ -360,6 +371,9 @@ object SmartCardRepository {
                     used += UiPrefs.CONNECTOR_NOTIFICATION
                 }
                 SmartCardKind.NOTIFICATION -> used += UiPrefs.CONNECTOR_NOTIFICATION
+                // 引导卡不是一件真事项，不计入任何来源的“最后使用时间”
+                // （且引导卡根本不进仓库的候选表，这里只是穷尽分支）。
+                SmartCardKind.GUIDE -> Unit
             }
         }
         if (used.isEmpty()) return
