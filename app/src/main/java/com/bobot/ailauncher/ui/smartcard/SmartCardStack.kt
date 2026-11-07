@@ -2,6 +2,7 @@ package com.bobot.ailauncher.ui.smartcard
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -56,6 +58,7 @@ import com.bobot.ailauncher.data.SmartCardActions
 import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.visibleGuideCards
+import com.bobot.ailauncher.ui.components.AppBadge
 import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.island.IslandToasts
@@ -236,6 +239,9 @@ fun SmartCardStackHost() {
  * 每张卡两个响应：忽略（消失、不再出现）与继续（卡片定义的下一步）。
  * onClose 非空时（引导卡片模式）× 在顶卡表头右上角、卡片内部：点一下
  * 整叠消失，不再出现；仍在叠层自己的槽位里，不另开浮层。
+ * 待办数角标（本批，Bob 2026-11-07 晚定）：叠层右上角压住顶卡角，
+ * 显示还剩几张待办卡片（当前叠层张数），与 Dock/应用中心同一套
+ * AppBadge；0 张时区域清空、角标不显示。
  *
  * 摞高怎么定（449/v1.2.2，修 448 实拍“按钮贴底被裁”）：
  * 旧实现用 onGloballyPositioned 量顶卡高 → Box 定高 → clipToBounds。
@@ -265,54 +271,71 @@ fun SmartCardStack(
         // 悬在壁纸上）；× 进卡内表头（见 SmartCardView），这里两模式
         // 统一只留段间距。
         Spacer(modifier = Modifier.height(32.dp))
-        SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
-            val topPlaceables = subcompose(SmartCardStackSlot.Top) {
-                key(top.id) {
-                    TopSmartCard(
-                        card = top,
-                        onAction = onAction,
-                        onSkip = onSkip,
-                        onIgnore = onIgnore,
-                        onClose = onClose,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("smart_card_top")
-                    )
-                }
-            }.map { it.measure(constraints.copy(maxHeight = Constraints.Infinity)) }
-            val topHeight = topPlaceables.maxOfOrNull { it.height } ?: 0
-            val peekPlaceables = peeks.mapIndexed { index, card ->
-                subcompose(SmartCardStackSlot.Peek(index)) {
-                    key(card.id) {
-                        SmartCardView(
-                            card = card,
-                            showAction = false,
-                            onActionClick = {},
-                            onIgnoreClick = {},
-                            onCloseClick = null,
+        // 待办数角标（Bob 2026-11-07 晚定）：叠层右上角、压住顶卡角，显示
+        // 还剩几张待办卡片；与 Dock/应用中心同一套 AppBadge（红 pill 白字，
+        // 1–99 显示数字、≥100 显示 99+，0 张不画）。计数＝当前叠层卡片张数
+        // （真卡或可见引导卡），随处理/跳过/新增实时变；0 张时本函数已提前
+        // 返回、区域清空，角标不显示。纯视觉覆盖层，不消费触摸（× 在卡内
+        // 16dp 处，角标贴角不重叠；即使贴到也不拦点按）。
+        Box(modifier = Modifier.fillMaxWidth()) {
+            SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
+                val topPlaceables = subcompose(SmartCardStackSlot.Top) {
+                    key(top.id) {
+                        TopSmartCard(
+                            card = top,
+                            onAction = onAction,
+                            onSkip = onSkip,
+                            onIgnore = onIgnore,
+                            onClose = onClose,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .graphicsLayer {
-                                    val scale = 0.97f - 0.03f * index
-                                    scaleX = scale
-                                    scaleY = scale
-                                    alpha = 0.65f - 0.25f * index
-                                }
-                                .testTag("smart_card_peek")
+                                .testTag("smart_card_top")
                         )
                     }
-                }.map { it.measure(constraints.copy(maxHeight = topHeight)) }
-            }
-            val stackHeight = topHeight + 8.dp.roundToPx() * peeks.size
-            layout(constraints.maxWidth, stackHeight) {
-                // 下面几张先放（在后面），露边在顶卡底边下方
-                peekPlaceables.forEachIndexed { index, placeables ->
-                    placeables.forEach {
-                        it.place(0, 8.dp.roundToPx() * (index + 1))
-                    }
+                }.map { it.measure(constraints.copy(maxHeight = Constraints.Infinity)) }
+                val topHeight = topPlaceables.maxOfOrNull { it.height } ?: 0
+                val peekPlaceables = peeks.mapIndexed { index, card ->
+                    subcompose(SmartCardStackSlot.Peek(index)) {
+                        key(card.id) {
+                            SmartCardView(
+                                card = card,
+                                showAction = false,
+                                onActionClick = {},
+                                onIgnoreClick = {},
+                                onCloseClick = null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer {
+                                        val scale = 0.97f - 0.03f * index
+                                        scaleX = scale
+                                        scaleY = scale
+                                        alpha = 0.65f - 0.25f * index
+                                    }
+                                    .testTag("smart_card_peek")
+                            )
+                        }
+                    }.map { it.measure(constraints.copy(maxHeight = topHeight)) }
                 }
-                topPlaceables.forEach { it.place(0, 0) }
+                val stackHeight = topHeight + 8.dp.roundToPx() * peeks.size
+                layout(constraints.maxWidth, stackHeight) {
+                    // 下面几张先放（在后面），露边在顶卡底边下方
+                    peekPlaceables.forEachIndexed { index, placeables ->
+                        placeables.forEach {
+                            it.place(0, 8.dp.roundToPx() * (index + 1))
+                        }
+                    }
+                    topPlaceables.forEach { it.place(0, 0) }
+                }
             }
+            // 待办数角标：与 Dock 图标角标同款贴法（右上角、微微压住角），
+            // 高度 20dp（与 D1 同档）。AppBadge 自身在 count<=0 时不画。
+            AppBadge(
+                count = cards.size,
+                height = 20.dp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 4.dp, y = (-4).dp)
+            )
         }
     }
 }
@@ -412,6 +435,11 @@ private fun TopSmartCard(
  * glassSurface STRONG，圆角 20dp；SIMULATED 档/无玻璃环境退化为
  * 半透明暖灰 GlassCard）：448 的纯白 Material 卡片在壁纸上是一块
  * 白底大空卡，与家里其他玻璃面不协调，改掉。
+ * 449 实拍 verdict（Bob 2026-11-07 晚）：玻璃太透、山体壁纸与露边卡
+ * 的字都透过顶卡，看着乱——字先保证可读，再谈透。本批在 glassSurface
+ * 之上加一层实色衬底（GlassCardStrong，0.88 不透明度，同一 20dp 圆角），
+ * 盖住玻璃补丁与身后露边卡的文字、落在文字之下；全局 GlassPolicy 不动，
+ * 露边卡 alpha（0.65/0.40）也不动——顶卡变实后露边字即被挡住。
  */
 @Composable
 private fun SmartCardView(
@@ -431,6 +459,10 @@ private fun SmartCardView(
                 cornerRadius = 20.dp,
                 tintColor = AILauncherColors.current.Card,
                 fallbackColor = AILauncherColors.current.GlassCard
+            )
+            .background(
+                color = AILauncherColors.current.GlassCardStrong,
+                shape = shape
             )
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)

@@ -62,6 +62,13 @@ object UiPrefs {
     // 首页选择器读它做等高；首次进应用中心前为 null，首页回退跟随容器。
     // 进程内状态，不持久化；转屏/字号变化后下次进应用中心重测即自愈。
     val appCenterListHeightPx = MutableStateFlow<Int?>(null)
+    // 智能卡片叠层带（451）：首页卡片叠层在根坐标里的上下缘（px，top to bottom），
+    // 由 HomeScreen 卡片槽位 onGloballyPositioned 写入；MainScreen 首页 picker
+    // （AppRail）读它，把触摸层在卡带处断开——卡片右侧按钮（连接/×）落在
+    // 48dp 隐形长按触发条内时点按会被条偷走、到不了卡片（449 实拍）；带内不挂
+    // 触摸层、点按落到卡片，带外仍挂、长按开 picker。无卡时为 null，触摸层整条
+    // 不断。进程内状态，不持久化；卡片换张/高度变时重写。
+    val cardStackBandPx = MutableStateFlow<Pair<Float, Float>?>(null)
     fun bumpDock() {
         dockTick.value++
     }
