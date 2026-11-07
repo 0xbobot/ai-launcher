@@ -49,14 +49,35 @@ fun combineBadgeCounts(
     numberMax: Map<String, Int>,
     smsUnread: Int,
     defaultSmsPackage: String?
+): Map<String, Int> = combineBadgeCounts(
+    notifCounts, numberMax, smsUnread, listOfNotNull(defaultSmsPackage)
+)
+
+/**
+ * 合并三路角标数 + 探针第四路（纯函数），每包取最大值；0 的包不进 map：
+ * - smsPackages：短信数要落的包（默认短信应用 + 用户实际看到的短信应用，
+ *   点号码发短信时会打开的那个；两者相同时只记一处，不同则两处都记，各取最大值。
+ *   Bob 2026-11-08 凌晨：短信角标 6、系统桌面 15，机制已通——归属加固作兜底，
+ *   主因是短信库 read 标志与应用自己的未读定义对不上，不是记错包）
+ * - extraCounts：探针第四路（角标广播 + ZTE provider 读到的数），每包取最大值；
+ *   为空时等价于旧的三路合并。探针失败时调用方传空 map，角标行为一字不变。
+ */
+fun combineBadgeCounts(
+    notifCounts: Map<String, Int>,
+    numberMax: Map<String, Int>,
+    smsUnread: Int,
+    smsPackages: Collection<String>,
+    extraCounts: Map<String, Int> = emptyMap()
 ): Map<String, Int> {
     val out = mutableMapOf<String, Int>()
-    for (pkg in notifCounts.keys + numberMax.keys) {
-        val v = maxOf(notifCounts[pkg] ?: 0, numberMax[pkg] ?: 0)
+    for (pkg in notifCounts.keys + numberMax.keys + extraCounts.keys) {
+        val v = maxOf(notifCounts[pkg] ?: 0, numberMax[pkg] ?: 0, extraCounts[pkg] ?: 0)
         if (v > 0) out[pkg] = v
     }
-    if (defaultSmsPackage != null && smsUnread > 0) {
-        out[defaultSmsPackage] = maxOf(out[defaultSmsPackage] ?: 0, smsUnread)
+    if (smsUnread > 0) {
+        for (pkg in smsPackages) {
+            out[pkg] = maxOf(out[pkg] ?: 0, smsUnread)
+        }
     }
     return out
 }

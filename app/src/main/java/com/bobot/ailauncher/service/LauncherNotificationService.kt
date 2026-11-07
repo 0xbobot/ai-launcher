@@ -1,7 +1,11 @@
 package com.bobot.ailauncher.service
 
 import android.app.Notification
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
 import android.database.ContentObserver
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Telephony
@@ -9,6 +13,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.core.event.LauncherEvent
+import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SimpleNotification
 import com.bobot.ailauncher.data.SmsRepository
@@ -38,17 +43,81 @@ class LauncherNotificationService : NotificationListenerService() {
         NotificationRepository.setConnected(true)
         pushActiveNotifications()
         registerSmsObserver()
+        registerBadgeReceiver()
+        probeZteBadgeAsync()
     }
 
     override fun onListenerDisconnected() {
+        unregisterBadgeReceiver()
         unregisterSmsObserver()
         super.onListenerDisconnected()
         NotificationRepository.setConnected(false)
     }
 
     override fun onDestroy() {
+        unregisterBadgeReceiver()
         unregisterSmsObserver()
         super.onDestroy()
+    }
+
+    /**
+     * 角标广播运行时接收器（探针，Bob 2026-11-08 凌晨：实测，不要只推理）。
+     * 监听 ShortcutBadger 的两个广播 action，只收不发；收到且校验通过后
+     * 立即重算一次角标（第四路信号进数）。manifest 里另有同逻辑的
+     * BadgeBroadcastReceiver（供 queryBroadcastReceivers 显式发送时命中）。
+     */
+    private var badgeReceiver: BroadcastReceiver? = null
+
+    private fun registerBadgeReceiver() {
+        if (badgeReceiver != null) return
+        try {
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    if (BadgeProbe.onBroadcastReceived(context, intent)) {
+                        pushActiveNotifications()
+                    }
+                }
+            }
+            val filter = BadgeProbe.badgeIntentFilter()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(receiver, filter)
+            }
+            badgeReceiver = receiver
+        } catch (_: Exception) {
+            // 注册失败不影响通知通道（探针收不到广播，诊断行会如实显示“未收到”）
+        }
+    }
+
+    private fun unregisterBadgeReceiver() {
+        val receiver = badgeReceiver ?: return
+        badgeReceiver = null
+        try {
+            unregisterReceiver(receiver)
+        } catch (_: Exception) {
+            // 未注册或已注销，忽略
+        }
+    }
+
+    /**
+     * ZTE provider 探针（后台线程跑，阻塞调用不上主线程）：试读
+     * content://com.android.launcher3.cornermark.unreadbadge，
+     * 拿到数就重算一次角标（第四路信号）；探针失败时角标行为一字不变。
+     * 只读，绝不调 setAppUnreadCount。
+     */
+    private fun probeZteBadgeAsync() {
+        Thread {
+            try {
+                val candidates = activeNotifications.map { it.packageName }.toSet() +
+                    listOfNotNull(BadgeProbe.resolveFeishuPackage(this))
+                BadgeProbe.probeZteProvider(this, candidates)
+                pushActiveNotifications()
+            } catch (_: Exception) {
+                // 探针失败不影响通知通道
+            }
+        }.start()
     }
 
     private fun registerSmsObserver() {
@@ -134,10 +203,13 @@ class LauncherNotificationService : NotificationListenerService() {
     }
 
     /**
-     * 角标三路合并（Bob 2026-11-07 晚：角标要的是应用的未读数据，不是通知栏的
-     * 消息数；通知栏的数保留作兜底）。每包取最大值：
-     * ① 短信库未读数（仅默认短信应用包，需 READ_SMS）② 通知 number 最大值
-     * （应用自报未读数）③ 在用通知条数（兜底）。
+     * 角标三路合并 + 探针第四路（Bob 2026-11-07 晚：角标要的是应用的未读数据，
+     * 不是通知栏的消息数；通知栏的数保留作兜底）。每包取最大值：
+     * ① 短信库未读数（需 READ_SMS）② 通知 number 最大值（应用自报未读数）
+     * ③ 在用通知条数（兜底）④ 探针（角标广播 + ZTE provider 读到的数）。
+     * 短信数记到默认短信应用与用户实际看到的短信应用两个包上（各取最大值），
+     * 两者相同时只记一处（Bob 2026-11-08 凌晨：短信角标 6、系统桌面 15，
+     * 机制已通，归属加固只作兜底，主因是 read 标志与应用未读定义对不上）。
      */
     private fun updateBadgeCounts(
         active: List<StatusBarNotification>,
@@ -154,9 +226,14 @@ class LauncherNotificationService : NotificationListenerService() {
         } catch (_: Exception) {
             null
         }
+        val visibleSms = SmsRepository.resolveVisibleSmsPackage(this)
+        val smsPackages = listOfNotNull(defaultSms, visibleSms).toSet()
         val smsUnread = SmsRepository.countUnreadSms(this)
         NotificationRepository.updateBadgeCounts(
-            combineBadgeCounts(notifCounts, numberMax, smsUnread, defaultSms)
+            combineBadgeCounts(
+                notifCounts, numberMax, smsUnread, smsPackages,
+                extraCounts = BadgeProbe.currentProbeCounts()
+            )
         )
     }
 

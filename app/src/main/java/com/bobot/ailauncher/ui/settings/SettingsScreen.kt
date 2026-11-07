@@ -3,6 +3,7 @@
 package com.bobot.ailauncher.ui.settings
 
 import android.content.Intent
+import android.provider.Telephony
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -75,8 +76,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.R
+import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.ConnectorState
 import com.bobot.ailauncher.data.CrashLog
+import com.bobot.ailauncher.data.NotificationRepository
+import com.bobot.ailauncher.data.SmsDiagCounts
+import com.bobot.ailauncher.data.SmsRepository
+import com.bobot.ailauncher.data.countSmsDiag
 import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.buildConnectorStates
@@ -107,7 +113,9 @@ import com.bobot.ailauncher.ui.settings.rememberPermissionState
 import com.bobot.ailauncher.ui.settings.rememberSmsPermissionOpener
 import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Box
@@ -964,6 +972,107 @@ fun SettingsScreen() {
                 }
             }
         }
+        // 角标诊断（Bob 2026-11-08 凌晨：我们的角标 6、系统桌面 15，差 9 条要看清去向；
+        // 另：飞书 125 的中兴通道要实测，不要只推理）。只读展示，不做任何操作。
+        // 数字为 0 也如实显示 0，不隐藏。包名太长只显后半段。
+        // 诊断查询（短信库、ZTE provider）是阻塞调用，走后台线程跑。
+        item {
+            var smsDiag by remember { mutableStateOf<SmsDiagCounts?>(null) }
+            var smsGranted by remember { mutableStateOf(false) }
+            var defaultSmsPkg by remember { mutableStateOf<String?>(null) }
+            var visibleSmsPkg by remember { mutableStateOf<String?>(null) }
+            var feishuPkg by remember { mutableStateOf<String?>(null) }
+            val lastBroadcast by BadgeProbe.lastBroadcast.collectAsState()
+            val zteResult by BadgeProbe.zteResult.collectAsState()
+            LaunchedEffect(Unit) {
+                smsGranted = SmsRepository.hasSmsPermission(context)
+                defaultSmsPkg = runCatching {
+                    Telephony.Sms.getDefaultSmsPackage(context)
+                }.getOrNull()
+                val diag = withContext(Dispatchers.IO) {
+                    val d = countSmsDiag(context)
+                    val vis = SmsRepository.resolveVisibleSmsPackage(context)
+                    val fei = BadgeProbe.resolveFeishuPackage(context)
+                    Triple(d, vis, fei)
+                }
+                smsDiag = diag.first
+                visibleSmsPkg = diag.second
+                feishuPkg = diag.third
+                withContext(Dispatchers.IO) {
+                    val candidates = (NotificationRepository.badgeCounts.value.keys +
+                        listOfNotNull(diag.third)).toSet()
+                    BadgeProbe.probeZteProvider(context, candidates)
+                }
+            }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "角标诊断",
+                        fontSize = AILauncherType.BodyLarge.fontSize,
+                        fontWeight = FontWeight.Medium,
+                        color = AILauncherColors.current.Title
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "只读：短信角标与飞书角标的真实数字，截个图就能对账",
+                        fontSize = AILauncherType.Footnote.fontSize,
+                        color = AILauncherColors.current.Hint,
+                        lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    BadgeDiagRow("读取短信权限", if (smsGranted) "已授" else "未授")
+                    BadgeDiagRow("默认短信应用", shortPackageName(defaultSmsPkg))
+                    BadgeDiagRow("可见短信应用", shortPackageName(visibleSmsPkg))
+                    BadgeDiagRow("短信库未读（read=0）", "${smsDiag?.unreadRead0 ?: 0} 条")
+                    BadgeDiagRow("短信库未看（seen=0）", "${smsDiag?.unseenSeen0 ?: 0} 条")
+                    BadgeDiagRow("read=0 但 seen=1", "${smsDiag?.unreadButSeen ?: 0} 条")
+                    BadgeDiagRow("收件箱总数", "${smsDiag?.inboxTotal ?: 0} 条")
+                    BadgeDiagRow("最近 7 天收件箱", "${smsDiag?.inboxLast7Days ?: 0} 条")
+                    BadgeDiagRow(
+                        "角标广播",
+                        when (val b = lastBroadcast) {
+                            null -> "未收到"
+                            else -> "已收到：${shortPackageName(b.pkg)}=${b.count}（${
+                                java.text.SimpleDateFormat(
+                                    "HH:mm", java.util.Locale.getDefault()
+                                ).format(java.util.Date(b.at))
+                            }）"
+                        }
+                    )
+                    val zte = zteResult
+                    BadgeDiagRow(
+                        "ZTE provider",
+                        when {
+                            zte == null -> "探针未跑"
+                            zte.queryOk || zte.callOk -> "可读"
+                            else -> "不可读"
+                        }
+                    )
+                    BadgeDiagRow(
+                        "飞书数",
+                        when {
+                            feishuPkg == null -> "未安装"
+                            zte == null -> "—"
+                            else -> zte.counts[feishuPkg]?.let { "$it 条" } ?: "—"
+                        }
+                    )
+                    if (zte != null && !(zte.queryOk || zte.callOk)) {
+                        Text(
+                            text = "探针详情：${zte.queryDetail}；${zte.callDetail}",
+                            fontSize = AILauncherType.Caption.fontSize,
+                            color = AILauncherColors.current.Hint,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
         // 分区：关于——落款
         item {
             SettingsSectionTitle("关于")
@@ -1088,6 +1197,37 @@ private fun SettingsConnectorRow(
  * 设置页分区标题：与应用中心分区标题同一语言
  * （Footnote / Medium / Hint / 左右 24dp）。
  */
+/** 角标诊断行：左标签、右数值；数值过长截断，不换行挤版式。 */
+@Composable
+private fun BadgeDiagRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            fontSize = AILauncherType.Body.fontSize,
+            color = AILauncherColors.current.Body,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(
+            text = value,
+            fontSize = AILauncherType.Body.fontSize,
+            color = AILauncherColors.current.Title,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/** 包名太长只显后半段（超 24 字显 … + 末 21 字）；空显示“未设置”。 */
+private fun shortPackageName(pkg: String?): String {
+    if (pkg.isNullOrBlank()) return "未设置"
+    return if (pkg.length <= 24) pkg else "…" + pkg.takeLast(21)
+}
+
 @Composable
 private fun SettingsSectionTitle(text: String) {
     Text(
