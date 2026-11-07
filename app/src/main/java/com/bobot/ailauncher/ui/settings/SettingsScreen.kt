@@ -608,107 +608,11 @@ fun SettingsScreen() {
             }
         }
 
-        // 分区：权限——默认桌面 / 日历 / 消息提醒
-        item {
-            SettingsSectionTitle("权限")
-        }
-
-        // 引导批（2026-10-27）：设置 → 权限常驻页——引导里跳过/拒绝后随时
-        // 可补授权（最后一页承诺了“以后随时可在设置 → 权限里设”，不做这页
-        // 承诺就落空）。复用引导第 2 屏同一套状态行与跳转逻辑（ON_RESUME
-        // 重读、日历授权框、通知监听设置页、默认桌面系统设置页）；不新增
-        // 其他设置项。
-        item {
-            val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
-            val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
-            val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
-            val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
-            OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
-            // 2026-11-02 设置分区：权限卡可折叠——有未开项默认展开（让人一眼
-            // 看到要补什么），三项全开默认收起（标题行只留已开启计数）。
-            // 展开/收起口径与「让助手更聪明」「崩溃记录」同款：标题行点按 +
-            // 上下箭头 + tick 震动。
-            val grantedCount = listOf(
-                defaultGranted.value, calendarGranted.value, notificationGranted.value
-            ).count { it }
-            var permExpanded by remember { mutableStateOf(grantedCount < 3) }
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                view.tickHaptic()
-                                permExpanded = !permExpanded
-                            },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "权限",
-                                fontSize = AILauncherType.BodyLarge.fontSize,
-                                fontWeight = FontWeight.Medium,
-                                color = AILauncherColors.current.Title
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = if (permExpanded) "首页要看到日程和消息、按 Home 键回来，需要这几项。随时能改。"
-                                    else "已开启 $grantedCount/3，点按展开",
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                lineHeight = 18.sp
-                            )
-                        }
-                        Icon(
-                            if (permExpanded) Icons.Filled.KeyboardArrowUp
-                            else Icons.Filled.KeyboardArrowDown,
-                            contentDescription = if (permExpanded) "收起" else "展开",
-                            tint = AILauncherColors.current.Hint
-                        )
-                    }
-                    if (permExpanded) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    SettingsPermissionRow(
-                        title = "默认桌面",
-                        desc = "按 Home 键回到 AI 桌面",
-                        granted = defaultGranted.value,
-                        doneText = "已设为默认",
-                        todoText = "尚未设为默认",
-                        actionText = "去设置",
-                        onOpen = { openHomeSettings(context) }
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    SettingsPermissionRow(
-                        title = "日历",
-                        desc = "首页显示今天的会、开会前提醒、点一下加入",
-                        granted = calendarGranted.value,
-                        doneText = "已开启",
-                        todoText = "尚未开启",
-                        actionText = "去开启",
-                        onOpen = openCalendar
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    SettingsPermissionRow(
-                        title = "消息提醒",
-                        desc = "要回的消息整理到首页，不漏掉",
-                        granted = notificationGranted.value,
-                        doneText = "已开启",
-                        todoText = "尚未开启",
-                        actionText = "去开启",
-                        onOpen = { openNotificationSettings(context) }
-                    )
-                    }
-                }
-            }
-        }
-
         // 分区：提醒来源——智能卡片的五个本机连接器（447，设计稿 §2/§5）
         // 各自单独接、有明确理由、随时可断；数据只在手机上处理，不发到别处。
+        // 448 合并：旧“权限”分区并入本分区——日历、通知只出现一次（原两处
+        // 重叠），默认桌面保留在本卡顶部；旧“权限”分区不再单独存在。
+        // 引导里跳过/拒绝后随时可补授权的承诺仍由本分区兑现。
         item {
             SettingsSectionTitle("提醒来源")
         }
@@ -718,9 +622,12 @@ fun SettingsScreen() {
             val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
             val smsGranted = rememberPermissionState { isSmsGranted(context) }
             val contactsGranted = rememberPermissionState { isContactsGranted(context) }
+            val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
             val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
             val openSms = rememberSmsPermissionOpener(smsGranted)
             val openContacts = rememberContactsPermissionOpener(contactsGranted)
+            // 应用运行中去设置里开通知读取权限时系统不回调，在这里重绑监听
+            OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
             // 消息刚接上就立即重读短信（不然卡片要等下次回桌面才出现）
             OnGrantedTransition(smsGranted.value) {
                 SmartCardRepository.refreshSms(context, force = true)
@@ -751,6 +658,18 @@ fun SettingsScreen() {
                         fontSize = AILauncherType.Footnote.fontSize,
                         color = AILauncherColors.current.Hint,
                         lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    // 默认桌面（448 自旧“权限”分区并入）：无开关，只有状态＋去设置；
+                    // 日历、通知在本卡只出现一次，不再另起一处。
+                    SettingsPermissionRow(
+                        title = "默认桌面",
+                        desc = "按 Home 键回到 AI 桌面",
+                        granted = defaultGranted.value,
+                        doneText = "已设为默认",
+                        todoText = "尚未设为默认",
+                        actionText = "去设置",
+                        onOpen = { openHomeSettings(context) }
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { state ->
@@ -1181,8 +1100,9 @@ private fun SettingsSectionTitle(text: String) {
 }
 
 /**
- * 设置 → 权限的一行：标题＋好处＋状态行＋去开启（已开启时只显示状态，
- * 不再给无意义的按钮；触控走 TextButton，热区 ≥48dp）。
+ * 设置 → 提醒来源里的无开关行（448：默认桌面自旧“权限”分区并入本卡）：
+ * 标题＋好处＋状态行＋去开启（已开启时只显示状态，不再给无意义的按钮；
+ * 触控走 TextButton，热区 ≥48dp）。
  */
 @Composable
 private fun SettingsPermissionRow(

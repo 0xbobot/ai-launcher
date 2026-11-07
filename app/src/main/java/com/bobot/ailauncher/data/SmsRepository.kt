@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.ContactsContract
 import android.provider.Telephony
+import android.util.Log
 import androidx.core.content.ContextCompat
 
 /**
@@ -27,6 +28,7 @@ data class SmsMessage(
 )
 
 object SmsRepository {
+    private const val TAG = "SmsRepository"
     private const val DEFAULT_DAYS_BACK = 7L
     private const val DEFAULT_LIMIT = 200
 
@@ -37,14 +39,18 @@ object SmsRepository {
 
     /**
      * 读近期短信（最新在前）。任何异常（无权限、提供程序不可用）都吞成空表，
-     * 调用方按“未接上”处理，不报错、不弹占位条。
+     * 调用方按“未接上”处理，不报错、不弹占位条。读到的条数只记 Log.d
+     * （448：下次“卡片没出现”先看 logcat，读到几条一目了然）。
      */
     fun loadRecentSms(
         context: Context,
         daysBack: Long = DEFAULT_DAYS_BACK,
         limit: Int = DEFAULT_LIMIT
     ): List<SmsMessage> {
-        if (!hasSmsPermission(context)) return emptyList()
+        if (!hasSmsPermission(context)) {
+            Log.d(TAG, "loadRecentSms: no READ_SMS permission, 0 sms")
+            return emptyList()
+        }
         return try {
             val since = System.currentTimeMillis() - daysBack * 24L * 60 * 60 * 1000
             val uri = Telephony.Sms.Inbox.CONTENT_URI
@@ -70,8 +76,10 @@ object SmsRepository {
                     if (body.isNotBlank()) out += SmsMessage(address, body, date)
                 }
             }
+            Log.d(TAG, "loadRecentSms: read=${out.size} sms")
             out
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d(TAG, "loadRecentSms failed, 0 sms", e)
             emptyList()
         }
     }

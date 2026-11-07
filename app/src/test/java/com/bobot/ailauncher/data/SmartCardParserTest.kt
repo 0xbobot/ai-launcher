@@ -56,6 +56,73 @@ val bill = parseBillSms(
 assertEquals(205747L, bill.amountFen)
 }
 
+// 448 回归：真实中信短信原文（2026-11-07 19:07 收到时仍在窗口内）。
+// 447 三处全灭：无“尾号”、无 ¥（2057.47元）、第一个日期是“截至”日。
+// 发件方 95558 是纯数字、正文无“银行”，银行名回退为泛称“银行”（号段映射未做）。
+@Test
+fun parseBill_realCitibankSms() {
+val atDueDay = ms(2026, 11, 7, 19, 7)
+val bill = parseBillSms(
+"截至11月04日仍需还款2057.47元，最后还款日11月07日。如已还款请忽略。",
+"95558", atDueDay
+)!!
+assertEquals(205747L, bill.amountFen)
+assertEquals("¥2,057.47", bill.amountText)
+assertEquals("11月7日", bill.dueLabel)
+assertNull(bill.tail4)
+assertEquals("银行", bill.bank)
+assertEquals(ms(2026, 11, 7, 23, 59, 59), bill.dueDayEndMs - 999)
+assertTrue(isBillInWindow(atDueDay, bill.dueDayEndMs))
+}
+
+// 448 回归：无 ¥ 金额（数字后跟“元”）+ 有尾号
+@Test
+fun parseBill_noYenAmount() {
+val bill = parseBillSms(
+"您尾号 7072 的信用卡本期应还 2057.47元，请于 11 月 7 日前还款",
+"95558", now
+)!!
+assertEquals(205747L, bill.amountFen)
+assertEquals("¥2,057.47", bill.amountText)
+assertEquals("7072", bill.tail4)
+assertEquals("11月7日", bill.dueLabel)
+}
+
+// 448 回归：多日期文本——“截至”日（账单日）在前、还款日在后，取还款日
+@Test
+fun parseBill_multipleDatesUsesDueKeyword() {
+val bill = parseBillSms(
+"您尾号 7072 的信用卡截至 11 月 4 日，本期应还 ¥2,057.47，最后还款日 11 月 7 日",
+"95558", now
+)!!
+assertEquals("11月7日", bill.dueLabel)
+assertEquals(ms(2026, 11, 7, 23, 59, 59), bill.dueDayEndMs - 999)
+}
+
+// 448 回归：无尾号文本仍可成卡
+@Test
+fun parseBill_noTailStillParses() {
+val bill = parseBillSms(
+"中信银行：您本期应还 ¥2,057.47，请于 11 月 7 日前还款",
+"95558", now
+)!!
+assertNull(bill.tail4)
+assertEquals("中信银行", bill.bank)
+assertEquals(205747L, bill.amountFen)
+assertEquals("11月7日", bill.dueLabel)
+}
+
+// 448 回归：只有“截至”日、定不出到期日时不成卡（账单日绝不当到期日）
+@Test
+fun parseBill_statementDateOnlyReturnsNull() {
+assertNull(
+parseBillSms(
+"截至11月04日仍需还款2057.47元。如已还款请忽略。",
+"95558", now
+)
+)
+}
+
 @Test
 fun parseBill_verificationCodeNeverParses() {
 assertNull(

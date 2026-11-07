@@ -15,8 +15,8 @@ import java.util.Calendar
 data class ParsedBill(
     /** 银行名：发件方标签里有“银行”就用它，否则从正文里找“XX 银行” */
     val bank: String,
-    /** 卡尾号 4 位 */
-    val tail4: String,
+    /** 卡尾号 4 位；真实运营商短信常不写尾号，无尾号时为空、仍可成卡 */
+    val tail4: String?,
     /** 显示用金额（含 ¥ 与千分位，如 ¥2,057.47） */
     val amountText: String,
     /** 金额（分），去重键用 */
@@ -48,7 +48,13 @@ const val APPOINTMENT_APPEAR_HOURS_BEFORE = 24L
 
 private val TAIL_REGEX = Regex("""尾号\s*(\d{4})""")
 private val AMOUNT_REGEX = Regex("""[¥￥]\s*([\d,]+(?:\.\d{1,2})?)""")
+/** 无 ¥ 的金额：数字后紧跟“元”，如 2057.47元（真实中信短信写法） */
+private val AMOUNT_BARE_YUAN_REGEX = Regex("""([\d,]+(?:\.\d{1,2})?)\s*元""")
 private val DUE_REGEX = Regex("""(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]""")
+/** 到期日关键词后的日期：最后还款日 / 还款日 / 到期日 / 请于（448：真实短信
+ * 里第一个日期是“截至”日＝账单日，绝不能当到期日，必须按关键词取） */
+private val DUE_KEYWORD_REGEX =
+    Regex("""(最后还款日|还款日|到期日|请于)\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]""")
 private val BANK_IN_TEXT_REGEX = Regex("""([^\s，。,：:；;]{2,8}银行)""")
 private val DATE_REGEX = Regex("""(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]""")
 private val TIME_RANGE_REGEX =
@@ -123,31 +129,72 @@ fun formatTimeRange(startMin: Int, endMin: Int?): String {
     return if (endMin != null) "${fmt(startMin)}–${fmt(endMin)}" else fmt(startMin)
 }
 
+/** 金额（分）→ 显示文本：¥2,057.47（千分位分隔，始终两位小数） */
+private fun formatAmountText(amountFen: Long): String {
+    val yuan = amountFen / 100
+    val fen = (amountFen % 100).toInt()
+    val grouped = buildString {
+        val digits = yuan.toString()
+        for ((i, c) in digits.withIndex()) {
+            if (i > 0 && (digits.length - i) % 3 == 0) append(',')
+            append(c)
+        }
+    }
+    return "¥$grouped.${"%02d".format(fen)}"
+}
+
+/** 文本里的金额（分）：优先 ¥/￥ 前缀的金额，其次无 ¥ 但后跟“元”的金额。
+ * 无 ¥ 的金额只在已确认含“还款/应还/待还”的前提下取（调用方已把关），
+ * 避免无上下文的裸数字误报。 */
+private fun findAmountFen(text: String): Long? {
+    val raw = AMOUNT_REGEX.find(text)?.groupValues?.get(1)
+        ?: AMOUNT_BARE_YUAN_REGEX.find(text)?.groupValues?.get(1)
+        ?: return null
+    val normalized = raw.replace(",", "")
+    val parts = normalized.split(".")
+    val yuan = parts.getOrNull(0)?.toLongOrNull() ?: return null
+    val fen = parts.getOrNull(1)?.padEnd(2, '0')?.take(2)?.toLongOrNull() ?: 0L
+    return yuan * 100 + fen
+}
+
+/** 取到期日（M 月 d 日）：优先关键词后的日期（最后还款日/还款日/到期日/
+ * 请于），无关键词时才回退到第一个 M 月 d 日——但“截至 M月d日”是账单日，
+ * 回退时跳过它；若只剩账单日、定不出到期日，返回 null（宁可漏一条也不错报）。 */
+private fun findDueMonthDay(text: String, nowMs: Long): Pair<Int, Int>? {
+    for (m in DUE_KEYWORD_REGEX.findAll(text)) {
+        val month = m.groupValues[2].toIntOrNull() ?: continue
+        val day = m.groupValues[3].toIntOrNull() ?: continue
+        if (monthDayToMs(nowMs, month, day) != null) return month to day
+    }
+    for (m in DUE_REGEX.findAll(text)) {
+        val before = text.substring(0, m.range.first).takeLast(4)
+        if (before.contains("截至")) continue
+        val month = m.groupValues[1].toIntOrNull() ?: continue
+        val day = m.groupValues[2].toIntOrNull() ?: continue
+        if (monthDayToMs(nowMs, month, day) != null) return month to day
+    }
+    return null
+}
+
 /**
  * 解析账单短信（纯函数）。
- * 三要素缺一不可：尾号 4 位、¥ 金额、M 月 d 日到期；三者齐了才成卡，
- * 宁可漏一条也不错报一条。已过期的不返回（过了截止点卡片即消失）。
+ * 必备：还款语境（还款/应还/待还）＋金额＋到期日；尾号可选——真实运营商
+ * 短信常不写“尾号”，无尾号仍可成卡（448：中信实测文本
+ * “截至11月04日仍需还款2057.47元，最后还款日11月07日”三处全灭的根因）。
+ * 金额接受无 ¥ 的“2057.47元”；到期日按关键词取，“截至”日是账单日不当到期日。
+ * 已过期的不返回（过了截止点卡片即消失）。
  */
 fun parseBillSms(text: String, senderLabel: String, nowMs: Long): ParsedBill? {
     if (isVerificationCodeSms(text)) return null
     if (!text.contains("还款") && !text.contains("应还") && !text.contains("待还")) return null
-    val tail = TAIL_REGEX.find(text)?.groupValues?.get(1) ?: return null
-    val amountRaw = AMOUNT_REGEX.find(text)?.groupValues?.get(1) ?: return null
-    val due = DUE_REGEX.find(text) ?: return null
-    val month = due.groupValues[1].toIntOrNull() ?: return null
-    val day = due.groupValues[2].toIntOrNull() ?: return null
+    val tail = TAIL_REGEX.find(text)?.groupValues?.get(1)
+    val amountFen = findAmountFen(text) ?: return null
+    val (month, day) = findDueMonthDay(text, nowMs) ?: return null
     val dueStart = monthDayToMs(nowMs, month, day) ?: return null
     val dueEnd = endOfDayMs(dueStart)
     if (dueEnd < nowMs) return null
     // 到期日离现在超过 45 天：不是当期账单，不解析（防旧短信里的日期误触发）
     if (dueStart - startOfDayMs(nowMs) > 45L * 24 * 60 * 60 * 1000) return null
-    val amountFen = run {
-        val normalized = amountRaw.replace(",", "")
-        val parts = normalized.split(".")
-        val yuan = parts.getOrNull(0)?.toLongOrNull() ?: return null
-        val fen = parts.getOrNull(1)?.padEnd(2, '0')?.take(2)?.toLongOrNull() ?: 0L
-        yuan * 100 + fen
-    }
     val bank = when {
         senderLabel.contains("银行") -> senderLabel.trim()
         else -> BANK_IN_TEXT_REGEX.find(text)?.groupValues?.get(1) ?: "银行"
@@ -155,7 +202,7 @@ fun parseBillSms(text: String, senderLabel: String, nowMs: Long): ParsedBill? {
     return ParsedBill(
         bank = bank,
         tail4 = tail,
-        amountText = "¥$amountRaw",
+        amountText = formatAmountText(amountFen),
         amountFen = amountFen,
         dueDayEndMs = dueEnd,
         dueLabel = "${month}月${day}日"
