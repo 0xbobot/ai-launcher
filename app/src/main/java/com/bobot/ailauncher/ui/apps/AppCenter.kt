@@ -380,15 +380,17 @@ fun AppCenterContent(
             }.toSet()
         }
     }
-    // 反馈闭环·重试提示是否出现（Bob 2026-11-06）：0 结果且索引已就绪，
-    // 且这句像一句意图。随便搜个不存在的应用名不出现。
-    // 441 口径修正：不再以“本地关键词没命中”为闸——关键词在表里也不代表
-    // 有已装应用接得住（“想看新闻”：关键词“新闻”命中，但没装新闻应用，
-    // 搜索仍 0 条）；进了空态就说明没找到，提示就该出现。
+    // 反馈闭环·重试提示是否出现（Bob 2026-11-06）：只剩空态本身——
+    // 索引已就绪 + 查询非空 + 搜索 0 结果。
+    // 442 通用口径（Bob 2026-11-07 中午真机报“玩游戏”0 条却没提示）：
+    // 不再用词表预判像不像一句意图——441 的 looksLikeIntent 是 18 个标记
+    // 的硬编码词表，“玩”不在表里就漏，词表就是场景清单，补不完。
+    // 意图判断交给点按后的大模型（LlmRouter.route）。代价：搜一个不存在
+    // 的应用名也会出现提示，点它仍有回收价值（大模型尝试解析，实在不行
+    // 选择器里能直接点到应用）。
     val showRetryPrompt = remember(filterQuery, searchResults, catalog) {
         val q = filterQuery.trim()
-        catalog != null && q.isNotEmpty() && searchResults?.isEmpty() == true &&
-            AppSearchIndex.shouldShowRetryPrompt(q)
+        catalog != null && q.isNotEmpty() && searchResults?.isEmpty() == true
     }
     // 字母 → LazyColumn item index（每字母：N 行 + 1 组间呼吸间距）
     // v0.41.8（Bob）：字母不再独占一行（浪费纵向空间），回到每组首行行内幽灵字母；

@@ -317,43 +317,43 @@ class AppSearchIndexTest {
 
     // ---------- 反馈闭环（Bob 2026-11-06：识别不到时，重试/选应用） ----------
 
+    // 442 通用口径：重试提示不再由词表预判（looksLikeIntent / shouldShowRetryPrompt
+    // 已删——18 个标记的硬编码词表，“玩”不在表里就漏“玩游戏”，补不完）。
+    // 提示条件只剩空态本身（索引已就绪 + 查询非空 + 搜索 0 结果，见 AppCenter.kt
+    // 的 showRetryPrompt，纯 Compose 层不在纯 JVM 单测覆盖内）。这里回归的是
+    // 空态的前提：以下说法对着一个没有对应应用的索引都得 0 条——进了空态，
+    // 提示就出现；意图判断交给点按后的大模型。
+
     @Test
-    fun `looksLikeIntent catches intent sentences`() {
-        assertTrue(AppSearchIndex.looksLikeIntent("我想看《狂飙》"))
-        assertTrue(AppSearchIndex.looksLikeIntent("打开微信"))
-        assertTrue(AppSearchIndex.looksLikeIntent("帮我订一张去北京的机票"))
-        assertTrue(AppSearchIndex.looksLikeIntent("帮我查一下天气"))
+    fun `generic retry prompt - queries reach zero results so prompt shows`() {
+        // 代表性索引：微信/支付宝/时钟/高德地图（包名用中性 pkg.*，不带真实
+        // 包名片段，避免关键词包名片段误命中——如“打车”→autonavi 会命中
+        // 真实高德包名 com.autonavi.minimap）。
+        val index = listOf(
+            entry("pkg.a", "微信", "weixin", "wx"),
+            entry("pkg.b", "支付宝", "zhifubao", "zfb"),
+            entry("pkg.c", "时钟", "shizhong", "sz"),
+            entry("pkg.d", "高德地图", "gaodeditu", "gddt")
+        )
+        // 回归（Bob 2026-11-07 中午真机）：“玩游戏”——441 的词表里没有“玩”，
+        // 提示被漏掉；通用口径下只要 0 条就出提示。
+        assertTrue(AppSearchIndex.rank(index, "玩游戏", AppSearchIndex.keywordPackagesFor("玩游戏", emptyMap())) { 0.0 }.isEmpty())
+        // “想看新闻”——关键词“新闻”在表里，但索引里没有新闻应用，0 条。
+        assertTrue(AppSearchIndex.rank(index, "想看新闻", AppSearchIndex.keywordPackagesFor("想看新闻", emptyMap())) { 0.0 }.isEmpty())
+        // “打车”——关键词“打车”在表里（→didi/autonavi…），但索引里没有打车应用，0 条。
+        assertTrue(AppSearchIndex.rank(index, "打车", AppSearchIndex.keywordPackagesFor("打车", emptyMap())) { 0.0 }.isEmpty())
+        // “刷视频”——关键词“视频”“刷视频”都在表里，但索引里没有视频应用，0 条。
+        assertTrue(AppSearchIndex.rank(index, "刷视频", AppSearchIndex.keywordPackagesFor("刷视频", emptyMap())) { 0.0 }.isEmpty())
     }
 
     @Test
-    fun `looksLikeIntent rejects plain app names and gibberish`() {
-        assertFalse(AppSearchIndex.looksLikeIntent("不存在的应用"))
-        assertFalse(AppSearchIndex.looksLikeIntent("asdfgh"))
-        assertFalse(AppSearchIndex.looksLikeIntent("微信"))
-        assertFalse(AppSearchIndex.looksLikeIntent(""))
-        assertFalse(AppSearchIndex.looksLikeIntent("   "))
-    }
-
-    @Test
-    fun `shouldShowRetryPrompt for any intent-like query in empty state`() {
-        // 441 口径修正：进了空态就说明没已装应用接得住，关键词在不在表里
-        // 不再是闸——“我想看《狂飙》”“帮我订一张去北京的机票”带关键词也出提示。
-        assertTrue(AppSearchIndex.shouldShowRetryPrompt("我想看《狂飙》"))
-        assertTrue(AppSearchIndex.shouldShowRetryPrompt("帮我订一张去北京的机票"))
-        assertFalse(AppSearchIndex.shouldShowRetryPrompt("不存在的应用"))
-        assertFalse(AppSearchIndex.shouldShowRetryPrompt("asdfgh"))
-    }
-
-    @Test
-    fun `shouldShowRetryPrompt for covered keyword with no installed app`() {
-        // 回归（Bob 2026-11-07 真机）：“想看新闻”——关键词“新闻”在表里
-        // （→news/toutiao/tencent.news），但用户没装这几家，搜索 0 条，
-        // 空态里提示必须出现。
-        assertTrue(AppSearchIndex.keywordPackagesFor("想看新闻", emptyMap()).contains("news"))
-        assertTrue(AppSearchIndex.shouldShowRetryPrompt("想看新闻"))
-        // 同理：“帮我订一张去北京的机票”——“机票”在表里，但无已装航班应用时也出提示。
-        assertTrue(AppSearchIndex.keywordPackagesFor("帮我订一张去北京的机票", emptyMap()).contains("ctrip"))
-        assertTrue(AppSearchIndex.shouldShowRetryPrompt("帮我订一张去北京的机票"))
+    fun `generic retry prompt - query with results has no empty state`() {
+        // 正例：有结果时没有空态，提示自然不出现。
+        val index = listOf(
+            entry("pkg.a", "微信", "weixin", "wx"),
+            entry("pkg.b", "支付宝", "zhifubao", "zfb")
+        )
+        assertFalse(AppSearchIndex.rank(index, "微信", AppSearchIndex.keywordPackagesFor("微信", emptyMap())) { 0.0 }.isEmpty())
     }
 
     @Test
