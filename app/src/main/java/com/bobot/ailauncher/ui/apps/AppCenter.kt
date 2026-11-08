@@ -74,6 +74,8 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.BiometricAuth
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -122,6 +124,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.confirmHaptic
@@ -184,6 +187,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.bobot.ailauncher.ui.island.IslandToasts
+import com.bobot.ailauncher.util.ensureListenerBound
 
 /**
  * 应用中心（v0.22，PRD 重设计方向）：D3 全屏单列表，只干一件事——最快找到应用。
@@ -208,6 +212,22 @@ fun AppCenterContent(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // 通知监听自查重绑（Bob 2026-11-08 20:42：通知栏有新通知，应用中心却没
+    // 有未读组、角标也没有——监听断了就一直断着，角标流冻结在空 map）。
+    // 首页已有 ON_RESUME 复核，应用中心没有；但应用中心是同 Activity 的
+    // 浮层（PullUpDock.FullAppsOverlay），打开它 Activity 不走 ON_RESUME，
+    // 所以进组合时立即复核一次，在屏期间 Activity 回到前台时再复核。
+    // 只在“已授权限但未连接”时重绑（ensureListenerBound 内含 30 秒节流），
+    // 已连接或未授权限时不做任何事。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        ensureListenerBound(context)
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) ensureListenerBound(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val hapticView = LocalView.current
