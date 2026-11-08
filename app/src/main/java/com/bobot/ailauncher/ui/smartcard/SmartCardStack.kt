@@ -2,6 +2,8 @@ package com.bobot.ailauncher.ui.smartcard
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -23,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -51,8 +54,13 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.bobot.ailauncher.data.CONNECTED_FEEDBACK_MS
+import com.bobot.ailauncher.data.ConnectedFeedback
 import com.bobot.ailauncher.data.GUIDE_VERSION
-import com.bobot.ailauncher.data.connectedGuideCard
+import com.bobot.ailauncher.data.buildConnectorStates
+import com.bobot.ailauncher.data.celebrationLevelText
+import com.bobot.ailauncher.data.connectedFeedback
+import com.bobot.ailauncher.data.connectedSourceCount
 import com.bobot.ailauncher.data.connectorKeyForGuideId
 import com.bobot.ailauncher.data.guideCards
 import com.bobot.ailauncher.data.guideIdsForConnector
@@ -187,8 +195,15 @@ fun SmartCardStackHost() {
     // 反馈再离开。只对“用户在叠层里点了继续”的卡给反馈；在设置里接上
     // 的权限，其卡片直接消失、不补反馈。
     var pendingConnectIds by remember { mutableStateOf(setOf<String>()) }
-    // 正在显示“已连接”反馈的卡（3 秒后离开）。
-    var connectedIds by remember { mutableStateOf(setOf<String>()) }
+    // 用户点“继续”那一刻的真实已接源个数（457 的 connectedSourceCount，
+    // 同一处计数）：接上后拿它跟新个数一减，就是本次智能涨了多少。
+    var pendingConnectLevels by remember { mutableStateOf(mapOf<String, Int>()) }
+    // 正在显示“已连接”庆祝反馈的卡（3 秒后离开）：状态里带动效触发标志
+    // celebrate 与等级增量 levelDelta（见 ConnectedFeedback），不是光一个 id。
+    var connectedFeedbacks by remember {
+        mutableStateOf(mapOf<String, ConnectedFeedback>())
+    }
+    val connectedIds: Set<String> = connectedFeedbacks.keys
     val guides = visibleGuideCards(
         messageGranted = smsGranted.value,
         notificationGranted = notificationGranted.value,
@@ -212,14 +227,23 @@ fun SmartCardStackHost() {
             )
         }
         if (newly.isNotEmpty()) {
+            // 等级数读真实已接源个数（457 的 connectedSourceCount，同一处
+            // 计数）：接通知时电话拨号器开关已开，等级一次涨 2，增量如实算，
+            // 不写死 +1。
+            val levelAfter = connectedSourceCount(buildConnectorStates(context))
             pendingConnectIds -= newly.toSet()
-            connectedIds += newly.toSet()
+            connectedFeedbacks += newly.associateWith { id ->
+                val before = pendingConnectLevels[id] ?: (levelAfter - 1)
+                val card = guideCards().find { it.id == id }!!
+                connectedFeedback(card, levelAfter, before)
+            }
+            pendingConnectLevels -= newly.toSet()
         }
     }
     // “已连接”反馈停留 3 秒后离开（记永久忽略，不再出现）。
     LaunchedEffect(connectedIds) {
         if (connectedIds.isNotEmpty()) {
-            delay(3000)
+            delay(CONNECTED_FEEDBACK_MS)
             val leaving = connectedIds
             leaving.forEach { id ->
                 guideCards().find { it.id == id }?.let {
@@ -227,12 +251,10 @@ fun SmartCardStackHost() {
                 }
             }
             dismissedGuideIds += leaving
-            connectedIds = emptySet()
+            connectedFeedbacks = emptyMap()
         }
     }
-    val connectedCards = guideCards()
-        .filter { it.id in connectedIds }
-        .map { connectedGuideCard(it) }
+    val connectedCards = connectedFeedbacks.values.map { it.card }
     // 反馈卡排在最前面（刚接上的事立刻看得见），其余引导卡留着。
     val displayed = connectedCards + guides
     // 叠层空下来才记当前版本（看完、忽略完、或全部接上且反馈已给完）：
@@ -251,11 +273,14 @@ fun SmartCardStackHost() {
     if (guideSeen || displayed.isEmpty()) return
     SmartCardStack(
         cards = displayed,
-        connectedIds = connectedIds,
+        connectedFeedbacks = connectedFeedbacks,
         onAction = { card ->
             val key = (card.action as? SmartCardAction.Connect)?.connectorKey
                 ?: return@SmartCardStack true
             pendingConnectIds += card.id
+            // 点“继续”这一刻的真实等级：接上后拿它算增量（见上）。
+            pendingConnectLevels +=
+                card.id to connectedSourceCount(buildConnectorStates(context))
             when (key) {
                 UiPrefs.CONNECTOR_MESSAGE ->
                     disclosureConnector = UiPrefs.CONNECTOR_MESSAGE
@@ -273,7 +298,8 @@ fun SmartCardStackHost() {
                 // 滑走“已连接”反馈卡＝直接记永久忽略，不再出现
                 SmartCardRepository.dismissGuideCard(context, card)
                 dismissedGuideIds += card.id
-                connectedIds -= card.id
+                connectedFeedbacks -= card.id
+                pendingConnectLevels -= card.id
             } else {
                 swipedGuideIds += card.id
             }
@@ -292,7 +318,9 @@ fun SmartCardStackHost() {
     // 对应卡片留在叠层里（pending 清掉，不给“已连接”反馈）。
     fun cancelDisclosure(key: String) {
         disclosureConnector = null
-        pendingConnectIds -= guideIdsForConnector(key).toSet()
+        val ids = guideIdsForConnector(key).toSet()
+        pendingConnectIds -= ids
+        pendingConnectLevels -= ids
     }
     if (disclosureConnector == UiPrefs.CONNECTOR_MESSAGE) {
         AlertDialog(
@@ -412,12 +440,15 @@ fun SmartCardStack(
     onIgnore: (SmartCard) -> Unit,
     modifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
-    // 正在显示“已连接”反馈的卡：不画动作行（没有“连接”可点），
-    // 只显示“已连接”＋接下来会发生什么。
-    connectedIds: Set<String> = emptySet()
+    // 正在显示“已连接”庆祝反馈的卡（第八批）：不画动作行（没有“连接”可点），
+    // 只显示“已连接”＋接下来会发生什么，外加庆祝形态（对勾弹入＋金色等级行
+    // ＋整卡轻弹，见 SmartCardView）。反馈卡顶掉的是它自己的引导卡，不多占
+    // 一张待办，角标计数不变（cards.size 本就是替换后的张数）。
+    connectedFeedbacks: Map<String, ConnectedFeedback> = emptyMap()
 ) {
     if (cards.isEmpty()) return
     val top = cards[0]
+    val connectedIds: Set<String> = connectedFeedbacks.keys
     val peeks = cards.drop(1).take(2)
     Column(modifier = modifier.fillMaxWidth()) {
         // 与简报会行同款段间距（32dp，大于简报内部 24dp 段间距，8dp 网格）：
@@ -442,6 +473,7 @@ fun SmartCardStack(
                             onIgnore = onIgnore,
                             onClose = onClose,
                             hideActionRow = top.id in connectedIds,
+                            celebration = connectedFeedbacks[top.id],
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("smart_card_top")
@@ -459,6 +491,7 @@ fun SmartCardStack(
                                 onIgnoreClick = {},
                                 onCloseClick = null,
                                 hideActionRow = card.id in connectedIds,
+                                celebration = connectedFeedbacks[card.id],
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .graphicsLayer {
@@ -515,7 +548,8 @@ private fun TopSmartCard(
     onIgnore: (SmartCard) -> Unit,
     onClose: (() -> Unit)?,
     modifier: Modifier = Modifier,
-    hideActionRow: Boolean = false
+    hideActionRow: Boolean = false,
+    celebration: ConnectedFeedback? = null
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -532,6 +566,7 @@ private fun TopSmartCard(
         onIgnoreClick = { onIgnore(card) },
         onCloseClick = onClose,
         hideActionRow = hideActionRow,
+        celebration = celebration,
         modifier = modifier
             .graphicsLayer {
                 translationX = offsetX.value
@@ -609,12 +644,58 @@ private fun SmartCardView(
     modifier: Modifier = Modifier,
     // “已连接”反馈卡：不画动作行（忽略/连接两个按钮与露边提示都不画），
     // 只留来源标签＋“已连接”＋接下来会发生什么。
-    hideActionRow: Boolean = false
+    hideActionRow: Boolean = false,
+    // “已连接”庆祝反馈（第八批，设计稿 §4.7）：非空时卡片换成庆祝形态——
+    // 金色对勾弹入＋金色等级行（“智能 +1 · 已接 3/5 个源”）＋整卡轻弹。
+    // 颜色只用已有的主操作金 Accent / AccentSoft，不引新色；图标是线性
+    // Check，不用 emoji；尺寸走 8dp 网格（40dp 圆、8dp 间距）；减动效时
+    // 直接落到终态，不播动画。文案仍按 Bob 的两条写。
+    celebration: ConnectedFeedback? = null
 ) {
     val shape = RoundedCornerShape(20.dp)
+    // 庆祝动效：整卡从 0.94 轻弹到 1（带回弹的弹簧），对勾从 0 弹入到 1。
+    // remember 以 celebration 为键：反馈出现是同一张卡换形态（id 不变，
+    // 不会重挂载），不 key 住就拿不到 0.94 的初值、动画播不出来。
+    val reduceMotion = rememberReduceMotion()
+    val pop = remember(celebration) {
+        Animatable(if (celebration == null) 1f else 0.94f)
+    }
+    val checkScale = remember(celebration) {
+        Animatable(if (celebration == null) 1f else 0f)
+    }
+    LaunchedEffect(celebration) {
+        if (celebration?.celebrate == true && !reduceMotion) {
+            launch {
+                pop.animateTo(
+                    1f,
+                    spring(
+                        dampingRatio = 0.55f,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+            }
+            launch {
+                delay(60)
+                checkScale.animateTo(
+                    1f,
+                    spring(
+                        dampingRatio = 0.5f,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+            }
+        } else {
+            pop.snapTo(1f)
+            checkScale.snapTo(1f)
+        }
+    }
     Column(
         modifier = modifier
             .clip(shape)
+            .graphicsLayer {
+                scaleX = pop.value
+                scaleY = pop.value
+            }
             .glassSurface(
                 kind = GlassSurfaceKind.STRONG,
                 cornerRadius = 20.dp,
@@ -656,6 +737,42 @@ private fun SmartCardView(
                         modifier = Modifier.size(20.dp)
                     )
                 }
+            }
+        }
+        // 庆祝行（第八批）：金色对勾＋等级变化。只在“已连接”反馈卡上画，
+        // 引导卡与真卡片一律没有——一眼就能看出这张不一样。
+        if (celebration != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .graphicsLayer {
+                            scaleX = checkScale.value
+                            scaleY = checkScale.value
+                        }
+                        .clip(CircleShape)
+                        .background(color = AILauncherColors.current.AccentSoft),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = "已连接",
+                        tint = AILauncherColors.current.Accent,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Text(
+                    text = celebrationLevelText(
+                        celebration.level, celebration.previousLevel
+                    ),
+                    fontSize = AILauncherType.Callout.fontSize,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AILauncherColors.current.Accent
+                )
             }
         }
         Text(
