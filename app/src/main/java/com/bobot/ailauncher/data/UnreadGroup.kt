@@ -74,6 +74,20 @@ fun previewForApp(
 }
 
 /**
+ * 每包最新一条在用通知（纯函数，供单测；未读组预览 + 左滑启用判定用）：
+ * 空列表 → 空 map；同包多条取时间最晚的一条。不取首个、不做 `!!`——
+ * 空组、空列表都返回空 map，不崩（2026-11-08 应用中心崩溃 hotfix：
+ * 服务层原来用 `maxByOrNull { it.time }!!`，理论上 groupBy 的组非空，
+ * 但它是 458 差分里唯一的 `!!`，改成无 `!!` 的纯函数以绝后患）。
+ */
+fun latestNotificationByPackage(
+    notifications: List<SimpleNotification>
+): Map<String, SimpleNotification> =
+    notifications.groupBy { it.packageName }
+        .mapNotNull { (pkg, list) -> list.maxByOrNull { it.time }?.let { pkg to it } }
+        .toMap()
+
+/**
  * 按首字母分组（纯函数）：与 AppCenter.kt azGroups 同口径——字典/区位码
  * 由调用方包进 [groupKeyOf]，'#' 排最后。某字母组因成员全被移走而变空时，
  * 该字母自然不在结果里（rail 字母随之消失，与折叠组一致）。

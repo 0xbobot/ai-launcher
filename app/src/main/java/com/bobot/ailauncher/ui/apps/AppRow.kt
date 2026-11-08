@@ -112,7 +112,7 @@ internal fun AppRow(
     // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览（最新通知正文
     // 或未读短信片段，调用方算好再传）；null 时只留应用名，字母组行不受影响。
     preview: String? = null,
-    // 未读组左滑=清理（Bob 2026-11-08）：未读行外层包 SwipeToDismissBox 时
+    // 未读组左滑=清理（Bob 2026-11-08）：未读行外层包左滑清理行时
     // 传 false，禁用本行的滑动浮层（★/眼睛），避免两套横滑手势抢事件；
     // 禁用后该行在未读组内暂不能收藏/隐藏（读完回字母组后恢复），见收据。
     // 默认 true，字母组行行为一字不变。
@@ -263,7 +263,7 @@ internal fun AppRow(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                // 未读组左滑=清理时禁用本行滑动（外层 SwipeToDismissBox 接管横滑）；
+                // 未读组左滑=清理时禁用本行滑动（外层左滑清理行接管横滑）；
                 // pointerInput 空转时不消费事件，点按/长按照常走，横滑落到外层。
                 .pointerInput(app.packageName, swipeActionsEnabled) {
                     if (swipeActionsEnabled) {
