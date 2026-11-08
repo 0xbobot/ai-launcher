@@ -54,6 +54,18 @@ class LauncherNotificationService : NotificationListenerService() {
         fun cancelNotificationsForPackage(packageName: String) {
             instance?.cancelPackageNotifications(packageName)
         }
+
+        /**
+         * 从外部触发一次角标重算（角标广播 manifest 接收器、应用中心
+         * 前台复核用，Bob 2026-11-08 21:54：抖音广播已收到但没合进
+         * 角标——manifest 接收器只记数不推，合入完全等下一次通知事件）。
+         * 未连接时静默无-op（记下的探针数不丢，下次 onListenerConnected
+         * 的 push 会把它合进去）。与 cancelNotificationsForPackage 同款：
+         * 只调实例方法，不复制五路合并逻辑，两处算不会漂移。
+         */
+        fun requestBadgeRecompute() {
+            instance?.recomputeBadgeCounts()
+        }
     }
 
     /** 取消该包的全部在用通知（实例方法，见 companion 说明）。 */

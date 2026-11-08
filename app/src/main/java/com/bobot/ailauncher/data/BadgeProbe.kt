@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import com.bobot.ailauncher.service.LauncherNotificationService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -262,13 +263,21 @@ object BadgeProbe {
 /**
  * Manifest 声明的角标广播接收器（AndroidManifest 里 exported=true）。
  * ShortcutBadger 发广播前用 queryBroadcastReceivers 找接收方，只找得到
- * manifest 里声明的 receiver，所以必须有这一个；只收不发，只记数。
- * （运行时 receiver 另由 LauncherNotificationService 注册，收到的广播
- * 会立即触发一次角标重算；本 receiver 收到的是同一广播的另一份，
- * 只更新探针状态，下次通知事件时合入角标。）
+ * manifest 里声明的 receiver，所以必须有这一个；只收不发。
+ * （运行时 receiver 另由 LauncherNotificationService 注册，但发送方按
+ * queryBroadcastReceivers 的结果显式发给 manifest 接收方，运行时
+ * receiver 发现不了、收不到同一广播，所以它那条“收到即重算”的路
+ * 对这类广播是死的——记下之后必须这里推一次，否则合入完全等下一次
+ * 通知事件。Bob 2026-11-08 21:54：抖音广播已收到、当前角标仍无，
+ * 就是这个口子。）
  */
 class BadgeBroadcastReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        BadgeProbe.onBroadcastReceived(context, intent)
+        if (BadgeProbe.onBroadcastReceived(context, intent)) {
+            // 记下之后立即触发一次角标重算（校验没通过不推，避免伪造
+            // 广播刷重算）。未连接时无-op，数不丢，下次连接的 push
+            // 会把它合进去。合并逻辑仍在服务里那一份，不复制。
+            LauncherNotificationService.requestBadgeRecompute()
+        }
     }
 }

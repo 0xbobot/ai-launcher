@@ -219,11 +219,21 @@ fun AppCenterContent(
     // 所以进组合时立即复核一次，在屏期间 Activity 回到前台时再复核。
     // 只在“已授权限但未连接”时重绑（ensureListenerBound 内含 30 秒节流），
     // 已连接或未授权限时不做任何事。
+    // 前台再推一次当前角标流（Bob 2026-11-08 21:54）：监听已连接时
+    // ensureListenerBound 什么也不做；但探针里可能躺着自上次推送后记下
+    // 的数（广播在服务断开时到达、或 manifest 接收器记下后尚未合入），
+    // 进应用中心时推一次，把已记下的探针数合进去。推数是读数重算、
+    // 不 toggle 组件，不共用重绑的 30 秒节流；触发点是进组合与回到
+    // 前台（用户动作），不是状态循环，不另加节流。未连接时无-op。
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         ensureListenerBound(context)
+        LauncherNotificationService.requestBadgeRecompute()
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) ensureListenerBound(context)
+            if (event == Lifecycle.Event.ON_RESUME) {
+                ensureListenerBound(context)
+                LauncherNotificationService.requestBadgeRecompute()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
