@@ -163,52 +163,6 @@ object SmsRepository {
 }
 
 /**
- * 短信库诊断计数（角标诊断行用，Bob 2026-11-08 凌晨：我们的角标 6、
- * 系统桌面 15，差 9 条要看清去向）。只计数不读内容；无权限/异常全返回 0。
- * 几个数一摆就能看出 9 条是被标成已读了、还是根本不在收件箱里、还是另一类消息。
- */
-data class SmsDiagCounts(
-    /** 收件箱里 read=0 的条数（角标短信路用的数） */
-    val unreadRead0: Int,
-    /** 收件箱里 seen=0 的条数（应用还没“看过”的） */
-    val unseenSeen0: Int,
-    /** read=0 但 seen=1 的条数（已在通知里出现过、库里仍标未读） */
-    val unreadButSeen: Int,
-    /** 收件箱总条数 */
-    val inboxTotal: Int,
-    /** 最近 7 天收件箱总条数 */
-    val inboxLast7Days: Int
-)
-
-/** 短信库诊断计数（阻塞调用，调用方在后台线程跑）。 */
-fun countSmsDiag(context: Context): SmsDiagCounts {
-    if (!SmsRepository.hasSmsPermission(context)) {
-        return SmsDiagCounts(0, 0, 0, 0, 0)
-    }
-    fun count(selection: String?, args: Array<String>?): Int = try {
-        context.contentResolver.query(
-            Telephony.Sms.Inbox.CONTENT_URI,
-            arrayOf(Telephony.Sms._ID),
-            selection, args, null
-        )?.use { cursor -> cursor.count } ?: 0
-    } catch (_: Exception) {
-        0
-    }
-    val since7d = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
-    return SmsDiagCounts(
-        unreadRead0 = count("${Telephony.Sms.READ} = 0", null),
-        unseenSeen0 = count("${Telephony.Sms.SEEN} = 0", null),
-        unreadButSeen = count(
-            "${Telephony.Sms.READ} = 0 AND ${Telephony.Sms.SEEN} = 1", null
-        ),
-        inboxTotal = count(null, null),
-        inboxLast7Days = count(
-            "${Telephony.Sms.DATE} >= ?", arrayOf(since7d.toString())
-        )
-    )
-}
-
-/**
  * 联系人姓名查询（设计稿 §2.1 联系人连接器，可选增强）：
  * 只按号码查姓名（未接来电卡片显示人名而不是一串数字），核心回拨不用它也能做。
  * 未授权或查不到时返回 null，调用方只显示号码，不报错。

@@ -137,26 +137,4 @@ object CrashEscape {
         }
     }
 
-    /**
-     * 测试入口：模拟一次崩溃循环（诊断区“模拟崩溃循环”按钮用）。
-     * 写一条标明“测试”的假崩溃记录，把计数置为 1、已见水位置为 0；
-     * 下次启动时真实判定逻辑会把它当成一次新崩溃、计数涨到 2、出恢复屏。
-     * 假记录进设置页「崩溃记录」可删除，不影响真实崩溃数据。
-     */
-    fun simulateCrashLoop(context: Context) {
-        runCatching {
-            CrashLog.writeCrash(
-                context,
-                Thread.currentThread(),
-                RuntimeException("模拟崩溃循环（测试入口，非真实崩溃）")
-            )
-        }
-        runCatching {
-            prefs(context).edit()
-                .putInt(KEY_CONSECUTIVE, 1)
-                .putLong(KEY_LAST_SEEN, 0L)
-                .putInt(KEY_VERSION_CODE, BuildConfig.VERSION_CODE)
-                .apply()
-        }
-    }
 }
