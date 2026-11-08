@@ -952,7 +952,7 @@ fun LazyListScope.AppCenterUnreadSection(
         itemsIndexed(unreadApps, key = { _, app -> "u:${app.packageName}" }) { index, app ->
             Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
                 // 幽灵信封（Bob 2026-11-08）：未读组首行左边大号淡色信封，
-                // 与字母组幽灵字母同一样式（40dp、Title 色 35% 透明）、同位置
+                // 与字母组幽灵字母同一样式（32dp、Title 色 35% 透明）、同位置
                 // （居左、start 24dp）；首行刚开始滚出即隐藏（stuckUnread，
                 // 464 起锚在首行，不再有吸顶“未读”标题可交接）。
                 // 信封是未读组在 rail 里的符号，两处同一符号保持一致。
@@ -962,7 +962,7 @@ fun LazyListScope.AppCenterUnreadSection(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .padding(start = 24.dp)
-                            .size(40.dp)
+                            .size(32.dp)
                     )
                 }
                 // 左滑清理（Bob 2026-11-08）：有在用通知的行可左滑取消通知；
