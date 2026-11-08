@@ -635,22 +635,12 @@ fun HomeScreen(
                                 totalY < -swipeThresholdPx -> {
                                     openDrawerState()
                                 }
-                                // 下滑 → 按 x 偏向决定
+                                // 下滑 → 仅左下开控制中心；右下 / 纯下滑不做任何事
+                                // （Bob 2026-11-08：桌面的下滑打开通知中心删除）
                                 totalY > swipeThresholdPx -> {
-                                    when {
-                                        totalX < -xBiasPx -> {
-                                            if (ensurePanelService())
-                                                PanelAccessibilityService.openControlCenter()
-                                        }
-                                        totalX > xBiasPx -> {
-                                            if (ensurePanelService())
-                                                PanelAccessibilityService.openNotificationCenter()
-                                        }
-                                        // 纯下滑：默认通知中心
-                                        else -> {
-                                            if (ensurePanelService())
-                                                PanelAccessibilityService.openNotificationCenter()
-                                        }
+                                    if (totalX < -xBiasPx) {
+                                        if (ensurePanelService())
+                                            PanelAccessibilityService.openControlCenter()
                                     }
                                 }
                             }
