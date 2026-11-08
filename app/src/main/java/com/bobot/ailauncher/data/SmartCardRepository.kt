@@ -515,11 +515,10 @@ fun connectorDescription(key: String): String = when (key) {
  * 通知源已接上（权限已授＋它自己的开关开）且电话拨号器自己的开关开才算）。
  * 默认桌面不是源，不进这个列表、不计入等级。纯函数，单测锁死。
  *
- * 注意口径分层：电话拨号器行的开关显示仍按单行规则（通知权限已授＋本开关开，
- * 见 isConnectorConnected），计数则多看一层通知源的开关——通知开关关了，
- * 未接来电卡片实际不出（仓库 refresh 门控 notifOn && phoneOn），等级就不该
- * 再把它算进去。两者只在“通知开关关了、电话拨号器开关还开着”这一角落不一致，
- * 已在收据里标明，待 Bob 定要不要让电话拨号器开关也跟着通知走。
+ * 电话拨号器行的开关显示与计数走同一口径（2026-11-08 Bob 定：电话拨号器
+ * 开关跟着通知走）：显示见 effectiveDialerState，通知开关关了，电话拨号器
+ * 行的开关也显示关、行变灰点不动；通知再开时回到它自己的开/关状态。
+ * 持久化的电话拨号器启用标志原样保留，只推导显示，不写回。
  */
 fun connectedSourceCount(states: List<ConnectorState>): Int {
     val byKey = states.associateBy { it.key }
@@ -531,6 +530,32 @@ fun connectedSourceCount(states: List<ConnectorState>): Int {
             else -> isConnectorConnected(state)
         }
     }
+}
+
+/**
+ * 电话拨号器行用于显示的有效状态（设计稿 §2，2026-11-08 Bob 定：电话拨号器
+ * 开关跟着通知走）：通知源已接上（权限已授＋它自己的开关开）且电话拨号器
+ * 自己的开关开，行才显示开；通知关了或权限未授，行显示关。只推导显示——
+ * 返回的是原状态的拷贝（enabled 按通知折算），持久化的电话拨号器启用标志
+ * 原样保留、不写回；通知再开时，行回到它自己的开/关状态。列表里没有电话
+ * 拨号器行时返回 null（设置页本来也不渲染这一行）。纯函数，单测锁死。
+ */
+fun effectiveDialerState(states: List<ConnectorState>): ConnectorState? {
+    val byKey = states.associateBy { it.key }
+    val phone = byKey[UiPrefs.CONNECTOR_PHONE] ?: return null
+    val notificationConnected =
+        byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { isConnectorConnected(it) } ?: false
+    return phone.copy(enabled = notificationConnected && phone.enabled)
+}
+
+/**
+ * 电话拨号器行能不能点（与 effectiveDialerState 同一条口径）：通知源已接上
+ * 时行可点（这时开关反映它自己的开/关）；通知关了或权限未授时行变灰、开关
+ * 点不动。纯函数，单测锁死。
+ */
+fun isDialerRowEnabled(states: List<ConnectorState>): Boolean {
+    val byKey = states.associateBy { it.key }
+    return byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { isConnectorConnected(it) } ?: false
 }
 
 /** 最后使用时间文案（纯函数，单测锁死） */

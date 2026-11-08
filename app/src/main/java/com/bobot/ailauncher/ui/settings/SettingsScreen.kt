@@ -93,7 +93,9 @@ import com.bobot.ailauncher.data.SMART_SOURCE_ORDER
 import com.bobot.ailauncher.data.buildConnectorStates
 import com.bobot.ailauncher.data.connectedSourceCount
 import com.bobot.ailauncher.data.connectorStatusText
+import com.bobot.ailauncher.data.effectiveDialerState
 import com.bobot.ailauncher.data.isConnectorConnected
+import com.bobot.ailauncher.data.isDialerRowEnabled
 import com.bobot.ailauncher.data.resolveConnectorToggle
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmKeyStore
@@ -739,8 +741,13 @@ fun SettingsScreen() {
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         byKey[UiPrefs.CONNECTOR_PHONE]?.let { state ->
+                            // 电话拨号器开关跟着通知走（设计稿 §2，2026-11-08 Bob 定）：
+                            // 行按有效状态渲染（通知关了开关显示关、行变灰点不动），
+                            // 它自己的启用标志原样保留在 state 里，只推导显示、不写回。
+                            val dialerState = effectiveDialerState(connectorStates) ?: state
                             SettingsConnectorRow(
-                                state = state,
+                                state = dialerState,
+                                enabled = isDialerRowEnabled(connectorStates),
                                 onToggle = { onConnectorToggle(state, notificationGranted.value, it) }
                             )
                         }
@@ -1217,11 +1224,15 @@ fun SettingsScreen() {
  * 未接上”；状态文字只做展示、不可点，不再有“去开启/接上”文字按钮。关开关立即
  * 停用该来源（卡片不再出该来源内容），系统权限本身不动；开开关走该来源既有的
  * 接上流程，用户取消或拒绝则开关保持关。电话拨号器无权限：开关就是纯粹的
- * 启用/停用。触控：开关走 Material3 默认 48dp 热区。
+ * 启用/停用，但显示跟着通知走（通知关了它也显示关、行变灰，见 effectiveDialerState）。触控：开关走 Material3 默认 48dp 热区。
+ * 电话拨号器行跟着通知走（设计稿 §2，2026-11-08 Bob 定）：通知关了时该行
+ * enabled=false——标题/说明/状态文字走 Hint 色、开关用 Material3 自身的
+ * 禁用态、点不动；通知开了行恢复，它自己的开/关状态不变。
  */
 @Composable
 private fun SettingsConnectorRow(
     state: ConnectorState,
+    enabled: Boolean = true,
     onToggle: (Boolean) -> Unit
 ) {
     val view = LocalView.current
@@ -1233,7 +1244,8 @@ private fun SettingsConnectorRow(
                     text = state.name,
                     fontSize = AILauncherType.Body.fontSize,
                     fontWeight = FontWeight.Medium,
-                    color = AILauncherColors.current.Title
+                    color = if (enabled) AILauncherColors.current.Title
+                        else AILauncherColors.current.Hint
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -1245,7 +1257,8 @@ private fun SettingsConnectorRow(
             }
             Switch(
                 checked = connected,
-                onCheckedChange = { view.tickHaptic(); onToggle(it) }
+                onCheckedChange = { view.tickHaptic(); onToggle(it) },
+                enabled = enabled
             )
         }
         Spacer(modifier = Modifier.height(8.dp))

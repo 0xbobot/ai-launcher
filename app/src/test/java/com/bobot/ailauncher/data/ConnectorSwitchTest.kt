@@ -230,6 +230,88 @@ class ConnectorSwitchTest {
         )
     }
 
+    // 电话拨号器开关跟着通知走（第九批，设计稿 §2，2026-11-08 Bob 定）
+
+    @Test
+    fun dialerDisplayOff_whenNotificationSwitchOff() {
+        // 通知权限已授、通知开关关、电话拨号器自己的开关开 → 电话拨号器
+        // 显示关（457 的分层边界就此关掉：显示与计数一致），等级里也不算它。
+        val states = allStates(
+            message = true to true,
+            notification = true to false,
+            calendar = true to true,
+            phone = true to true,
+            contacts = false to false
+        )
+        val effective = effectiveDialerState(states)
+        assertTrue(effective != null)
+        assertFalse(isConnectorConnected(effective!!))
+        assertEquals("已关闭", connectorStatusText(effective))
+        assertFalse(isDialerRowEnabled(states))
+        assertEquals(2, connectedSourceCount(states))
+    }
+
+    @Test
+    fun dialerDisplayFollowsOwnState_whenNotificationOn() {
+        // 通知开着 → 电话拨号器显示回到它自己的状态：自己开着就显示开、
+        // 自己关着就显示关；行可点。
+        val onStates = allStates(notification = true to true, phone = true to true)
+        val onEffective = effectiveDialerState(onStates)
+        assertTrue(onEffective != null)
+        assertTrue(isConnectorConnected(onEffective!!))
+        assertTrue(isDialerRowEnabled(onStates))
+
+        val offStates = allStates(notification = true to true, phone = true to false)
+        val offEffective = effectiveDialerState(offStates)
+        assertTrue(offEffective != null)
+        assertFalse(isConnectorConnected(offEffective!!))
+        assertEquals("已关闭", connectorStatusText(offEffective))
+        assertTrue(isDialerRowEnabled(offStates))
+    }
+
+    @Test
+    fun dialerOwnFlagPreserved_notificationOffThenOn() {
+        // 通知开关关→开一次，电话拨号器自己的启用标志不变：同一组输入状态
+        // 先后算有效态，关时显示关、开时显示开——证明没丢状态（JVM 层只测
+        // 推导函数，不写持久化标志；设置页也不写回 setConnectorEnabled）。
+        val base = allStates(notification = true to true, phone = true to true)
+        val offStates = base.map {
+            if (it.key == UiPrefs.CONNECTOR_NOTIFICATION) it.copy(enabled = false) else it
+        }
+        assertFalse(isConnectorConnected(effectiveDialerState(offStates)!!))
+        // 通知再开：输入表里的电话拨号器 enabled 仍是 true，显示回到开。
+        assertTrue(isConnectorConnected(effectiveDialerState(base)!!))
+        assertTrue(base.first { it.key == UiPrefs.CONNECTOR_PHONE }.enabled)
+    }
+
+    @Test
+    fun dialerDisplayOff_whenNotificationNotGranted() {
+        // 通知权限未授 → 电话拨号器显示关（计数口径已有覆盖，显示也要一致），
+        // 行变灰点不动。
+        val states = allStates(
+            message = true to true,
+            notification = false to true,
+            calendar = true to true,
+            phone = true to true,
+            contacts = false to false
+        )
+        val effective = effectiveDialerState(states)
+        assertTrue(effective != null)
+        assertFalse(isConnectorConnected(effective!!))
+        assertEquals("未接上", connectorStatusText(effective))
+        assertFalse(isDialerRowEnabled(states))
+        assertEquals(2, connectedSourceCount(states))
+    }
+
+    @Test
+    fun dialerRowEnabled_followsNotificationConnected() {
+        // 行可点当且仅当通知源已接上（权限已授＋通知自己的开关开）。
+        assertTrue(isDialerRowEnabled(allStates(notification = true to true)))
+        assertFalse(isDialerRowEnabled(allStates(notification = true to false)))
+        assertFalse(isDialerRowEnabled(allStates(notification = false to true)))
+        assertFalse(isDialerRowEnabled(allStates(notification = false to false)))
+    }
+
     @Test
     fun levelCount_phoneNeedsNotificationConnected() {
         // 电话拨号器随通知计：通知权限已授、但通知自己的开关关了 → 电话
