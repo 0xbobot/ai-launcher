@@ -2,6 +2,7 @@
 
 package com.bobot.ailauncher.ui.settings
 
+import android.app.Activity
 import android.content.Intent
 import android.provider.Telephony
 import androidx.compose.foundation.Image
@@ -75,10 +76,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
+import com.bobot.ailauncher.MainActivity
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.ConnectorState
 import com.bobot.ailauncher.data.ConnectorToggleAction
+import com.bobot.ailauncher.data.CrashEscape
 import com.bobot.ailauncher.data.CrashLog
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SmsDiagCounts
@@ -1109,6 +1112,53 @@ fun SettingsScreen() {
                             color = AILauncherColors.current.Hint,
                             lineHeight = 16.sp,
                             modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+        // 崩溃逃生通道测试入口（Bob 2026-11-08 定做核心版）：模拟一次崩溃循环，
+        // 验证恢复屏会出现。只写一条标明“测试”的假崩溃记录、不改真实数据；
+        // 点了就重启并出恢复屏，恢复屏点“重试”即回正常桌面，假记录可进
+        // 「崩溃记录」删除。测试用，不影响正常使用。
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "模拟崩溃循环（测试）",
+                        fontSize = AILauncherType.BodyLarge.fontSize,
+                        fontWeight = FontWeight.Medium,
+                        color = AILauncherColors.current.Title
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "写一条假崩溃记录并重启，验证恢复屏会出现。测试用，不影响正常使用。",
+                        fontSize = AILauncherType.Footnote.fontSize,
+                        color = AILauncherColors.current.Hint,
+                        lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            view.tickHaptic()
+                            CrashEscape.simulateCrashLoop(context)
+                            val restart = Intent(context, MainActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                            }
+                            context.startActivity(restart)
+                            (context as? Activity)?.finish()
+                        },
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(
+                            text = "模拟一次崩溃循环",
+                            fontSize = AILauncherType.BodyLarge.fontSize,
+                            color = AILauncherColors.current.Accent
                         )
                     }
                 }

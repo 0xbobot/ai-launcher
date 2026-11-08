@@ -8,6 +8,10 @@ import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
@@ -32,6 +36,15 @@ class MainActivity : FragmentActivity() {
         // 真异常，验证崩溃日志端到端落盘；release 包 BuildConfig.DEBUG 恒
         // false 不存在此入口，用户界面没有任何「测试崩溃」按钮
         throwIfSmokeCrash(intent)
+        // 崩溃逃生通道（核心版）：连续崩两次出恢复屏，不再进正常首页。
+        // 在 setContent 之前算好，恢复屏要盖过首页与引导。
+        val showRecoveryAtStart =
+            com.bobot.ailauncher.data.CrashEscape.evaluateStartup(this)
+        val latestCrashRecord = if (showRecoveryAtStart) {
+            com.bobot.ailauncher.data.CrashLog.list(this).firstOrNull()
+        } else {
+            null
+        }
         // v0.32.3：冷启动时也处理快捷方式
         if (intent?.action == "com.bobot.ailauncher.CHECK_UPDATE") {
             // 延迟到 UI 就绪后检查
@@ -56,9 +69,12 @@ class MainActivity : FragmentActivity() {
         // v0.68.56（Bob）：B 方案——灵动岛系统通知通道初始化
         com.bobot.ailauncher.ui.island.IslandToasts.init(this)
         // v0.68.100（卫生批）：有没看过的崩溃记录时，冷启动非模态提示一次
-        // （每个新崩溃至多提示一次，在设置页看过后不再提）
-        com.bobot.ailauncher.data.CrashLog.promptTextIfNeeded(this)
-            ?.let { IslandToasts.show(it) }
+        // （每个新崩溃至多提示一次，在设置页看过后不再提）。
+        // 恢复屏出现时不弹 toast——恢复屏本身已说明崩溃，两处提示会打架。
+        if (!showRecoveryAtStart) {
+            com.bobot.ailauncher.data.CrashLog.promptTextIfNeeded(this)
+                ?.let { IslandToasts.show(it) }
+        }
         // v0.40.0：低电量守护不再用前台服务（常驻通知打扰），BatteryGuard 跟随进程生命周期；
         // LauncherApp.onCreate 已注册，这里幂等再保一次
         com.bobot.ailauncher.data.BatteryGuard.ensureStarted(this)
@@ -84,6 +100,9 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             AILauncherTheme {
+                // 崩溃逃生通道（核心版）：出恢复屏时优先显示它，盖过首页；
+                // 点“重试”后改回 false，恢复正常桌面。
+                var showRecovery by remember { mutableStateOf(showRecoveryAtStart) }
                 // v0.37.2：系统壁纸直接透出（windowShowWallpaper），不再手动绘制
                 Box(modifier = Modifier
                     .fillMaxSize()
@@ -91,9 +110,44 @@ class MainActivity : FragmentActivity() {
                     // 供冒烟脚本语义定位（semantics 修饰不影响布局与长相）
                     .semantics { testTagsAsResourceId = true }
                 ) {
-                    MainScreen()
+                    if (showRecovery) {
+                        com.bobot.ailauncher.ui.recovery.CrashRecoveryScreen(
+                            latestRecord = latestCrashRecord,
+                            onSwitchToSystemLauncher = {
+                                com.bobot.ailauncher.data.CrashEscape
+                                    .switchToSystemLauncher(this@MainActivity)
+                            },
+                            onRetry = {
+                                com.bobot.ailauncher.data.CrashEscape
+                                    .resetCounter(this@MainActivity)
+                                showRecovery = false
+                                scheduleGraceReset()
+                            },
+                            onShareRecord = { record ->
+                                val send = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "AI桌面崩溃记录")
+                                    putExtra(Intent.EXTRA_TEXT, record.content)
+                                }
+                                runCatching {
+                                    startActivity(
+                                        Intent.createChooser(send, "分享崩溃记录")
+                                    )
+                                }.onFailure {
+                                    IslandToasts.show("没有可用的分享方式")
+                                }
+                            }
+                        )
+                    } else {
+                        MainScreen()
+                    }
                 }
             }
+        }
+        // 崩溃逃生通道：正常运行满 60 秒后，连续崩溃计数清零（崩溃循环已断）；
+        // 恢复屏出现时不排——用户还没正常跑起来，清零无意义。
+        if (!showRecoveryAtStart) {
+            scheduleGraceReset()
         }
     }
 
@@ -123,6 +177,16 @@ class MainActivity : FragmentActivity() {
             checkUpdateNow()
         }
         // 其他情况不做任何事：MainScreen 的 Compose 状态保持，避免"空页面"
+    }
+
+    /** 崩溃逃生通道：正常运行满宽限期后，连续崩溃计数清零。 */
+    private fun scheduleGraceReset() {
+        lifecycleScope.launch {
+            kotlinx.coroutines.delay(
+                com.bobot.ailauncher.data.CrashEscapeLogic.GRACE_PERIOD_MILLIS
+            )
+            com.bobot.ailauncher.data.CrashEscape.resetCounter(this@MainActivity)
+        }
     }
 
     /** v0.68.100（卫生批）：debug 冒烟专用崩溃触发（release 包恒不触发） */
