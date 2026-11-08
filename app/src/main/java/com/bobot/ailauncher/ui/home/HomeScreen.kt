@@ -12,15 +12,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -40,33 +37,21 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.ui.theme.AILauncherType
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.PanelAccessibilityService
@@ -74,8 +59,6 @@ import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.smartcard.SmartCardStackHost
 import com.bobot.ailauncher.ui.theme.AILauncherColors
-import com.bobot.ailauncher.ui.theme.PetMotion
-import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.island.IslandToasts
 
@@ -136,37 +119,10 @@ fun HomeScreen(
     dockBoundsInRoot: androidx.compose.ui.geometry.Rect? = null,
     // R2 UI：意图入口"去设置"导航（无 Key 时引导去配大模型 Key）
     onOpenSettings: () -> Unit = {},
-    // R2 UI（10-21 新规格）：意图状态与回调——协调器由 HomeHost 持有（应用中心「问七仔」共用），
-    // HomeScreen 只负责把状态交给胶囊渲染
-    intentState: com.bobot.ailauncher.core.intent.IntentUiState,
-    onIntentSubmit: (String) -> Unit,
-    onIntentConfirm: (com.bobot.ailauncher.core.action.ActionRequest) -> Unit,
-    // 意图页优化（2026-10-30，Bob 已批 §二 B2）：理解预告条“就这样办”
-    // 的回调（协调器 confirmUnderstood），与弹窗确认分开透传。
-    onIntentConfirmUnderstood: (com.bobot.ailauncher.core.action.ActionRequest) -> Unit = {},
-    onIntentDismiss: () -> Unit,
-    // v0.68.98（F-06）：Planning 态取消（宿主真取消在途 Job），透传给 IntentEntry
-    onIntentCancelPlanning: () -> Unit,
-    // v0.68.99（主页重构 R-1）：输入态开关（HomeHost 持有）——静态主页无胶囊；
-    // 点意图胶囊进入，协调器在场状态由 HomeHost 自动带起
-    intentInputMode: Boolean = false,
-    // 进入输入态时是否挂载即聚焦（点入口进入 = true 要打字；自动带起呈现 = false 不弹键盘）
-    intentRequestFocus: Boolean = false,
-    onExitIntentInput: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val view = LocalView.current
-
-    // v0.68.93（布局与交互 Loop 一批①）：点胶囊外释放焦点的宿主侧状态——
-    // 胶囊聚焦与否由 IntentEntry 经 onFocusChanged 外报，胶囊范围用包裹 Box 的
-    // boundsInRoot 捕获，根节点原点用 positionInRoot 换算本地坐标（观察者见根 Box）。
-    val focusManager = LocalFocusManager.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-    var intentFocused by remember { mutableStateOf(false) }
-    var intentBoundsInRoot by remember {
-        mutableStateOf<androidx.compose.ui.geometry.Rect?>(null)
-    }
     // 449/v1.2.2（智能卡片叠层手势仲裁）：叠层范围用卡片槽位包裹 Box 的
     // boundsInRoot 捕获（与意图/Dock 同口径，见根 Box 观察者）；叠层为空
     // （无卡、无引导卡）时槽位零高度，bounds 是零面积矩形、contains 恒
@@ -176,233 +132,6 @@ fun HomeScreen(
     }
     var rootPosInRoot by remember {
         mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
-    }
-
-    // v0.68.99（主页重构 R-1）：意图输入文本由本宿主持有——IntentEntry 随
-    // 输入态挂载/卸载，文本放宿主则收起再进入不吞字（沿 .93 口径）。
-    var intentFieldValue by remember {
-        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
-    }
-    // 输入态退出判定（v0.68.101·D-2 重构，取代「失焦边沿推断 + 4 秒盲
-    // 兜底」）：旧实现把「聚焦过→失焦」当退出信号，真机实证（Bob 录屏
-    // 两幕，缺陷文档 D-2）输入会话在进态约 4~5 秒无故退出/收键盘——
-    // 切 IME 面板、删字期间的瞬时焦点事件在真机 IME 下时序不可靠，任何
-    // 「看焦点猜意图」的推断都会误伤会话。新口径下退出只由用户动作事件
-    // 与协调器状态落定驱动（打字/切面板/删到空都不碰这两条通道）：
-    //  ① 点外：根观察者真实 Press 事件直接回调退出（见根 Box 的
-    //     onOutsideTap，非在场状态时）；② Back（下方 BackHandler）；
-    //  ③ 提交后落定：在场状态退场且未聚焦 → 收起；④ 点本地结果/建议
-    //     应用开 App（IntentEntry 的 onRequestExitInput）；⑤ 开抽屉。
-    // 「曾经聚焦过」锁存只供 ⑥ 滞留兜底，不再直接触发退出。
-    var intentHasFocused by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(intentFocused) {
-        if (intentFocused) intentHasFocused = true
-    }
-    androidx.compose.runtime.LaunchedEffect(intentInputMode) {
-        if (intentInputMode) intentHasFocused = false
-    }
-    // ---- 输入态专注·进出过渡（2026-10-26 起；
-    // 2026-10-27 竖屏区块切换重做） ----
-    // 退出进行中状态由本宿主持有（横屏场景换守卫与竖屏终态 snap 用）。
-    // onExitFocusRequest 是本宿主向下暴露的单一
-    // 退出入口：所有退出路径只调它；竖屏它即时清焦点＋收键盘＋翻转
-    // mode（离散切换同帧完成），横屏它走场景换分支；D 的 ✕ 一键退出
-    // 也只调这个入口（须透传给专注卡片的 ✕ 按钮）。
-    // 槽位挂载条件：竖屏即 intentInputMode（离散切换无退态滞留）；
-    // 横屏为 mode && landscapeSlotReady（场景整体换，先出后进），
-    // 见 focusSlotVisible；横屏退聚焦不走 funnel 行程，见 requestExitFocus
-    // 横屏分支。
-    // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏聚焦槽位挂载门。
-    // 家场景先出、聚焦场景后进——横屏下槽位只在 intentInputMode 为真且
-    // 进场延迟已走完（Dock 退出淡出 FadeQuick 完成）时挂载；竖屏不走此门
-    // （沿用 mode || 退态进行中）。由进场 LaunchedEffect 与横屏退出分支
-    // 两处写入（进场 effect 已结束时退出分支才写，无争夺）。
-    var landscapeSlotReady by remember { mutableStateOf(false) }
-    // 横屏判定共享值（BoxWithConstraints 内算出后经 SideEffect 同步到此，
-    // 供 requestExitFocus 横屏分支读取；槽位公式直接读内容域内值）。
-    var isLandscapeHomeShared by remember { mutableStateOf(false) }
-    // 退出进行中（焦点退出状态，非宠物逻辑）：横屏退态守卫与复位用。
-    var exitInProgress by remember { mutableStateOf(false) }
-    val exitScope = rememberCoroutineScope()
-    val reduceMotionHome = rememberReduceMotion()
-    val exitIntentInputLatest by rememberUpdatedState(onExitIntentInput)
-    // IME 底部高度提前到此处（横屏退态等待循环与垫高计算同源）：横屏退态
-    // 第①步等它归零才起步行程（竖屏离散切换不等键盘），WindowInsets.ime
-    // 变化会触发重组、值随之更新。
-    val imeBottomPx = WindowInsets.ime.getBottom(density)
-    val imeBottomLatest by rememberUpdatedState(imeBottomPx)
-    // 点外退出走 pointerInput(Unit)（首帧闭包常驻）：护栏不能读参数原值
-    // （首帧 intentInputMode 恒 false，退出永不触发），必须读最新态。
-    val intentInputModeLatest by rememberUpdatedState(intentInputMode)
-    // 在途退出协程句柄（横屏退出分支用）：退出进行中重进时进态 effect
-    // 取消它（见下方进态会话 effect）；取消后 isExiting 守卫由句柄的
-    // invokeOnCompletion 补清（否则下一次退出被护栏永久挡下）。竖屏离散
-    // 切换不建长时退出协程。
-    var exitJob by remember { mutableStateOf<Job?>(null) }
-    fun requestExitFocus() {
-        if (exitInProgress || !intentInputModeLatest) return
-        exitJob = exitScope.launch {
-            if (isLandscapeHomeShared) {
-                // 横屏退聚焦（2026-10-26，Bob 22:57 最终口径）：场景整体换、
-                // 不移头、不双头、不走 funnel 行程。beginExit／finishExit 仅借
-                // isExiting 守卫（防重入）与相位复位，不跑行程／70% 交接。
-                // ① 键盘落下（同竖屏第①步；横屏悬浮键盘 imeBottom 恒为 0，
-                //    等待循环即时退出）；
-                // ② 聚焦场景先出：槽位挂载门关闭 → 槽位 fadeOut（FadeStandard
-                //    250ms），等淡出完成；
-                // ③ 家场景后进：翻转 mode → Dock 卡片 fade-only 重进（上一帧
-                //    仍在聚焦，PullUpDock 取 fade-only）＋首页淡入。
-                // 竖屏已改离散切换（2026-10-27），见下方竖屏分支。
-                exitInProgress = true
-                focusManager.clearFocus()
-                keyboardController?.hide()
-                var waited = 0
-                while (imeBottomLatest > 0 && waited < 22) {
-                    delay(16)
-                    waited++
-                }
-                landscapeSlotReady = false
-                delay(PetMotion.FadeStandard.toLong())
-                exitIntentInputLatest()
-                exitInProgress = false
-                return@launch
-            }
-            // 竖屏区块切换（2026-10-27）：离散切换，无 funnel——清焦点＋
-            // 收键盘＋翻转 mode 同帧完成：信息区、Dock 区整块重现，意图区
-            // 整块消失；不走行程、不等键盘、不做 70% 交接与落地溶解。
-            // 键盘随后自行落下，家场景不依赖键盘、无跳变；快进快出与退出
-            // 中重进无在途协程可打架（护栏首行仍挡重复调用）。
-            focusManager.clearFocus()
-            keyboardController?.hide()
-            exitIntentInputLatest()
-        }
-        exitJob?.invokeOnCompletion {
-            exitInProgress = false
-        }
-    }
-    val onExitFocusRequest: () -> Unit = { requestExitFocus() }
-    // 退出进行中重进（2026-10-27 闪烁修复，横屏沿用）：横屏退出协程在途
-    // 时 mode 一变真即取消它（句柄补清守卫）。竖屏离散切换
-    // 无在途退出协程，本 effect 在竖屏是 no-op，保留只为横屏路径。
-    androidx.compose.runtime.LaunchedEffect(intentInputMode) {
-        if (intentInputMode) {
-            exitJob?.cancel()
-        }
-    }
-    val intentStateLatest by rememberUpdatedState(intentState)
-    // ③ 状态落定退出（纯函数 intentSettleShouldExit，单测锁死矩阵）
-    var intentPrevHolds by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(intentState, intentFocused, intentInputMode) {
-        val holdsNow = intentStateHoldsInput(intentState)
-        if (intentSettleShouldExit(intentInputMode, intentPrevHolds, holdsNow, intentFocused)) {
-            // 落定退出同样走单一退出入口，不直接翻转 mode。
-            onExitFocusRequest()
-        }
-        intentPrevHolds = holdsNow
-    }
-    // ⑦ IME 收起自动收卡片（2026-10-27，Bob 追问）：悬浮键盘下 imeBottom 恒为 0，
-    //    底部 inset 看不见键盘；Compose 本版 BOM（2024.10.01）又没有
-    //    WindowInsets.isImeVisible（CI 实证 Unresolved reference）——改读平台
-    //    兼容旗 ViewCompat.getRootWindowInsets(view).isVisible(ime())（可见性
-    //    与是否和窗口相交无关，悬浮键盘同样翻转）。意图态在场期间 100ms
-    //    轮询一次（只读、不碰 inset 分发链；意图态外不轮询；remember 以
-    //    intentInputMode 为 key，进态即重置为 false，防上一会话残留 true
-    //    在进态首轮造成幻边沿）。仅输入态（Idle／Editing）的可见→隐藏边沿
-    //    触发，走单一退出入口；120ms 防抖：边沿后复核守卫，期间可见性翻回
-    //    则 effect 重启、取消本次触发。
-    //    不触发：提交转场（提交 flag＋状态守卫双拦）、程序化收起、旋转（方向
-    //    变化即重置跟踪不触发）、呈现态／在场态（状态守卫）、退出进行中。
-    //    如实标注：nubia 悬浮键盘上的翻转行为未经本机验证——若真机上
-    //    isVisible 不翻转，本通道静默不触发、无回归，兜底仍是 375 的返回键。
-    var imeVisible by remember(intentInputMode) { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(intentInputMode) {
-        if (!intentInputMode) return@LaunchedEffect
-        while (true) {
-            val visible = ViewCompat.getRootWindowInsets(view)
-                ?.isVisible(WindowInsetsCompat.Type.ime())
-            if (visible != null && visible != imeVisible) imeVisible = visible
-            delay(100)
-        }
-    }
-    val imeOrientation = LocalConfiguration.current.orientation
-    var imeSubmitPending by remember { mutableStateOf(false) }
-    val onIntentSubmitWrapped: (String) -> Unit = { text ->
-        imeSubmitPending = true
-        onIntentSubmit(text)
-    }
-    // 提交 flag 清理：状态离输入态、mode 退出时清（边沿消费时另清，见下）。
-    androidx.compose.runtime.LaunchedEffect(intentState, intentInputMode) {
-        if (!intentInputMode || intentStateHoldsInput(intentState)) imeSubmitPending = false
-    }
-    var imePrevVisible by remember { mutableStateOf(false) }
-    var imePrevMode by remember { mutableStateOf(false) }
-    var imePrevOrientation by remember { mutableStateOf(-1) }
-    androidx.compose.runtime.LaunchedEffect(imeVisible, imeOrientation, intentInputMode) {
-        val modeChanged = intentInputMode != imePrevMode
-        val orientationChanged = imeOrientation != imePrevOrientation
-        imePrevMode = intentInputMode
-        imePrevOrientation = imeOrientation
-        if (!imeAutoCloseShouldFire(
-                prevVisible = imePrevVisible,
-                nowVisible = imeVisible,
-                inputMode = intentInputMode,
-                modeChanged = modeChanged,
-                orientationChanged = orientationChanged,
-                isInputState = !intentStateHoldsInput(intentStateLatest),
-                submitPending = imeSubmitPending,
-                isExiting = exitInProgress,
-            )
-        ) {
-            // 未触发的边沿同样消费提交 flag（提交那次收键盘即此沿；新一轮
-            // 可见边沿也清，旧提交不污染下一会话）。
-            if (imePrevVisible != imeVisible) imeSubmitPending = false
-            imePrevVisible = imeVisible
-            return@LaunchedEffect
-        }
-        delay(120)
-        // 防抖后复核最新守卫（effect 重启会取消本分支，故翻回不触发）。
-        if (intentInputModeLatest && !intentStateHoldsInput(intentStateLatest) &&
-            !imeSubmitPending && !exitInProgress
-        ) {
-            onExitFocusRequest()
-        }
-        imePrevVisible = imeVisible
-    }
-    // ⑥ 滞留兜底：进态 2.5 秒后仍「从未聚焦 + 文本为空 + 无在场状态」
-    // 才收起——防聚焦请求被吞后空胶囊永久滞留。真实会话必先聚焦（锁存
-    // 置位）或已有文本，永不误伤；它只收「根本没开始过」的会话，与旧
-    // 4 秒盲兜底的区别正在于三重门槛（旧版单看未聚焦即在会话中误伤）。
-    val intentFieldTextLatest by rememberUpdatedState(intentFieldValue.text)
-    // v0.68.102（310 冻结修复二轮·进态错峰）：聚焦（= IME 首秀 + 窗口
-    // resize）延迟到进态合成落定后才放行。CI 探针实证（probe-freeze-*，
-    // 2026-10-24）：进态首帧的合成爆发（槽位淡入 + hero 紧凑 + 伴随卡片
-    // 挂载）与 IME 首秀在同一时间窗叠加时整机图形栈死亡（模拟器进程级
-    // 消失、logcat 无宾客侧 FATAL）——冷 IME（开机首秀）与深色首帧各为
-    // 一个加重因子，任一与进态同窗即点火；应用中心单独聚焦（无进态
-    // 合成）与错峰后的进态均存活。故把链条串行化：胶囊先挂载落定
-    // （含 +300ms 的伴随卡片），450ms 后才放行聚焦，IME 在静默窗外弹起。
-    // 呈现带起（intentRequestFocus=false）本就不聚焦，不受影响；滞留
-    // 兜底的 2.5s 阈值远大于 450ms，不误伤。
-    var intentFocusGateOpen by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(intentInputMode) {
-        intentFocusGateOpen = false
-        if (intentInputMode) {
-            delay(450)
-            intentFocusGateOpen = true
-        }
-    }
-    androidx.compose.runtime.LaunchedEffect(intentInputMode) {
-        if (intentInputMode) {
-            delay(2500)
-            if (intentInputStranded(
-                    intentHasFocused, intentFieldTextLatest.isEmpty(),
-                    intentStateHoldsInput(intentStateLatest)
-                )
-            ) {
-                // 滞留兜底同样走单一退出入口，不直接翻转 mode。
-                onExitFocusRequest()
-            }
-        }
     }
 
     val openDrawerState by rememberUpdatedState(onOpenAppDrawer)
@@ -540,47 +269,21 @@ fun HomeScreen(
             // 取代旧「失焦后由 Effect 推断退出」）——协调器在场状态持有
             // 输入框时不退（确认/追问/回复呈现中点外只收键盘，用户看完
             // 还要能接着答；其落定退出走状态通道）。
-            .clearIntentFocusOnOutsideTap(
-                focused = { intentFocused },
-                targetBoundsInHost = {
-                    intentBoundsInRoot?.let { b ->
-                        androidx.compose.ui.geometry.Rect(
-                            b.left - rootPosInRoot.x,
-                            b.top - rootPosInRoot.y,
-                            b.right - rootPosInRoot.x,
-                            b.bottom - rootPosInRoot.y
-                        )
-                    }
-                },
-                focusManager = focusManager,
-                keyboardController = keyboardController,
-                onOutsideTap = {
-                    if (!intentStateHoldsInput(intentStateLatest)) {
-                        // 点外退出走单一退出入口，不直接翻转 mode。
-                        onExitFocusRequest()
-                    }
-                }
-            )
             // v0.68.17：落点跟踪已删除（触发改为"任何左滑"，不再需要真实落点）
             .pointerInput(blindCtl) {
                 var totalX = 0f
                 var totalY = 0f
                 // v0.68.165（瘦条批）：盲操手势仲裁——盲操只认主页背景。
-                // 意图卡片区／Dock 区内起始的手势不转发盲操：示例行横滚、
-                // 卡片内点滑、Dock 区手势都不再弹扇形／直开相机；纵向
-                // fallback（上滑 D3／下滑通知）不受影响，仍按原逻辑走。
+                // Dock 区内起始的手势不转发盲操：卡片内点滑、Dock 区手势
+                // 都不再弹扇形／直开相机；纵向 fallback（上滑 D3／下滑通知）
+                // 不受影响，仍按原逻辑走。
                 // 449/v1.2.2：智能卡片叠层区也一样排除在外——叠层横滑是
                 // 它自己的手势（detectHorizontalDragGestures 跳过沉底），
                 // 父层再认一次就是 448 实拍的扇形＋相机。且叠层区的手势
                 // 连纵向 fallback 也不走：斜滑带上分量时 fallback 会误开
                 // 应用中心（448 视频里应用中心就是这么开的），叠层区的手
-                // 势归叠层自己，纵向在叠层上本来就没意义。意图/Dock 区的
+                // 势归叠层自己，纵向在叠层上本来就没意义。Dock 区的
                 // 纵向 fallback 口径不动（只叠层区禁纵向）。
-                // 注意：pointerInput key 只有 blindCtl、块不重启，故参数原值
-                // 会 stale——意图挂载门读 intentInputModeLatest（见 201 行
-                // rememberUpdatedState），bounds／尺寸读 remember 态本身。
-                // 意图区挂载门与槽位可见性同口径（竖屏即 mode，横屏加
-                // landscapeSlotReady），防止退态滞留 bounds 误拦主页背景手势。
                 var gestureExcludedFromBlind = false
                 var gestureOnCardStack = false
                 fun cardStackLocal(): androidx.compose.ui.geometry.Rect? =
@@ -593,16 +296,6 @@ fun HomeScreen(
                         )
                     }
                 fun blindExclusionContains(start: androidx.compose.ui.geometry.Offset): Boolean {
-                    val intentMounted = intentInputModeLatest &&
-                        (homeSize.width <= homeSize.height || landscapeSlotReady)
-                    val intentLocal = if (intentMounted) intentBoundsInRoot?.let { b ->
-                        androidx.compose.ui.geometry.Rect(
-                            b.left - rootPosInRoot.x,
-                            b.top - rootPosInRoot.y,
-                            b.right - rootPosInRoot.x,
-                            b.bottom - rootPosInRoot.y
-                        )
-                    } else null
                     val dockLocal = dockBoundsInRoot?.let { b ->
                         androidx.compose.ui.geometry.Rect(
                             b.left - rootPosInRoot.x,
@@ -612,7 +305,7 @@ fun HomeScreen(
                         )
                     }
                     return blindStartExcluded(
-                        start, intentLocal, dockLocal, cardStackLocal()
+                        start, null, dockLocal, cardStackLocal()
                     )
                 }
                 detectDragGestures(
@@ -677,170 +370,7 @@ fun HomeScreen(
         // 修法：两侧直接吃 displayCutout inset——竖屏侧边 inset 为 0，竖屏布局零变化；
         // 顶部横屏取 max(16dp, 状态栏高)，竖屏保持 16dp 不动。
         val isLandscapeHome = maxWidth > maxHeight
-        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：把内容域横屏判定
-        // 同步到外层，供 requestExitFocus 横屏分支读取（该分支在内容域外，
-        // 读不到此局部值；SideEffect 在组合后更新，退出点按时值已稳定）。
-        androidx.compose.runtime.SideEffect { isLandscapeHomeShared = isLandscapeHome }
-        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏进聚焦的槽位
-        // 进场延迟——家场景先出（Dock 卡片 fade-only 退出，FadeQuick 150ms），
-        // 聚焦场景后进（延迟走完才挂载槽位）。key 只取 intentInputMode：
-        // 横竖屏旋转不重启（旋转时已在聚焦中，Dock 早已隐藏，无需再等；
-        // 若 key 含 isLandscape，旋转会重启延迟、槽位闪烁）。竖屏直接置
-        // true（槽位公式竖屏分支不读此门，但保持值与 mode 同步、退出时复位）。
-        androidx.compose.runtime.LaunchedEffect(intentInputMode) {
-            if (intentInputMode) {
-                if (isLandscapeHome) {
-                    landscapeSlotReady = false
-                    delay(PetMotion.FadeQuick.toLong())
-                    landscapeSlotReady = true
-                } else {
-                    landscapeSlotReady = true
-                }
-            } else {
-                landscapeSlotReady = false
-            }
-        }
         val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
-        // 输入态专注·集成：专注组底边锚定——adjustResize 下窗口底边 =
-        // 键盘顶边（键盘升起）或屏底（键盘收起）；结果态导航栏 clearance
-        // 取栏高与 16dp 地板的大值（与 Dock 底垫同口径）。
-        val navClearanceDp = with(density) {
-            maxOf(16.dp, WindowInsets.navigationBars.getBottom(density).toDp())
-        }
-        // 输入态专注·弹闪修复（2026-10-26，357 真机反馈）：组底边垫高改走
-        // 单一连续值——357 的四路分流在键盘动画中途离散跳档（焦点一落先
-        // 跳悬浮 50%、键盘一升跳停靠贴合、窗口一缩跳垫 0），卡片上下跳、
-        // 宠物位移与卡片／键盘各动各的；退态冻结垫高又让卡片在键盘落下
-        // 后仍悬在原位、首页淡入时双影。357 批改三处（当时垫高数值口径
-        // 一字不动；本批横屏分支改恒 0dp，见 resolveFocusBottomPad）：
-        // ① 悬浮 50% 兜底不再设落定门（本批竖屏一拍）——键盘在场预期成立
-        //    即认定，垫高连续跟随键盘动画：停靠键盘 inset 通常首帧内即
-        //    > 0，50% 误触窗口极小；悬浮键盘与键盘自身动画同节拍上升，
-        //    不再门后 350ms＋250ms 两段走（21:08“卡片在键盘出现后才又被
-        //    推起一段”的根因之一）；
-        // ② 渲染垫高由 Animatable 驱动：imeBottom > 0 时逐帧 snap 跟键盘
-        //    顶边（窗口未收缩时 imeBottom 即键盘高，卡片精确坐键盘顶边，
-        //    snap 不动——精确贴合不是自由运动）；imeBottom = 0 时向目标值
-        //    走家族弹簧滑过去（PadStandard 临界阻尼约 250ms，导航垫 ↔
-        //    50% ↔ 0 之间不再一帧跳变；停靠键盘冷启动晚到、50% 与新到
-        //    inset 差值 > 48dp 则 PadFast 约 150ms 快滑过去，不跳）；
-        // ③ 退态不再冻结垫高——退出时垫高跟键盘一起落下（imeBottom 缩小
-        //    即跟下），键盘落定后再滑向导航垫；冻结机制随之删除（其防跳变
-        //    的本意由 ② 的滑过去接管）。
-        // 横屏（Bob 2026-10-26 新口径，取代 357 左区躲避；本批底边不钉
-        // 导航垫）：横屏专注态不做任何键盘避让——垫高恒为 0dp（停靠键盘
-        // 靠窗口收缩自然顶起卡片，悬浮键盘由用户自己放位置），左区躲避
-        // 与窄化一并拆除。
-        // 专注组在场：竖屏即 mode（离散切换同帧翻转）；横屏沿用
-        // mode || 退态进行中（场景换先出后进，锚定在退态完成前保留）。
-        val focusGroupVisible = intentInputMode || exitInProgress
-        // 垫高跳变补偿（2026-10-27 闪烁修复，竖屏区块切换后仅横屏沿用）：
-        // 横屏场景换时 focusGroupVisible 一翻转，权重 Spacer 出现／消失，
-        // 整列 PetZone 在一帧内于顶部锚定与底部锚定之间瞬移数百 dp
-        // （361“一拍”在真机上未达成的主因：瞬移帧上又叠了四路同窗
-        // 淡入淡出叠加，读着就是闪）。修法不是改布局结构
-        // （稳态布局一字不动），而是用绘制期位移把瞬移抹成连续滑动：
-        // 布局跳变帧的 onGloballyPositioned 回调里同步算出补偿量（绘制
-        // 前生效、本帧不闪），再以家族 FadeStandard 一拍滑回 0；减动效
-        // 不补偿（snap 契约本身就是瞬时）。补偿量只依赖布局跳变前后
-        // 两次 laid-out 顶边（positionInRoot 含自身绘制位移，公式见文件尾
-        // jumpCompensationShift，单测锁死）；键盘垫高弹簧、英雄区淡出
-        // 等连续量不触发补偿（首帧回调后即解除武装，阈值 4px 防抖动）。
-        // 竖屏离散切换同帧完成、无跳变可抹，永不武装（见下方武装门）。
-        var jumpShift by remember { mutableStateOf(0f) }
-        var lastLaidOutTop by remember { mutableStateOf<Int?>(null) }
-        var jumpArmed by remember { mutableStateOf(false) }
-        var jumpAnimId by remember { mutableStateOf(0) }
-        var prevFocusVisible by remember { mutableStateOf(focusGroupVisible) }
-        androidx.compose.runtime.SideEffect {
-            if (prevFocusVisible != focusGroupVisible) {
-                prevFocusVisible = focusGroupVisible
-                // 竖屏区块切换：竖屏离散切换同帧完成、无跳变可抹，
-                // 永不武装补偿；横屏场景换沿用 367 补偿。
-                jumpArmed = isLandscapeHome
-            }
-        }
-        androidx.compose.runtime.LaunchedEffect(jumpAnimId) {
-            if (jumpAnimId == 0) return@LaunchedEffect
-            androidx.compose.animation.core.animate(
-                jumpShift, 0f,
-                animationSpec = androidx.compose.animation.core.tween(
-                    PetMotion.FadeStandard,
-                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                )
-            ) { v, _ -> jumpShift = v }
-        }
-        // 输入态专注·修复（2026-10-26，356 真机反馈）：组底边改走显式垫高，
-        // 不再只依赖窗口收缩。356 的锚定是权重 Spacer + adjustResize：窗口
-        // 不收缩时等于没锚。Bob 机上横屏截图证实键盘是悬浮式（右侧圆角浮
-        // 窗、压住卡片右侧）——悬浮键盘既不触发窗口收缩、也不产生底部 IME
-        // inset，两条旧路径同时失效，卡片留在屏底被键盘盖住；同机竖屏同
-        // 一键盘模式，竖屏“没有推起来”与此同根（竖屏截图本身无键盘在场，
-        // 故竖屏机制由横屏证据 + 代码链完整性推断：三环逐一核过——Manifest
-        // 是 adjustResize、无运行时覆盖、宿主链 Box→NavHost→HomeScreen 全
-        // fillMaxSize、无 Popup、无 inset 消费，收缩链本身无断点）。
-        // 四路分流（纯函数 resolveFocusBottomPad，单测锁死）：
-        // ① 停靠键盘且窗口未收缩（imeBottom > 0）：垫 = imeBottom，卡片精确
-        //    坐在键盘顶边，0dp 贴合；
-        // ② 停靠键盘且窗口已收缩（窗口高 < 屏高 − 48dp，imeBottom 归零）：
-        //    垫 = 0，Spacer 已把卡片推到窗口底边即键盘顶边（356 在此情形下
-        //    误加了导航垫、卡片会浮在键盘上方 16dp，本批一并修正）；
-        // ③ 悬浮键盘（键盘在场预期成立、窗口未收缩、imeBottom = 0）：竖屏
-        //    垫 = 窗口高 × 50%，把组顶到屏幕上半区、躲开底部悬浮键盘（悬浮
-        //    键盘位置／尺寸系统不提供，50% 是保守兜底：覆盖底部半屏内任意
-        //    高度的悬浮键盘；被用户拖到屏幕中部的悬浮键盘仍可能压住，此为
-        //    系统能力边界、如实标注）；
-        // ④ 其余（键盘收起／结果态）：垫 = 导航栏 clearance（356 原口径不变）。
-        // 键盘在场预期 = 输入态且（胶囊聚焦，或 Planning／NeedsInput——这两
-        // 态键盘按设计保持升起）；Reply／Error 等态键盘按设计已收，走 ④。
-        // 竖屏一拍（2026-10-26 本批）：③ 的在场预期直接用 keyboardExpected
-        // （落定门删除），横屏恒走 0dp（见 resolveFocusBottomPad
-        // 的 isLandscape 分支，Bob 横屏不推＋底边不钉导航垫口径）。
-        val imeBottomDp = with(density) { imeBottomPx.toDp() }
-        val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
-        val windowResized = maxHeight < screenHeightDp - 48.dp
-        val keyboardExpected = intentInputMode && (intentFocused ||
-            intentState is com.bobot.ailauncher.core.intent.IntentUiState.Planning ||
-            intentState is com.bobot.ailauncher.core.intent.IntentUiState.NeedsInput)
-        // 垫高目标：四路分流数值口径不变（横屏分支除外：恒 0dp）；
-        // 50% 兜底的在场预期直接用 keyboardExpected，不再过落定门。
-        val focusBottomPadTarget = resolveFocusBottomPad(
-            imeBottom = imeBottomDp,
-            windowResized = windowResized,
-            keyboardExpected = keyboardExpected,
-            isPortrait = !isLandscapeHome,
-            windowHeight = maxHeight,
-            navClearance = navClearanceDp,
-            isLandscape = isLandscapeHome
-        )
-        // 渲染垫高：Animatable 单一连续值（像素 Float，免 Dp VectorConverter）。
-        // imeBottom 在场时逐帧 snap 跟键盘顶边（窗口未收缩时 imeBottom 即
-        // 键盘高，精确贴合 0dp 不动）；imeBottom = 0 时向目标值走家族弹簧
-        // 滑过去（PadStandard 约 250ms；退出时键盘落下即跟下、落定后滑向
-        // 导航垫，冻结机制删除）。冷启动停靠键盘晚到、50% 与新到 inset
-        // 差值 > 48dp 则 PadFast 约 150ms 快滑过去，不跳（正常停靠键盘
-        // 首帧内到达，差值小、直接 snap）。
-        val focusPadAnim = remember {
-            androidx.compose.animation.core.Animatable(0f)
-        }
-        androidx.compose.runtime.LaunchedEffect(focusBottomPadTarget, imeBottomDp) {
-            val imePx = imeBottomPx.toFloat()
-            if (imePx > 0f) {
-                if (focusPadAnim.value - imePx > 48f ||
-                    imePx - focusPadAnim.value > 48f
-                ) {
-                    focusPadAnim.animateTo(imePx, PetMotion.PadFast)
-                } else {
-                    focusPadAnim.snapTo(imePx)
-                }
-            } else {
-                focusPadAnim.animateTo(
-                    with(density) { focusBottomPadTarget.toPx() },
-                    PetMotion.PadStandard
-                )
-            }
-        }
-        val focusBottomPad = with(density) { focusPadAnim.value.toDp() }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -853,54 +383,14 @@ fun HomeScreen(
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 输入态专注·集成：权重 Spacer 把专注态的 PetZone（可见内容
-            // 只剩意图卡片）推到窗口底边——adjustResize 下窗口底边即键盘
-            // 顶边，组随键盘同进同退（整块位移）；竖屏起步落点不再
-            // 依赖冻结位移量（离散切换无滑入）。
-            if (focusGroupVisible) {
-                Spacer(modifier = Modifier.weight(1f))
-            }
             // v0.68.44（Bob）：杂志封面模式
             // v0.68.96（F-01 退役）：PetZone 的非封面分支已删除，todayCardAlpha
             // 参数随之移除——该淡出原本只作用于已退役的 TODAY 卡，封面形态从未吃到。
-            // 跳变补偿绘制层（2026-10-27，竖屏区块切换后仅横屏沿用）——
-            // 见上方 focusGroupVisible 处的补偿状态说明。绘制期位移不
-            // 参与布局，故不影响槽位锚点、点外退出 bounds 与键盘垫高。
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .graphicsLayer {
-                        translationY = if (isLandscapeHome) jumpShift else 0f
-                    }
-                    .onGloballyPositioned { coords ->
-                        // 竖屏不补偿（见上方武装门）；横屏沿用 367 逻辑。
-                        if (isLandscapeHome) {
-                            val visualTop = coords.positionInRoot().y.toInt()
-                            val laidOutTop = visualTop - jumpShift.toInt()
-                            val prevLaidOut = lastLaidOutTop
-                            if (jumpArmed) {
-                                jumpArmed = false
-                                if (!reduceMotionHome && prevLaidOut != null &&
-                                    kotlin.math.abs(laidOutTop - prevLaidOut) > 4
-                                ) {
-                                    jumpShift = jumpCompensationShift(
-                                        prevLaidOut, laidOutTop, jumpShift
-                                    )
-                                    lastLaidOutTop = laidOutTop
-                                    jumpAnimId++
-                                } else {
-                                    lastLaidOutTop = laidOutTop
-                                }
-                            } else {
-                                lastLaidOutTop = laidOutTop
-                            }
-                        }
-                    }
             ) {
             PetZone(
-                // v0.68.101：PetZone 已纯文字简报；inputActive
-                // 驱动简报紧凑（D-1）与横屏 hero 让位。
-                inputActive = intentInputMode,
                 // 智能卡片（447）：叠层槽位——会行下方独立一段，无卡零高度，
                 // 输入态与简报一起淡出。
                 // 449/v1.2.2：包裹 Box 捕获叠层 boundsInRoot，供盲操手势仲裁
@@ -919,111 +409,7 @@ fun HomeScreen(
                         }
                     ) { SmartCardStackHost() }
                 },
-                // v0.68.99（R-1 修订）：输入态填充 PetZone 的 intentSlot（.97
-                // 槽位：hero 与会行之间、横屏左区）——静态时 AnimatedVisibility
-                // 零高度、封面只剩简报+Dock；包裹 Box 捕获意图区范围供 .93
-                // 点外部收焦观察者用。早先的底部浮层在横屏跨进 hero 区
-                // （矩阵 landphone 实测 overlap），流式槽位靠分区天然不重叠。
-                intentSlot = {
-                    // v0.68.102（310 冻结修复·入场削峰）：槽位进出只走 fade，
-                    // 不再 expandVertically/shrinkVertically——高度动画会让
-                    // 简报列在进态首帧逐帧重测（与 IME resize、hero 紧凑、
-                    // 伴随意图卡片首次挂载叠加成布局风暴，CI 实证进态后进程
-                    // 死亡/楔死、screencap 与层级读取全失效）。fade 不改变
-                    // 尺寸，槽位一帧到位，语义与呈现内容不变。
-                    androidx.compose.animation.AnimatedVisibility(
-                        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：横屏
-                        // 下槽位只在 mode 为真且进场延迟已走完时挂载（家场景
-                        // 先出、聚焦场景后进，不重叠）；横屏退聚焦由
-                        // requestExitFocus 横屏分支先关此门、等淡出完成再翻
-                        // mode。竖屏区块切换（2026-10-27）：竖屏槽位可见性
-                        // 即 mode（focusSlotVisible 竖屏分支），无退态滞留挂载。
-                        visible = focusSlotVisible(
-                            intentInputMode = intentInputMode,
-                            isLandscape = isLandscapeHome,
-                            landscapeSlotReady = landscapeSlotReady
-                        ),
-                        // 竖屏区块切换：竖屏进出用 None——槽位同帧整体显隐，
-                        // 不与信息区／Dock 区半透明重叠、不 stagger；横屏沿用
-                        // fade（先出后进不重叠）。
-                        enter = if (isLandscapeHome) androidx.compose.animation.fadeIn(
-                            animationSpec = androidx.compose.animation.core.tween(
-                                PetMotion.FadeStandard,
-                                easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                            )
-                        ) else androidx.compose.animation.EnterTransition.None,
-                        exit = if (isLandscapeHome) androidx.compose.animation.fadeOut(
-                            animationSpec = androidx.compose.animation.core.tween(
-                                PetMotion.FadeStandard,
-                                easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                            )
-                        ) else androidx.compose.animation.ExitTransition.None
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(top = 16.dp)
-                                .onGloballyPositioned {
-                                    intentBoundsInRoot = it.boundsInRoot()
-                                }
-                        ) {
-                            // F 批（输入态轻量化）：胶囊左侧 Row 站位退役
-                            // ——IntentEntry 独占整宽；整区在意图区 bounds 内，
-                            // 点它不触发点外退出。
-                            // freeze3 焦点门（§9 削峰）口径保留：requestFocusOnMount
-                            // 仍须过 intentFocusGateOpen。
-                            IntentEntry(
-                                state = intentState,
-                                onSubmit = onIntentSubmitWrapped,
-                                onConfirm = onIntentConfirm,
-                                onConfirmUnderstood = onIntentConfirmUnderstood,
-                                onDismiss = onIntentDismiss,
-                                onCancelPlanning = onIntentCancelPlanning,
-                                onOpenSettings = onOpenSettings,
-                                onOpenPermissionSettings = { perm ->
-                                    openPermissionSettings(context, perm)
-                                },
-                                onFocusChanged = { intentFocused = it },
-                                fieldValue = intentFieldValue,
-                                onFieldValueChange = { intentFieldValue = it },
-                                requestFocusOnMount = intentRequestFocus && intentFocusGateOpen,
-                                // 单一退出入口：IntentEntry 的显式退出（含 D 的 ✕
-                                // 集成时透传的入口）与旧 onRequestExitInput 同走
-                                // onExitFocusRequest，不再直通 onExitIntentInput。
-                                onExitFocusRequest = onExitFocusRequest,
-                                                                onRequestExitInput = onExitFocusRequest,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                }
             )
-            }
-            // 输入态专注·修复＋弹闪修复：组底边垫高见上方四路分流
-            // （resolveFocusBottomPad）＋ Animatable 连续值——此处不再按
-            // imeBottomPx == 0 一刀切（窗口已收缩时 imeBottom 同样归零，356
-            // 在此误加导航垫、卡片浮在键盘上方）；退态冻结已删除，垫高跟
-            // 键盘一起落下、落定后滑向导航垫。
-            if (focusGroupVisible) {
-                Spacer(modifier = Modifier.height(focusBottomPad))
-            }
-        }
-        // v0.68.166（2026-10-27，Bob 真机报障）：返回退出输入态——意图专注态
-        // 在场即启用，不以键盘可见性为门。旧 v0.68.99 的 imeBottomPx == 0 门
-        // 使键盘收起后 imeBottom 未归零时返回无路、卡片滞留屏中无锚点；
-        // 键盘在场时第一按仍归输入法收键盘（Android 平台行为：输入法优先
-        // 消费返回键），键盘收起后的滞留态下一按即退卡片。
-        // 在场状态先关内层、再退意图（落点见 intentBackStep）：直接退出会
-        // 与 MainScreen 的在场自动带起 effect 打架。
-        // Back 进行中重复按下由 requestExitFocus 的 isExiting 护栏挡下，
-        // 故此处不另加 isExiting 到 enabled（禁用会把 Back 交给系统，危险）。
-        androidx.activity.compose.BackHandler(
-            enabled = intentInputMode
-        ) {
-            when (intentBackStep(intentState)) {
-                IntentBackStep.CancelPlanning -> onIntentCancelPlanning()
-                IntentBackStep.DismissInner -> onIntentDismiss()
-                IntentBackStep.ExitIntent -> onExitFocusRequest()
             }
         }
         // v0.36.0：无障碍权限引导卡
@@ -1112,182 +498,3 @@ private fun PanelPermissionGuide(
         }
     }
 }
-
-/**
- * v0.68.99（主页重构 R-1）：意图「在场状态」——这些状态下输入胶囊必须留在
- * 屏上（思考中 / 待确认 / 缺权限 / 在追问 / 回复或错误待用户处理），
- * 输入态不退出。Idle / Editing（无事发生）不算在场。
- */
-internal fun intentStateHoldsInput(
-    state: com.bobot.ailauncher.core.intent.IntentUiState
-): Boolean = when (state) {
-    is com.bobot.ailauncher.core.intent.IntentUiState.Planning,
-    is com.bobot.ailauncher.core.intent.IntentUiState.NeedsConfirmation,
-    is com.bobot.ailauncher.core.intent.IntentUiState.NeedsPermission,
-    is com.bobot.ailauncher.core.intent.IntentUiState.NeedsInput,
-    // 意图页优化（2026-10-30，Bob 已批 §二 B2/B3）：理解预告与正在
-    // 执行同样是在场状态——输入态不因此退出、返回键先关内层（经
-    // intentBackStep 的 DismissInner，与其他在场态同款）。
-    is com.bobot.ailauncher.core.intent.IntentUiState.Understood,
-    is com.bobot.ailauncher.core.intent.IntentUiState.Executing,
-    is com.bobot.ailauncher.core.intent.IntentUiState.Reply,
-    is com.bobot.ailauncher.core.intent.IntentUiState.Error -> true
-    is com.bobot.ailauncher.core.intent.IntentUiState.Idle,
-    is com.bobot.ailauncher.core.intent.IntentUiState.Editing -> false
-}
-
-/**
- * v0.68.166（2026-10-27，Bob 真机报障）：返回键在意图专注态的落点（纯函数，
- * 单测锁死）。在场状态先关内层、再退意图——直接退出会在场状态下打架
- * （MainScreen 的在场自动带起 effect 会在下一次状态变化时把 mode 翻回
- * true，卡片刚关又弹回）；Planning 必须走真取消（代际 bump＋Job cancel，
- * 见 cancelIntentPlanning），只 dismiss 会留下在途规划、迟到落地复活旧态；
- * 其余在场态走协调器 dismiss（清 pending 回编辑／Idle，与各条自身 ✕ 同款）。
- */
-internal enum class IntentBackStep { CancelPlanning, DismissInner, ExitIntent }
-
-internal fun intentBackStep(
-    state: com.bobot.ailauncher.core.intent.IntentUiState
-): IntentBackStep = when {
-    state is com.bobot.ailauncher.core.intent.IntentUiState.Planning ->
-        IntentBackStep.CancelPlanning
-    intentStateHoldsInput(state) -> IntentBackStep.DismissInner
-    else -> IntentBackStep.ExitIntent
-}
-
-/**
- * IME 收起自动收卡片判定（2026-10-27，纯函数，单测锁死）：仅可见→隐藏边沿、
- * 且在输入态、且无提交在途、且未在退出中才放行；mode 变化／方向变化／未在
- * 输入态时一律不触发（调用方以此重置跟踪，不形成边沿）。
- */
-internal fun imeAutoCloseShouldFire(
-    prevVisible: Boolean,
-    nowVisible: Boolean,
-    inputMode: Boolean,
-    modeChanged: Boolean,
-    orientationChanged: Boolean,
-    isInputState: Boolean,
-    submitPending: Boolean,
-    isExiting: Boolean,
-): Boolean = when {
-    modeChanged || orientationChanged || !inputMode -> false
-    prevVisible && !nowVisible && isInputState && !submitPending && !isExiting -> true
-    else -> false
-}
-
-/**
- * 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：聚焦槽位可见门（纯函数，
- * 单测锁死）。横屏：家场景先出、聚焦场景后进——槽位只在 mode 为真且进场
- * 延迟已走完（Dock 退出淡出完成）时挂载；竖屏区块切换（2026-10-27）：
- * 槽位可见性即 mode——离散切换无退态滞留挂载。
- */
-internal fun focusSlotVisible(
-    intentInputMode: Boolean,
-    isLandscape: Boolean,
-    landscapeSlotReady: Boolean
-): Boolean =
-    if (isLandscape) intentInputMode && landscapeSlotReady
-    else intentInputMode
-
-/**
- * 输入态专注·修复（2026-10-26，356 真机反馈）：专注组底边垫高决策（纯函数，单测锁死）。
- * 四路按序分流，互斥且全覆盖——调用方只传信号，不在这里再算窗口／键盘状态：
- *  - imeBottom > 0：停靠键盘且窗口未收缩，垫 = 键盘高，卡片精确坐键盘顶边（0dp 贴合）；
- *  - windowResized：停靠键盘且窗口已收缩（imeBottom 已归零），垫 = 0，权重 Spacer
- *    已把卡片推到窗口底边即键盘顶边（356 在此误加导航垫的回归锁）；
- *  - keyboardExpected && isPortrait：悬浮键盘兜底（窗口未收缩、imeBottom = 0、键盘
- *    在场预期成立），垫 = 窗口高 × 50%，把组顶到屏幕上半区；
- *  - 其余：键盘收起／结果态，垫 = 导航栏 clearance（356 原口径）。
- * 注意：横屏情形由 isLandscape 分支优先接管（恒为 0dp，Bob 横屏不推＋
- * 底边不钉导航垫口径），故 isPortrait 门只管竖屏兜底；调用方传给
- * keyboardExpected 的是直接的在场预期（本批竖屏一拍：落定门已删除）。
- *
- * 2026-10-29 意图页设计评审第 3 轮·键盘落下态规则（与撑高修复同批落地，
- * 本函数数值口径一字不动——落下态本就走④分支，缺的是修撑高后的内容定高
- * 与成文规则，不是新分支）：
- * 落下态＝键盘已收起且意图态仍在场（imeBottom＝0、窗口未收缩、
- * keyboardExpected＝false）→ 走④，垫＝导航栏 clearance；权重 Spacer
- * 把卡片推到窗口底边，面板高度严格跟内容走（空输入态竖屏 158dp、
- * 横屏 134dp，命中态满结果竖屏 398dp、横屏 374dp），底边可见、不悬空。
- * 卡片在落下态的去留不由本函数定，由退出三路定（见 IntentEntry 退出
- * 兜底注释）：376 适用时（Idle／Editing 态可见→隐藏边沿、守卫放行）
- * 卡片跟随自动收起；不适用时（输入持有态／守卫拦截／边沿从未登记）
- * 卡片留在屏底、保持内容高度与可见底边，等返回键或点外退出。
- * 23:23 截图前键盘如何收起、是否按过返回／完成的操作序列仍待 Bob 回复，
- * 故 376 在该帧未见生效不得裁决为通道失效，退出控件项保持开放。
- */
-internal fun resolveFocusBottomPad(
-    imeBottom: Dp,
-    windowResized: Boolean,
-    keyboardExpected: Boolean,
-    isPortrait: Boolean,
-    windowHeight: Dp,
-    navClearance: Dp,
-    isLandscape: Boolean = false,
-): Dp = when {
-    // 横屏不推（Bob 2026-10-26 新口径，取代 357 左区躲避；本批底边不钉
-    // 导航垫）：横屏专注态不做任何键盘避让——垫高恒为 0dp；停靠键盘靠
-    // 窗口收缩自然顶起卡片，悬浮键盘由用户自己放位置。
-    isLandscape -> 0.dp
-    imeBottom > 0.dp -> imeBottom
-    windowResized -> 0.dp
-    keyboardExpected && isPortrait -> windowHeight * 0.5f
-    else -> navClearance
-}
-
-/**
- * 输入态专注·弹闪修复（2026-10-26，357 真机反馈）：卡片横向外边距决策
- * （纯函数，单测锁死）——按容器宽算，不按屏宽算。
- * 357 的横屏左区垫高按屏宽算（左 20dp、右 = 屏宽 − 20 − 卡片宽），却落在
- * PetZone 的 coverLeftFrac 左区槽内（槽宽仅约 55% 屏宽）二次扣减：屏宽
- * 800dp 时卡片塌到 40dp（356 同款公式在槽内也只剩 160dp，正是 356
- * “横屏太窄”的成因），面板内容仅剩 8dp，胶囊 weight 文本框负约束抛
- * IllegalArgumentException → 横屏进输入闪退。本函数以容器宽（竖屏即屏
- * 宽、横屏即左区槽宽）统一口径：max(20dp, (容器宽 − 520dp) / 2)，卡片
- * = min(520dp, 容器宽 − 40dp) 居于容器内；横屏不再左区躲、不窄化，
- * 底边不钉导航垫（见 resolveFocusBottomPad 的 isLandscape 分支，恒 0dp）。
- */
-internal fun resolveCardHorizontalPadding(
-    containerWidth: Dp,
-): Dp = maxOf(20.dp, (containerWidth - 520.dp) / 2)
-
-/**
- * v0.68.101（D-2）：状态落定退出（纯函数，单测锁死）：在场状态从持有
- * 变不持有、且当前未聚焦 → 输入态收起。它是提交后生命周期的收口——
- * 用户提交后焦点已被释放，回复/确认呈现完自然落定关闭；打字不改变
- * 协调器状态，IME 焦点抖动无从触发本通道。
- */
-internal fun intentSettleShouldExit(
-    inputMode: Boolean,
-    prevHolds: Boolean,
-    holdsNow: Boolean,
-    focused: Boolean
-): Boolean = inputMode && prevHolds && !holdsNow && !focused
-
-/**
- * v0.68.101（D-2）：滞留兜底（纯函数，单测锁死）：进态后从未聚焦、
- * 文本为空、无在场状态——三条全中才判定「会话根本没开始过」，允许
- * 延迟收起。从未聚焦是进入会话的必经之路（打字前必聚焦），故真实
- * 会话永不命中；旧 intentInputShouldExit（失焦边沿推断）已删除。
- */
-internal fun intentInputStranded(
-    hasFocused: Boolean,
-    textEmpty: Boolean,
-    holdsNow: Boolean
-): Boolean = !hasFocused && textEmpty && !holdsNow
-
-/**
- * 跳变补偿量（2026-10-27 闪烁修复，竖屏区块切换后仅横屏沿用；纯函数，
- * 单测锁死）。
- * 布局跳变后，为把视觉位置钉在跳变前那一帧、再滑向新 laid-out 位置，
- * 绘制位移应取 (prevLaidOutTop − newLaidOutTop)＋currentShiftPx：
- * 进态（列下移，new > prev）为负（先上抬回旧位）、退态（列上移）
- * 为正（先下压回旧位）；currentShiftPx 是重叠补偿进行中的残值
- * （无重叠时为 0）。positionInRoot 含自身绘制位移，故回调侧以
- * visualTop − currentShiftPx 还原 laid-out 顶边再调本函数。
- */
-internal fun jumpCompensationShift(
-    prevLaidOutTop: Int,
-    newLaidOutTop: Int,
-    currentShiftPx: Float
-): Float = (prevLaidOutTop - newLaidOutTop).toFloat() + currentShiftPx

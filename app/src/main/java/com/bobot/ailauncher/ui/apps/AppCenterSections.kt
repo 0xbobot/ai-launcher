@@ -47,7 +47,6 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Lock
@@ -410,7 +409,7 @@ data class AppCenterRowActions(
 )
 
 /**
- * 刊头 + 搜索胶囊 + morph 齿轮 + 问助手行（原 1091–1281 行）。
+ * 刊头 + 搜索胶囊 + morph 齿轮（原 1091–1281 行；「问助手」行已删）。
  * intentFocused / intentBoundsInRoot / morphButtonBoundsInRoot 是调用点的
  * 可变状态：读走值、写走 setter lambda，语义不变。
  */
@@ -422,8 +421,10 @@ fun AppCenterHeaderSection(
     azApps: List<AppInfo>,
     queryField: TextFieldValue,
     onQueryFieldChange: (TextFieldValue) -> Unit,
-    onAskQizai: (String) -> Unit,
-    onThrottledAsk: (String) -> Unit,
+    // 意图清理（Bob 2026-11-08 23:38）：意图框不再有单独问 LLM 的入口——
+    // 胶囊提交（键盘 Done）只收键盘，不再调大模型；「问助手」行已删。
+    // 兜底（空态“有应用能打开，重试”→ 大模型再确认）不在此处，原样保留。
+    onCapsuleSubmit: () -> Unit,
     intentFocused: Boolean,
     onIntentFocusedChange: (Boolean) -> Unit,
     onIntentBoundsChange: (Rect) -> Unit,
@@ -515,22 +516,19 @@ fun AppCenterHeaderSection(
         ) {
             // R2 UI（2026-10-21 新规格）：原搜索框删除，换成与首页同一个意图胶囊组件——
             // 一个入口两层响应：打字走本地层过滤网格（状态层 query/searchResults 不变）。
-            // 应用中心胶囊无提交钮（Bob 2026-11-03：箭头仅收键盘、无实际功能，
-            // 随首页意图入口一并删）；IME Done 与问七仔行仍 = 问七仔。
+            // 意图清理（Bob 2026-11-08 23:38）：胶囊提交（键盘 Done）只收键盘，
+            // 不再问大模型（原 onAskQizai 已删）。
             IntentCapsuleField(
                 value = queryField,
                 onValueChange = onQueryFieldChange,
-                onSubmit = {
-                    val q = query.trim()
-                    if (q.isNotEmpty()) onAskQizai(q)
-                },
+                onSubmit = onCapsuleSubmit,
                 // 425（Bob 2026-11-04，参考视频）：里侧清空去掉，挪到外面齿轮位——
                 // 聚焦变 X、失焦回齿轮，全程只剩外面这一个清空（见下齿轮 morph）。
                 showClearButton = false,
                 showSubmitButton = false,
                 // 428 滚动关键字：应用中心箭头只作关键字的运行钮——点箭头只填入
-                // 关键字、网格随之过滤，不走 onSubmit（其 onSubmit 是 onAskQizai，
-                // 会回首页跑意图，与“按关键字过滤应用”相悖）。
+                // 关键字、网格随之过滤，不走 onSubmit（其 onSubmit 只是收键盘，
+                // 与“按关键字过滤应用”相悖）。
                 keywordSubmitCallsOnSubmit = false,
                 fusedBackground = true,
                 // v0.68.93：焦点外报 + 范围捕获（根 Box 点外部观察者用）
@@ -588,39 +586,6 @@ fun AppCenterHeaderSection(
                         )
                     }
                 }
-            }
-        }
-        // R2 UI（10-21 新规格）：「问七仔」行——有输入时出现，整句交给助手理解（回首页提交协调器）
-        // 意图改进一批：本行跟随原始文本即时出现（不等防抖落定），文案与提交都用原句
-        // 应用中心升级：去 Card 底降重——文字改 Title 75%，金色只留小箭头
-        // 一处线索；连点 500ms 节流
-        if (query.isNotBlank()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 24.dp, end = 16.dp, top = 4.dp)
-                    .clickable { onThrottledAsk(query.trim()) }
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "问助手：「${query.trim()}」",
-                    fontSize = AILauncherType.Footnote.fontSize,
-                    color = AILauncherColors.current.Title.copy(alpha = 0.75f),
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowForward,
-                    // 体检批D ⑨：装饰图标（同问七仔行）标装饰语义
-                    contentDescription = null,
-                    tint = AILauncherColors.current.Accent,
-                    modifier = Modifier
-                        .size(16.dp)
-                        .semantics { invisibleToUser() }
-                )
             }
         }
         Spacer(modifier = Modifier.height(4.dp))

@@ -207,8 +207,6 @@ fun AppCenterContent(
     onOpenSettings: () -> Unit,
     onPullDownToD2: () -> Unit,
     onHeaderSwipeRight: () -> Unit,
-    // R2 UI（10-21 新规格）：「问七仔」——回首页并把整句提交意图协调器（HomeHost 提供）
-    onAskQizai: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -642,14 +640,6 @@ fun AppCenterContent(
     // 应用中心升级：启动 in-flight 门——500ms 内重复点同一应用只启动一次
     // （结果行 combinedClickable 本身无防抖，系统层合并不可靠）
     var lastLaunch by remember { mutableStateOf<Pair<String, Long>?>(null) }
-    // 应用中心升级：问七仔行 500ms 节流——连点不进两次协调器
-    var lastAskMs by remember { mutableStateOf(0L) }
-    fun throttledAsk(q: String) {
-        val now = System.currentTimeMillis()
-        if (now - lastAskMs < 500L) return
-        lastAskMs = now
-        onAskQizai(q)
-    }
     // v0.25.2：松手滚动——等列表恢复全量重组完成后再滚，避免打在旧内容上
     // 反馈闭环：返回是否真的打开了（选择器点选后要凭它决定上报 outcome）。
     // 其余调用点仍当 Unit 用（Kotlin 允许 Boolean 函数赋给 () -> Unit 的
@@ -757,10 +747,9 @@ fun AppCenterContent(
         showChooser = true
     }
 
-    // “有应用能打开，重试”：点一下，大模型再确认一次。复用“问助手”同一条
-    // LLM 意图解析——LlmRouter.route，同端点、同 Key、同能力白名单；
-    // 不经过 IntentCoordinator，因为那条路会离开应用中心回首页提交，
-    // 重试要留在应用中心出结果。三支分流（MarketGuide.decideLlmRetry）：
+    // “有应用能打开，重试”：点一下，大模型再确认一次。直接调
+    // LlmRouter.route，同端点、同 Key、同能力白名单；重试留在应用中心
+    // 出结果，不离开应用中心。三支分流（MarketGuide.decideLlmRetry）：
     // 认出意图且有已装提供方→列成结果；认出意图但一个都没装→应用市场
     // 指引（443，不进选择器）；仍认不出（"none"/报错/没配 Key）→进选应用。
     fun onRetryClick() {
@@ -986,8 +975,12 @@ fun AppCenterContent(
             azApps = azApps,
             queryField = queryField,
             onQueryFieldChange = ::onQueryFieldChange,
-            onAskQizai = onAskQizai,
-            onThrottledAsk = ::throttledAsk,
+            // 意图清理（Bob 2026-11-08 23:38）：胶囊提交（键盘 Done）只收键盘，
+            // 不再问大模型。
+            onCapsuleSubmit = {
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            },
             intentFocused = intentFocused,
             onIntentFocusedChange = { intentFocused = it },
             onIntentBoundsChange = { intentBoundsInRoot = it },
@@ -1055,14 +1048,15 @@ fun AppCenterContent(
                 // 共用（横屏不另算，判定口径与竖屏同一套）。
                 deepLinkSupportedPkgs = deepLinkSupportedPkgs,
                 onSearchSubmit = {
-                    val q = query.trim()
-                    if (q.isNotEmpty()) onAskQizai(q)
+                    // 意图清理（Bob 2026-11-08 23:38）：横屏胶囊提交（键盘 Done）
+                    // 只收键盘，不再问大模型。
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
                 },
                 // 应用中心升级：横屏空结果文案区分"索引加载中"与"真无匹配"
                 indexLoading = catalog == null && query.isNotBlank(),
                 // 横屏首页修：把主屏 picker 会话状态透传给横屏 rail 门（同竖屏 AppCenter.kt:1419）
                 homeTarget = homeTarget,
-                onAskQizai = onAskQizai,
                 // 反馈闭环（Bob 2026-11-06）：横屏空态重试提示——
                 // 与竖屏同一状态、同一触发口径、同一行。
                 showRetryPrompt = showRetryPrompt,
@@ -1288,9 +1282,8 @@ internal fun MarketGuideRow(
 
 /**
  * 反馈闭环·重试提示行（Bob 2026-11-06：空态“有应用能打开，重试”）。
- * 样式跟“问助手”行同一套（Footnote、Title 75%、Medium、金色 16dp 箭头、
- * 48dp 最小触控高），竖屏/横屏共用。空态文案是居中的，这里也居中
- * （不跟“问助手”行左对齐——那是列表行，这里是空态动作）。
+ * 样式（Footnote、Title 75%、Medium、金色 16dp 箭头、48dp 最小触控高），
+ * 竖屏/横屏共用。空态文案是居中的，这里也居中（这里是空态动作）。
  * 加载中显示“正在确认…”，不可点。
  */
 @Composable

@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,7 +33,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
@@ -153,7 +151,6 @@ fun AppCenterLandscape(
     onSearchSubmit: () -> Unit,
     // 应用中心升级：索引加载中标记（空结果文案区分"索引加载中"与"真无匹配"）
     indexLoading: Boolean = false,
-    onAskQizai: (String) -> Unit,
     // 反馈闭环（Bob 2026-11-06）：空态重试提示——调用点（AppCenter.kt）
     // 传入竖屏同一状态、同一触发口径、同一行（FeedbackRetryRow），横屏不另算。
     showRetryPrompt: Boolean = false,
@@ -182,14 +179,6 @@ fun AppCenterLandscape(
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
-    // 应用中心升级：问七仔行 500ms 节流（同竖屏）
-    var lastAskMs by remember { mutableStateOf(0L) }
-    fun throttledAsk(q: String) {
-        val now = System.currentTimeMillis()
-        if (now - lastAskMs < 500L) return
-        lastAskMs = now
-        onAskQizai(q)
-    }
     val onPullDownToD2State = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
     val rowState = rememberLazyListState()
@@ -538,43 +527,6 @@ fun AppCenterLandscape(
                                 )
                             }
                         }
-                    }
-                }
-                // F2：「问七仔」行与竖屏同契约同结构（跟随原始文本即时出现、
-                // 不等防抖落定，整句交七仔；横屏此前无此行）
-                // 应用中心升级：同竖屏去 Card 底降重（文字 Title 75%，
-                // 金色只留小箭头），连点 500ms 节流
-                if (searchFieldValue.text.isNotBlank()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 24.dp, end = 24.dp, top = 8.dp)
-                            // 触控下限 48dp：与竖屏同结构在横屏宽容器下布局
-                            // 取整差 3px（实测行高 123px≈46.9dp，竖屏 126px=
-                            // 48.0dp），§16 a11y 量到 46.9<48——下限保不变量，
-                            // 内容更高时自然长高，外观与竖屏一致
-                            .heightIn(min = 48.dp)
-                            .clickable { throttledAsk(searchFieldValue.text.trim()) }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "问助手：「${searchFieldValue.text.trim()}」",
-                            fontSize = AILauncherType.Footnote.fontSize,
-                            color = AILauncherColors.current.Title.copy(alpha = 0.75f),
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            tint = AILauncherColors.current.Accent,
-                            modifier = Modifier
-                                .size(16.dp)
-                                .semantics { invisibleToUser() }
-                        )
                     }
                 }
                 val results = searchResults

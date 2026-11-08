@@ -3,7 +3,8 @@ package com.bobot.ailauncher.core.intent
 /**
 * planner 上下文包（意图改进二批）：把「助手已经知道、但模型之前完全不知道」的
 * 用户现状压成一段紧凑文本，随每次 plan 注入 prompt。纯数据 + 纯拼装，可单测；
-* 生产侧的采集（日历/天气缓存/使用统计/通知）在 [IntentContextProvider]。
+* （意图清理后：生产侧的采集器已随协调器删除，本包现仅由 LlmRouter.plan 的
+*  contextPack 参数引用，plan 的调用方直接传文本。）
 *
 * 设计纪律：
 * - 只给事实，不给指令；每项一行、带，方便模型引用、用户事后可核对。
