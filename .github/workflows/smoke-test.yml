@@ -3,6 +3,9 @@ name: Smoke Test (Emulator)
 # 每版构建成功后自动冒烟：CI 模拟器装包 -> 手势脚本 -> 截图存档
 # Bob 不再需要手动测每版；他只在里程碑版本做真机手感验收。
 # publish-ota 只看 build-apk.yml 的 build job 结论，本 workflow 独立结论，失败不阻塞发布。
+# nightly：每天凌晨 02:00 北京时间（UTC+8）= 18:00 UTC 定时跑一次，取 main
+# 最新一次成功构建的 APK；失败时写 run 摘要 + 自动建 issue（见文末两步），
+# 早上由定时检查任务跟进（查本 workflow 与 smoke-matrix 的 run 结论）。
 
 on:
   workflow_run:
@@ -12,16 +15,22 @@ on:
   # （R2 UI 分支 loop-r2-ui 首次发现，2026-10-20）。dispatch 时取该分支最近一次
   # 成功构建的 APK，checkout 用 dispatch 所在 ref 的代码（含 smoke.sh）。
   workflow_dispatch:
+  schedule:
+    # 每天 02:00 北京时间 = 18:00 UTC（GitHub cron 一律 UTC）。
+    - cron: '0 18 * * *'
 
 permissions:
   actions: read
   contents: read
+  issues: write
 
 jobs:
   smoke:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45 分钟：脚本已长到 31 段，两次连续验证跑在模拟器存活时也跑满 30 分钟
+    # 才到第 22 段左右（矩阵腿早已是 45 分钟）；30 分钟已不够整轮跑完。
+    timeout-minutes: 45
     steps:
       - name: Checkout triggering commit
         uses: actions/checkout@v4
@@ -38,8 +47,10 @@ jobs:
           name: ai-launcher-debug-apk
           path: apk
 
-      - name: Download debug APK artifact (dispatch)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      # dispatch / schedule 共用：取该 ref（schedule 时为 main）最近一次
+      # 成功构建的 APK。定时触发没有 workflow_run 事件，只能走这条路。
+      - name: Download debug APK artifact (dispatch/schedule)
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
         uses: dawidd6/action-download-artifact@v27
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -71,7 +82,12 @@ jobs:
           # -no-window：CI 无显示器，headless 运行（否则 Qt 报
           # "no Qt platform plugin could be initialized" 直接崩溃）
           emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu swiftshader_indirect
-          script: bash scripts/smoke.sh
+          # smoke.sh 输出 tee 进 smoke-out/smoke.log（随 artifact 存档），
+          # PIPESTATUS[0] 保住 smoke.sh 自身的退出码，失败仍让本步失败。
+          script: |
+            mkdir -p smoke-out
+            bash scripts/smoke.sh 2>&1 | tee smoke-out/smoke.log
+            exit ${PIPESTATUS[0]}
 
       - name: Upload smoke screenshots
         if: always()
@@ -80,3 +96,47 @@ jobs:
           name: smoke-screenshots
           path: smoke-out/
           retention-days: 14
+
+      # nightly 失败发现层：run 摘要一眼看到哪条腿失败 + smoke.log 尾巴。
+      # 只在失败时跑；dispatch 手动失败也写摘要（方便当时排查），
+      # 但建 issue 只针对 schedule（手动跑失败不建 issue，见下一步）。
+      # cancelled() 也要进：job 超时被取消时 failure() 为假，不加它
+      # 超时取消的 run 既无摘要也无 issue——正是 nightly 最怕的静默。
+      - name: Summarize nightly failure
+        if: failure() || cancelled()
+        run: |
+          {
+            echo "## Nightly failure — ${{ github.workflow }} — $(date -u +%F)"
+            echo ""
+            echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Commit: ${{ github.sha }}"
+            echo "- Branch: ${{ github.ref_name }}"
+            echo "- Artifact: smoke-screenshots (smoke-out/smoke.log + screenshots, 14 days)"
+            echo ""
+            echo "### smoke.sh tail (last 40 lines)"
+            echo '```'
+            tail -n 40 smoke-out/smoke.log 2>/dev/null || echo "(smoke.log not available — see the run log)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 同一天同一 workflow 只建一个 issue（先按标题去重）。label
+      # nightly-failure 已建在仓库里；create 带 label 失败时退回无 label
+      # 再建一次，避免 label 偶发问题导致 issue 丢了。
+      - name: File nightly failure issue (schedule only)
+        if: (failure() || cancelled()) && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE=$(date -u +%F)
+          TITLE="[nightly] ${{ github.workflow }} failed $DATE"
+          EXISTING=$(gh issue list --state open --label nightly-failure --limit 50 --json title --jq -r '.[].title' 2>/dev/null || true)
+          if echo "$EXISTING" | grep -qx "$TITLE"; then
+            echo "open issue already exists for $TITLE — skip"
+            exit 0
+          fi
+          BODY="Nightly ${{ github.workflow }} failed on $DATE (UTC).
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          Artifact: smoke-screenshots (smoke-out/smoke.log + screenshots, 14 days).
+          See the run summary for the failing leg and the smoke.log tail."
+          gh issue create --title "$TITLE" --body "$BODY" --label nightly-failure || gh issue create --title "$TITLE" --body "$BODY"
