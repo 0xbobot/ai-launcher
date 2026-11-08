@@ -230,13 +230,18 @@ fun AppCenterLandscape(
         // v0.68.75（Bob）：收藏放最前、隐藏放最后，核心功能不能丢
         // hiddenUnlocked 必须进 key：解锁前后隐藏列形态不同（锁定占位 ↔
         // 应用列），否则解锁后列流不重建。
-        val columns = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, unreadApps, rowsPerCol) {
+        // 未读列索引与列流同源（466）：构建时记下未读组首列的索引，随
+        // columns 一起返回；不能事后按“列内是否含未读应用”找——收藏列
+        // 里也可能有未读应用（收藏了又有角标），会错认成收藏列。
+        val (columns, unreadColIdx) = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, unreadApps, rowsPerCol) {
             val cols = mutableListOf<MutableList<FlowItem>>()
             var cur = mutableListOf<FlowItem>()
             fun colCap(): Int = rowsPerCol
             fun flush() {
                 if (cur.isNotEmpty()) { cols.add(cur); cur = mutableListOf() }
             }
+            // 未读组首列索引（构建时记下，见未读组块；无未读组时为 null）
+            var unreadFirstCol: Int? = null
             // 收藏区（★头）
             if (favApps.isNotEmpty()) {
                 flush()
@@ -256,6 +261,9 @@ fun AppCenterLandscape(
             // rail 信封”标识。搜索态不走列流，未读组不参与。
             if (unreadApps.isNotEmpty()) {
                 flush()
+                // flush 后 cols.size 就是下一列（未读首列）的索引；未读组
+                // 从这里开始，后续列（若未读应用跨列）依次往后排。
+                unreadFirstCol = cols.size
                 var cap = colCap()
                 var count = 0
                 unreadApps.forEach { app ->
@@ -322,7 +330,7 @@ fun AppCenterLandscape(
                 }
             }
             flush()
-            cols.map { it.toList() }
+            cols.map { it.toList() } to unreadFirstCol
         }
         // 字母 → 列索引（取该字母首次出现的列）；★→0，👁→末列
         val letterToCol = remember(columns) {
@@ -346,14 +354,6 @@ fun AppCenterLandscape(
             columns.indexOfFirst { col -> col.any { it is FlowItem.FoldHeader } }
                 .takeIf { it >= 0 }
         }
-        // 未读组：信封专位 → 未读应用所在列（464 起区头已删，改按列内
-        // 是否含未读应用定位；rail 信封保留）。
-        val unreadColIdx = remember(columns) {
-            columns.indexOfFirst { col ->
-                col.any { it is FlowItem.App && it.app.packageName in unreadPkgs }
-            }.takeIf { it >= 0 }
-        }
-
         fun scrollToLetter(letter: Char) {
             letterToCol[letter]?.let { idx ->
                 scope.launch { rowState.animateScrollToItem(idx) }
@@ -791,14 +791,19 @@ fun AppCenterLandscape(
                                         val pkg = item.app.packageName
                                         if (pkg in unreadPkgs) {
                                             // 465（Bob 2026-11-08 19:27 横屏未读幽灵图标也没有）：
-                                            // 464 删区头时列内幽灵信封随区头行一起去掉了，现补回来——
-                                            // 挂在未读组首行（与竖屏同款）：首行左边淡色信封
-                                            // （UnreadGlyph，Title 色 35% 透明、32dp、start 16dp，
-                                            // 与竖屏改小后的尺寸一致）；未读行整体起首 48dp
-                                            // 给信封留位置（竖屏同款：行起首、信封占左），
-                                            // 其余未读行同起首、只首行挂信封。rail 信封保留。
+                                            // 464 删区头时列内幽灵信封随区头行一起去掉了，465 补回来。
+                                            // 466（Bob 2026-11-08 20:03 横屏信封挂错）：信封是
+                                            // 未读组的标记（一个组只一个、标在组上，像幽灵字母
+                                            // 标字母组那样），不是每行都挂的小图标；只挂在
+                                            // 未读列的首行（列内 + 首行两个条件），收藏列、
+                                            // 字母列的行一律不挂。rail 信封保留。
+                                            // 466（Bob 2026-11-08 20:02 左滑清理蒙层全宽）：
+                                            // 48dp 起首从 LandscapeAppRow 移到 ClearableUnreadRow
+                                            // 外面的 wrapper Box（行外），蒙层继承缩进、只盖
+                                            // 行内容，不盖信封区；与竖屏 Column 外包同款。
+                                            val isUnreadCol = unreadColIdx != null && idx == unreadColIdx
                                             Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
-                                                if (pkg == firstUnreadPkg) {
+                                                if (isUnreadCol && pkg == firstUnreadPkg) {
                                                     UnreadGlyph(
                                                         color = AILauncherColors.current.Title.copy(alpha = 0.35f),
                                                         modifier = Modifier
@@ -807,17 +812,22 @@ fun AppCenterLandscape(
                                                             .size(32.dp)
                                                     )
                                                 }
-                                                ClearableUnreadRow(
-                                                    enabled = pkg in activeNotifPkgs,
-                                                    onClear = { onClearNotifications(pkg) }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(start = if (isUnreadCol) 48.dp else 0.dp)
                                                 ) {
-                                                    LandscapeAppRow(
-                                                        app = item.app,
-                                                        onLaunch = onLaunch,
-                                                        compact = true,
-                                                        preview = unreadPreviews[pkg],
-                                                        modifier = Modifier.padding(start = 48.dp)
-                                                    )
+                                                    ClearableUnreadRow(
+                                                        enabled = pkg in activeNotifPkgs,
+                                                        onClear = { onClearNotifications(pkg) }
+                                                    ) {
+                                                        LandscapeAppRow(
+                                                            app = item.app,
+                                                            onLaunch = onLaunch,
+                                                            compact = true,
+                                                            preview = unreadPreviews[pkg]
+                                                        )
+                                                    }
                                                 }
                                             }
                                         } else {

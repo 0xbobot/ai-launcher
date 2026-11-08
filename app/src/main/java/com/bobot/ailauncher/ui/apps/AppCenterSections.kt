@@ -968,20 +968,25 @@ fun LazyListScope.AppCenterUnreadSection(
                 // 左滑清理（Bob 2026-11-08）：有在用通知的行可左滑取消通知；
                 // 无在用通知的行（短信库口径、飞书无通知）不启用左滑。
                 // 行内滑动浮层（★/眼睛）关掉，避免两套横滑抢事件。
-                ClearableUnreadRow(
-                    enabled = app.packageName in activeNotifPkgs,
-                    onClear = { onClearUnreadNotifications(app.packageName) }
+                // 466（Bob 2026-11-08 20:02 左滑清理蒙层为啥全宽）：蒙层原先挂在
+                // 带 padding 的 Column 外面、没继承 72/64dp 缩进，铺满全宽；
+                // 现把 Column 外包、ClearableUnreadRow 只包 AppRow 本身，
+                // 蒙层继承缩进、只盖行内容（与 AppRow 蒙层同宽）。
+                // padding 的单一来源仍是这里的 Column，蒙层跟着它走。
+                val isPopupExpandedX = actions.popupApp?.packageName == app.packageName
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 72.dp, end = 64.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            if (isPopupExpandedX) AILauncherColors.current.Card
+                            else Color.Transparent
+                        )
                 ) {
-                    val isPopupExpandedX = actions.popupApp?.packageName == app.packageName
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 72.dp, end = 64.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(
-                                if (isPopupExpandedX) AILauncherColors.current.Card
-                                else Color.Transparent
-                            )
+                    ClearableUnreadRow(
+                        enabled = app.packageName in activeNotifPkgs,
+                        onClear = { onClearUnreadNotifications(app.packageName) }
                     ) {
                         AppRow(
                             app = app,
@@ -1655,6 +1660,18 @@ fun BoxScope.AppCenterRailSection(
             else -> null
         }
         val onRailItem: (RailItem) -> Unit = { item ->
+            // 466（Bob 2026-11-08 20:11 rail 滑不到收藏和未读）：非字母项
+            // 不是 glide——松手时 stopGlide 不许弹回任何字母。latestGlideLetter
+            // 只在字母路径（glideToLetter）赋值、从未清掉，滑过字母再到
+            // ★/✉ 时松手补位会把列表弹回上一个字母；这里清掉两者，松手
+            // 补位便不再触发。竞态：清 glideTarget 会取消 LaunchedEffect 里
+            // 待落位的字母（effect 重启后 glideTarget 为 null 即返回）；
+            // 若字母已落位，★/✉ 的 scrollToItem 在后发出、以 ★/✉ 为准。
+            // 字母路径不动（glideToLetter 重新记下），字母间拖动仍跟手。
+            if (item !is RailItem.Letter) {
+                latestGlideLetter = null
+                glideTarget = null
+            }
             when (item) {
                 // v0.68.20：房子不再用停留触发，改上拉手势（onHousePull）
                 is RailItem.House -> {}
