@@ -117,6 +117,9 @@ fun AppCenterLandscape(
     // 在用通知包（左滑启用判定）、左滑清理回调——调用点（竖屏）算好的同一份，
     // 横屏不另算、不另起状态源。
     unreadPreviews: Map<String, String> = emptyMap(),
+    // 未读行显示名（Bob 2026-11-08 22:45）：与竖屏同款，调用点算好的同一份
+    // （包名→行名，全覆盖；无标题时即应用名），横屏不另算。
+    unreadDisplayNames: Map<String, String> = emptyMap(),
     activeNotifPkgs: Set<String> = emptySet(),
     onClearNotifications: (String) -> Unit = {},
     onToggleFold: () -> Unit = {},
@@ -825,6 +828,7 @@ fun AppCenterLandscape(
                                                             app = item.app,
                                                             onLaunch = onLaunch,
                                                             compact = true,
+                                                            displayLabel = unreadDisplayNames[pkg],
                                                             preview = unreadPreviews[pkg]
                                                         )
                                                     }
@@ -1001,7 +1005,10 @@ private fun LandscapeAppRow(
     showDeepLinkBadge: Boolean = false,
     // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览（调用方算好再传）；
     // null 时只留应用名，非未读行不受影响。
-    preview: String? = null
+    preview: String? = null,
+    // 未读行显示名（Bob 2026-11-08 22:45）：与竖屏 AppRow 同款，未读组里用
+    // 最新通知标题当行名；不传时默认应用名。
+    displayLabel: String? = null
 ) {
     // 未读角标（Bob 2026-11-07 晚）：通知监听汇总的该包条数；>0 才显示。
     val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
@@ -1040,7 +1047,7 @@ private fun LandscapeAppRow(
         // 的 weight 口径一致），预览跟名字同宽、单行省略。
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = app.label.toString(),
+                text = displayLabel ?: app.label.toString(),
                 fontSize = AILauncherType.Callout.fontSize,
                 color = AILauncherColors.current.Title,
                 maxLines = 1,

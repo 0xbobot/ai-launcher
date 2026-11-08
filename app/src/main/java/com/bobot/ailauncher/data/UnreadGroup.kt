@@ -65,22 +65,32 @@ fun smsPreviewText(body: String?): String? {
 }
 
 /**
- * 未读组某行的预览文案（纯函数）：
- * - 短信应用（默认/可见短信包）：最新未读短信正文；没有未读短信时退回通知
- *   （标题 + 正文组装，同 notificationPreviewText）；
- * - 其他应用：最新一条在用通知（标题 + 正文组装，标题 == 正文时去重）；
- * - 都没有 → null（不显示预览行，只留应用名+角标）。
+ * 未读行显示文案（Bob 2026-11-08 22:45 真机反馈：未读组里用通知标题当行名
+ * 更清晰，预览只留正文、不再拼“标题 · 正文”）。纯函数，供单测；UI 层只做
+ * remember 派生。
+ *
+ * - 短信应用且有未读短信正文：没有通知标题，行名留应用名、预览取短信正文；
+ * - 否则取最新一条在用通知：标题非空 → 行名 = 标题；预览只留正文，正文与
+ *   标题相同时不重复（预览置空，不显示该行）；
+ * - 标题空 → 行名留应用名，预览按正文（只有正文时就是正文）；
+ * - 都没有 → 行名留应用名、不显示预览行。
  */
-fun previewForApp(
-    packageName: String,
-    latestByPackage: Map<String, SimpleNotification>,
-    smsPackages: Set<String>,
-    smsBody: String?
-): String? {
-    if (packageName in smsPackages) {
-        return smsPreviewText(smsBody) ?: notificationPreviewText(latestByPackage[packageName])
+data class UnreadRowText(val displayName: String, val preview: String?)
+
+fun unreadRowText(
+    appLabel: String,
+    latest: SimpleNotification?,
+    smsBody: String?,
+    isSmsApp: Boolean
+): UnreadRowText {
+    if (isSmsApp && !smsBody.isNullOrBlank()) {
+        return UnreadRowText(appLabel, smsPreviewText(smsBody))
     }
-    return notificationPreviewText(latestByPackage[packageName])
+    val title = latest?.title?.trim().orEmpty()
+    val text = latest?.text?.trim().orEmpty()
+    val displayName = if (title.isNotEmpty()) title else appLabel
+    val preview = if (text.isNotEmpty() && text != title) truncatePreview(text) else null
+    return UnreadRowText(displayName, preview)
 }
 
 /**

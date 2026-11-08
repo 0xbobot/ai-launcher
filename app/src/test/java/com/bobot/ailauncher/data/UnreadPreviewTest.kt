@@ -6,9 +6,11 @@ import org.junit.Test
 
 /**
  * 未读预览行纯逻辑单测（Bob 2026-11-08 08:02 反馈①：未读组直接显示未读信息预览；
- * 2026-11-08 18:37 反馈：通知预览组装标题 + 正文、截断 40 → 60 字）。
+ * 2026-11-08 18:37 反馈：通知预览组装标题 + 正文、截断 40 → 60 字；
+ * 2026-11-08 22:45 反馈：未读组行名取通知标题、预览只留正文）。
  * 覆盖：截断约 60 字、单行化、通知标题 + 正文组装（去重/单方/空处理）、
- * 短信应用取短信正文、短信无正文时退回通知正文、都没正文时不显示预览行。
+ * 未读行文案（行名取标题、预览只留正文；短信应用取短信正文、短信无正文时
+ * 退回通知、都没正文时不显示预览行；标题 == 正文时预览置空）。
  */
 class UnreadPreviewTest {
 
@@ -105,51 +107,104 @@ class UnreadPreviewTest {
         assertEquals("y".repeat(60) + "…", smsPreviewText("y".repeat(70)))
     }
 
-    // ---------- 按应用取预览 ----------
+    // ---------- 未读行文案（行名取标题、预览只留正文） ----------
 
     @Test
-    fun `previewForApp - sms app uses the sms body`() {
-        val preview = previewForApp(
-            packageName = "com.android.mms",
-            latestByPackage = mapOf("com.android.mms" to notif("com.android.mms", text = "通知正文")),
-            smsPackages = setOf("com.android.mms"),
-            smsBody = "短信正文片段"
+    fun `unreadRowText - sms app uses the sms body and keeps the app label`() {
+        val row = unreadRowText(
+            appLabel = "短信",
+            latest = notif("com.android.mms", text = "通知正文"),
+            smsBody = "短信正文片段",
+            isSmsApp = true
         )
-        assertEquals("短信正文片段", preview)
+        assertEquals(UnreadRowText("短信", "短信正文片段"), row)
     }
 
     @Test
-    fun `previewForApp - sms app falls back to notification when no unread sms`() {
-        val preview = previewForApp(
-            packageName = "com.android.mms",
-            latestByPackage = mapOf("com.android.mms" to notif("com.android.mms", title = "标题", text = "通知正文")),
-            smsPackages = setOf("com.android.mms"),
-            smsBody = null
+    fun `unreadRowText - sms app falls back to notification when no unread sms`() {
+        val row = unreadRowText(
+            appLabel = "短信",
+            latest = notif("com.android.mms", title = "标题", text = "通知正文"),
+            smsBody = null,
+            isSmsApp = true
         )
-        assertEquals("标题 · 通知正文", preview)
+        assertEquals(UnreadRowText("标题", "通知正文"), row)
     }
 
     @Test
-    fun `previewForApp - non-sms app uses the latest notification`() {
-        val preview = previewForApp(
-            packageName = "com.example.chat",
-            latestByPackage = mapOf("com.example.chat" to notif("com.example.chat", title = "标题", text = "最新消息")),
-            smsPackages = setOf("com.android.mms"),
-            smsBody = "短信正文片段"
+    fun `unreadRowText - non-sms app uses the latest notification title as the name`() {
+        val row = unreadRowText(
+            appLabel = "聊天",
+            latest = notif("com.example.chat", title = "标题", text = "最新消息"),
+            smsBody = "短信正文片段",
+            isSmsApp = false
         )
-        assertEquals("标题 · 最新消息", preview)
+        assertEquals(UnreadRowText("标题", "最新消息"), row)
     }
 
     @Test
-    fun `previewForApp - no notification and not sms gives null`() {
-        assertNull(
-            previewForApp(
-                packageName = "com.ss.android.lark",
-                latestByPackage = emptyMap(),
-                smsPackages = setOf("com.android.mms"),
-                smsBody = null
-            )
+    fun `unreadRowText - no notification and not sms keeps the app label and no preview`() {
+        val row = unreadRowText(
+            appLabel = "飞书",
+            latest = null,
+            smsBody = null,
+            isSmsApp = false
         )
+        assertEquals(UnreadRowText("飞书", null), row)
+    }
+
+    @Test
+    fun `unreadRowText - Bob screenshot rows`() {
+        // 飞书：标题即应用名，名字不变、预览去掉“飞书 · ”前缀。
+        assertEquals(
+            UnreadRowText("飞书", "Liz Li: https://w…"),
+            unreadRowText("飞书", notif("com.ss.android.lark", title = "飞书", text = "Liz Li: https://w…"), null, false)
+        )
+        // 微信：行名变“和和美美”。
+        assertEquals(
+            UnreadRowText("和和美美", "Su: [憨笑][憨…"),
+            unreadRowText("微信", notif("com.tencent.mm", title = "和和美美", text = "Su: [憨笑][憨…"), null, false)
+        )
+        // ChatGPT：行名变“获取应用未读消息”。
+        assertEquals(
+            UnreadRowText("获取应用未读消息", "当…"),
+            unreadRowText("ChatGPT", notif("com.openai.chatgpt", title = "获取应用未读消息", text = "当…"), null, false)
+        )
+        // WhatsApp：无标题，行名与预览都不变。
+        assertEquals(
+            UnreadRowText("WhatsApp", "Couldn't complete bac…"),
+            unreadRowText("WhatsApp", notif("com.whatsapp", title = "", text = "Couldn't complete bac…"), null, false)
+        )
+    }
+
+    @Test
+    fun `unreadRowText - title equal to text shows the name once and no preview`() {
+        val row = unreadRowText(
+            "聊天",
+            notif("com.example.chat", title = "同一句话", text = "同一句话"),
+            null, false
+        )
+        assertEquals(UnreadRowText("同一句话", null), row)
+    }
+
+    @Test
+    fun `unreadRowText - blank title keeps the app label`() {
+        val row = unreadRowText(
+            "聊天",
+            notif("com.example.chat", title = "  ", text = "只有正文"),
+            null, false
+        )
+        assertEquals(UnreadRowText("聊天", "只有正文"), row)
+    }
+
+    @Test
+    fun `unreadRowText - title only shows the name and no preview`() {
+        val row = unreadRowText(
+            "聊天",
+            notif("com.example.chat", title = "只有标题", text = "   "),
+            null, false
+        )
+        assertEquals(UnreadRowText("只有标题", null), row)
     }
 
     // ---------- 每包最新一条在用通知（2026-11-08 应用中心崩溃 hotfix：去 `!!`） ----------
