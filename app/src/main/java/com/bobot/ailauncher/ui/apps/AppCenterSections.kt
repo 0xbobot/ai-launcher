@@ -967,6 +967,7 @@ fun LazyListScope.AppCenterDockSection(
 fun LazyListScope.AppCenterUnreadSection(
     unreadApps: List<AppInfo>,
     unreadPreviews: Map<String, String>,
+    unreadDisplayNames: Map<String, String> = emptyMap(),
     activeNotifPkgs: Set<String>,
     onClearUnreadNotifications: (String) -> Unit,
     unreadVisible: Boolean,
@@ -1024,6 +1025,7 @@ fun LazyListScope.AppCenterUnreadSection(
                             app = app,
                             onLaunch = { actions.onLaunchApp(app) },
                             compact = true,
+                            displayLabel = unreadDisplayNames[app.packageName],
                             preview = unreadPreviews[app.packageName],
                             swipeActionsEnabled = false,
                             onLongClick = {

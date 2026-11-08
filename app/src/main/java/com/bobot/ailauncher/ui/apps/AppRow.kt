@@ -112,6 +112,9 @@ internal fun AppRow(
     // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览（最新通知正文
     // 或未读短信片段，调用方算好再传）；null 时只留应用名，字母组行不受影响。
     preview: String? = null,
+    // 未读行显示名（Bob 2026-11-08 22:45）：未读组里用最新通知标题当行名；
+    // 非空才传，未读组外调用方不传（默认应用名）。图标无障碍描述仍用应用名。
+    displayLabel: String? = null,
     // 未读组左滑=清理（Bob 2026-11-08）：未读行外层包左滑清理行时
     // 传 false，禁用本行的滑动浮层（★/眼睛），避免两套横滑手势抢事件；
     // 禁用后该行在未读组内暂不能收藏/隐藏（读完回字母组后恢复），见收据。
@@ -359,7 +362,7 @@ internal fun AppRow(
                     modifier = if ((showInfoIcon && onInfoClick != null) || showDeepLinkBadge) Modifier.weight(1f) else Modifier
                 ) {
                     Text(
-                        text = app.label.toString(),
+                        text = displayLabel ?: app.label.toString(),
                         fontSize = AILauncherType.BodyLarge.fontSize,
                         color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
                         maxLines = 1,

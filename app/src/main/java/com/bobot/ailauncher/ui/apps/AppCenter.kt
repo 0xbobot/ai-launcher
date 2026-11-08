@@ -168,7 +168,7 @@ import com.bobot.ailauncher.data.SmsRepository
 import com.bobot.ailauncher.data.UserIntentMapping
 import com.bobot.ailauncher.data.deriveUnreadApps
 import com.bobot.ailauncher.data.groupAppsByLetter
-import com.bobot.ailauncher.data.previewForApp
+import com.bobot.ailauncher.data.unreadRowText
 import com.bobot.ailauncher.data.withoutPkgs
 import com.bobot.ailauncher.service.LauncherNotificationService
 import com.bobot.ailauncher.ui.components.AppIconImage
@@ -339,12 +339,25 @@ fun AppCenterContent(
             SmsRepository.latestUnreadSmsBody(context)
         }
     }
-    // 未读组每行预览文案（包名→预览，竖屏 + 横屏共用同一份；无预览的包不在 map 里）。
-    val unreadPreviews = remember(unreadApps, latestActiveByPackage, smsPackages, smsPreviewBody) {
-        unreadApps.mapNotNull { app ->
-            previewForApp(app.packageName, latestActiveByPackage, smsPackages, smsPreviewBody)
-                ?.let { app.packageName to it }
-        }.toMap()
+    // 未读组每行文案（Bob 2026-11-08 22:45：行名取最新通知标题、预览只留正文；
+    // 竖屏 + 横屏共用同一份）。rowTexts 全覆盖未读组；previews 只含带预览的包，
+    // displayNames 全覆盖（无标题时即应用名）。
+    val unreadRowTexts = remember(unreadApps, latestActiveByPackage, smsPackages, smsPreviewBody) {
+        unreadApps.associate { app ->
+            val isSms = app.packageName in smsPackages
+            app.packageName to unreadRowText(
+                appLabel = app.label.toString(),
+                latest = latestActiveByPackage[app.packageName],
+                smsBody = if (isSms) smsPreviewBody else null,
+                isSmsApp = isSms
+            )
+        }
+    }
+    val unreadPreviews = remember(unreadRowTexts) {
+        unreadRowTexts.mapNotNull { (pkg, row) -> row.preview?.let { pkg to it } }.toMap()
+    }
+    val unreadDisplayNames = remember(unreadRowTexts) {
+        unreadRowTexts.mapValues { (_, row) -> row.displayName }
     }
     // 未读组左滑清理：取消该包的在用通知（走通知监听服务），角标随之重算。
     val onClearUnreadNotifications: (String) -> Unit = { pkg ->
@@ -957,6 +970,7 @@ fun AppCenterContent(
                 // 未读组打磨（Bob 2026-11-08）：预览文案 + 在用通知包 + 左滑清理回调，
                 // 横屏与竖屏共用调用点算好的同一份，不另算。
                 unreadPreviews = unreadPreviews,
+                unreadDisplayNames = unreadDisplayNames,
                 activeNotifPkgs = activeNotifPkgs,
                 onClearNotifications = onClearUnreadNotifications,
                 foldExpanded = foldExpandedState,
@@ -1090,6 +1104,7 @@ fun AppCenterContent(
                 AppCenterUnreadSection(
                     unreadApps = unreadApps,
                     unreadPreviews = unreadPreviews,
+                    unreadDisplayNames = unreadDisplayNames,
                     activeNotifPkgs = activeNotifPkgs,
                     onClearUnreadNotifications = onClearUnreadNotifications,
                     unreadVisible = unreadVisible,
