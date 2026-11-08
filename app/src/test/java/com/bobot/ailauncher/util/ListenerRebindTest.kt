@@ -71,4 +71,28 @@ class ListenerRebindTest {
         assertFalse(shouldRebindListener(true, false, false, justRebound, now, 60_000L))
         assertTrue(shouldRebindListener(true, false, false, justRebound, now, 500L))
     }
+
+    @Test
+    fun `connected and bound but live check says dead rebinds`() {
+        // Bob 2026-11-08 22:15：flag 与实例都说“已连接”，但 activeNotifications
+        // 现查为 null（绑定已死、onListenerDisconnected 漏回调）——重绑。
+        assertTrue(
+            shouldRebindListener(true, true, true, never, now, liveNotifications = false)
+        )
+    }
+
+    @Test
+    fun `live check dead but throttled does not rebind`() {
+        val justRebound = now - 10_000L
+        assertFalse(
+            shouldRebindListener(true, true, true, justRebound, now, liveNotifications = false)
+        )
+    }
+
+    @Test
+    fun `live check alive does nothing`() {
+        assertFalse(
+            shouldRebindListener(true, true, true, never, now, liveNotifications = true)
+        )
+    }
 }

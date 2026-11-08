@@ -66,6 +66,23 @@ class LauncherNotificationService : NotificationListenerService() {
         fun requestBadgeRecompute() {
             instance?.recomputeBadgeCounts()
         }
+
+        /**
+         * 系统现查的活信号（Bob 2026-11-08 22:15：bobot 与 ChatGPT 两条
+         * 可划掉的消息通知在栏里两分钟、监听报已连接、角标仍空——绑定
+         * 可能已死、onListenerDisconnected 漏回调导致 flag 陈旧；isBound()
+         * 只看实例在不在，实例活着但绑定已死时它也报 true）。
+         * activeNotifications 未连接时返回 null，是一次 Binder 现查，
+         * 不是缓存 flag。任何异常都当未连接（宁可多重绑一次——30 秒
+         * 节流兜底——也不漏掉一次死绑定）。
+         */
+        fun hasLiveNotifications(): Boolean {
+            return try {
+                instance?.activeNotifications != null
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     /** 取消该包的全部在用通知（实例方法，见 companion 说明）。 */
@@ -204,7 +221,7 @@ class LauncherNotificationService : NotificationListenerService() {
     /** 角标重算（短信库变化触发）：从在用通知列表重算三路信号并合并推送。 */
     private fun recomputeBadgeCounts() {
         try {
-            val active = activeNotifications.filter { it.isClearable && !it.isOngoing }
+            val active = filterClearableNotifications(activeNotifications)
             val all = active.mapNotNull { sbn -> sbn.toSimpleNotification() }
             updateBadgeCounts(active, all)
         } catch (e: Exception) {
@@ -253,7 +270,7 @@ class LauncherNotificationService : NotificationListenerService() {
 
     private fun pushActiveNotifications() {
         try {
-            val active = activeNotifications.filter { it.isClearable && !it.isOngoing }
+            val active = filterClearableNotifications(activeNotifications)
             // 角标计数（Bob 2026-11-07 晚）：从完整在用通知列表汇总，不 take(20)——
             // 展示列表只取最新 20 条，计数若共用它，“125 条”会被截成 20 条以内。
             // （toSimpleNotification 只丢标题正文都空的条目——这类通知无可读内容。）
@@ -304,7 +321,15 @@ class LauncherNotificationService : NotificationListenerService() {
         val smsPackages = listOfNotNull(defaultSms, visibleSms).toSet()
         val smsUnread = SmsRepository.countUnreadSms(this)
         // 粘性数第五路（Bob 2026-11-08）：应用最后一次上报的 number，通知栏清掉后仍粘住。
-        val stickyCounts = BadgeStickyStore.loadNumbers(this)
+        // 读失败（SharedPreferences 损坏等）只丢这一路、回空 map，不丢整推
+        // （Bob 2026-11-08 22:15：角标全空调查——推送是一路抛、全推废的结构，
+        // 外层 try/catch 只兜底；每路读失败都要在自己这一层消化掉）。
+        val stickyCounts = try {
+            BadgeStickyStore.loadNumbers(this)
+        } catch (e: Exception) {
+            Log.e("LauncherNotifSvc", "loadNumbers failed, sticky=empty", e)
+            emptyMap()
+        }
         NotificationRepository.updateBadgeCounts(
             combineBadgeCounts(
                 notifCounts, numberMax, smsUnread, smsPackages,
@@ -359,5 +384,22 @@ class LauncherNotificationService : NotificationListenerService() {
             else -> digits
         }
         return if (num.length in 7..15) num else ""
+    }
+}
+
+/**
+ * 在用通知列表空态守卫（Bob 2026-11-08 22:15：角标全空调查）：
+ * 未连接时 activeNotifications 为 null（系统现查的活信号），直接 filter
+ * 会 NPE，整推被外层 try/catch 吞掉、角标冻住。短信库观察者与 ZTE 探针
+ * 线程都可能在断开后跑到这里。null 或读取抛异常都当空列表——其它路
+ * （探针/粘性/短信）照常合入，不丢整推。纯函数（只依赖输入数组），供单测。
+ */
+internal fun filterClearableNotifications(
+    active: Array<StatusBarNotification>?
+): List<StatusBarNotification> {
+    return try {
+        active?.filter { it.isClearable && !it.isOngoing } ?: emptyList()
+    } catch (_: Exception) {
+        emptyList()
     }
 }
