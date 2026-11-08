@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.bobot.ailauncher.data.GUIDE_VERSION
 import com.bobot.ailauncher.data.connectedGuideCard
 import com.bobot.ailauncher.data.connectorKeyForGuideId
 import com.bobot.ailauncher.data.guideCards
@@ -62,6 +63,7 @@ import com.bobot.ailauncher.data.SmartCardAction
 import com.bobot.ailauncher.data.SmartCardActions
 import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.data.shouldShowGuideVersion
 import com.bobot.ailauncher.data.visibleGuideCards
 import com.bobot.ailauncher.ui.components.AppBadge
 import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
@@ -102,8 +104,11 @@ import kotlin.math.abs
  * 走已有的深链/启动路径直接执行）。忽略真卡片即记处理完（截止点前不再
  * 出现）；忽略引导卡即永久记下这张（不是滑走，滑走只是本轮沉底）。
  *
- * 引导卡片（设计稿 §4.7，448；v3 按权限重做，455）：真卡片为空、且引导
- * 还没看过时，叠层位置出现一叠引导卡片（而不是空着），只出现一次。
+ * 引导卡片（设计稿 §4.7，448；v3 按权限重做，455；换版重看，456）：
+ * 真卡片为空、且本版引导还没看过时，叠层位置出现一叠引导卡片
+ * （而不是空着），每版引导只出现一次、不是终身一次——引导内容带
+ * 版本号，换版后自动重看一次（452 记下的旧版 guide_seen 视为已看 v2，
+ * 不挡 v3）。
  * 按权限分五张（消息、通知、日历、联系人、电话拨号器）；点 × 整叠消失、
  * 不再出现；一张张滑过去看完也记一次；点“连接”走 §5 流程（消息/联系人
  * 先显著披露再弹系统框，日历直接弹，通知跳系统设置页）；接上某个权限后
@@ -165,9 +170,12 @@ fun SmartCardStackHost() {
         return
     }
     // 真卡片为空时才轮到引导卡片（而不是空着）。
-    var guideSeen by remember {
-        mutableStateOf(SmartCardRepository.isGuideSeen(context))
+    // 引导内容带版本号（设计稿 §4.7，456）：存的版本比当前旧（或无记录）
+    // 就出现；看完/关掉记当前版本，同一版本不再重复出现。
+    var seenGuideVersion by remember {
+        mutableStateOf(SmartCardRepository.guideSeenVersion(context))
     }
+    val guideSeen = !shouldShowGuideVersion(seenGuideVersion)
     var swipedGuideIds by remember { mutableStateOf(setOf<String>()) }
     var dismissedGuideIds by remember {
         mutableStateOf(SmartCardRepository.dismissedGuideIds(context))
@@ -227,16 +235,17 @@ fun SmartCardStackHost() {
         .map { connectedGuideCard(it) }
     // 反馈卡排在最前面（刚接上的事立刻看得见），其余引导卡留着。
     val displayed = connectedCards + guides
-    // 叠层空下来才记一次（看完、忽略完、或全部接上且反馈已给完）：整叠只在
-    // 首次出现。注意不要按 guides.isEmpty() 记——接上最后一个权限时 guides
-    // 先空、反馈卡还在显示，那时记下会把反馈也吞掉（452 的问题：连一个
-    // 权限整叠全消失，根因有二：①已接上的权限被静默过滤——Bob 设备上通知
-    // 在 452 测试前已接上，首屏只剩两张消息卡，连上消息即清空；②这行 latch
-    // 在引导列表一空就记 guide_seen，全程没有任何反馈，用户点了连接是懵的）。
+    // 叠层空下来才记当前版本（看完、忽略完、或全部接上且反馈已给完）：
+    // 每版引导只出现一次。注意不要按 guides.isEmpty() 记——接上最后一个
+    // 权限时 guides 先空、反馈卡还在显示，那时记下会把反馈也吞掉（452 的
+    // 问题：连一个权限整叠全消失，根因有二：①已接上的权限被静默过滤——
+    // Bob 设备上通知在 452 测试前已接上，首屏只剩两张消息卡，连上消息即
+    // 清空；②这行 latch 在引导列表一空就记 guide_seen，全程没有任何反馈，
+    // 用户点了连接是懵的）。
     LaunchedEffect(displayed.isEmpty(), guideSeen) {
         if (displayed.isEmpty() && !guideSeen) {
             SmartCardRepository.markGuideSeen(context)
-            guideSeen = true
+            seenGuideVersion = GUIDE_VERSION
         }
     }
     if (guideSeen || displayed.isEmpty()) return
@@ -275,7 +284,7 @@ fun SmartCardStackHost() {
         },
         onClose = {
             SmartCardRepository.markGuideSeen(context)
-            guideSeen = true
+            seenGuideVersion = GUIDE_VERSION
         }
     )
     // 显著披露（§5.4，同设置页原文）：先讲清要什么、为什么，用户点

@@ -23,6 +23,35 @@ package com.bobot.ailauncher.data
  * 引导列表一空就记下，全程没有任何反馈）。有真事项时真卡片顶掉整叠
  * 引导卡（宿主只在真卡片为空时展示引导卡）。
  */
+/**
+ * 引导内容版本号（设计稿 §4.7，456/v1.2.9，Bob 2026-11-08 定）：
+ * 换版时只改这一个数。已看过的标记按版本记（guide_seen_version），
+ * 不是终身一次——换版后自动重看一次，每版引导只出现一次。
+ * 当前 v3：五张按权限分的引导卡（455/v1.2.8 的文案）。
+ */
+const val GUIDE_VERSION = 3
+
+/** 存量旧版布尔 guide_seen == true 视为已看 v2（v3 之前最新版引导）。 */
+const val LEGACY_GUIDE_SEEN_VERSION = 2
+
+/**
+ * 该版本引导是否该出现：没记过，或记的版本比当前旧，就出现；
+ * 记的版本等于当前（看完本版）或更新，就不再出现。
+ * currentVersion 只为单测“未来换版”留口子，生产调用不传。
+ */
+fun shouldShowGuideVersion(
+    seenVersion: Int?,
+    currentVersion: Int = GUIDE_VERSION
+): Boolean = seenVersion == null || seenVersion < currentVersion
+
+/**
+ * 迁移：旧版布尔 guide_seen 与新版整数 guide_seen_version 合并成一个
+ * 已看版本。整数在就以整数为准；只有布尔 true 时视为已看 v2——
+ * 452 记下的旧版 guide_seen 不挡 v3（Bob 设备上记的就是这个）。
+ */
+fun migrateLegacyGuideSeen(legacySeen: Boolean, storedVersion: Int?): Int? =
+    storedVersion ?: if (legacySeen) LEGACY_GUIDE_SEEN_VERSION else null
+
 private fun guideCard(
     id: String,
     sourceLabel: String,

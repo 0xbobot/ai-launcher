@@ -29,6 +29,10 @@ object SmartCardRepository {
     private const val KEY_LAST_SMS_REFRESH = "last_sms_refresh_ms"
     /** 引导卡片只出现一次（设计稿 §4.7）：看完（滑完全部）或点 × 关掉即记下，不再弹 */
     private const val KEY_GUIDE_SEEN = "guide_seen"
+    /** 引导内容已看过的版本号（设计稿 §4.7，456/v1.2.9）：换版后自动重看
+     * 一次，每版引导只出现一次，不是终身一次。旧版布尔 guide_seen 只读、
+     * 只做迁移（true 视为已看 v2），不再写。 */
+    private const val KEY_GUIDE_SEEN_VERSION = "guide_seen_version"
     /** 引导卡片的“忽略”（设计稿 §4.2，449/v1.2.2）：单张永久不再出现。
      * 与“滑走”不同——滑走只是本轮沉底/看完才记一次，忽略是当即永久记下。 */
     private const val KEY_GUIDE_DISMISSED = "guide_dismissed"
@@ -84,13 +88,24 @@ object SmartCardRepository {
         return withDeadline.sortedBy { it.second }.map { it.first }
     }
 
-    /** 引导卡片是否已看过（看完或点 × 关掉后为 true，之后不再出现） */
-    fun isGuideSeen(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_GUIDE_SEEN, false)
+    /**
+     * 引导卡片已看过的版本号：无记录为 null；旧版布尔 guide_seen == true
+     * 视为已看 v2（v3 之前最新版引导），不挡 v3——Bob 设备上 452 时记下
+     * 的就是旧版布尔，升到新版后 v3 五张引导卡要再出现一次。
+     */
+    fun guideSeenVersion(context: Context): Int? {
+        val p = prefs(context)
+        val stored = if (p.contains(KEY_GUIDE_SEEN_VERSION)) {
+            p.getInt(KEY_GUIDE_SEEN_VERSION, 0)
+        } else {
+            null
+        }
+        return migrateLegacyGuideSeen(p.getBoolean(KEY_GUIDE_SEEN, false), stored)
+    }
 
-    /** 记下引导卡片已看过（只出现一次） */
+    /** 记下当前版本引导卡片已看过（整叠走空或点 × 关掉时记当前版本） */
     fun markGuideSeen(context: Context) {
-        prefs(context).edit().putBoolean(KEY_GUIDE_SEEN, true).apply()
+        prefs(context).edit().putInt(KEY_GUIDE_SEEN_VERSION, GUIDE_VERSION).apply()
     }
 
     /** 点过“忽略”的引导卡 id（永久不再出现） */
