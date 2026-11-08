@@ -1036,6 +1036,13 @@ fun SettingsScreen() {
             var feishuPkg by remember { mutableStateOf<String?>(null) }
             val lastBroadcast by BadgeProbe.lastBroadcast.collectAsState()
             val zteResult by BadgeProbe.zteResult.collectAsState()
+            // 探针已记下的数（广播 + ZTE，见下“探针已收”行）：collect 进来，
+            // 再以它们为 key 记一次 currentProbeCounts()——取数只走这
+            // 一个函数（广播 + ZTE 取最大），不另复制一份合并逻辑。
+            val probeBroadcast by BadgeProbe.broadcastCounts.collectAsState()
+            val pendingProbeCounts = remember(probeBroadcast, zteResult) {
+                BadgeProbe.currentProbeCounts()
+            }
             // 监听实时状态（Bob 2026-11-08 20:42：通知栏有新通知，应用中心
             // 却没有未读组/角标——一张诊断截图就要能对上应用中心的状态：是
             // “连上了但 badge 是空的”还是“根本没连上”，一眼分得清）。
@@ -1091,6 +1098,17 @@ fun SettingsScreen() {
                         else badgeCounts.entries.sortedByDescending { it.value }.take(5)
                             .joinToString("、") { "${shortPackageName(it.key)}=${it.value}" } +
                             if (badgeCounts.size > 5) "…等 ${badgeCounts.size} 个" else ""
+                    )
+                    BadgeDiagRow(
+                        // 探针已收（Bob 2026-11-08 21:54）：广播 + ZTE 两路
+                        // 探针已记下的数，与“当前角标”对照——探针有数、当前
+                        // 角标没有 = 还没合进去；两者一致 = 已合入。格式与
+                        // “当前角标”那行一致（数降序前 5 包）。
+                        "探针已收",
+                        if (pendingProbeCounts.isEmpty()) "无"
+                        else pendingProbeCounts.entries.sortedByDescending { it.value }.take(5)
+                            .joinToString("、") { "${shortPackageName(it.key)}=${it.value}" } +
+                            if (pendingProbeCounts.size > 5) "…等 ${pendingProbeCounts.size} 个" else ""
                     )
                     BadgeDiagRow("读取短信权限", if (smsGranted) "已授" else "未授")
                     BadgeDiagRow("默认短信应用", shortPackageName(defaultSmsPkg))
