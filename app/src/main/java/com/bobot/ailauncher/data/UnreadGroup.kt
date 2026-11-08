@@ -34,18 +34,27 @@ fun withoutPkgs(apps: List<AppInfo>, pkgs: Set<String>): List<AppInfo> =
  * 预览，让用户查看清理）。纯函数，供单测；UI 层只做 remember 派生。
  */
 
-/** 截断约 40 字（纯函数）：先单行化（换行→空格、去首尾空白），超长取前 40 字 + "…"。 */
-fun truncatePreview(text: String, maxChars: Int = 40): String {
+/** 截断约 60 字（纯函数）：先单行化（换行→空格、去首尾空白），超长取前 60 字 + "…"。 */
+fun truncatePreview(text: String, maxChars: Int = 60): String {
     val single = text.replace('\n', ' ').replace('\r', ' ').trim()
     if (single.length <= maxChars) return single
     return single.take(maxChars).trimEnd() + "…"
 }
 
-/** 通知预览（纯函数）：优先 text，没有 text 取 title；两者都空 → null（不显示预览行）。 */
+/** 通知预览（纯函数）：标题 + 正文一起组装——两者都非空且不同时显示
+ * “标题 · 正文”（Bob 2026-11-08 18:37 真机反馈：旧口径只取 text，标题被丢掉，
+ * 豆包“做测试 · 今天 19:07 - 20:07”只剩后半截）；只一个有时显示那一个；
+ * 标题 == 正文时只显示一次；两者都空 → null（不显示预览行）。 */
 fun notificationPreviewText(n: SimpleNotification?): String? {
     if (n == null) return null
-    val raw = n.text.ifBlank { n.title }
-    if (raw.isBlank()) return null
+    val title = n.title.trim()
+    val text = n.text.trim()
+    val raw = when {
+        title.isNotEmpty() && text.isNotEmpty() && title != text -> "$title · $text"
+        text.isNotEmpty() -> text
+        title.isNotEmpty() -> title
+        else -> return null
+    }
     return truncatePreview(raw)
 }
 
@@ -57,8 +66,9 @@ fun smsPreviewText(body: String?): String? {
 
 /**
  * 未读组某行的预览文案（纯函数）：
- * - 短信应用（默认/可见短信包）：最新未读短信正文；没有未读短信时退回通知正文；
- * - 其他应用：最新一条在用通知正文（优先 text，没有取 title）；
+ * - 短信应用（默认/可见短信包）：最新未读短信正文；没有未读短信时退回通知
+ *   （标题 + 正文组装，同 notificationPreviewText）；
+ * - 其他应用：最新一条在用通知（标题 + 正文组装，标题 == 正文时去重）；
  * - 都没有 → null（不显示预览行，只留应用名+角标）。
  */
 fun previewForApp(

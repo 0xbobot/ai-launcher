@@ -5,8 +5,9 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * 未读预览行纯逻辑单测（Bob 2026-11-08 08:02 反馈①：未读组直接显示未读信息预览）。
- * 覆盖：截断约 40 字、单行化、通知正文优先 text/无 text 取 title、空处理、
+ * 未读预览行纯逻辑单测（Bob 2026-11-08 08:02 反馈①：未读组直接显示未读信息预览；
+ * 2026-11-08 18:37 反馈：通知预览组装标题 + 正文、截断 40 → 60 字）。
+ * 覆盖：截断约 60 字、单行化、通知标题 + 正文组装（去重/单方/空处理）、
  * 短信应用取短信正文、短信无正文时退回通知正文、都没正文时不显示预览行。
  */
 class UnreadPreviewTest {
@@ -24,15 +25,15 @@ class UnreadPreviewTest {
     @Test
     fun `truncatePreview - short text is unchanged`() {
         assertEquals("你好", truncatePreview("你好"))
-        assertEquals("a".repeat(40), truncatePreview("a".repeat(40)))
+        assertEquals("a".repeat(60), truncatePreview("a".repeat(60)))
     }
 
     @Test
-    fun `truncatePreview - long text is cut to 40 chars plus ellipsis`() {
-        val long = "这是一条很长的未读消息正文，用来验证预览行截断约四十个字之后会加上省略号，超过四十字的部分会被截掉。"
+    fun `truncatePreview - long text is cut to 60 chars plus ellipsis`() {
+        val long = "这是一条很长的未读消息正文，用来验证预览行截断约六十个字之后会加上省略号，超过六十字的部分会被截掉，这句是凑字数的尾巴，再补几个字凑满六十以上。"
         val cut = truncatePreview(long)
-        assertEquals(long.take(40).trimEnd() + "…", cut)
-        assertEquals(41, cut.length)
+        assertEquals(long.take(60).trimEnd() + "…", cut)
+        assertEquals(61, cut.length)
     }
 
     @Test
@@ -49,13 +50,31 @@ class UnreadPreviewTest {
     }
 
     @Test
-    fun `notificationPreviewText - text wins over title`() {
-        assertEquals("正文内容", notificationPreviewText(notif("com.example.chat", title = "标题", text = "正文内容")))
+    fun `notificationPreviewText - title and text are joined`() {
+        assertEquals("标题 · 正文内容", notificationPreviewText(notif("com.example.chat", title = "标题", text = "正文内容")))
     }
 
     @Test
-    fun `notificationPreviewText - title is the fallback when text is blank`() {
+    fun `notificationPreviewText - doubao case keeps the title`() {
+        assertEquals(
+            "做测试 · 今天 19:07 - 20:07",
+            notificationPreviewText(notif("com.larus.nova", title = "做测试", text = "今天 19:07 - 20:07"))
+        )
+    }
+
+    @Test
+    fun `notificationPreviewText - title equal to text is shown once`() {
+        assertEquals("同一句话", notificationPreviewText(notif("com.example.chat", title = "同一句话", text = "同一句话")))
+    }
+
+    @Test
+    fun `notificationPreviewText - only title is shown as is`() {
         assertEquals("只有标题", notificationPreviewText(notif("com.example.chat", title = "只有标题", text = "   ")))
+    }
+
+    @Test
+    fun `notificationPreviewText - only text is shown as is`() {
+        assertEquals("只有正文", notificationPreviewText(notif("com.example.chat", title = "  ", text = "只有正文")))
     }
 
     @Test
@@ -64,9 +83,11 @@ class UnreadPreviewTest {
     }
 
     @Test
-    fun `notificationPreviewText - long text is truncated`() {
-        val long = "x".repeat(50)
-        assertEquals("x".repeat(40) + "…", notificationPreviewText(notif("com.example.chat", text = long)))
+    fun `notificationPreviewText - long title plus text is truncated to 60`() {
+        val long = "x".repeat(70)
+        assertEquals("x".repeat(60) + "…", notificationPreviewText(notif("com.example.chat", text = long)))
+        val joined = notificationPreviewText(notif("com.example.chat", title = "标题", text = "y".repeat(70)))
+        assertEquals(("标题 · " + "y".repeat(70)).take(60).trimEnd() + "…", joined)
     }
 
     // ---------- 短信预览 ----------
@@ -81,7 +102,7 @@ class UnreadPreviewTest {
     @Test
     fun `smsPreviewText - body is truncated like a notification`() {
         assertEquals("短信正文", smsPreviewText("短信正文"))
-        assertEquals("y".repeat(40) + "…", smsPreviewText("y".repeat(50)))
+        assertEquals("y".repeat(60) + "…", smsPreviewText("y".repeat(70)))
     }
 
     // ---------- 按应用取预览 ----------
@@ -101,11 +122,11 @@ class UnreadPreviewTest {
     fun `previewForApp - sms app falls back to notification when no unread sms`() {
         val preview = previewForApp(
             packageName = "com.android.mms",
-            latestByPackage = mapOf("com.android.mms" to notif("com.android.mms", text = "通知正文")),
+            latestByPackage = mapOf("com.android.mms" to notif("com.android.mms", title = "标题", text = "通知正文")),
             smsPackages = setOf("com.android.mms"),
             smsBody = null
         )
-        assertEquals("通知正文", preview)
+        assertEquals("标题 · 通知正文", preview)
     }
 
     @Test
@@ -116,7 +137,7 @@ class UnreadPreviewTest {
             smsPackages = setOf("com.android.mms"),
             smsBody = "短信正文片段"
         )
-        assertEquals("最新消息", preview)
+        assertEquals("标题 · 最新消息", preview)
     }
 
     @Test

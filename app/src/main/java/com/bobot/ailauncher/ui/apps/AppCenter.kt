@@ -458,11 +458,14 @@ fun AppCenterContent(
     // Bob 2026-11-03 回滚：锚点回 409 加过滤前——只按完整列表算
     // （Dock 分区在前、每组＋1 组间呼吸），不再跟搜索结果走
     // 前移到搜索 effect 之前：取消输入态的落点（下）要读它
-    // 未读组段占位：组头 1 项＋ N 行＋组间呼吸 1 项（始终展开、无组底行）；
-    // N==0 时不占位。未读段在 Dock 分区之后、A 组之前，字母锚点随之
-    // 后移，折叠/隐藏段锚点亦然。
-    val unreadSectionSize = if (unreadVisible) unreadApps.size + 2 else 0
-    val unreadHeaderIndex = dockSectionSize
+    // 未读组段占位：N 行＋组间呼吸 1 项（始终展开、无组底行；464 起组头
+    // 已删，不再占 1 项）；N==0 时不占位。未读段在 Dock 分区之后、A 组之前，
+    // 字母锚点随之后移，折叠/隐藏段锚点亦然。
+    val unreadSectionSize = if (unreadVisible) unreadApps.size + 1 else 0
+    // 未读首行 index（464 起组头已删：此前是组头 index，值不变，仍是
+    // Dock 分区之后第一项，现指向未读第一行；搜索取消/默认进入/rail
+    // 信封的落点都是它）。
+    val unreadFirstIndex = dockSectionSize
     val letterAnchors = remember(azGroups, dockSectionSize, unreadSectionSize) {
         val m = mutableMapOf<Char, Int>()
         var idx = dockSectionSize + unreadSectionSize // v0.41.31：Dock 分区在前，字母锚点后移；未读段又占一段
@@ -491,7 +494,7 @@ fun AppCenterContent(
             // 收藏区，savedListPosition 记下 0，恢复即落到收藏。
             // 未读组在则落未读组、否则落 A（437 的“落 A”改成“第一组”）。
             // A 组没有时退到首个字母组，再没有才退回进入前位置。
-            val firstAnchor = if (unreadVisible) unreadHeaderIndex
+            val firstAnchor = if (unreadVisible) unreadFirstIndex
                 else letterAnchors['A']
                     ?: letterAnchors[letters.firstOrNull()]
                     ?: savedListPosition
@@ -551,7 +554,7 @@ fun AppCenterContent(
         hiddenUnlocked = hiddenUnlocked,
         dockApps = dockApps,
         unreadVisible = unreadVisible,
-        unreadHeaderIndex = unreadHeaderIndex,
+        unreadFirstIndex = unreadFirstIndex,
         reduceMotion = reduceMotion,
         density = density
     )
@@ -566,7 +569,7 @@ fun AppCenterContent(
             // 列表停在收藏区（item 0），搜索开始时 savedListPosition 记下 0。
             // 打开应用中心默认落在列表顶：未读组在则未读组、否则 A。
             dockInitialScrollDone = true
-            val firstAnchor = if (unreadVisible) unreadHeaderIndex
+            val firstAnchor = if (unreadVisible) unreadFirstIndex
                 else letterAnchors[letters.firstOrNull()] ?: 0
             if (firstAnchor > 0) listState.scrollToItem(firstAnchor)
         }
@@ -1107,7 +1110,7 @@ fun AppCenterContent(
                 unreadVisible = unreadVisible,
                 foldHeaderIndex = foldHeaderIndex,
                 hiddenHeaderIndex = hiddenHeaderIndex,
-                unreadHeaderIndex = unreadHeaderIndex,
+                unreadFirstIndex = unreadFirstIndex,
                 homeTarget = homeTarget,
                 searchResults = searchResults,
                 flashTick = flashTick,
