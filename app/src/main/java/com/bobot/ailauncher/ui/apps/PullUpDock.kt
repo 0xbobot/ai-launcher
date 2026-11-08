@@ -4,8 +4,6 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -161,9 +159,6 @@ fun PullUpDock(
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
     onOpenSettings: () -> Unit,
-    // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页并提交协调器（HomeHost 提供）
-    onAskQizai: (String) -> Unit = {},
-    intentInputMode: Boolean = false,
     // v0.68.169（盲操扇形找回）：Dock 视觉单元（面板）精确 bounds
     // ——供 MainScreen→HomeScreen 盲操手势仲裁。374 批误用 PullUpDock 外层
     // modifier 的 onGloballyPositioned，其根为 fillMaxSize，捕获的是整屏
@@ -177,7 +172,6 @@ fun PullUpDock(
     val density = LocalDensity.current
     val onStateChangeState = rememberUpdatedState(onStateChange)
     val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
-    val onAskQizaiState = rememberUpdatedState(onAskQizai)
     // v0.68.169：单元 bounds 回调最新态（DisposableEffect(Unit) 不重启，
     // 卸载时报 null 须调最新回调，不读首帧闭包）。
     val onDockUnitBoundsChangeLatest by rememberUpdatedState(onDockUnitBoundsChange)
@@ -304,23 +298,9 @@ fun PullUpDock(
         val cutoutRightDp = with(density) {
             WindowInsets.displayCutout.getRight(density, LayoutDirection.Ltr).toDp()
         }
-        // v0.68.99：输入态下卡片让位（意图胶囊在底部原地接管，Dock 内容不与
-        // 之叠画）。横屏聚焦（2026-10-26，Bob 22:57 最终口径）：Dock 要隐藏
-        // （与竖屏聚焦一致）——聚焦批的横屏留场例外（isLandscapeDock）已删除，
-        // 横屏聚焦时 Dock 隐藏、宠物在左侧意图卡片上（头＋卡片一个身体）。
-        val cardVisible = (state == DockState.D1 || state == DockState.D2) &&
-            !intentInputMode
-        // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：场景整体换时 Dock
-        // 卡片只做淡入淡出、不滑动。重进方向的信号取上一帧 intentInputMode
-        // （SideEffect 在组合后才更新，故翻转当帧仍持旧值 true → fade-only；
-        // 正常回场时上一帧为 false → 沿用滑动＋淡入）。退出方向直接读当帧
-        // intentInputMode（翻转当帧已为 true → fade-only；D3／状态变化离场
-        // 时为 false → 沿用滑动＋淡出）。竖屏区块切换（2026-10-27）：
-        // 聚焦进出方向同理取信号、走 None（整块显隐、不滑动、不淡入淡出，
-        // 与信息区／意图区同帧离散切换）；D3／状态变化离场／回场沿用
-        // 滑动＋淡入淡出（不属本批）。
-        var prevIntentInputMode by remember { mutableStateOf(intentInputMode) }
-        androidx.compose.runtime.SideEffect { prevIntentInputMode = intentInputMode }
+        // v0.68.99：输入态已随意图清理（Bob 2026-11-08 23:38）删除——卡片只按
+        // Dock 状态显隐，不再为意图胶囊让位。
+        val cardVisible = (state == DockState.D1 || state == DockState.D2)
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
         // D2→D1 改由面板下滑手势触发
         // 点外关闭层（2026-10-26 入口子项，仅清单打开时存在，与 v0.27.4
@@ -343,28 +323,17 @@ fun PullUpDock(
                     // 再让 live cutoutRight（挖孔在右时卡片不顶挖孔区，
                     // 无挖孔时仍是 12dp，一字不写死数值）
                     .let { if (isLandscapeDock) it.padding(end = 16.dp + cutoutRightDp) else it },
+                // 意图清理（Bob 2026-11-08 23:38）：聚焦切换的 fade-only 分支
+                // 已随意图输入态删除——进出场一律按方向走原滑动＋淡入淡出。
                 enter = if (isLandscapeDock) {
-                    // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：聚焦退出
-                    // 回场时只淡入、不滑动（上一帧仍在聚焦 → fade-only）；正常
-                    // 回场（D3 关闭、状态回 D1/D2）沿用 v0.68.82 斜向滑入。
-                    if (dockCardFocusSwapIsFadeOnly(isLandscapeDock, prevIntentInputMode)) {
-                        fadeIn(
-                            tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
-                        )
-                    } else {
-                        // v0.68.82（第 3 项）：横屏从右下角斜向滑入
-                        // 家族规格（值不动、仅具名）：滑入 DockEnter、淡入 FadeHandoff。
-                        slideIn(
-                            initialOffset = { IntOffset(it.width, it.height) },
-                            animationSpec = PetMotion.DockEnter
-                        ) + fadeIn(
-                            tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
-                        )
-                    }
-                } else if (prevIntentInputMode) {
-                    // 竖屏区块切换：聚焦退出回场时整块重现，不滑动、不淡入；
-                    // 与信息区／意图区同帧离散切换，不半透明重叠。
-                    EnterTransition.None
+                    // v0.68.82（第 3 项）：横屏从右下角斜向滑入
+                    // 家族规格（值不动、仅具名）：滑入 DockEnter、淡入 FadeHandoff。
+                    slideIn(
+                        initialOffset = { IntOffset(it.width, it.height) },
+                        animationSpec = PetMotion.DockEnter
+                    ) + fadeIn(
+                        tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
+                    )
                 } else {
                     slideInVertically(
                         animationSpec = PetMotion.DockEnter
@@ -373,28 +342,14 @@ fun PullUpDock(
                     )
                 },
                 exit = if (isLandscapeDock) {
-                    // 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：进聚焦离场
-                    // 时只淡出、不滑动（当帧 intentInputMode 已为 true → fade-only；
-                    // 150ms 淡出完成后 HomeScreen 才挂载意图槽位，先出后进不重叠）；
-                    // D3／状态变化离场时沿用 v0.68.82 斜向滑出。
-                    if (dockCardFocusSwapIsFadeOnly(isLandscapeDock, intentInputMode)) {
-                        fadeOut(
-                            tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)
-                        )
-                    } else {
-                        // v0.68.82（第 3 项）：横屏向右下角斜向滑出
-                        // 家族规格（值不动、仅具名）：滑出 DockExit、淡出 FadeQuick。
-                        slideOut(
-                            targetOffset = { IntOffset(it.width, it.height) },
-                            animationSpec = PetMotion.DockExit
-                        ) + fadeOut(
-                            tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)
-                        )
-                    }
-                } else if (intentInputMode) {
-                    // 竖屏区块切换：进聚焦离场时整块消失，不滑动、不淡出；
-                    // D3／状态变化离场仍沿用滑动＋淡出。
-                    ExitTransition.None
+                    // v0.68.82（第 3 项）：横屏向右下角斜向滑出
+                    // 家族规格（值不动、仅具名）：滑出 DockExit、淡出 FadeQuick。
+                    slideOut(
+                        targetOffset = { IntOffset(it.width, it.height) },
+                        animationSpec = PetMotion.DockExit
+                    ) + fadeOut(
+                        tween(PetMotion.FadeQuick, easing = MotionTokens.Easing)
+                    )
                 } else {
                     slideOutVertically(
                         animationSpec = PetMotion.DockExit
@@ -697,8 +652,7 @@ fun PullUpDock(
             FullAppsOverlay(
                 onStateChange = onStateChangeState.value,
                 onD3SwipeRight = onD3SwipeRightState.value,
-                onOpenSettings = onOpenSettings,
-                onAskQizai = onAskQizaiState.value
+                onOpenSettings = onOpenSettings
             )
         }
 
@@ -807,9 +761,7 @@ fun PullUpDock(
 private fun FullAppsOverlay(
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
-    onOpenSettings: () -> Unit,
-    // R2 UI（10-21 新规格）：应用中心「问七仔」
-    onAskQizai: (String) -> Unit = {}
+    onOpenSettings: () -> Unit
 ) {
     val onStateChangeState = rememberUpdatedState(onStateChange)
     val onD3SwipeRightState = rememberUpdatedState(onD3SwipeRight)
@@ -826,8 +778,6 @@ private fun FullAppsOverlay(
             onOpenSettings = onOpenSettings,
             onPullDownToD2 = { onStateChangeState.value(DockState.D2) },
             onHeaderSwipeRight = { onD3SwipeRightState.value() },
-            // R2 UI（10-21 新规格）：「问七仔」——回首页并提交协调器
-            onAskQizai = onAskQizai,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
@@ -1000,18 +950,6 @@ private fun DockIconButton(
         )
     }
 }
-
-/**
- * 横屏场景切换（2026-10-26，Bob 22:57 最终口径）：Dock 卡片进出是否只做
- * 淡入淡出、不滑动。横屏＋聚焦切换信号为真时 fade-only；竖屏恒走原滑动＋
- * 淡入淡出（竖屏进态位移、Dock 滑入／滑出、漏斗四步时序一字不动）。
- * 调用方传不同的信号：退出（离场）传当帧 intentInputMode，重进（回场）传
- * 上一帧 intentInputMode（SideEffect 滞后一帧，翻转当帧仍为 true）。
- * 纯函数，单测锁死。
- */
-internal fun dockCardFocusSwapIsFadeOnly(isLandscape: Boolean, inFocusSignal: Boolean): Boolean =
-    isLandscape && inFocusSignal
-
 
 /** v0.68.44：页脚刊头字距文本 */
 @Composable

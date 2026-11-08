@@ -33,7 +33,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.ui.theme.PetMotion
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -173,16 +172,6 @@ fun MainScreen() {
                 },
                 onStateChange = { goDock(it) },
                 onD3SwipeRight = { goDock(DockState.D2, fromD3SwipeRight = true) },
-                // 离 D3 回记住的档（问七仔提交前先离 D3 用；D3 上滑手势已删，不再是手势回调）
-                onD3SwipeUpToHome = {
-                    if (dockVisible) {
-                        val remembered =
-                            if (UiPrefs.getDockRows(context) == 2) DockState.D2 else DockState.D1
-                        goDock(remembered)
-                    } else {
-                        dockState = DockState.Hidden
-                    }
-                },
                 onOpenSettings = { navController.navigate("settings") },
             )
         }
@@ -204,47 +193,9 @@ private fun HomeHost(
     onOpenAppDrawer: () -> Unit,
     onStateChange: (DockState) -> Unit,
     onD3SwipeRight: () -> Unit,
-    onD3SwipeUpToHome: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
-    // R2 UI（10-21 新规格）：意图协调器提到 HomeHost 持有——首页胶囊与应用中心「问七仔」
-    // 共用同一协调器，状态只有一个真源；HomeScreen 只拿状态渲染
-    val intentCoordinator = remember { com.bobot.ailauncher.core.intent.IntentCoordinatorFactory.create(context) }
-    val intentState by intentCoordinator.state.collectAsState()
-    val intentScope = rememberCoroutineScope()
-    // 意图改进一批·防重：宿主保留在途 Job——新提交先 cancel 旧 Job 再 launch
-    // （顶替语义）；被顶替的旧提交在协调器内交还编辑态，不会卡死 Planning。
-    // 与协调器 submit 入口的 Planning 守卫叠加：连点不会重复规划/重复执行。
-    var intentJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    fun submitIntent(text: String) {
-        intentJob?.cancel()
-        intentJob = intentScope.launch { intentCoordinator.submit(text) }
-    }
-    // v0.68.98（F-06）：Planning 态「取消」——先让协调器作废在途规划的落地权
-    // 并收回 Idle（结果条随之收起），再 cancel Job 本体；顺序反过来，Job 的
-    // CancellationException 分支会抢先 dismiss 回 Editing，与取消语义不符。
-    fun cancelIntentPlanning() {
-        intentCoordinator.cancelPlanning()
-        intentJob?.cancel()
-        intentJob = null
-    }
-    // v0.68.99（主页重构 R-1）：输入态开关——静态主页无胶囊；点意图胶囊 /
-    // 进入（要打字，聚焦）；协调器进入在场状态（思考 / 回复 /
-    // 待确认 / 缺权限 / 追问）时自动带起呈现（不聚焦、不弹键盘，如应用中心
-    // 「问七仔」提交后回首页看结果）。开 D3 抽屉即退出（见 HomeScreen 调用点）。
-    var intentInputMode by remember { mutableStateOf(false) }
-    var intentFocusWanted by remember { mutableStateOf(false) }
-    LaunchedEffect(intentState) {
-        if (com.bobot.ailauncher.ui.home.intentStateHoldsInput(intentState)) {
-            intentInputMode = true
-        }
-    }
-    // 应用中心「问七仔」：先回首页（离 D3），再把整句交给协调器理解
-    val onAskQizai: (String) -> Unit = { text ->
-        onD3SwipeUpToHome()
-        submitIntent(text)
-    }
     // v0.64.2：更新弹窗走共享流（自动检查 / TODAY 卡片"有新版本"行点击）
     val updatePrompt by OtaUpdater.updatePrompt.collectAsState()
 
@@ -342,11 +293,7 @@ private fun HomeHost(
         // 系统手势豁免，让系统返回手势正常工作（之前漏传，恒为 true，
         // 豁免在应用中心也生效，吃掉了系统返回）
         HomeScreen(
-            // v0.68.99：上滑开 D3 即退出输入态（D3 是覆盖层，胶囊不跟随）
-            onOpenAppDrawer = {
-                intentInputMode = false
-                onOpenAppDrawer()
-            },
+            onOpenAppDrawer = onOpenAppDrawer,
             cleanHome = dockState != DockState.D3,
             onBlindActiveChange = { blindActive = it },
             // v0.68.32：扇形状态上报（顶层绘制）+ Dock 区高度（圆心钳制）
@@ -364,17 +311,6 @@ private fun HomeHost(
             },
             // R2 UI：意图入口无 Key 时的"去设置"
             onOpenSettings = onOpenSettings,
-            // R2 UI：意图状态与回调（协调器在 HomeHost）
-            intentState = intentState,
-            onIntentSubmit = { t -> submitIntent(t) },
-            onIntentConfirm = { req -> intentCoordinator.confirm(req) },
-            onIntentConfirmUnderstood = { req -> intentCoordinator.confirmUnderstood(req) },
-            onIntentDismiss = { intentCoordinator.dismiss() },
-            onIntentCancelPlanning = { cancelIntentPlanning() },
-            // v0.68.99（R-1）：输入态（进入 = 点意图胶囊；退出由 HomeScreen 判定）
-            intentInputMode = intentInputMode,
-            intentRequestFocus = intentFocusWanted,
-            onExitIntentInput = { intentInputMode = false },
         )
         // 上拉 Dock（常驻）：悬浮卡 D1/D2 + 全屏 D3 应用中心，手势切换
         // v0.68.32：扇形展开时 Dock 淡出到 0.3（视觉让位）
@@ -392,9 +328,6 @@ private fun HomeHost(
                     if (dockState == DockState.D1 || dockState == DockState.D2) it else null
             },
             onOpenSettings = onOpenSettings,
-            // R2 UI（10-21 新规格）：应用中心「问七仔」——回首页 + 提交协调器
-            onAskQizai = onAskQizai,
-            intentInputMode = intentInputMode,
         )
         // v0.67.13（Bob）：主屏 rail 长按 → 快找；房子/收藏/字母/隐藏一条导航滑动到达。
         // 长按震动后选择器浮现；手指一动就由应用中心接管（D3 淡入）；picker 会话在 D3 打开后

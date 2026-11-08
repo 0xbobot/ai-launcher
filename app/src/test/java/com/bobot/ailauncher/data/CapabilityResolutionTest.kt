@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.data
 
-import com.bobot.ailauncher.core.intent.CapabilityHints
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -171,23 +170,6 @@ class CapabilityResolutionTest {
         assertNull(CapabilityResolution.geoUriForCoord("91.0", "116.4"))
         assertNull(CapabilityResolution.geoUriForCoord("39.9", "181.0"))
         assertNull(CapabilityResolution.geoUriForCoord("", "116.4"))
-    }
-
-    @Test
-    fun `hints built from resolvable subset excludes unavailable capabilities`() {
-        // 与生产过滤同一口径（RegistryAdapter.hints -> executableCapabilities
-        // 的纯函数部分 isResolvable）：只装腾讯地图的手机，微信不许进清单
-        val wechat = Capability(
-            id = "wechat", label = "微信", iconName = "",
-            packageNames = listOf("com.tencent.mm"), deeplinkTemplate = null
-        )
-        val installed = setOf("com.tencent.map")
-        val executable = listOf(wechat, daohang).filter {
-            CapabilityResolution.isResolvable(it, installed)
-        }
-        val hints = CapabilityHints.build(executable)
-        assertTrue(hints.contains("daohang: 导航"))
-        assertFalse(hints.contains("wechat"))
     }
 
     // ---------- 432：点搜索结果带目的地（parseDestination + tapSteps） ----------
