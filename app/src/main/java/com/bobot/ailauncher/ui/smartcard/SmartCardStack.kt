@@ -51,6 +51,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -432,6 +433,35 @@ fun SmartCardStackHost() {
  * 量真实高度，摞高＝顶卡真实高＋露边，顶卡再也不受摞高约束；
  * 露边卡按顶卡真实高量（maxHeight = 顶卡高），不裁顶卡。
  */
+/**
+ * 叠层卡片两侧边距（第十批，设计稿 §4.7，2026-11-08 Bob 真机 verdict：
+ * “卡片是全宽，和桌面风格不协调”）。
+ * 取值来源——设置页卡片（桌面现成的浮动玻璃卡语言）：
+ * SettingsScreen 全页同一值，`padding(horizontal = 24.dp)` ＋
+ * `RoundedCornerShape(20.dp)`；智能卡片圆角原本就是 20dp
+ * （SmartCardView），内边距 16dp、行距 8dp 网格也不变，所以只收
+ * 边距这一处：两侧各 24dp，不贴边、不满宽。
+ * 简报 hero/会行是 32dp 文字缩进（不是卡片），Dock 是竖屏满宽底板
+ * （28dp 圆角），都不是浮动卡片的边距——不取那两处。
+ * 顶卡、露边卡、“已连接”反馈卡都走同一处（同一 SubcomposeLayout
+ * 约束下量），角标压在收边后的顶卡角上。
+ */
+val SmartCardStackSideMargin = 24.dp
+
+/**
+ * 露边卡形态（纯函数，单测锁死）：第 index 张露边卡相对顶卡的缩放、
+ * 透明度与下移量。露边只露 8dp 一格（8dp 网格），顶卡之下最多露两张。
+ * 宽度与顶卡相同——露边卡与顶卡用同一组 constraints 量，不另缩宽度；
+ * 这里的 scale 只是视觉上的轻微缩小（绕中心），不是改宽度。
+ */
+data class PeekCardTransform(val scale: Float, val alpha: Float, val yOffset: Dp)
+
+fun peekCardTransform(index: Int): PeekCardTransform = PeekCardTransform(
+    scale = 0.97f - 0.03f * index,
+    alpha = 0.65f - 0.25f * index,
+    yOffset = 8.dp * (index + 1)
+)
+
 @Composable
 fun SmartCardStack(
     cards: List<SmartCard>,
@@ -450,7 +480,15 @@ fun SmartCardStack(
     val top = cards[0]
     val connectedIds: Set<String> = connectedFeedbacks.keys
     val peeks = cards.drop(1).take(2)
-    Column(modifier = modifier.fillMaxWidth()) {
+    // 第十批：卡片按桌面卡片语言收边——两侧各留 SmartCardStackSideMargin，
+    // 不贴边、不满宽。收边放在最外层 Column：顶卡、露边卡、角标一起收，
+    // 摞高量测（SubcomposeLayout）与手势带（cardStackBandPx 的上下缘）
+    // 都按收边后的宽度走，不另起一套。
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = SmartCardStackSideMargin)
+    ) {
         // 与简报会行同款段间距（32dp，大于简报内部 24dp 段间距，8dp 网格）：
         // 卡片作为独立一段站得住。× 不再占这一行（448 的 × 行在卡外、
         // 悬在壁纸上）；× 进卡内表头（见 SmartCardView），这里两模式
@@ -482,6 +520,7 @@ fun SmartCardStack(
                 }.map { it.measure(constraints.copy(maxHeight = Constraints.Infinity)) }
                 val topHeight = topPlaceables.maxOfOrNull { it.height } ?: 0
                 val peekPlaceables = peeks.mapIndexed { index, card ->
+                    val transform = peekCardTransform(index)
                     subcompose(SmartCardStackSlot.Peek(index)) {
                         key(card.id) {
                             SmartCardView(
@@ -495,10 +534,9 @@ fun SmartCardStack(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .graphicsLayer {
-                                        val scale = 0.97f - 0.03f * index
-                                        scaleX = scale
-                                        scaleY = scale
-                                        alpha = 0.65f - 0.25f * index
+                                        scaleX = transform.scale
+                                        scaleY = transform.scale
+                                        alpha = transform.alpha
                                     }
                                     .testTag("smart_card_peek")
                             )
@@ -510,7 +548,7 @@ fun SmartCardStack(
                     // 下面几张先放（在后面），露边在顶卡底边下方
                     peekPlaceables.forEachIndexed { index, placeables ->
                         placeables.forEach {
-                            it.place(0, 8.dp.roundToPx() * (index + 1))
+                            it.place(0, peekCardTransform(index).yOffset.roundToPx())
                         }
                     }
                     topPlaceables.forEach { it.place(0, 0) }
