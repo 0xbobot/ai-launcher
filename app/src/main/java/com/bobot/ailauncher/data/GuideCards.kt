@@ -172,9 +172,67 @@ fun connectedNextStep(connectorKey: String): String = when (connectorKey) {
 }
 
 /**
+ * “已连接”反馈停留时长（设计稿 §4.7 v3，455/v1.2.8 起：3 秒后离开；
+ * 第八批不改时长，只改这一刻的样子）。宿主 delay 用这个常量，单测锁死。
+ */
+const val CONNECTED_FEEDBACK_MS = 3000L
+
+/**
+ * “已连接”庆祝反馈的状态（设计稿 §4.7，第八批 2026-11-08 Bob verdict：
+ * “已连接”那一刻要让人振奋，不只是换文案）。
+ *
+ * 动效本身 JVM 单测测不到，锁死方式是状态机：反馈状态必须携带
+ * [celebrate]（动效触发标志）与等级增量（[levelDelta]，由真实已接源
+ * 个数算出，不是写死的 +1——例如接通知时电话拨号器开关已开，
+ * 等级一次涨 2）。UI 层见 SmartCardView：celebrate 为真时整卡轻弹
+ * （弹簧回弹）＋金色对勾弹入＋金色等级行；视觉以代码复核＋Bob 真机为准。
+ * [level] 必须复用 [connectedSourceCount]（457 的智能等级同一处计数），
+ * 不许另写一套、更不许写死。
+ */
+data class ConnectedFeedback(
+    /** 已按 connectedGuideCard 换成“已连接”文案的那张卡 */
+    val card: SmartCard,
+    /** 接上之后真实已接源个数（connectedSourceCount） */
+    val level: Int,
+    /** 接上之前真实已接源个数（用户点“继续”那一刻记下） */
+    val previousLevel: Int
+) {
+    /** 本次接上让智能涨了多少（正常为 1；通知＋电话拨号器同涨时为 2） */
+    val levelDelta: Int get() = level - previousLevel
+    /** 动效触发标志：反馈一出现，UI 就播一次庆祝动效 */
+    val celebrate: Boolean = true
+}
+
+/**
+ * 等级行文案（纯函数，单测逐字锁死）：“智能 +1 · 已接 3/5 个源”。
+ * total 默认取 SMART_SOURCE_ORDER 的个数（五个源），不写死 5。
+ */
+fun celebrationLevelText(
+    level: Int,
+    previousLevel: Int,
+    total: Int = SMART_SOURCE_ORDER.size
+): String = if (level > previousLevel) {
+    "智能 +${level - previousLevel} · 已接 $level/$total 个源"
+} else {
+    "已接 $level/$total 个源"
+}
+
+/** 由一张引导卡＋接上前后的真实等级，造出带庆祝标志的反馈状态。 */
+fun connectedFeedback(
+    card: SmartCard,
+    level: Int,
+    previousLevel: Int
+): ConnectedFeedback = ConnectedFeedback(
+    card = connectedGuideCard(card),
+    level = level,
+    previousLevel = previousLevel
+)
+
+/**
  * 接上权限后显示的“已连接”反馈卡：同一张卡（id 不变），只换文案——
  * fact 是“已连接”，prep 是一句接下来会发生什么。没有动作按钮，
- * 3 秒后自动离开（宿主负责记永久忽略）。
+ * 3 秒后自动离开（宿主负责记永久忽略）。第八批：文案不变，庆祝感由
+ * [ConnectedFeedback]（对勾弹入＋金色等级行＋整卡轻弹）给，不换文案。
  */
 fun connectedGuideCard(card: SmartCard): SmartCard {
     val key = (card.action as? SmartCardAction.Connect)?.connectorKey
