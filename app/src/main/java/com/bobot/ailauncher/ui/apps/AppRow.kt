@@ -109,6 +109,14 @@ internal fun AppRow(
     // 内容的应用出「直达」小标签；只打开首页的没有。调用方按当前查询算好
     // 再传（CapabilityResolution.supportsDeepLink），默认不显示。
     showDeepLinkBadge: Boolean = false,
+    // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览（最新通知正文
+    // 或未读短信片段，调用方算好再传）；null 时只留应用名，字母组行不受影响。
+    preview: String? = null,
+    // 未读组左滑=清理（Bob 2026-11-08）：未读行外层包 SwipeToDismissBox 时
+    // 传 false，禁用本行的滑动浮层（★/眼睛），避免两套横滑手势抢事件；
+    // 禁用后该行在未读组内暂不能收藏/隐藏（读完回字母组后恢复），见收据。
+    // 默认 true，字母组行行为一字不变。
+    swipeActionsEnabled: Boolean = true,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -255,7 +263,10 @@ internal fun AppRow(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .pointerInput(app.packageName) {
+                // 未读组左滑=清理时禁用本行滑动（外层 SwipeToDismissBox 接管横滑）；
+                // pointerInput 空转时不消费事件，点按/长按照常走，横滑落到外层。
+                .pointerInput(app.packageName, swipeActionsEnabled) {
+                    if (swipeActionsEnabled) {
                     detectHorizontalDragGestures(
                         onDragStart = { isDragging = true },
                         onDragCancel = {
@@ -299,6 +310,7 @@ internal fun AppRow(
                                 .coerceIn(-maxDragPx, maxDragPx)
                         }
                     )
+                    }
                 }
         ) {
             // 内容：静态不位移，弱化到 30%
@@ -340,16 +352,32 @@ internal fun AppRow(
                     }
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = app.label.toString(),
-                    fontSize = AILauncherType.BodyLarge.fontSize,
-                    color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    // ⓘ 在行尾时占满剩余宽，把行尾元素顶到行尾；「直达」标签
-                    // 同理——有标签时名字同样占满剩余宽，标签落到行尾。
+                // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览，不抢应用名；
+                // 无预览时只留应用名。ⓘ/「直达」在行尾时名字列占满剩余宽（与原来单 Text
+                // 的 weight 口径一致），预览跟名字同宽、单行省略；拖动弱化时跟内容一起淡。
+                Column(
                     modifier = if ((showInfoIcon && onInfoClick != null) || showDeepLinkBadge) Modifier.weight(1f) else Modifier
-                )
+                ) {
+                    Text(
+                        text = app.label.toString(),
+                        fontSize = AILauncherType.BodyLarge.fontSize,
+                        color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (preview != null) {
+                        Text(
+                            text = preview,
+                            fontSize = AILauncherType.Caption.fontSize,
+                            lineHeight = AILauncherType.Caption.lineHeight,
+                            color = AILauncherColors.current.Hint.copy(alpha = contentAlpha),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
                 // 内容深链标识：小字标签「直达」——点按这家直接进到查询的那份
                 // 内容。只在搜索结果行出现（调用方按查询算好再传）；拖动弱化
                 // 时跟内容一起淡；本身不是可点目标，不抢行点按。

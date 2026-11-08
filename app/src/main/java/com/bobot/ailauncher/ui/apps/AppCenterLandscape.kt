@@ -112,6 +112,12 @@ fun AppCenterLandscape(
     // 未读组（Bob 2026-11-07 晚）：状态由调用点传入（竖屏同款，不得另起一套）；
     // unreadApps 已按未读数排好序、含 N>0 门，横屏直接用。
     unreadApps: List<AppInfo> = emptyList(),
+    // 未读组打磨（Bob 2026-11-08）：预览文案（包名→预览，无预览的包不在 map 里）、
+    // 在用通知包（左滑启用判定）、左滑清理回调——调用点（竖屏）算好的同一份，
+    // 横屏不另算、不另起状态源。
+    unreadPreviews: Map<String, String> = emptyMap(),
+    activeNotifPkgs: Set<String> = emptySet(),
+    onClearNotifications: (String) -> Unit = {},
     onToggleFold: () -> Unit = {},
     // 折叠组（421 安静版）：组底“取消折叠”——调用点传入竖屏同一双写逻辑。
     onUnfold: () -> Unit = {},
@@ -209,6 +215,10 @@ fun AppCenterLandscape(
         // v0.68.73：字母头占一个完整行位（rowH），与应用同高
         // v0.68.75（Bob）：减去顶栏 56.dp + 底部分隔 8.dp，否则多算一行导致末行被压缩
         val rowsPerCol = ((maxHeight - 56.dp - 8.dp) / rowH).toInt().coerceAtLeast(3)
+
+        // 未读组打磨（Bob 2026-11-08）：未读包集合，供列流里的 FlowItem.App
+        // 判定该行是不是未读行（未读行带预览 + 左滑清理，非未读行一字不动）。
+        val unreadPkgs = remember(unreadApps) { unreadApps.map { it.packageName }.toSet() }
 
         // 按字母切列：每个字母从新列顶部开始，字母头占首行位（Bob）
         // 首列：[字母头 rowH][应用...]；续列：无头，应用直接从顶部开始
@@ -650,17 +660,44 @@ fun AppCenterLandscape(
                                         // v0.68.75（Bob）：收藏/隐藏区头，占一个完整行位
                                         // 应用中心升级：区头金色 → Title 色（金色只留
                                         // 选中环 / 已收藏★ 本体，不再成片刷）
-                                        Text(
-                                            text = item.title,
-                                            fontSize = AILauncherType.Body.fontSize,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 2.sp,
-                                            color = AILauncherColors.current.Title,
-                                            modifier = Modifier
-                                                .height(rowH)
-                                                .padding(start = 16.dp)
-                                                .wrapContentHeight(Alignment.CenterVertically)
-                                        )
+                                        // 未读组幽灵信封（Bob 2026-11-08）：未读区头左边大号淡色信封，
+                                        // 与竖屏未读组幽灵信封同一符号、同样式（40dp、Title 色 35% 透明）；
+                                        // 收藏/隐藏区头不动（★/👁 已在标题文字里）。
+                                        if (item.title.startsWith("未读")) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .height(rowH)
+                                                    .padding(start = 16.dp)
+                                            ) {
+                                                UnreadGlyph(
+                                                    color = AILauncherColors.current.Title.copy(alpha = 0.35f),
+                                                    modifier = Modifier.size(40.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = item.title,
+                                                    fontSize = AILauncherType.Body.fontSize,
+                                                    fontWeight = FontWeight.Bold,
+                                                    letterSpacing = 2.sp,
+                                                    color = AILauncherColors.current.Title,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        } else {
+                                            Text(
+                                                text = item.title,
+                                                fontSize = AILauncherType.Body.fontSize,
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 2.sp,
+                                                color = AILauncherColors.current.Title,
+                                                modifier = Modifier
+                                                    .height(rowH)
+                                                    .padding(start = 16.dp)
+                                                    .wrapContentHeight(Alignment.CenterVertically)
+                                            )
+                                        }
                                     }
                                     is FlowItem.FoldHeader -> {
                                         // 折叠组（419）：区头行位，点按收展；样式同区头
@@ -758,11 +795,29 @@ fun AppCenterLandscape(
                                         }
                                     }
                                     is FlowItem.App -> {
-                                        LandscapeAppRow(
-                                            app = item.app,
-                                            onLaunch = onLaunch,
-                                            compact = true
-                                        )
+                                        // 未读组打磨（Bob 2026-11-08）：未读行带预览 + 左滑清理；
+                                        // 非未读行一字不动（不包 SwipeToDismissBox，不改手势）。
+                                        // 注意：搜索结果分支（上）在另一处，不走这里，不带预览/左滑。
+                                        val pkg = item.app.packageName
+                                        if (pkg in unreadPkgs) {
+                                            ClearableUnreadRow(
+                                                enabled = pkg in activeNotifPkgs,
+                                                onClear = { onClearNotifications(pkg) }
+                                            ) {
+                                                LandscapeAppRow(
+                                                    app = item.app,
+                                                    onLaunch = onLaunch,
+                                                    compact = true,
+                                                    preview = unreadPreviews[pkg]
+                                                )
+                                            }
+                                        } else {
+                                            LandscapeAppRow(
+                                                app = item.app,
+                                                onLaunch = onLaunch,
+                                                compact = true
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -924,7 +979,10 @@ private fun LandscapeAppRow(
     // 内容深链标识（Bob 2026-11-05 晚）：搜索结果行里，点按会走深链直达
     // 内容的应用出「直达」小标签；只打开首页的没有。调用方按当前查询算好
     // 再传（与竖屏 AppRow 同款标签、同一判定），默认不显示。
-    showDeepLinkBadge: Boolean = false
+    showDeepLinkBadge: Boolean = false,
+    // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览（调用方算好再传）；
+    // null 时只留应用名，非未读行不受影响。
+    preview: String? = null
 ) {
     // 未读角标（Bob 2026-11-07 晚）：通知监听汇总的该包条数；>0 才显示。
     val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
@@ -958,14 +1016,30 @@ private fun LandscapeAppRow(
             }
         }
         Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = app.label.toString(),
-            fontSize = AILauncherType.Callout.fontSize,
-            color = AILauncherColors.current.Title,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
+        // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览，不抢应用名；
+        // 无预览时只留应用名。「直达」标签在行尾时名字列占满剩余宽（与原来单 Text
+        // 的 weight 口径一致），预览跟名字同宽、单行省略。
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = app.label.toString(),
+                fontSize = AILauncherType.Callout.fontSize,
+                color = AILauncherColors.current.Title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
+            if (preview != null) {
+                Text(
+                    text = preview,
+                    fontSize = AILauncherType.Caption.fontSize,
+                    lineHeight = AILauncherType.Caption.lineHeight,
+                    color = AILauncherColors.current.Hint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
         // 内容深链标识：小字标签「直达」（与竖屏 AppRow 同款）；本身不是
         // 可点目标，不抢行点按。
         if (showDeepLinkBadge) {

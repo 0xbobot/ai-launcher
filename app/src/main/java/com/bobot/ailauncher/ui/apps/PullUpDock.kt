@@ -95,6 +95,7 @@ import com.bobot.ailauncher.data.AppCatalog
 import kotlinx.coroutines.launch
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.BadgeStickyStore
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
@@ -280,8 +281,12 @@ fun PullUpDock(
             val intent = context.packageManager
                 .getLaunchIntentForPackage(app.packageName)
                 ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-            if (intent != null) context.startActivity(intent)
-            else IslandToasts.show("无法打开「${app.label}」")
+            if (intent != null) {
+                context.startActivity(intent)
+                // 角标粘性数（Bob 2026-11-08）：在我们桌面里点图标启动应用 = 去读消息了，
+                // 成功打开才清掉该包粘性数；打开失败不清。
+                BadgeStickyStore.clearForPackage(context, app.packageName)
+            } else IslandToasts.show("无法打开「${app.label}」")
         } catch (_: Exception) {
             IslandToasts.show("无法打开「${app.label}」")
         }

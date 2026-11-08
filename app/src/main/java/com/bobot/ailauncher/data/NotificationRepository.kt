@@ -31,6 +31,14 @@ object NotificationRepository {
     private val _badgeCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
     val badgeCounts: StateFlow<Map<String, Int>> = _badgeCounts.asStateFlow()
 
+    /** 每包最新一条在用通知（未读组预览行 + 左滑启用判定用，Bob 2026-11-08）：
+     *  由 LauncherNotificationService 从完整在用列表汇总（不截 20 条），
+     *  每包只留时间最晚的一条；空 map = 无在用通知。 */
+    private val _latestActiveByPackage =
+        MutableStateFlow<Map<String, SimpleNotification>>(emptyMap())
+    val latestActiveByPackage: StateFlow<Map<String, SimpleNotification>> =
+        _latestActiveByPackage.asStateFlow()
+
     /** 监听服务是否已连接（授权发生在 App 运行中时，系统可能尚未回调 onListenerConnected） */
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
@@ -41,6 +49,10 @@ object NotificationRepository {
 
     fun updateBadgeCounts(counts: Map<String, Int>) {
         _badgeCounts.value = counts
+    }
+
+    fun updateLatestActiveByPackage(map: Map<String, SimpleNotification>) {
+        _latestActiveByPackage.value = map
     }
 
     /** 本地忽略一条通知（从首页移除；该应用有新通知时仍会重新出现） */

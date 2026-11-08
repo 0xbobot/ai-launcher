@@ -290,4 +290,59 @@ class BadgeCountsTest {
         )
         assertEquals(mapOf("com.example.chat" to 2), combined)
     }
+
+    // ---------- 粘性数第五路（Bob 2026-11-08） ----------
+
+    @Test
+    fun `combineBadgeCounts - empty sticky counts change nothing`() {
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.chat" to 2),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            stickyCounts = emptyMap()
+        )
+        assertEquals(mapOf("com.example.chat" to 2), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - sticky larger than all other sources wins`() {
+        // 通知栏已清（notifCounts/numberMax 为空），粘住的 125 仍让角标显示 125。
+        val combined = combineBadgeCounts(
+            notifCounts = emptyMap(),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            stickyCounts = mapOf("com.ss.android.lark" to 125)
+        )
+        assertEquals(mapOf("com.ss.android.lark" to 125), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - larger live source beats sticky`() {
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.ss.android.lark" to 130),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            stickyCounts = mapOf("com.ss.android.lark" to 125)
+        )
+        assertEquals(mapOf("com.ss.android.lark" to 130), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - sticky combines with probe as max of all`() {
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.chat" to 2),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            extraCounts = mapOf("com.example.chat" to 8),
+            stickyCounts = mapOf("com.example.chat" to 5, "com.ss.android.lark" to 125)
+        )
+        assertEquals(
+            mapOf("com.example.chat" to 8, "com.ss.android.lark" to 125),
+            combined
+        )
+    }
 }

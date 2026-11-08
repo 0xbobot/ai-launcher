@@ -30,6 +30,50 @@ fun withoutPkgs(apps: List<AppInfo>, pkgs: Set<String>): List<AppInfo> =
     if (pkgs.isEmpty()) apps else apps.filter { it.packageName !in pkgs }
 
 /**
+ * 未读预览行文案（Bob 2026-11-08 08:02 反馈①：未读组直接显示未读信息
+ * 预览，让用户查看清理）。纯函数，供单测；UI 层只做 remember 派生。
+ */
+
+/** 截断约 40 字（纯函数）：先单行化（换行→空格、去首尾空白），超长取前 40 字 + "…"。 */
+fun truncatePreview(text: String, maxChars: Int = 40): String {
+    val single = text.replace('\n', ' ').replace('\r', ' ').trim()
+    if (single.length <= maxChars) return single
+    return single.take(maxChars).trimEnd() + "…"
+}
+
+/** 通知预览（纯函数）：优先 text，没有 text 取 title；两者都空 → null（不显示预览行）。 */
+fun notificationPreviewText(n: SimpleNotification?): String? {
+    if (n == null) return null
+    val raw = n.text.ifBlank { n.title }
+    if (raw.isBlank()) return null
+    return truncatePreview(raw)
+}
+
+/** 短信预览（纯函数）：最新一条未读短信正文片段；空 → null。 */
+fun smsPreviewText(body: String?): String? {
+    if (body.isNullOrBlank()) return null
+    return truncatePreview(body)
+}
+
+/**
+ * 未读组某行的预览文案（纯函数）：
+ * - 短信应用（默认/可见短信包）：最新未读短信正文；没有未读短信时退回通知正文；
+ * - 其他应用：最新一条在用通知正文（优先 text，没有取 title）；
+ * - 都没有 → null（不显示预览行，只留应用名+角标）。
+ */
+fun previewForApp(
+    packageName: String,
+    latestByPackage: Map<String, SimpleNotification>,
+    smsPackages: Set<String>,
+    smsBody: String?
+): String? {
+    if (packageName in smsPackages) {
+        return smsPreviewText(smsBody) ?: notificationPreviewText(latestByPackage[packageName])
+    }
+    return notificationPreviewText(latestByPackage[packageName])
+}
+
+/**
  * 按首字母分组（纯函数）：与 AppCenter.kt azGroups 同口径——字典/区位码
  * 由调用方包进 [groupKeyOf]，'#' 排最后。某字母组因成员全被移走而变空时，
  * 该字母自然不在结果里（rail 字母随之消失，与折叠组一致）。

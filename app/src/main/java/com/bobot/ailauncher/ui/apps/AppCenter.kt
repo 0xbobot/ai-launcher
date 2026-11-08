@@ -3,6 +3,7 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
+import android.provider.Telephony
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -157,12 +158,16 @@ import com.bobot.ailauncher.data.DeepLinkServiceReport
 import com.bobot.ailauncher.data.LlmCallResult
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
+import com.bobot.ailauncher.data.BadgeStickyStore
 import com.bobot.ailauncher.data.MarketGuide
 import com.bobot.ailauncher.data.NotificationRepository
+import com.bobot.ailauncher.data.SmsRepository
 import com.bobot.ailauncher.data.UserIntentMapping
 import com.bobot.ailauncher.data.deriveUnreadApps
 import com.bobot.ailauncher.data.groupAppsByLetter
+import com.bobot.ailauncher.data.previewForApp
 import com.bobot.ailauncher.data.withoutPkgs
+import com.bobot.ailauncher.service.LauncherNotificationService
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.pageTextureBackground
@@ -171,6 +176,7 @@ import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.Collator
 import java.util.Locale
 import kotlin.math.exp
@@ -275,6 +281,43 @@ fun AppCenterContent(
     val unreadApps = remember(azApps, badgeCounts) { deriveUnreadApps(azApps, badgeCounts) }
     val unreadMemberPkgs = remember(unreadApps) { unreadApps.map { it.packageName }.toSet() }
     val unreadVisible = unreadApps.isNotEmpty()
+    // 未读组打磨（Bob 2026-11-08 08:02 反馈①）：
+    // - 每包最新一条在用通知（完整列表，不截 20 条），供预览行 + 左滑启用判定；
+    // - 短信包（默认 + 可见）用于识别短信应用（预览取未读短信正文）；
+    // - 短信预览正文：IO 线程读最新一条未读短信（只读，不存），短信角标变了就重读。
+    val latestActiveByPackage by NotificationRepository.latestActiveByPackage.collectAsState()
+    val activeNotifPkgs = remember(latestActiveByPackage) { latestActiveByPackage.keys }
+    val smsPackages = remember(context) {
+        val def = try { Telephony.Sms.getDefaultSmsPackage(context) } catch (_: Exception) { null }
+        listOfNotNull(def, SmsRepository.resolveVisibleSmsPackage(context)).toSet()
+    }
+    val smsAppInUnread = remember(unreadApps, smsPackages) {
+        unreadApps.any { it.packageName in smsPackages }
+    }
+    val smsBadge = remember(badgeCounts, smsPackages) {
+        smsPackages.sumOf { badgeCounts[it] ?: 0 }
+    }
+    var smsPreviewBody by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(smsAppInUnread, smsBadge) {
+        if (!smsAppInUnread) {
+            smsPreviewBody = null
+            return@LaunchedEffect
+        }
+        smsPreviewBody = withContext(Dispatchers.IO) {
+            SmsRepository.latestUnreadSmsBody(context)
+        }
+    }
+    // 未读组每行预览文案（包名→预览，竖屏 + 横屏共用同一份；无预览的包不在 map 里）。
+    val unreadPreviews = remember(unreadApps, latestActiveByPackage, smsPackages, smsPreviewBody) {
+        unreadApps.mapNotNull { app ->
+            previewForApp(app.packageName, latestActiveByPackage, smsPackages, smsPreviewBody)
+                ?.let { app.packageName to it }
+        }.toMap()
+    }
+    // 未读组左滑清理：取消该包的在用通知（走通知监听服务），角标随之重算。
+    val onClearUnreadNotifications: (String) -> Unit = { pkg ->
+        LauncherNotificationService.cancelNotificationsForPackage(pkg)
+    }
     // 折叠组（419）：不活跃集——可见 = azApps（已去隐藏、去自己）；共享规则
     // （AppUsageTracker.inactiveMembers：系统 UsageStats 优先，没授权退回
     // 自己记的＋首次见到宽限；固定位永远不进）。inactiveTick 由 launchApp
@@ -817,6 +860,9 @@ fun AppCenterContent(
         // 智能滚动关键字：能力动作成功打开应用才记（点按深链/定向 geo/
         // 直接打开任一成功都算；失败、或点的不是该能力提供方时不记）。
         ActionUsageTracker.recordTapAction(context, query, app.packageName, opened)
+        // 角标粘性数（Bob 2026-11-08）：在我们桌面里点图标启动应用 = 去读消息了，
+        // 成功打开才清掉该包粘性数；打开失败不清（用户没读到）。
+        if (opened) BadgeStickyStore.clearForPackage(context, app.packageName)
         return opened
     }
 
@@ -1249,6 +1295,11 @@ fun AppCenterContent(
                 // 未读组：状态由调用点传入（横屏不另起一套）；unreadApps
                 // 已按未读数排好序、含 N>0 门，横屏直接用。
                 unreadApps = unreadApps,
+                // 未读组打磨（Bob 2026-11-08）：预览文案 + 在用通知包 + 左滑清理回调，
+                // 横屏与竖屏共用调用点算好的同一份，不另算。
+                unreadPreviews = unreadPreviews,
+                activeNotifPkgs = activeNotifPkgs,
+                onClearNotifications = onClearUnreadNotifications,
                 foldExpanded = foldExpandedState,
                 onToggleFold = {
                     val next = !foldExpandedState
@@ -1652,53 +1703,75 @@ fun AppCenterContent(
                             )
                         }
                     }
-                    itemsIndexed(unreadApps, key = { _, app -> "u:${app.packageName}" }) { _, app ->
+                    itemsIndexed(unreadApps, key = { _, app -> "u:${app.packageName}" }) { index, app ->
                         Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
-                            // 未读组内无幽灵字母（不是字母组）；行结构与 A-Z 行一致
-                            val isPopupExpandedX = popupApp?.packageName == app.packageName
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 72.dp, end = 64.dp)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(
-                                        if (isPopupExpandedX) AILauncherColors.current.Card
-                                        else Color.Transparent
-                                    )
-                            ) {
-                                AppRow(
-                                    app = app,
-                                    onLaunch = { launchApp(app) },
-                                    compact = true,
-                                    onLongClick = {
-                                        hapticView.confirmHaptic()
-                                        popupApp = app
-                                    },
-                                    showInfoIcon = isPopupExpandedX,
-                                    onInfoClick = {
-                                        openAppDetailsPage(context, app.packageName)
-                                        popupApp = null
-                                    },
-                                    onHide = ::hideApp,
-                                    actionsVisible = expandedActionsPkg == app.packageName,
-                                    onActionsVisibleChange = { expanded ->
-                                        expandedActionsPkg =
-                                            if (expanded) app.packageName
-                                            else if (expandedActionsPkg == app.packageName) null
-                                            else expandedActionsPkg
-                                    }
+                            // 幽灵信封（Bob 2026-11-08）：未读组首行左边大号淡色信封，
+                            // 与字母组幽灵字母同一样式（40dp、Title 色 35% 透明）、同位置
+                            // （居左、start 24dp）；吸顶“未读”出现时隐藏，不与它重叠。
+                            // 信封是未读组在 rail 里的符号，两处同一符号保持一致。
+                            if (index == 0 && !stuckUnread) {
+                                UnreadGlyph(
+                                    color = AILauncherColors.current.Title.copy(alpha = 0.35f),
+                                    modifier = Modifier
+                                        .align(Alignment.CenterStart)
+                                        .padding(start = 24.dp)
+                                        .size(40.dp)
                                 )
-                                AnimatedVisibility(
-                                    visible = isPopupExpandedX,
-                                    enter = expandVertically() +
-                                        fadeIn(),
-                                    exit = shrinkVertically() +
-                                        fadeOut()
+                            }
+                            // 左滑清理（Bob 2026-11-08）：有在用通知的行可左滑取消通知；
+                            // 无在用通知的行（短信库口径、飞书无通知）不启用左滑。
+                            // 行内滑动浮层（★/眼睛）关掉，避免两套横滑抢事件。
+                            ClearableUnreadRow(
+                                enabled = app.packageName in activeNotifPkgs,
+                                onClear = { onClearUnreadNotifications(app.packageName) }
+                            ) {
+                                val isPopupExpandedX = popupApp?.packageName == app.packageName
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 72.dp, end = 64.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(
+                                            if (isPopupExpandedX) AILauncherColors.current.Card
+                                            else Color.Transparent
+                                        )
                                 ) {
-                                    AppShortcutInline(
+                                    AppRow(
                                         app = app,
-                                        onDismiss = { popupApp = null }
+                                        onLaunch = { launchApp(app) },
+                                        compact = true,
+                                        preview = unreadPreviews[app.packageName],
+                                        swipeActionsEnabled = false,
+                                        onLongClick = {
+                                            hapticView.confirmHaptic()
+                                            popupApp = app
+                                        },
+                                        showInfoIcon = isPopupExpandedX,
+                                        onInfoClick = {
+                                            openAppDetailsPage(context, app.packageName)
+                                            popupApp = null
+                                        },
+                                        onHide = ::hideApp,
+                                        actionsVisible = expandedActionsPkg == app.packageName,
+                                        onActionsVisibleChange = { expanded ->
+                                            expandedActionsPkg =
+                                                if (expanded) app.packageName
+                                                else if (expandedActionsPkg == app.packageName) null
+                                                else expandedActionsPkg
+                                        }
                                     )
+                                    AnimatedVisibility(
+                                        visible = isPopupExpandedX,
+                                        enter = expandVertically() +
+                                            fadeIn(),
+                                        exit = shrinkVertically() +
+                                            fadeOut()
+                                    ) {
+                                        AppShortcutInline(
+                                            app = app,
+                                            onDismiss = { popupApp = null }
+                                        )
+                                    }
                                 }
                             }
                         }
