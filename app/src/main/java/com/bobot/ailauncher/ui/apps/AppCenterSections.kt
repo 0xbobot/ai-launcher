@@ -69,6 +69,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.withFrameNanos
@@ -755,6 +756,23 @@ fun LazyListScope.AppCenterSearchResultsSection(
 }
 
 /**
+ * Dock 拖动排序步进（纯函数，单测锁死在 DockDragTest）：
+ * 根据累计偏移算目标位；返回 (目标位, 回扣后偏移)，不够一行返回 null。
+ * 行高由调用方传（生产是 64dp = 60dp 行 + 4dp 间距，2026-11-03 一屏
+ * 8 个后定的数）。
+ */
+internal fun dockDragStep(
+    curIdx: Int,
+    offsetY: Float,
+    rowH: Float,
+    size: Int,
+): Pair<Int, Float>? {
+    val targetIdx = (curIdx + (offsetY / rowH).toInt()).coerceIn(0, size - 1)
+    if (targetIdx == curIdx) return null
+    return targetIdx to (offsetY - (targetIdx - curIdx) * rowH)
+}
+
+/**
  * Dock 段（原 1507–1664 行）。拖拽本地状态（dockOrder / draggingDockPkg /
  * dockDragOffsetY）及同步用 LaunchedEffect 留在 AppCenterContent（LazyListScope
  * 段函数不是 @Composable 语境，不能持有 remember/LaunchedEffect），这里只接参数。
@@ -776,9 +794,12 @@ fun LazyListScope.AppCenterDockSection(
         // v0.41.32（Bob）：幽灵 ★ 与第一行同行（像字母那样），不单独占行
         itemsIndexed(dockOrder, key = { _, app -> "d:${app.packageName}" }) { index, app ->
             // v0.56.1（Bob）：手柄若因重组被重建、正在拖，保存顺序（防手势取消丢保存）
+            // 463 拆分回归：onDispose 读的是段参数快照（建 effect 时的旧值，恒为
+            // null），保存分支永远走不到；改用 rememberUpdatedState 读最新值。
+            val latestDraggingDockPkg by rememberUpdatedState(draggingDockPkg)
             DisposableEffect(app.packageName) {
                 onDispose {
-                    if (draggingDockPkg == app.packageName) {
+                    if (latestDraggingDockPkg == app.packageName) {
                         UiPrefs.setDockPinned(actions.context, dockOrder.map { it.packageName })
                         onDraggingDockPkgChange(null)
                         onDockDragOffsetYChange(0f)
@@ -875,8 +896,19 @@ fun LazyListScope.AppCenterDockSection(
                         .padding(end = 88.dp)
                         .size(18.dp)
                         .pointerInput(app.packageName) {
+                            // 463 拆分回归：段函数接的是 dockDragOffsetY 快照
+                            // （Float 参数），pointerInput 只在 key 变化时重建，
+                            // onDrag 读到的永远是建块时的旧值（0f）——累计偏移
+                            // 算不出，targetIdx 恒等于 curIdx，拖动永远换不了位
+                            // （行只剩“最新一次位移”的抖动，松手弹回原位）。
+                            // 拆分前这里直接读写委托属性（每次读都走 state.value，
+                            // 天然最新）。累计偏移改由手势域内局部变量持有、并
+                            // 镜像到状态（渲染用），恢复拆分前语义；步进算式抽成
+                            // 纯函数 dockDragStep（单测锁死）。
+                            var accOffsetY = 0f
                             detectDragGestures(
                                 onDragStart = {
+                                    accOffsetY = 0f
                                     onDraggingDockPkgChange(app.packageName)
                                     onDockDragOffsetYChange(0f)
                                     actions.hapticView.tickHaptic()
@@ -900,7 +932,8 @@ fun LazyListScope.AppCenterDockSection(
                                 },
                                 onDrag = { change, dragAmount ->
                                     change.consume()
-                                    onDockDragOffsetYChange(dockDragOffsetY + dragAmount.y)
+                                    accOffsetY += dragAmount.y
+                                    onDockDragOffsetYChange(accOffsetY)
                                     // v0.55.2：步进 = 行 60dp + 4dp 间距 = 64dp
                                     // （Bob 2026-11-03：一屏 8 个；旧 56dp 是 52dp 行时代的数，已作废）
                                     val rowH = with(density) {
@@ -910,13 +943,12 @@ fun LazyListScope.AppCenterDockSection(
                                         it.packageName == app.packageName
                                     }
                                     if (curIdx >= 0) {
-                                        val targetIdx = (
-                                            curIdx + (dockDragOffsetY / rowH).toInt()
-                                        ).coerceIn(0, dockOrder.size - 1)
-                                        if (targetIdx != curIdx) {
+                                        dockDragStep(curIdx, accOffsetY, rowH, dockOrder.size)?.let { (targetIdx, rebated) ->
                                             val item = dockOrder.removeAt(curIdx)
                                             dockOrder.add(targetIdx, item)
-                                            onDockDragOffsetYChange(dockDragOffsetY - (targetIdx - curIdx) * rowH)                                        }
+                                            accOffsetY = rebated
+                                            onDockDragOffsetYChange(accOffsetY)
+                                        }
                                     }
                                 }
                             )
