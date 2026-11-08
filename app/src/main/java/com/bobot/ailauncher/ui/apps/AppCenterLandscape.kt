@@ -56,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
@@ -219,6 +220,10 @@ fun AppCenterLandscape(
         // 未读组打磨（Bob 2026-11-08）：未读包集合，供列流里的 FlowItem.App
         // 判定该行是不是未读行（未读行带预览 + 左滑清理，非未读行一字不动）。
         val unreadPkgs = remember(unreadApps) { unreadApps.map { it.packageName }.toSet() }
+        // 465（Bob 2026-11-08 19:27 横屏未读幽灵图标也没有）：未读组首个
+        // 应用包名，供列流给首行挂幽灵信封（与竖屏首行信封同符号
+        // UnreadGlyph、同尺寸 32dp）；其余未读行不挂，只首行有标记。
+        val firstUnreadPkg = remember(unreadApps) { unreadApps.firstOrNull()?.packageName }
 
         // 按字母切列：每个字母从新列顶部开始，字母头占首行位（Bob）
         // 首列：[字母头 rowH][应用...]；续列：无头，应用直接从顶部开始
@@ -359,12 +364,20 @@ fun AppCenterLandscape(
         // 只在首次进入且非搜索态时定位一次——未读组在则未读列、否则首个
         // 有应用的字母列（A 有应用时就是 A 列）；收藏列仍在，点 ★ 回去。
         // 守卫保证不与用户后续滚动打架、不影响搜索态。
+        // 465（Bob 2026-11-08 19:27 横屏没从未读开始）：只有数据就绪
+        // （有未读列或有字母列、target 非空）时才消耗一次定位；首帧
+        // catalog 为空（AppCatalog.snapshot 初值 null，IO 构建）时
+        // target 为 null，不消耗，等 catalog 到位、columns 变化后再定位
+        // ——否则一次定位被空耗，列表停在收藏列（与竖屏
+        // dockInitialScrollDone 同款问题，竖屏已有此守卫、横屏漏了）。
         LaunchedEffect(columns, searchResults) {
             if (!initialScrollDone && searchResults == null) {
-                initialScrollDone = true
                 val target = unreadColIdx
                     ?: ('A'..'Z').firstNotNullOfOrNull { letterToCol[it] }
-                if (target != null) rowState.scrollToItem(target)
+                if (target != null) {
+                    initialScrollDone = true
+                    rowState.scrollToItem(target)
+                }
             }
         }
 
@@ -661,9 +674,9 @@ fun AppCenterLandscape(
                                         // v0.68.75（Bob）：收藏/隐藏区头，占一个完整行位
                                         // 应用中心升级：区头金色 → Title 色（金色只留
                                         // 选中环 / 已收藏★ 本体，不再成片刷）
-                                        // 464 起未读区头已删：SectionHeader 只剩收藏/隐藏，
-                                        // 列内未读幽灵信封随区头行一起去掉（它附在区头行上），
-                                        // 未读组的标记只剩 rail 信封（与竖屏首行信封同符号）。
+                                        // 464 起未读区头已删：SectionHeader 只剩收藏/隐藏；
+                                        // 465 起列内幽灵信封补回来了，挂在未读组首行（见
+                                        // FlowItem.App 未读分支），不再附在区头行上。
                                         Text(
                                             text = item.title,
                                             fontSize = AILauncherType.Body.fontSize,
@@ -777,16 +790,35 @@ fun AppCenterLandscape(
                                         // 注意：搜索结果分支（上）在另一处，不走这里，不带预览/左滑。
                                         val pkg = item.app.packageName
                                         if (pkg in unreadPkgs) {
-                                            ClearableUnreadRow(
-                                                enabled = pkg in activeNotifPkgs,
-                                                onClear = { onClearNotifications(pkg) }
-                                            ) {
-                                                LandscapeAppRow(
-                                                    app = item.app,
-                                                    onLaunch = onLaunch,
-                                                    compact = true,
-                                                    preview = unreadPreviews[pkg]
-                                                )
+                                            // 465（Bob 2026-11-08 19:27 横屏未读幽灵图标也没有）：
+                                            // 464 删区头时列内幽灵信封随区头行一起去掉了，现补回来——
+                                            // 挂在未读组首行（与竖屏同款）：首行左边淡色信封
+                                            // （UnreadGlyph，Title 色 35% 透明、32dp、start 16dp，
+                                            // 与竖屏改小后的尺寸一致）；未读行整体起首 48dp
+                                            // 给信封留位置（竖屏同款：行起首、信封占左），
+                                            // 其余未读行同起首、只首行挂信封。rail 信封保留。
+                                            Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
+                                                if (pkg == firstUnreadPkg) {
+                                                    UnreadGlyph(
+                                                        color = AILauncherColors.current.Title.copy(alpha = 0.35f),
+                                                        modifier = Modifier
+                                                            .align(Alignment.CenterStart)
+                                                            .padding(start = 16.dp)
+                                                            .size(32.dp)
+                                                    )
+                                                }
+                                                ClearableUnreadRow(
+                                                    enabled = pkg in activeNotifPkgs,
+                                                    onClear = { onClearNotifications(pkg) }
+                                                ) {
+                                                    LandscapeAppRow(
+                                                        app = item.app,
+                                                        onLaunch = onLaunch,
+                                                        compact = true,
+                                                        preview = unreadPreviews[pkg],
+                                                        modifier = Modifier.padding(start = 48.dp)
+                                                    )
+                                                }
                                             }
                                         } else {
                                             LandscapeAppRow(
