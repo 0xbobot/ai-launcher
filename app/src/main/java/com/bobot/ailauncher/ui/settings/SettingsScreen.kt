@@ -2,11 +2,8 @@
 
 package com.bobot.ailauncher.ui.settings
 
-import android.app.Activity
 import android.content.Intent
-import android.provider.Telephony
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -41,7 +38,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -76,17 +72,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
-import com.bobot.ailauncher.MainActivity
 import com.bobot.ailauncher.R
-import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.ConnectorState
 import com.bobot.ailauncher.data.ConnectorToggleAction
-import com.bobot.ailauncher.data.CrashEscape
-import com.bobot.ailauncher.data.CrashLog
-import com.bobot.ailauncher.data.NotificationRepository
-import com.bobot.ailauncher.data.SmsDiagCounts
-import com.bobot.ailauncher.data.SmsRepository
-import com.bobot.ailauncher.data.countSmsDiag
 import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.SMART_SOURCE_ORDER
@@ -124,19 +112,9 @@ import com.bobot.ailauncher.ui.settings.rememberPermissionState
 import com.bobot.ailauncher.ui.settings.rememberSmsPermissionOpener
 import com.bobot.ailauncher.util.rebindListener
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import com.bobot.ailauncher.ui.island.IslandToasts
@@ -862,331 +840,6 @@ fun SettingsScreen() {
             }
         }
 
-        // 分区：诊断——崩溃记录
-        item {
-            SettingsSectionTitle("诊断")
-        }
-
-        // v0.68.100（卫生批）：崩溃记录——侧载没有 Play Console，崩溃在这里
-        // 可见：本地留痕（环形 10 份）、可看全文、可经系统分享发给开发者、可删。
-        // 未读时标题带红点，进列表即标记已读（与冷启动提示一次的水位联动）。
-        item {
-            var crashExpanded by remember { mutableStateOf(false) }
-            var crashRecords by remember { mutableStateOf(CrashLog.list(context)) }
-            var crashUnread by remember { mutableStateOf(CrashLog.unreadCount(context)) }
-            var openedCrash by remember { mutableStateOf<Long?>(null) }
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                view.tickHaptic()
-                                crashExpanded = !crashExpanded
-                                if (crashExpanded) {
-                                    crashRecords = CrashLog.list(context)
-                                    CrashLog.markAllRead(context)
-                                    crashUnread = 0
-                                }
-                            },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "崩溃记录",
-                                    fontSize = AILauncherType.BodyLarge.fontSize,
-                                    fontWeight = FontWeight.Medium,
-                                    color = AILauncherColors.current.Title
-                                )
-                                if (crashUnread > 0) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.error)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = when {
-                                    crashRecords.isEmpty() -> "暂无记录，运行得很稳"
-                                    crashUnread > 0 -> "有 $crashUnread 条新记录，点开查看"
-                                    else -> "共 ${crashRecords.size} 条，点开查看或分享"
-                                },
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                lineHeight = 18.sp
-                            )
-                        }
-                        Icon(
-                            if (crashExpanded) Icons.Filled.KeyboardArrowUp
-                            else Icons.Filled.KeyboardArrowDown,
-                            contentDescription = if (crashExpanded) "收起" else "展开",
-                            tint = AILauncherColors.current.Hint
-                        )
-                    }
-                    if (crashExpanded && crashRecords.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        crashRecords.forEach { record ->
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        openedCrash =
-                                            if (openedCrash == record.epochMillis) null
-                                            else record.epochMillis
-                                    }
-                                    .padding(vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = java.text.SimpleDateFormat(
-                                        "yyyy-MM-dd HH:mm",
-                                        java.util.Locale.getDefault()
-                                    ).format(java.util.Date(record.epochMillis)),
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    color = AILauncherColors.current.Title
-                                )
-                                Text(
-                                    text = record.title,
-                                    fontSize = AILauncherType.Caption.fontSize,
-                                    color = AILauncherColors.current.Hint,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(top = 8.dp)
-                                )
-                            }
-                            if (openedCrash == record.epochMillis) {
-                                Text(
-                                    text = record.content,
-                                    fontSize = AILauncherType.Caption.fontSize,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = AILauncherColors.current.Body,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 240.dp)
-                                        .verticalScroll(rememberScrollState())
-                                )
-                                TextButton(
-                                    onClick = {
-                                        view.tickHaptic()
-                                        val send = Intent(Intent.ACTION_SEND).apply {
-                                            type = "text/plain"
-                                            putExtra(Intent.EXTRA_SUBJECT, "AI桌面崩溃记录")
-                                            putExtra(Intent.EXTRA_TEXT, record.content)
-                                        }
-                                        runCatching {
-                                            context.startActivity(
-                                                Intent.createChooser(send, "分享崩溃记录")
-                                            )
-                                        }.onFailure {
-                                            IslandToasts.show("没有可用的分享方式")
-                                        }
-                                    },
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    Text(
-                                        text = "分享这条",
-                                        fontSize = AILauncherType.Footnote.fontSize,
-                                        color = AILauncherColors.current.Accent
-                                    )
-                                }
-                            }
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    view.tickHaptic()
-                                    CrashLog.deleteAll(context)
-                                    crashRecords = emptyList()
-                                    openedCrash = null
-                                }
-                            ) {
-                                Text(
-                                    text = "全部删除",
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // 角标诊断（Bob 2026-11-08 凌晨：我们的角标 6、系统桌面 15，差 9 条要看清去向；
-        // 另：飞书 125 的中兴通道要实测，不要只推理）。只读展示，不做任何操作。
-        // 数字为 0 也如实显示 0，不隐藏。包名太长只显后半段。
-        // 诊断查询（短信库、ZTE provider）是阻塞调用，走后台线程跑。
-        item {
-            var smsDiag by remember { mutableStateOf<SmsDiagCounts?>(null) }
-            var smsGranted by remember { mutableStateOf(false) }
-            var notifGranted by remember { mutableStateOf(false) }
-            var defaultSmsPkg by remember { mutableStateOf<String?>(null) }
-            var visibleSmsPkg by remember { mutableStateOf<String?>(null) }
-            var feishuPkg by remember { mutableStateOf<String?>(null) }
-            val lastBroadcast by BadgeProbe.lastBroadcast.collectAsState()
-            val zteResult by BadgeProbe.zteResult.collectAsState()
-            // 监听实时状态（Bob 2026-11-08 20:42：通知栏有新通知，应用中心
-            // 却没有未读组/角标——一张诊断截图就要能对上应用中心的状态：是
-            // “连上了但 badge 是空的”还是“根本没连上”，一眼分得清）。
-            val listenerConnected by NotificationRepository.isConnected.collectAsState()
-            val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
-            LaunchedEffect(Unit) {
-                smsGranted = SmsRepository.hasSmsPermission(context)
-                notifGranted = NotificationRepository.hasAccess(context)
-                defaultSmsPkg = runCatching {
-                    Telephony.Sms.getDefaultSmsPackage(context)
-                }.getOrNull()
-                val diag = withContext(Dispatchers.IO) {
-                    val d = countSmsDiag(context)
-                    val vis = SmsRepository.resolveVisibleSmsPackage(context)
-                    val fei = BadgeProbe.resolveFeishuPackage(context)
-                    Triple(d, vis, fei)
-                }
-                smsDiag = diag.first
-                visibleSmsPkg = diag.second
-                feishuPkg = diag.third
-                withContext(Dispatchers.IO) {
-                    val candidates = (NotificationRepository.badgeCounts.value.keys +
-                        listOfNotNull(diag.third)).toSet()
-                    BadgeProbe.probeZteProvider(context, candidates)
-                }
-            }
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "角标诊断",
-                        fontSize = AILauncherType.BodyLarge.fontSize,
-                        fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.current.Title
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "只读：监听是否连着、当前角标、短信与飞书的真实数字，截个图就能对账",
-                        fontSize = AILauncherType.Footnote.fontSize,
-                        color = AILauncherColors.current.Hint,
-                        lineHeight = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    BadgeDiagRow("通知监听", if (listenerConnected) "已连接" else "未连接")
-                    BadgeDiagRow("通知读取权限", if (notifGranted) "已授" else "未授")
-                    BadgeDiagRow(
-                        "当前角标",
-                        if (badgeCounts.isEmpty()) "无"
-                        else badgeCounts.entries.sortedByDescending { it.value }.take(5)
-                            .joinToString("、") { "${shortPackageName(it.key)}=${it.value}" } +
-                            if (badgeCounts.size > 5) "…等 ${badgeCounts.size} 个" else ""
-                    )
-                    BadgeDiagRow("读取短信权限", if (smsGranted) "已授" else "未授")
-                    BadgeDiagRow("默认短信应用", shortPackageName(defaultSmsPkg))
-                    BadgeDiagRow("可见短信应用", shortPackageName(visibleSmsPkg))
-                    BadgeDiagRow("短信库未读（read=0）", "${smsDiag?.unreadRead0 ?: 0} 条")
-                    BadgeDiagRow("短信库未看（seen=0）", "${smsDiag?.unseenSeen0 ?: 0} 条")
-                    BadgeDiagRow("read=0 但 seen=1", "${smsDiag?.unreadButSeen ?: 0} 条")
-                    BadgeDiagRow("收件箱总数", "${smsDiag?.inboxTotal ?: 0} 条")
-                    BadgeDiagRow("最近 7 天收件箱", "${smsDiag?.inboxLast7Days ?: 0} 条")
-                    BadgeDiagRow(
-                        "角标广播",
-                        when (val b = lastBroadcast) {
-                            null -> "未收到"
-                            else -> "已收到：${shortPackageName(b.pkg)}=${b.count}（${
-                                java.text.SimpleDateFormat(
-                                    "HH:mm", java.util.Locale.getDefault()
-                                ).format(java.util.Date(b.at))
-                            }）"
-                        }
-                    )
-                    val zte = zteResult
-                    BadgeDiagRow(
-                        "ZTE provider",
-                        when {
-                            zte == null -> "探针未跑"
-                            zte.queryOk || zte.callOk -> "可读"
-                            else -> "不可读"
-                        }
-                    )
-                    BadgeDiagRow(
-                        "飞书数",
-                        when {
-                            feishuPkg == null -> "未安装"
-                            zte == null -> "—"
-                            else -> zte.counts[feishuPkg]?.let { "$it 条" } ?: "—"
-                        }
-                    )
-                    if (zte != null && !(zte.queryOk || zte.callOk)) {
-                        Text(
-                            text = "探针详情：${zte.queryDetail}；${zte.callDetail}",
-                            fontSize = AILauncherType.Caption.fontSize,
-                            color = AILauncherColors.current.Hint,
-                            lineHeight = 16.sp,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                    }
-                }
-            }
-        }
-        // 崩溃逃生通道测试入口（Bob 2026-11-08 定做核心版）：模拟一次崩溃循环，
-        // 验证恢复屏会出现。只写一条标明“测试”的假崩溃记录、不改真实数据；
-        // 点了就重启并出恢复屏，恢复屏点“重试”即回正常桌面，假记录可进
-        // 「崩溃记录」删除。测试用，不影响正常使用。
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "模拟崩溃循环（测试）",
-                        fontSize = AILauncherType.BodyLarge.fontSize,
-                        fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.current.Title
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "写一条假崩溃记录并重启，验证恢复屏会出现。测试用，不影响正常使用。",
-                        fontSize = AILauncherType.Footnote.fontSize,
-                        color = AILauncherColors.current.Hint,
-                        lineHeight = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(
-                        onClick = {
-                            view.tickHaptic()
-                            CrashEscape.simulateCrashLoop(context)
-                            val restart = Intent(context, MainActivity::class.java).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                            }
-                            context.startActivity(restart)
-                            (context as? Activity)?.finish()
-                        },
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text(
-                            text = "模拟一次崩溃循环",
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            color = AILauncherColors.current.Accent
-                        )
-                    }
-                }
-            }
-        }
         // 分区：关于——落款
         item {
             SettingsSectionTitle("关于")
@@ -1303,37 +956,6 @@ private fun SettingsConnectorRow(
  * 设置页分区标题：与应用中心分区标题同一语言
  * （Footnote / Medium / Hint / 左右 24dp）。
  */
-/** 角标诊断行：左标签、右数值；数值过长截断，不换行挤版式。 */
-@Composable
-private fun BadgeDiagRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            fontSize = AILauncherType.Body.fontSize,
-            color = AILauncherColors.current.Body,
-            modifier = Modifier.weight(1f)
-        )
-        Spacer(modifier = Modifier.width(16.dp))
-        Text(
-            text = value,
-            fontSize = AILauncherType.Body.fontSize,
-            color = AILauncherColors.current.Title,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-/** 包名太长只显后半段（超 24 字显 … + 末 21 字）；空显示“未设置”。 */
-private fun shortPackageName(pkg: String?): String {
-    if (pkg.isNullOrBlank()) return "未设置"
-    return if (pkg.length <= 24) pkg else "…" + pkg.takeLast(21)
-}
-
 @Composable
 private fun SettingsSectionTitle(text: String) {
     Text(
