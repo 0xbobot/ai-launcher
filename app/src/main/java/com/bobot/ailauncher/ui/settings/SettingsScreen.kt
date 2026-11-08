@@ -1030,13 +1030,20 @@ fun SettingsScreen() {
         item {
             var smsDiag by remember { mutableStateOf<SmsDiagCounts?>(null) }
             var smsGranted by remember { mutableStateOf(false) }
+            var notifGranted by remember { mutableStateOf(false) }
             var defaultSmsPkg by remember { mutableStateOf<String?>(null) }
             var visibleSmsPkg by remember { mutableStateOf<String?>(null) }
             var feishuPkg by remember { mutableStateOf<String?>(null) }
             val lastBroadcast by BadgeProbe.lastBroadcast.collectAsState()
             val zteResult by BadgeProbe.zteResult.collectAsState()
+            // 监听实时状态（Bob 2026-11-08 20:42：通知栏有新通知，应用中心
+            // 却没有未读组/角标——一张诊断截图就要能对上应用中心的状态：是
+            // “连上了但 badge 是空的”还是“根本没连上”，一眼分得清）。
+            val listenerConnected by NotificationRepository.isConnected.collectAsState()
+            val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
             LaunchedEffect(Unit) {
                 smsGranted = SmsRepository.hasSmsPermission(context)
+                notifGranted = NotificationRepository.hasAccess(context)
                 defaultSmsPkg = runCatching {
                     Telephony.Sms.getDefaultSmsPackage(context)
                 }.getOrNull()
@@ -1070,12 +1077,21 @@ fun SettingsScreen() {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "只读：短信角标与飞书角标的真实数字，截个图就能对账",
+                        text = "只读：监听是否连着、当前角标、短信与飞书的真实数字，截个图就能对账",
                         fontSize = AILauncherType.Footnote.fontSize,
                         color = AILauncherColors.current.Hint,
                         lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
+                    BadgeDiagRow("通知监听", if (listenerConnected) "已连接" else "未连接")
+                    BadgeDiagRow("通知读取权限", if (notifGranted) "已授" else "未授")
+                    BadgeDiagRow(
+                        "当前角标",
+                        if (badgeCounts.isEmpty()) "无"
+                        else badgeCounts.entries.sortedByDescending { it.value }.take(5)
+                            .joinToString("、") { "${shortPackageName(it.key)}=${it.value}" } +
+                            if (badgeCounts.size > 5) "…等 ${badgeCounts.size} 个" else ""
+                    )
                     BadgeDiagRow("读取短信权限", if (smsGranted) "已授" else "未授")
                     BadgeDiagRow("默认短信应用", shortPackageName(defaultSmsPkg))
                     BadgeDiagRow("可见短信应用", shortPackageName(visibleSmsPkg))

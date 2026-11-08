@@ -38,6 +38,15 @@ class LauncherNotificationService : NotificationListenerService() {
         private var instance: LauncherNotificationService? = null
 
         /**
+         * 服务实例是否活着（监听自查重绑用，Bob 2026-11-08 20:42）：
+         * 与 NotificationRepository.isConnected 是两路独立信号——flag 只在
+         * onListenerConnected / onListenerDisconnected 里变，个别机型上
+         * onListenerDisconnected 漏回调时 flag 会陈旧地停在 true；实例在
+         * onDestroy 里也会清掉。任一路说“没连上”就重绑。
+         */
+        fun isBound(): Boolean = instance != null
+
+        /**
          * 取消该包的全部在用通知（未读组左滑清理，Bob 2026-11-08）：
          * 只取消通知，不改短信、不标已读、不碰用户数据。取消后系统回调
          * onNotificationRemoved，角标随之重算。未连接时静默无-op。
@@ -89,6 +98,10 @@ class LauncherNotificationService : NotificationListenerService() {
         unregisterBadgeReceiver()
         unregisterSmsObserver()
         if (instance == this) instance = null
+        // 监听自查重绑（Bob 2026-11-08 20:42）：onDestroy 里实例已清，flag
+        // 也必须清——之前这里漏了，服务销毁后 isConnected 会陈旧地停在 true，
+        // 前台复核误判“已连接”而不重绑。
+        NotificationRepository.setConnected(false)
         super.onDestroy()
     }
 
