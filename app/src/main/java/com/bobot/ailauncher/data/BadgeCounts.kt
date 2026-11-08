@@ -5,12 +5,14 @@ package com.bobot.ailauncher.data
  * 同晚 Bob 修正口径：角标要的是应用的未读数据，不是通知栏的消息数，
  * 通知栏的数保留作兜底）。
  *
- * 每包角标数 = 下面三路的最大值：
+ * 每包角标数 = 下面四路的最大值：
  * ① 短信库未读数（仅默认短信应用包，需 READ_SMS）——最准的短信未读数，
  *    不受通知栏清掉影响；
  * ② 通知 number 最大值（应用通过 setNumber 上报的未读数，是 Feishu/微信
  *    这类应用目前唯一能拿到的未读信号；未设为 0，不参与）；
  * ③ 在用通知条数（兜底，保留 450 的逻辑）。
+ * ④ 粘性数（Bob 2026-11-08：应用最后一次上报的 number，通知栏清掉后仍粘住；
+ *    启动应用或新通知 number=0 时清掉；不会立刻变出飞书 125）。
  * 展示列表只取最新 20 条，计数必须从完整列表算——否则“125 条”会被截成
  * 20 条以内的数（截断坑，本文件单测锁死）。
  * 数字文案：1–99 显示数字，≥100 显示 "99+"（Bob 亲选），0 条不显示。
@@ -43,35 +45,46 @@ fun aggregateNumberMax(numbers: List<Pair<String, Int>>): Map<String, Int> {
  * - numberMax：每包通知 number 最大值（应用自报未读数）
  * - smsUnread：短信库未读数，只作用于默认短信应用包
  * - defaultSmsPackage：默认短信应用包名（null 时短信数不起作用）
+ * - stickyCounts：粘性数（Bob 2026-11-08），每包取最大值；为空时等价于旧的三路合并。
  */
 fun combineBadgeCounts(
     notifCounts: Map<String, Int>,
     numberMax: Map<String, Int>,
     smsUnread: Int,
-    defaultSmsPackage: String?
+    defaultSmsPackage: String?,
+    stickyCounts: Map<String, Int> = emptyMap()
 ): Map<String, Int> = combineBadgeCounts(
-    notifCounts, numberMax, smsUnread, listOfNotNull(defaultSmsPackage)
+    notifCounts, numberMax, smsUnread, listOfNotNull(defaultSmsPackage),
+    stickyCounts = stickyCounts
 )
 
 /**
- * 合并三路角标数 + 探针第四路（纯函数），每包取最大值；0 的包不进 map：
+ * 合并三路角标数 + 探针第四路 + 粘性数第五路（纯函数），每包取最大值；0 的包不进 map：
  * - smsPackages：短信数要落的包（默认短信应用 + 用户实际看到的短信应用，
  *   点号码发短信时会打开的那个；两者相同时只记一处，不同则两处都记，各取最大值。
  *   Bob 2026-11-08 凌晨：短信角标 6、系统桌面 15，机制已通——归属加固作兜底，
  *   主因是短信库 read 标志与应用自己的未读定义对不上，不是记错包）
  * - extraCounts：探针第四路（角标广播 + ZTE provider 读到的数），每包取最大值；
  *   为空时等价于旧的三路合并。探针失败时调用方传空 map，角标行为一字不变。
+ * - stickyCounts：粘性数第五路（Bob 2026-11-08：应用最后一次上报的 number，
+ *   通知栏清掉后仍粘住；启动应用或新通知 number=0 时清掉）；为空时不影响旧行为。
  */
 fun combineBadgeCounts(
     notifCounts: Map<String, Int>,
     numberMax: Map<String, Int>,
     smsUnread: Int,
     smsPackages: Collection<String>,
-    extraCounts: Map<String, Int> = emptyMap()
+    extraCounts: Map<String, Int> = emptyMap(),
+    stickyCounts: Map<String, Int> = emptyMap()
 ): Map<String, Int> {
     val out = mutableMapOf<String, Int>()
-    for (pkg in notifCounts.keys + numberMax.keys + extraCounts.keys) {
-        val v = maxOf(notifCounts[pkg] ?: 0, numberMax[pkg] ?: 0, extraCounts[pkg] ?: 0)
+    for (pkg in notifCounts.keys + numberMax.keys + extraCounts.keys + stickyCounts.keys) {
+        val v = maxOf(
+            notifCounts[pkg] ?: 0,
+            numberMax[pkg] ?: 0,
+            extraCounts[pkg] ?: 0,
+            stickyCounts[pkg] ?: 0
+        )
         if (v > 0) out[pkg] = v
     }
     if (smsUnread > 0) {

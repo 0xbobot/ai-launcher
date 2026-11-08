@@ -109,6 +109,31 @@ object SmsRepository {
     }
 
     /**
+     * 最新一条未读短信正文（只读，不存；未读组预览用，Bob 2026-11-08）。
+     * 无 READ_SMS、无未读短信、查询失败 → null（调用方退回通知正文或不显示预览行）。
+     */
+    fun latestUnreadSmsBody(context: Context): String? {
+        if (!hasSmsPermission(context)) return null
+        return try {
+            context.contentResolver.query(
+                Telephony.Sms.Inbox.CONTENT_URI,
+                arrayOf(Telephony.Sms.BODY),
+                "${Telephony.Sms.READ} = 0",
+                null,
+                "${Telephony.Sms.DATE} DESC LIMIT 1"
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(Telephony.Sms.BODY)
+                    if (idx >= 0) cursor.getString(idx) else null
+                } else null
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "latestUnreadSmsBody failed", e)
+            null
+        }
+    }
+
+    /**
      * 用户实际看到的短信应用（点号码发短信时会打开的那个）：
      * 用 PackageManager 解析 ACTION_SENDTO + smsto: 能打开的应用。
      * 与默认短信应用可能不同（中兴机上桌面“短信”图标与默认短信处理程序

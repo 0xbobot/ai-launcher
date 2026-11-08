@@ -14,6 +14,7 @@ import android.service.notification.StatusBarNotification
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.core.event.LauncherEvent
 import com.bobot.ailauncher.data.BadgeProbe
+import com.bobot.ailauncher.data.BadgeStickyStore
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SimpleNotification
 import com.bobot.ailauncher.data.SmsRepository
@@ -29,6 +30,32 @@ import com.bobot.ailauncher.data.combineBadgeCounts
  */
 class LauncherNotificationService : NotificationListenerService() {
 
+    companion object {
+        /** 正在连接的服务实例（未读组左滑清理用）：未连接时为 null，取消静默无-op。 */
+        @Volatile
+        private var instance: LauncherNotificationService? = null
+
+        /**
+         * 取消该包的全部在用通知（未读组左滑清理，Bob 2026-11-08）：
+         * 只取消通知，不改短信、不标已读、不碰用户数据。取消后系统回调
+         * onNotificationRemoved，角标随之重算。未连接时静默无-op。
+         */
+        fun cancelNotificationsForPackage(packageName: String) {
+            instance?.cancelPackageNotifications(packageName)
+        }
+    }
+
+    /** 取消该包的全部在用通知（实例方法，见 companion 说明）。 */
+    private fun cancelPackageNotifications(packageName: String) {
+        try {
+            activeNotifications
+                .filter { it.packageName == packageName }
+                .forEach { cancelNotification(it.key) }
+        } catch (_: Exception) {
+            // 取消失败不报错（角标不动，用户可再滑一次）
+        }
+    }
+
     /** 短信库变化观察者（角标用）：短信在应用里读了/删了会触发角标重算，
      * 通知事件覆盖不到“应用内读短信”的场景。只在监听已连接且授了 READ_SMS 时注册。 */
     private var smsObserverRegistered = false
@@ -40,6 +67,7 @@ class LauncherNotificationService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        instance = this
         NotificationRepository.setConnected(true)
         pushActiveNotifications()
         registerSmsObserver()
@@ -50,6 +78,7 @@ class LauncherNotificationService : NotificationListenerService() {
     override fun onListenerDisconnected() {
         unregisterBadgeReceiver()
         unregisterSmsObserver()
+        if (instance == this) instance = null
         super.onListenerDisconnected()
         NotificationRepository.setConnected(false)
     }
@@ -57,6 +86,7 @@ class LauncherNotificationService : NotificationListenerService() {
     override fun onDestroy() {
         unregisterBadgeReceiver()
         unregisterSmsObserver()
+        if (instance == this) instance = null
         super.onDestroy()
     }
 
@@ -162,6 +192,10 @@ class LauncherNotificationService : NotificationListenerService() {
                 it.toSimpleNotification()?.let { n ->
                     EventBus.emit(LauncherEvent.NotificationReceived(n))
                 }
+                // 粘性数（Bob 2026-11-08）：新通知到达即记/清 number（事件驱动，
+                // 只在到达时写；只对计入角标的通知记——进行中通知（音乐/导航）
+                // 的 number 不是未读消息，不应粘住）。
+                BadgeStickyStore.recordPostedNumber(this, it.packageName, it.notification.number)
             }
         }
         pushActiveNotifications()
@@ -195,6 +229,11 @@ class LauncherNotificationService : NotificationListenerService() {
             // （toSimpleNotification 只丢标题正文都空的条目——这类通知无可读内容。）
             val all = active.mapNotNull { sbn -> sbn.toSimpleNotification() }
             updateBadgeCounts(active, all)
+            // 未读组预览 + 左滑启用判定（Bob 2026-11-08）：每包最新一条在用通知，
+            // 从完整列表汇总（不截 20 条），与角标计数同一口径。
+            val latestByPkg = all.groupBy { it.packageName }
+                .mapValues { (_, list) -> list.maxByOrNull { it.time }!! }
+            NotificationRepository.updateLatestActiveByPackage(latestByPkg)
             val list = all.sortedByDescending { it.time }.take(20)
             NotificationRepository.update(list)
         } catch (_: SecurityException) {
@@ -203,10 +242,12 @@ class LauncherNotificationService : NotificationListenerService() {
     }
 
     /**
-     * 角标三路合并 + 探针第四路（Bob 2026-11-07 晚：角标要的是应用的未读数据，
+     * 角标三路合并 + 探针第四路 + 粘性数第五路（Bob 2026-11-07 晚：角标要的是应用的未读数据，
      * 不是通知栏的消息数；通知栏的数保留作兜底）。每包取最大值：
      * ① 短信库未读数（需 READ_SMS）② 通知 number 最大值（应用自报未读数）
-     * ③ 在用通知条数（兜底）④ 探针（角标广播 + ZTE provider 读到的数）。
+     * ③ 在用通知条数（兜底）④ 探针（角标广播 + ZTE provider 读到的数）
+     * ⑤ 粘性数（Bob 2026-11-08：应用最后一次上报的 number，通知栏清掉后仍粘住；
+     * 启动应用或新通知 number=0 时清掉；不会立刻变出飞书 125）。
      * 短信数记到默认短信应用与用户实际看到的短信应用两个包上（各取最大值），
      * 两者相同时只记一处（Bob 2026-11-08 凌晨：短信角标 6、系统桌面 15，
      * 机制已通，归属加固只作兜底，主因是 read 标志与应用未读定义对不上）。
@@ -229,10 +270,13 @@ class LauncherNotificationService : NotificationListenerService() {
         val visibleSms = SmsRepository.resolveVisibleSmsPackage(this)
         val smsPackages = listOfNotNull(defaultSms, visibleSms).toSet()
         val smsUnread = SmsRepository.countUnreadSms(this)
+        // 粘性数第五路（Bob 2026-11-08）：应用最后一次上报的 number，通知栏清掉后仍粘住。
+        val stickyCounts = BadgeStickyStore.loadNumbers(this)
         NotificationRepository.updateBadgeCounts(
             combineBadgeCounts(
                 notifCounts, numberMax, smsUnread, smsPackages,
-                extraCounts = BadgeProbe.currentProbeCounts()
+                extraCounts = BadgeProbe.currentProbeCounts(),
+                stickyCounts = stickyCounts
             )
         )
     }

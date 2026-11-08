@@ -852,9 +852,10 @@ private fun FoldGlyph(
 /**
  * 未读组：线性信封——与房子/星星/眼睛/收纳盒同款细描边+圆角。
  * 外框 + 封口两条斜线（左右上角向中下收），14dp 下仍可辨。
+ * internal：未读组幽灵标记（AppCenter 竖屏 + AppCenterLandscape 横屏）与 rail 共用同一符号。
  */
 @Composable
-private fun UnreadGlyph(
+internal fun UnreadGlyph(
     color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
 ) {
