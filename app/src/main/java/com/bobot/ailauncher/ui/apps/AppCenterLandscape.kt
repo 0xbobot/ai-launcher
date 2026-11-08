@@ -246,12 +246,12 @@ fun AppCenterLandscape(
                 }
             }
             // 未读组（Bob 2026-11-07 晚）：收藏之后、A 组之前最优先；始终展开、
-            // 不折叠；区头“未读 · N 个”同收藏/隐藏区头样式，组内应用按列流续排。
-            // 搜索态不走列流，未读组不参与。
+            // 不折叠；464 起区头“未读 · N 个”已删（Bob 2026-11-08 18:37），
+            // 未读应用直接续排进列流、不占区头行位；组仍以“收藏之后第一列 +
+            // rail 信封”标识。搜索态不走列流，未读组不参与。
             if (unreadApps.isNotEmpty()) {
                 flush()
-                cur.add(FlowItem.SectionHeader("未读 · ${unreadApps.size} 个"))
-                var cap = colCap() - 1
+                var cap = colCap()
                 var count = 0
                 unreadApps.forEach { app ->
                     if (count >= cap) {
@@ -341,10 +341,11 @@ fun AppCenterLandscape(
             columns.indexOfFirst { col -> col.any { it is FlowItem.FoldHeader } }
                 .takeIf { it >= 0 }
         }
-        // 未读组：信封专位 → 未读区头所在列
+        // 未读组：信封专位 → 未读应用所在列（464 起区头已删，改按列内
+        // 是否含未读应用定位；rail 信封保留）。
         val unreadColIdx = remember(columns) {
             columns.indexOfFirst { col ->
-                col.any { it is FlowItem.SectionHeader && it.title.startsWith("未读") }
+                col.any { it is FlowItem.App && it.app.packageName in unreadPkgs }
             }.takeIf { it >= 0 }
         }
 
@@ -660,44 +661,20 @@ fun AppCenterLandscape(
                                         // v0.68.75（Bob）：收藏/隐藏区头，占一个完整行位
                                         // 应用中心升级：区头金色 → Title 色（金色只留
                                         // 选中环 / 已收藏★ 本体，不再成片刷）
-                                        // 未读组幽灵信封（Bob 2026-11-08）：未读区头左边大号淡色信封，
-                                        // 与竖屏未读组幽灵信封同一符号、同样式（40dp、Title 色 35% 透明）；
-                                        // 收藏/隐藏区头不动（★/👁 已在标题文字里）。
-                                        if (item.title.startsWith("未读")) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier
-                                                    .height(rowH)
-                                                    .padding(start = 16.dp)
-                                            ) {
-                                                UnreadGlyph(
-                                                    color = AILauncherColors.current.Title.copy(alpha = 0.35f),
-                                                    modifier = Modifier.size(40.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text(
-                                                    text = item.title,
-                                                    fontSize = AILauncherType.Body.fontSize,
-                                                    fontWeight = FontWeight.Bold,
-                                                    letterSpacing = 2.sp,
-                                                    color = AILauncherColors.current.Title,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        } else {
-                                            Text(
-                                                text = item.title,
-                                                fontSize = AILauncherType.Body.fontSize,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 2.sp,
-                                                color = AILauncherColors.current.Title,
-                                                modifier = Modifier
-                                                    .height(rowH)
-                                                    .padding(start = 16.dp)
-                                                    .wrapContentHeight(Alignment.CenterVertically)
-                                            )
-                                        }
+                                        // 464 起未读区头已删：SectionHeader 只剩收藏/隐藏，
+                                        // 列内未读幽灵信封随区头行一起去掉（它附在区头行上），
+                                        // 未读组的标记只剩 rail 信封（与竖屏首行信封同符号）。
+                                        Text(
+                                            text = item.title,
+                                            fontSize = AILauncherType.Body.fontSize,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 2.sp,
+                                            color = AILauncherColors.current.Title,
+                                            modifier = Modifier
+                                                .height(rowH)
+                                                .padding(start = 16.dp)
+                                                .wrapContentHeight(Alignment.CenterVertically)
+                                        )
                                     }
                                     is FlowItem.FoldHeader -> {
                                         // 折叠组（419）：区头行位，点按收展；样式同区头
@@ -892,7 +869,7 @@ fun AppCenterLandscape(
                                 scope.launch { rowState.animateScrollToItem(idx) }
                             }
                         }
-                        // 未读组：信封专位 → 未读区头所在列
+                        // 未读组：信封专位 → 未读应用所在列（464 起区头已删）
                         is RailItem.Unread -> {
                             unreadColIdx?.let { idx ->
                                 scope.launch { rowState.animateScrollToItem(idx) }

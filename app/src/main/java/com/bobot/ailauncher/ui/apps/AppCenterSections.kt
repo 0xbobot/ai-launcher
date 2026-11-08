@@ -134,9 +134,6 @@ data class AppCenterStuckState(
     val stuckHiddenAlpha: Float,
     val stuckFoldAlpha: Float,
     val stuckUnread: Boolean,
-    val unreadPushPx: Float,
-    val animatedUnreadPushPx: Float,
-    val stuckUnreadAlpha: Float,
 )
 
 @Composable
@@ -151,7 +148,7 @@ fun rememberAppCenterStuckState(
     hiddenUnlocked: Boolean,
     dockApps: List<AppInfo>,
     unreadVisible: Boolean,
-    unreadHeaderIndex: Int,
+    unreadFirstIndex: Int,
     reduceMotion: Boolean,
     density: Density,
 ): AppCenterStuckState {
@@ -297,16 +294,17 @@ fun rememberAppCenterStuckState(
         }
     }
     // v0.41.31：Dock 悬停被 A 顶走（与字母顶走逻辑一致）
-    val dockPushPx: Float by remember(dockApps, azGroups, unreadVisible, unreadHeaderIndex) {
+    val dockPushPx: Float by remember(dockApps, azGroups, unreadVisible, unreadFirstIndex) {
         derivedStateOf {
             if (!stuckDock) return@derivedStateOf 0f
             @Suppress("UNUSED_EXPRESSION")
             listState.firstVisibleItemScrollOffset
-            // 未读组在时，Dock 悬停由未读组头顶走（未读组紧跟 Dock 之后）；
+            // 未读组在时，Dock 悬停由未读首行顶走（未读组紧跟 Dock 之后；
+            // 464 起组头已删，顶走锚点就是未读第一行）；
             // 否则仍由首个字母组顶走（旧口径）。
             val off = if (unreadVisible) {
                 listState.layoutInfo.visibleItemsInfo
-                    .firstOrNull { it.index == unreadHeaderIndex }
+                    .firstOrNull { it.index == unreadFirstIndex }
                     ?.offset?.toFloat() ?: return@derivedStateOf 0f
             } else {
                 val firstLetter = letters.firstOrNull() ?: return@derivedStateOf 0f
@@ -349,47 +347,25 @@ fun rememberAppCenterStuckState(
         animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
         label = "stuckFoldAlpha"
     )
-    // 未读组：未读段幽灵——组头刚开始滚出就接管（427，同字母/折叠），
-    // 直到滚出未读段；与 stuckFold 同理（组头已走＋段内仍有可见项）。
-    val stuckUnread: Boolean by remember(unreadVisible, unreadHeaderIndex) {
+    // 未读组：未读段幽灵——首行刚开始滚出就隐藏行内信封（427，同字母/折叠），
+    // 直到滚出未读段；与 stuckFold 同理（首行已走＋段内仍有可见项）。
+    // 464 起组头已删（Bob：组头“未读 · N 个”不重要），吸顶“未读”标题
+    // 一并取消，stuckUnread 不再交接给任何吸顶标题，只作行内信封的
+    // 隐藏信号：首行完整可见时信封在，首行一开始滚出信封即消失
+    // （不留吸顶标题占位，也不与 Dock ★ 悬停重叠）。
+    val stuckUnread: Boolean by remember(unreadVisible, unreadFirstIndex) {
         derivedStateOf {
             if (!unreadVisible) return@derivedStateOf false
             val vis = listState.layoutInfo.visibleItemsInfo
-            val first = vis.firstOrNull { it.key == "unread-header" }
+            val first = vis.firstOrNull { it.index == unreadFirstIndex }
             val firstGone = first == null || first.offset < 0
             val unreadInView = vis.any {
-                it.key == "unread-header" || it.key == "sp:unread" ||
+                it.key == "sp:unread" ||
                     (it.key is String && (it.key as String).startsWith("u:"))
             }
             firstGone && unreadInView
         }
     }
-    // 未读组：未读幽灵被首个字母组顶走（与 Dock 幽灵被 A 顶走同逻辑）；
-    // 无字母组时不顶（幽灵随滚出自然消失）。
-    val unreadPushPx: Float by remember(unreadVisible, letters) {
-        derivedStateOf {
-            if (!stuckUnread) return@derivedStateOf 0f
-            @Suppress("UNUSED_EXPRESSION")
-            listState.firstVisibleItemScrollOffset
-            val firstLetter = letters.firstOrNull() ?: return@derivedStateOf 0f
-            val anchor = letterAnchors[firstLetter] ?: return@derivedStateOf 0f
-            val off = listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.index == anchor }
-                ?.offset?.toFloat() ?: return@derivedStateOf 0f
-            val pushZonePx = with(density) { 48.dp.toPx() }
-            if (off < pushZonePx) off - pushZonePx else 0f
-        }
-    }
-    val animatedUnreadPushPx by animateFloatAsState(
-        targetValue = unreadPushPx,
-        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
-        label = "unreadPush"
-    )
-    val stuckUnreadAlpha by animateFloatAsState(
-        targetValue = if (stuckUnread) 1f else 0f,
-        animationSpec = if (reduceMotion) tween(0) else PetMotion.PadStandard,
-        label = "stuckUnreadAlpha"
-    )
     return AppCenterStuckState(
         stuckLetter = stuckLetter,
         stuckPushPx = stuckPushPx,
@@ -406,9 +382,6 @@ fun rememberAppCenterStuckState(
         stuckHiddenAlpha = stuckHiddenAlpha,
         stuckFoldAlpha = stuckFoldAlpha,
         stuckUnread = stuckUnread,
-        unreadPushPx = unreadPushPx,
-        animatedUnreadPushPx = animatedUnreadPushPx,
-        stuckUnreadAlpha = stuckUnreadAlpha,
     )
 }
 
@@ -969,34 +942,19 @@ fun LazyListScope.AppCenterUnreadSection(
     actions: AppCenterRowActions,
 ) {
     // 未读组（Bob 2026-11-07 晚）：A 组之前最优先；始终展开、不折叠；
-    // 组头“未读 · N 个”对齐折叠组“不常用 · N 个”样式（BodyLarge、
-    // Title 色、无 chevron、不可点）；行复用 AppRow（角标照常画、
-    // 长按菜单与生长式展开都在），组内按未读数从大到小排；
+    // 464 起组头已删（Bob 2026-11-08 18:37：“未读 · N 个”没那么重要，
+    // 删除吧）——段内只有 N 行 + 组间呼吸，首行就是组的开头；
+    // 行复用 AppRow（角标照常画、长按菜单与生长式展开都在），
+    // 组内按未读数从大到小排；
     // N==0 时整组不出现，列表仍从 A 开始。搜索态不走这里（搜索
     // 结果分支在上），取消搜索后落点见 LaunchedEffect(searching)。
     if (unreadVisible) {
-        item(key = "unread-header") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 72.dp, end = 64.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "未读 · ${unreadApps.size} 个",
-                    fontSize = AILauncherType.BodyLarge.fontSize,
-                    color = AILauncherColors.current.Title,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
         itemsIndexed(unreadApps, key = { _, app -> "u:${app.packageName}" }) { index, app ->
             Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
                 // 幽灵信封（Bob 2026-11-08）：未读组首行左边大号淡色信封，
                 // 与字母组幽灵字母同一样式（40dp、Title 色 35% 透明）、同位置
-                // （居左、start 24dp）；吸顶“未读”出现时隐藏，不与它重叠。
+                // （居左、start 24dp）；首行刚开始滚出即隐藏（stuckUnread，
+                // 464 起锚在首行，不再有吸顶“未读”标题可交接）。
                 // 信封是未读组在 rail 里的符号，两处同一符号保持一致。
                 if (index == 0 && !stuckUnread) {
                     UnreadGlyph(
@@ -1498,7 +1456,9 @@ fun LazyListScope.AppCenterHiddenSection(
 
 /**
  * 吸顶覆盖层（原 2178–2249 行）：Dock ★ / 隐藏眼 / 折叠“不常用” /
- * 未读“未读” / 字母幽灵。BoxScope：overlay 用 align(TopStart) 定位。
+ * 字母幽灵。464 起未读组无吸顶标题（组头已删，Bob 2026-11-08 18:37），
+ * 未读段不参与吸顶 overlay；行内信封的隐藏仍由 stuckUnread 控制。
+ * BoxScope：overlay 用 align(TopStart) 定位。
  * stuckState 在函数内一次性解构，段内引用名与原来一致。
  */
 @Composable
@@ -1511,9 +1471,10 @@ fun BoxScope.AppCenterStuckOverlays(
     val (
         stuckLetter, stuckPushPx, animatedPushPx, stuckHidden, stuckFold,
         foldPushPx, animatedFoldPushPx, stuckDock, dockPushPx, animatedDockPushPx,
-        stuckLetterAlpha, stuckDockAlpha, stuckHiddenAlpha, stuckFoldAlpha,
-        stuckUnread, unreadPushPx, animatedUnreadPushPx, stuckUnreadAlpha
+        stuckLetterAlpha, stuckDockAlpha, stuckHiddenAlpha, stuckFoldAlpha
     ) = stuckState
+    // 注：stuckUnread 不在此解构——它只驱动未读首行行内信封的隐藏
+    // （AppCenterUnreadSection），吸顶 overlay 里不再用它。
     // v0.41.8：悬停幽灵字母——当前组首行刚开始滚出就接管显示（427），
     // 下一组首行接近时被顶走；外层 clipToBounds 保证不会顶到搜索栏上面（Bob）。
     // 应用中心升级：透明度跟行内幽灵字母同为 0.35；Bob 2026-11-03 起编辑态不再隐藏
@@ -1561,18 +1522,6 @@ fun BoxScope.AppCenterStuckOverlays(
                     .padding(start = 24.dp, top = 16.dp)
                     .offset { IntOffset(0, animatedFoldPushPx.roundToInt()) }
             )
-        } else if (stuckUnread) {
-            // 未读组：未读段悬停——“未读”文字（同折叠组“不常用”口径，
-            // Callout 档塞进幽灵留白）
-            Text(
-                text = "未读",
-                fontSize = AILauncherType.Callout.fontSize,
-                color = AILauncherColors.current.Title.copy(alpha = 0.35f * stuckUnreadAlpha),
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = 24.dp, top = 16.dp)
-                    .offset { IntOffset(0, animatedUnreadPushPx.roundToInt()) }
-            )
         } else if (sl != null && !isLandscapeAc) {
             Text(
                 text = sl.toString(),
@@ -1604,7 +1553,7 @@ fun BoxScope.AppCenterRailSection(
     unreadVisible: Boolean,
     foldHeaderIndex: Int,
     hiddenHeaderIndex: Int,
-    unreadHeaderIndex: Int,
+    unreadFirstIndex: Int,
     homeTarget: UiPrefs.HomeRailTarget?,
     searchResults: List<AppInfo>?,
     flashTick: Int,
@@ -1715,8 +1664,8 @@ fun BoxScope.AppCenterRailSection(
                 is RailItem.Eye -> scope.launch { listState.scrollToItem(hiddenHeaderIndex) }
                 // 折叠组（419）：收纳盒专位 → 折叠组头锚点
                 is RailItem.Fold -> scope.launch { listState.scrollToItem(foldHeaderIndex) }
-                // 未读组：信封专位 → 未读组头锚点
-                is RailItem.Unread -> scope.launch { listState.scrollToItem(unreadHeaderIndex) }
+                // 未读组：信封专位 → 未读首行锚点（464 起组头已删）
+                is RailItem.Unread -> scope.launch { listState.scrollToItem(unreadFirstIndex) }
                 is RailItem.Letter -> glideToLetter(item.char)
                 is RailItem.Separator -> {}
             }
