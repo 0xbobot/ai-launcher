@@ -6,7 +6,7 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 
 /**
- * 系统面板服务：用无障碍全局动作打开通知中心 / 控制中心（快捷设置）。
+ * 系统面板服务：用无障碍全局动作打开控制中心（快捷设置）。
  * 需要用户在系统设置 → 无障碍中手动开启。
  */
 class PanelAccessibilityService : AccessibilityService() {
@@ -39,11 +39,6 @@ class PanelAccessibilityService : AccessibilityService() {
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
             ) ?: return false
             return services.contains(context.packageName)
-        }
-
-        /** 打开通知中心（通知栏）；返回是否成功触发 */
-        fun openNotificationCenter(): Boolean {
-            return instance?.performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS) == true
         }
 
         /** 打开控制中心（快捷设置面板）；返回是否成功触发 */
