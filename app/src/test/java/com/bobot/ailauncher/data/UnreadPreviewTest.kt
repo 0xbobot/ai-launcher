@@ -130,4 +130,40 @@ class UnreadPreviewTest {
             )
         )
     }
+
+    // ---------- 每包最新一条在用通知（2026-11-08 应用中心崩溃 hotfix：去 `!!`） ----------
+
+    @Test
+    fun `latestNotificationByPackage - empty list gives empty map`() {
+        assertEquals(emptyMap<String, SimpleNotification>(), latestNotificationByPackage(emptyList()))
+    }
+
+    @Test
+    fun `latestNotificationByPackage - one per package is itself`() {
+        val a = notif("com.example.a", text = "a1").copy(time = 100L)
+        val b = notif("com.example.b", text = "b1").copy(time = 200L)
+        val out = latestNotificationByPackage(listOf(a, b))
+        assertEquals(mapOf("com.example.a" to a, "com.example.b" to b), out)
+    }
+
+    @Test
+    fun `latestNotificationByPackage - same package keeps the latest by time`() {
+        val old = notif("com.example.a", text = "old").copy(time = 100L)
+        val newer = notif("com.example.a", text = "new").copy(time = 300L)
+        val mid = notif("com.example.a", text = "mid").copy(time = 200L)
+        val out = latestNotificationByPackage(listOf(old, newer, mid))
+        assertEquals(1, out.size)
+        assertEquals("new", out["com.example.a"]?.text)
+    }
+
+    @Test
+    fun `latestNotificationByPackage - mixed packages keep latest per package`() {
+        val a1 = notif("com.example.a", text = "a1").copy(time = 100L)
+        val a2 = notif("com.example.a", text = "a2").copy(time = 400L)
+        val b1 = notif("com.example.b", text = "b1").copy(time = 250L)
+        val out = latestNotificationByPackage(listOf(a1, b1, a2))
+        assertEquals(2, out.size)
+        assertEquals("a2", out["com.example.a"]?.text)
+        assertEquals("b1", out["com.example.b"]?.text)
+    }
 }

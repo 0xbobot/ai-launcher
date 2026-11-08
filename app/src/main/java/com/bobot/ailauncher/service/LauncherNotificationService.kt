@@ -11,6 +11,7 @@ import android.os.Looper
 import android.provider.Telephony
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.core.event.LauncherEvent
 import com.bobot.ailauncher.data.BadgeProbe
@@ -21,6 +22,7 @@ import com.bobot.ailauncher.data.SmsRepository
 import com.bobot.ailauncher.data.aggregateBadgeCounts
 import com.bobot.ailauncher.data.aggregateNumberMax
 import com.bobot.ailauncher.data.combineBadgeCounts
+import com.bobot.ailauncher.data.latestNotificationByPackage
 
 /**
  * 通知监听服务：通知事件的生产者。
@@ -180,8 +182,11 @@ class LauncherNotificationService : NotificationListenerService() {
             val active = activeNotifications.filter { it.isClearable && !it.isOngoing }
             val all = active.mapNotNull { sbn -> sbn.toSimpleNotification() }
             updateBadgeCounts(active, all)
-        } catch (_: SecurityException) {
-            // 未连接时静默忽略
+        } catch (e: Exception) {
+            // 2026-11-08 应用中心崩溃 hotfix：通知监听服务与桌面同进程，
+            // 角标重算任何异常都不许崩进程（只记日志，等下一次推送）；之前只接
+            // SecurityException，非 SecurityException 会直接杀掉整个应用。
+            Log.e("LauncherNotifSvc", "recomputeBadgeCounts failed", e)
         }
     }
 
@@ -230,14 +235,17 @@ class LauncherNotificationService : NotificationListenerService() {
             val all = active.mapNotNull { sbn -> sbn.toSimpleNotification() }
             updateBadgeCounts(active, all)
             // 未读组预览 + 左滑启用判定（Bob 2026-11-08）：每包最新一条在用通知，
-            // 从完整列表汇总（不截 20 条），与角标计数同一口径。
-            val latestByPkg = all.groupBy { it.packageName }
-                .mapValues { (_, list) -> list.maxByOrNull { it.time }!! }
+            // 从完整列表汇总（不截 20 条），与角标计数同一口径。无 `!!` 的纯函数
+            //（2026-11-08 应用中心崩溃 hotfix：458 差分里唯一的 `!!` 在此）。
+            val latestByPkg = latestNotificationByPackage(all)
             NotificationRepository.updateLatestActiveByPackage(latestByPkg)
             val list = all.sortedByDescending { it.time }.take(20)
             NotificationRepository.update(list)
-        } catch (_: SecurityException) {
-            // 权限被撤销时静默忽略，首页会显示空态引导
+        } catch (e: Exception) {
+            // 2026-11-08 应用中心崩溃 hotfix：通知监听服务与桌面同进程，
+            // 推送汇总任何异常都不许崩进程（只记日志，等下一次推送）；之前只接
+            // SecurityException，非 SecurityException 会直接杀掉整个应用。
+            Log.e("LauncherNotifSvc", "pushActiveNotifications failed", e)
         }
     }
 

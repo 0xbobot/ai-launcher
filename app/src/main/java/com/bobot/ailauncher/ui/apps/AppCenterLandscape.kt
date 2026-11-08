@@ -796,7 +796,7 @@ fun AppCenterLandscape(
                                     }
                                     is FlowItem.App -> {
                                         // 未读组打磨（Bob 2026-11-08）：未读行带预览 + 左滑清理；
-                                        // 非未读行一字不动（不包 SwipeToDismissBox，不改手势）。
+                                        // 非未读行一字不动（不包左滑清理行，不改手势）。
                                         // 注意：搜索结果分支（上）在另一处，不走这里，不带预览/左滑。
                                         val pkg = item.app.packageName
                                         if (pkg in unreadPkgs) {
