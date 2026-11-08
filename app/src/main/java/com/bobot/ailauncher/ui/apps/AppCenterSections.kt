@@ -401,6 +401,11 @@ data class AppCenterRowActions(
     val hapticView: View,
     val context: Context,
     val onLaunchApp: (AppInfo) -> Boolean,
+    // 未读行点按的“打开”（Bob 2026-11-08 23:49）：优先发通知自己的
+    // contentIntent 直达会话/消息，没有或失败时退回普通打开应用
+    // （调用点 AppCenter.kt 的 openUnreadApp）。只未读行用，其余行仍走
+    // onLaunchApp。
+    val onOpenUnreadApp: (AppInfo) -> Boolean,
     val onHideApp: (AppInfo) -> Unit,
 )
 
@@ -1027,12 +1032,15 @@ fun LazyListScope.AppCenterUnreadSection(
                             // 后消息没被清除——原来行点按只走开应用、不取消通知）：
                             // 像点通知栏通知一样，成功打开且有在用通知时，走左滑
                             // 清理同一条取消路径（onClearUnreadNotifications）。
+                            // “打开”那一半（Bob 2026-11-08 23:49）：走
+                            // onOpenUnreadApp——优先发通知自己的 contentIntent
+                            // 直达会话/消息，没有或失败时退回普通打开应用。
                             // 短信行无在用通知（不在 activeNotifPkgs 里），只打开、
                             // 不调取消，行等短信在应用内读完、库计数降了才离开未读组。
                             // 打开失败（同一应用 500ms 内重复点按、或启动抛异常）
                             // 不取消——用户没读到，通知留着。
                             onLaunch = {
-                                val opened = actions.onLaunchApp(app)
+                                val opened = actions.onOpenUnreadApp(app)
                                 if (opened && app.packageName in activeNotifPkgs) {
                                     onClearUnreadNotifications(app.packageName)
                                 }

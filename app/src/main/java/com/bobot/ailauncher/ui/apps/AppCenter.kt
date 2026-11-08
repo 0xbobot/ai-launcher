@@ -695,6 +695,52 @@ fun AppCenterContent(
         return opened
     }
 
+    // 未读行点按的“打开”（Bob 2026-11-08 23:49：点未读行只打开应用主界面，
+    // 没有精准落到那条通知消息的目标地址）：优先发该应用最新一条在用通知
+    // 自己的 contentIntent（通知自带的 PendingIntent，点通知栏通知时系统
+    // 就是发它、直接进对应会话/消息——微信进“和和美美”会话、飞书进 Liz Li
+    // 那条消息）；没有 contentIntent、或发送失败（通知已被撤、
+    // PendingIntent 已取消）时，退回 launchApp 正常打开应用。
+    // 核实（见收据）：contentIntent 不用补存——SimpleNotification 早有
+    // contentIntent 字段（v0.60.0），监听服务从真实通知里带过来
+    // （LauncherNotificationService.kt:360），latestActiveByPackage 里
+    // 的就是行名用的同一条最新通知；发送写法照抄智能卡片线已验证的
+    // SmartCardActions.performAction（OpenNotification 分支：send() +
+    // try/catch 返回 Boolean）。
+    // 发送本身不会自动取消通知（系统点通知栏时是系统顺手取消），取消仍由
+    // 调用方（未读行点按的另一半）显式走 onClear，与这里无关、不要省。
+    // 短信行：短信没有通知跳转目标（不在 latestActiveByPackage 里），
+    // contentIntent 为 null，直接走 launchApp 只打开应用。
+    fun openUnreadApp(app: AppInfo): Boolean {
+        val now = System.currentTimeMillis()
+        val last = lastLaunch
+        if (last != null && last.first == app.packageName && now - last.second < 500L) return false
+        val contentIntent =
+            latestActiveByPackage[app.packageName]?.contentIntent
+        if (contentIntent != null) {
+            val sent = try {
+                contentIntent.send()
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (sent) {
+                // 成功打开后的记账与 launchApp 成功分支同款（去重标记、收焦点
+                // 藏键盘、记一次启动、粘性数清掉——不清粘性数的话，取消通知后
+                // 角标五路里粘性数那路还算着，行离不开未读组）。
+                // 智能滚动关键字不记：未读组里 query 为空，本来也记不到动作。
+                lastLaunch = app.packageName to now
+                focusManager.clearFocus()
+                keyboardController?.hide()
+                AppUsageTracker.recordLaunch(context, app.packageName)
+                inactiveTick++
+                BadgeStickyStore.clearForPackage(context, app.packageName)
+                return true
+            }
+        }
+        return launchApp(app)
+    }
+
     // ---------- 反馈闭环（Bob 2026-11-06） ----------
 
     // 选应用：先收键盘、清焦点，sheet 才看得全；已装应用按与查询的相关程度排。
@@ -871,6 +917,7 @@ fun AppCenterContent(
         hapticView = hapticView,
         context = context,
         onLaunchApp = ::launchApp,
+        onOpenUnreadApp = ::openUnreadApp,
         onHideApp = ::hideApp
     )
 
@@ -989,6 +1036,7 @@ fun AppCenterContent(
                 },
                 onUnlockHiddenApps = { unlockHiddenApps() },
                 onLaunch = ::launchApp,
+                onOpenUnreadApp = ::openUnreadApp,
                 onLongPress = { popupApp = it },
                 onOpenSettings = onOpenSettings,
                 // v0.68.82（横屏专项第 1 项）：两套手势对齐竖屏（底部上滑已删）
