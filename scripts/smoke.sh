@@ -42,6 +42,12 @@
 # D-6（应用中心底部条带点不动，Bob .100 真机点名）= 第 30 段（列车统一编号：原线 D-6 第 28 段，与线 B 第 28 段撞号），插在第 27 段
 # 之后、第 23 段之前：D3 内对同一个应用做底部 88dp 带内点（A）与滚到中屏
 # 点（B）的同应用对照，并把带区节点打进日志留档（ac_band*.xml）。
+# nightly 批追加：第 31 段为收藏区拖动排序（dock-drag-reorder /
+# dock-drag-reorder-persists：Bob 2026-11-08 真机点名 466→469，463 拆分
+# 回归——pointerInput 闭包读快照旧值致拖动换不了位；本段在模拟器上拖次行
+# 手柄上移两行断言顺序换位，再 force-stop 重进断言松手保存）。插在第 30 段
+# 之后、第 23 段之前。前置：第 2 段预写 prefs 时把两个模拟器实装应用种进
+# ui_prefs.xml 的 dock_pinned（否则收藏区无行可拖）。横屏腿无收藏区拖动手柄，整段跳过。
 # crash-log-content / crash-relaunch-alive：debug 专用 intent extra 触发一次
 # 真崩溃 -> files/crashes 落盘且含异常首行 -> 正常重启存活不进崩溃循环）。
 # 本段故意产生 FATAL，必须排在第 23 段 no-fatal-crash 之后。
@@ -274,13 +280,47 @@ fi
 # 且该路径历史上 uiautomator 解析翻过车（见下文注），保留坐标（经 SX/SY 换算）不迁语义定位。
 # MainActivity 读 ai_launcher SP 的这两个 key；debug 包可用 run-as 写入（文件归属 app uid）。
 # 写法：本地生成 xml -> adb push 到 /data/local/tmp -> run-as cp 进 app 私有目录（避免 heredoc 嵌套引号坑）。
+# 收藏区拖动排序冒烟（第 31 段）的前置：dock_pinned 默认是空，模拟器上
+# 收藏区就没有行可拖。启动前先种两个模拟器上真实存在的应用进 dock_pinned，
+# 让收藏区从一开始就有两行；选包以 pm list packages 实测为准（\r 先去掉，
+# 否则行尾锚点匹配不到），找不到两个就不种（第 31 段会跳过、不计 FAIL）。
+DOCK_SEED_PKGS=""
+for CAND in com.android.contacts com.android.deskclock com.android.settings com.android.calendar com.android.camera2 com.android.dialer com.android.messaging com.android.gallery3d com.android.calculator2; do
+  if adb shell pm list packages 2>/dev/null | tr -d '\r' | grep -q "^package:$CAND$"; then
+    if [ -z "$DOCK_SEED_PKGS" ]; then DOCK_SEED_PKGS="$CAND"; else DOCK_SEED_PKGS="$DOCK_SEED_PKGS $CAND"; fi
+  fi
+  [ "$(echo "$DOCK_SEED_PKGS" | wc -w)" -ge 2 ] && break
+done
 printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
   '    <boolean name="battery_asked" value="true" />' \
-  '    <boolean name="onboarded" value="true" />' "</map>" > "$OUT/ai_launcher.xml"
+  '    <boolean name="onboarded" value="true" />' \
+  "</map>" > "$OUT/ai_launcher.xml"
 adb push "$OUT/ai_launcher.xml" /data/local/tmp/ai_launcher.xml
 adb shell "run-as $PKG mkdir -p shared_prefs"
 adb shell "run-as $PKG cp /data/local/tmp/ai_launcher.xml shared_prefs/ai_launcher.xml"
 adb shell "run-as $PKG chmod 660 shared_prefs/ai_launcher.xml"
+# dock_pinned 单独写 ui_prefs.xml：dock_pinned 是 UiPrefs 的键，读的是
+# SharedPreferences 文件 "ui_prefs"（ui_prefs.xml），不是 ai_launcher.xml——
+# round 1 错写进 ai_launcher.xml，应用根本读不到，收藏区一直是空的
+# （run 3 实证：全部 dump 无一含“拖动排序”）。换行用文件里的真实换行
+# （XML 文本换行读回即 \n，与 UiPrefs.setDockPinned 的 joinToString("\n")
+# 同格式）；不要用 &#10;——sed 替换里的 & 是“整个匹配”，
+# 's/ /&#10;/g' 写出的是字面 " #10;"，读回是单个垃圾包名。
+if [ "$(echo "$DOCK_SEED_PKGS" | wc -w)" -ge 2 ]; then
+  DOCK_P1=$(echo "$DOCK_SEED_PKGS" | cut -d' ' -f1)
+  DOCK_P2=$(echo "$DOCK_SEED_PKGS" | cut -d' ' -f2)
+  { printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" "    <string name=\"dock_pinned\">$DOCK_P1" "$DOCK_P2</string>" "</map>"; } > "$OUT/ui_prefs.xml"
+  adb push "$OUT/ui_prefs.xml" /data/local/tmp/ui_prefs.xml
+  adb shell "run-as $PKG cp /data/local/tmp/ui_prefs.xml shared_prefs/ui_prefs.xml"
+  adb shell "run-as $PKG chmod 660 shared_prefs/ui_prefs.xml"
+  if adb shell "run-as $PKG cat shared_prefs/ui_prefs.xml" 2>/dev/null | grep -q 'name="dock_pinned"'; then
+    log "dock-seed: pinned $DOCK_SEED_PKGS (ui_prefs.xml)"
+  else
+    log "dock-seed: ui_prefs.xml write failed - dock drag segment will skip"
+  fi
+else
+  log "dock-seed: fewer than 2 candidate apps installed - dock drag segment will skip"
+fi
 if adb shell "run-as $PKG cat shared_prefs/ai_launcher.xml" 2>/dev/null | grep -q 'name="onboarded" value="true"'; then
   ok "seed-prefs"
 else
@@ -2097,6 +2137,23 @@ glass_wallpaper_round() {
   if ! glass_root_swap_wallpaper "$img"; then
     log "glass: root swap failed ($mode) - shots fall back to current wallpaper"
   fi
+  # 壁纸重启后设备死亡则 fail fast（第 11 段同款口径）：换壁纸失败但设备
+  # 还在时继续回退取证；设备已死（本轮实测：sky 轮重启后 adb 再也找不到
+  # 设备）则不再磨后续段落——否则静默到 job 超时、RESULT 永远打不出来，
+  # 直接打 RESULT-PARTIAL 退出（job 结论为失败，摘要与 issue 随之触发）。
+  if ! timeout 20 adb get-state 2>/dev/null | grep -qx device; then
+    log "glass: adb transport lost after wallpaper swap; trying adb server restart"
+    timeout 20 adb kill-server > /dev/null 2>&1 || true
+    timeout 30 adb start-server > /dev/null 2>&1 || true
+    timeout 90 adb wait-for-device > /dev/null 2>&1 || true
+    if ! timeout 20 adb get-state 2>/dev/null | grep -qx device; then
+      ENV_DEATHS=$((ENV_DEATHS+1))
+      log "ENV-DEATH: glass wallpaper reboot left adb transport unrecoverable; remaining sections skipped (not passed)"
+      log "RESULT-PARTIAL pass=$PASS fail=$FAIL env_deaths=$ENV_DEATHS ENV-INVALID"
+      if [ "$FAIL" = "0" ]; then exit 1; else exit "$FAIL"; fi
+    fi
+    log "glass: adb transport recovered via server restart"
+  fi
   glass_relaunch_home
   shot "glass-$mode"
   glass_nextup_shot "glass-$mode-nextup"
@@ -2977,6 +3034,172 @@ if [ -n "$A_LBL" ]; then
   else
     log "band-tap: same app '$A_LBL' never reached mid zone"
     ng "appcenter-band-sameapp-mid"
+  fi
+fi
+adb shell input keyevent KEYCODE_HOME || true
+sleep 1
+
+# --- 31. 收藏区拖动排序（nightly 批，Bob 2026-11-08 真机点名 466→469）---
+# 469 是 463 拆分回归：pointerInput 闭包读 dockDragOffsetY 快照旧值 0f，
+# 行只剩“最新一次位移”的抖动、松手弹回原位；修法是手势域内局部变量
+# accOffsetY 累计偏移（步进算式抽纯函数 dockDragStep，单测锁死）。
+# 本段直接在模拟器上复现该回归：拖首行手柄下移、断言顺序换位
+# （dock-drag-reorder），再 force-stop 重进断言松手保存
+# （dock-drag-reorder-persists，覆盖 469 同根因杀死的保存网）。
+# 定位：手柄是 AppCenterDockSection 里的 DragHandle Icon，
+# content-desc="拖动排序"，无 testTag——dump 里按 content-desc 找；
+# 应用名用同行文本节点认（python 按中心 y 就近配对，纯数字角标排除）。
+# 行距 64dp（v0.55.2：行 60dp + 4dp 间距），拖 3 行距确保越过第二行中心。
+# 横屏腿跳过：横屏应用中心（AppCenterLandscape）没有收藏区拖动手柄，
+# 无行可拖（不计 FAIL、不计 PASS，只记一条 log）；竖屏 5 腿（基线/小屏
+# 字体 1.3/API 29/深色/平板竖屏）都跑。顺序换位后不再复原（模拟器用完即弃，
+# 后续 23/24 段不依赖收藏区顺序）。
+log "dock-drag: segment start"
+# 打开应用中心并验证到达（appcenter_settings 在场才算进了应用中心）：
+# round 1 只发上滑不验证——run 3 里上滑被首页引导卡吃掉、段全程停在首页，
+# 且 dockdrag_open_d3 只在 persists 路径调了一次、入口根本没调。上滑最多
+# 重试 3 次；3 次都不到就返回 1（调用方按跳过处理、不计 FAIL）。
+dockdrag_open_d3() {
+  adb shell am force-stop "$PKG" > /dev/null 2>&1 || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  local TRY
+  for TRY in 1 2 3; do
+    adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+    sleep 3
+    dockdrag_dump dockdrag_open
+    if [ -f "$OUT/dockdrag_open.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/dockdrag_open.xml"; then
+      return 0
+    fi
+    log "dock-drag: open try $TRY did not land in App Center, retrying swipe"
+  done
+  log "dock-drag: could not enter App Center after 3 swipe tries - segment skipped (not counted)"
+  return 1
+}
+dockdrag_dump() {
+  adb shell uiautomator dump "/sdcard/$1.xml" > /dev/null 2>&1 || true
+  adb pull "/sdcard/$1.xml" "$OUT/$1.xml" > /dev/null 2>&1 || true
+  redump_if_empty "$1"
+}
+# dockdrag_handles <dumpfile>：每行手柄输出 "x y 应用名"，按文档序（从上到下）。
+# python 解析：手柄节点 content-desc="拖动排序"；应用名取同行（中心 y 差
+# 24dp 内）最近的非空、非纯数字 text 节点（纯数字是角标，不是应用名）；
+# 行高 60dp，24dp 容差不会跨行误配。dump 不存在/解析失败时无输出。
+dockdrag_handles() {
+  python3 - "$1" "$DENSITY" <<'PYEOF' || true
+import re, sys
+try:
+    data = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except Exception:
+    sys.exit(0)
+density = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 420
+tol = 24 * density // 160
+nodes = []
+for m in re.finditer(r"<node[^>]*>", data):
+    n = m.group(0)
+    def attr(k):
+        mm = re.search(k + r'="([^"]*)"', n)
+        return mm.group(1) if mm else ""
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if not b:
+        continue
+    x1, y1, x2, y2 = (int(v) for v in b.groups())
+    nodes.append({"text": attr("text"), "desc": attr("content-desc"),
+                  "cx": (x1 + x2) // 2, "cy": (y1 + y2) // 2})
+for h in [n for n in nodes if n["desc"] == "拖动排序"]:
+    best, bd = "", 10 ** 9
+    for n in nodes:
+        t = n["text"]
+        if not t or t.isdigit():
+            continue
+        d = abs(n["cy"] - h["cy"])
+        if d < bd:
+            bd, best = d, t
+    if bd <= tol:
+        print("%d %d %s" % (h["cx"], h["cy"], best))
+PYEOF
+}
+# dockdrag_find_handles：滚到列表顶找手柄（应用中心打开落在未读/A 组，
+# 收藏区在顶上；逐次下滑露出来）。找到 ≥2 行时 DOCK_HANDLES 非空返回 0，
+# 否则返回 1（调用方按跳过处理）。
+dockdrag_find_handles() {
+  local TRY
+  DOCK_HANDLES=""
+  for TRY in 1 2 3 4 5 6; do
+    dockdrag_dump dockdrag0
+    if [ -f "$OUT/dockdrag0.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/dockdrag0.xml"; then
+      DOCK_HANDLES=$(dockdrag_handles "$OUT/dockdrag0.xml" || true)
+      if [ "$(printf '%s' "$DOCK_HANDLES" | grep -c .)" -ge 2 ]; then
+        return 0
+      fi
+    fi
+    adb shell input swipe "$(SX 540)" "$(SY 800)" "$(SX 540)" "$(SY 1400)" 300 || true
+    sleep 1
+  done
+  return 1
+}
+DOCK_HANDLES=""
+if dockdrag_open_d3 && dockdrag_find_handles; then
+  H1=$(printf '%s' "$DOCK_HANDLES" | sed -n 1p)
+  H2=$(printf '%s' "$DOCK_HANDLES" | sed -n 2p)
+  H1X=$(echo "$H1" | cut -d' ' -f1); H1Y=$(echo "$H1" | cut -d' ' -f2); H1N=$(echo "$H1" | cut -d' ' -f3-)
+  H2X=$(echo "$H2" | cut -d' ' -f1); H2Y=$(echo "$H2" | cut -d' ' -f2); H2N=$(echo "$H2" | cut -d' ' -f3-)
+  log "dock-drag: before order top='$H1N' ($H1X,$H1Y) next='$H2N' ($H2X,$H2Y)"
+  # 拖次行手柄上移 3 行距（192dp）：越过首行中心，触发换位；1200ms
+  # 慢拖让 detectDragGestures 收到足量位移事件（同扇形段长按拖动口径）。
+  # 方向取“上”不取“下”：列表已在顶（收藏区可见 = scroll 0），向下拖若
+  # 手柄没吃住手势、overscroll 会把应用中心整页划回首页（run 4 实证：
+  # 向下拖完直接落在首页）；向上拖即使没吃住也只是列表上滚、不退页。
+  DRAG_PX=$(( 192 * DENSITY / 160 ))
+  adb shell input swipe "$H2X" "$H2Y" "$H2X" "$(( H2Y - DRAG_PX ))" 1200 || true
+  sleep 2
+  # 拖完先留档一次（dockdrag_after.xml）：区分“拖动把页划走了”与
+  # “还在页内但手柄找不到了”——find 的下滑会改动状态，不能拿它当证据。
+  dockdrag_dump dockdrag_after
+  if [ -f "$OUT/dockdrag_after.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/dockdrag_after.xml"; then
+    DOCK_IN_AC=1
+  else
+    log "dock-drag: drag left App Center - reorder check skipped (not counted)"
+    DOCK_IN_AC=0
+  fi
+  DOCK_HANDLES=""
+  if [ "$DOCK_IN_AC" = 1 ] && dockdrag_find_handles; then
+    A1N=$(printf '%s' "$DOCK_HANDLES" | sed -n 1p | cut -d' ' -f3-)
+    A2N=$(printf '%s' "$DOCK_HANDLES" | sed -n 2p | cut -d' ' -f3-)
+    log "dock-drag: after order top='$A1N' next='$A2N'"
+    if [ "$A1N" = "$H2N" ] && [ "$A2N" = "$H1N" ]; then
+      ok "dock-drag-reorder"
+      # 松手保存：force-stop 重进，顺序应仍是换位后的（覆盖保存网）。
+      DOCK_HANDLES=""
+      if dockdrag_open_d3 && dockdrag_find_handles; then
+        P1N=$(printf '%s' "$DOCK_HANDLES" | sed -n 1p | cut -d' ' -f3-)
+        P2N=$(printf '%s' "$DOCK_HANDLES" | sed -n 2p | cut -d' ' -f3-)
+        log "dock-drag: persists order top='$P1N' next='$P2N'"
+        if [ "$P1N" = "$H2N" ] && [ "$P2N" = "$H1N" ]; then
+          ok "dock-drag-reorder-persists"
+        else
+          ng "dock-drag-reorder-persists"
+        fi
+      else
+        log "dock-drag: handles gone after relaunch - persistence check skipped (not counted)"
+      fi
+    else
+      ng "dock-drag-reorder"
+      log "dock-drag: reorder failed - persistence check skipped (not counted)"
+    fi
+  else
+    if [ "$DOCK_IN_AC" = 1 ]; then
+      log "dock-drag: handles gone after drag - reorder check skipped (not counted)"
+    fi
+  fi
+else
+  if [ -f "$OUT/dockdrag0.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/dockdrag0.xml"; then
+    log "dock-drag: in App Center but fewer than 2 drag handles after scrolls (landscape leg has no dock drag UI, or dock seed failed) - segment skipped (not counted)"
+  else
+    log "dock-drag: not in App Center after open attempts - segment skipped (not counted)"
   fi
 fi
 adb shell input keyevent KEYCODE_HOME || true

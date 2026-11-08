@@ -10,13 +10,20 @@ name: Smoke Matrix (Regression)
 # （Nexus 9 + 1536x2048 + 旋转 0）；smoke.sh 第 0a 段在几何读取前覆写，
 # 第 21 段 layout_check.py 做元素两两不相交的几何断言，全腿常驻。
 # dispatch 口径同 smoke-test：取 dispatch 所在 ref 最近一次成功构建的 APK。
+# nightly：每天凌晨 02:00 北京时间（UTC+8）= 18:00 UTC 定时跑一次，取 main
+# 最新一次成功构建的 APK；失败时写 run 摘要 + 自动建 issue（按腿去重），
+# 早上由定时检查任务跟进（查本 workflow 各腿结论）。
 
 on:
   workflow_dispatch:
+  schedule:
+    # 每天 02:00 北京时间 = 18:00 UTC（GitHub cron 一律 UTC）。
+    - cron: '0 18 * * *'
 
 permissions:
   actions: read
   contents: read
+  issues: write
 
 jobs:
   matrix-smoke:
@@ -82,6 +89,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      # dispatch / schedule 共用：取该 ref（schedule 时为 main）最近一次
+      # 成功构建的 APK。定时触发没有 workflow_run 事件，只能走这条路。
       - name: Download debug APK artifact (latest success on this ref)
         uses: dawidd6/action-download-artifact@v27
         with:
@@ -114,7 +123,12 @@ jobs:
           profile: ${{ matrix.profile }}
           disable-animations: true
           emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu swiftshader_indirect
-          script: bash scripts/smoke.sh
+          # smoke.sh 输出 tee 进 smoke-out/smoke.log（随 artifact 存档），
+          # PIPESTATUS[0] 保住 smoke.sh 自身的退出码，失败仍让本步失败。
+          script: |
+            mkdir -p smoke-out
+            bash scripts/smoke.sh 2>&1 | tee smoke-out/smoke.log
+            exit ${PIPESTATUS[0]}
 
       - name: Upload matrix screenshots
         if: always()
@@ -123,3 +137,45 @@ jobs:
           name: smoke-matrix-${{ matrix.label }}
           path: smoke-out/
           retention-days: 14
+
+      # nightly 失败发现层（按腿）：run 摘要一眼看到哪条腿失败 + smoke.log 尾巴。
+      # cancelled() 也要进：job 超时被取消时 failure() 为假，不加它
+      # 超时取消的 run 既无摘要也无 issue——正是 nightly 最怕的静默。
+      - name: Summarize nightly failure
+        if: failure() || cancelled()
+        run: |
+          {
+            echo "## Nightly failure — ${{ github.workflow }} / ${{ matrix.label }} — $(date -u +%F)"
+            echo ""
+            echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Commit: ${{ github.sha }}"
+            echo "- Branch: ${{ github.ref_name }}"
+            echo "- Artifact: smoke-matrix-${{ matrix.label }} (smoke-out/smoke.log + screenshots, 14 days)"
+            echo ""
+            echo "### smoke.sh tail (last 40 lines)"
+            echo '```'
+            tail -n 40 smoke-out/smoke.log 2>/dev/null || echo "(smoke.log not available — see the run log)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 同一天同一 workflow 同一腿只建一个 issue（先按标题去重）。label
+      # nightly-failure 已建在仓库里；create 带 label 失败时退回无 label
+      # 再建一次，避免 label 偶发问题导致 issue 丢了。
+      - name: File nightly failure issue (schedule only)
+        if: (failure() || cancelled()) && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE=$(date -u +%F)
+          TITLE="[nightly] ${{ github.workflow }} / ${{ matrix.label }} failed $DATE"
+          EXISTING=$(gh issue list --state open --label nightly-failure --limit 50 --json title --jq -r '.[].title' 2>/dev/null || true)
+          if echo "$EXISTING" | grep -qx "$TITLE"; then
+            echo "open issue already exists for $TITLE — skip"
+            exit 0
+          fi
+          BODY="Nightly ${{ github.workflow }} / ${{ matrix.label }} failed on $DATE (UTC).
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          Artifact: smoke-matrix-${{ matrix.label }} (smoke-out/smoke.log + screenshots, 14 days).
+          See the run summary for the failing leg and the smoke.log tail."
+          gh issue create --title "$TITLE" --body "$BODY" --label nightly-failure || gh issue create --title "$TITLE" --body "$BODY"
