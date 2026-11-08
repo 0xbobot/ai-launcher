@@ -13,15 +13,13 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.NotificationsOff
+import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,15 +48,19 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * - 左滑（EndToStart）→ 松手时若超过阈值，onClear（取消该应用的在用通知，
  *   走通知监听服务），行弹回原位（不真正 dismiss——行靠角标归 0 离开未读组；
  *   若角标未归 0 如短信库口径，行留在原位、角标已更新）。
- * - 点中央图标（铃铛斜杠按钮）→ 同样 onClear（与松手过阈值同一条清理逻辑）。
- *   点蒙层空白处 → dismiss（收起蒙层、不清理、不打开应用）。
+ * - 中央图标（“已读”：信封 + 对勾）只是视觉指示，不可点；清理只走“松手过阈值”这一条路。
+ *   点图标/点蒙层空白处 → 原有浮层行为（松手后弹簧收起），不触发清理。
  * - enabled=false（该应用无在用通知可取消，如短信库口径、飞书无通知）时，
  *   手势关闭、蒙层不画，行只剩点按/长按；用户去应用里读完自然清。
  * - 右滑不启用（只清通知，不做别的）。
- * - 点按隔离（Bob 2026-11-08 23:04：点图标没清掉，疑似走了行点按/通知点击
- *   逻辑）：此前图标只是视觉指示、蒙层没有任何点按处理，点图标会穿过蒙层
- *   落到行点按（打开应用），onClear 永远不触发。现图标是真正可点的按钮、
- *   蒙层空白处可点 dismiss，两处的 clickable 都消费点按，不落到行点按。
+ * - 修正诊断（Bob 2026-11-08 23:20 澄清）：第②点不是点图标——Bob 点的是未读
+ *   组里的行（打开应用），打开后消息没被清除。行点按原来只走普通开应用路径
+ *   （getLaunchIntentForPackage + startActivity），不取消通知：通知仍在栏里，
+ *   角标里通知派生那几路（number 最大值、在用通知条数）还算着，行就还留在
+ *   未读组。修法在调用方（AppCenter 竖屏未读段 + 横屏未读行）：未读行点按改
+ *   成打开 + 清除（像点通知栏通知一样），成功打开且有在用通知时走左滑清理
+ *   同一条取消路径。本文件只换图标、不改按钮：图标继续只是视觉指示，不可点。
+ *   （此前按 23:04 字面理解给图标加过按钮，已随本次修正撤掉，见收据。）
  *
  * 实现（2026-11-08 应用中心崩溃 hotfix）：不用 Material3 SwipeToDismissBox——
  * 它在 LazyColumn 首帧布局时可崩（Bob 2026-11-08 08:46 报进应用中心就崩，
@@ -69,12 +71,13 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  *
  * 样式（465，Bob 2026-11-08 19:29：沿用字母组行收藏/隐藏浮层设计）：
  * 内容不位移、弱化到 30%；蒙层整行覆盖、Card 色 80% 透明、20dp 圆角；
- * 中央一个铃铛斜杠线条图标（NotificationsOff，26dp、48dp 触控框、图标形
- * 投影），无红色底、无“清除”文字。两段阈值与 AppRow 同款：56dp 现形、
+ * 中央一个“已读”线条图标（MarkEmailRead：信封 + 对勾，26dp、48dp 触控框、
+ * 图标形投影），无红色底、无“清除”文字。两段阈值与 AppRow 同款：56dp 现形、
  * 120dp 到底主按钮脉冲、松手触发清理。
- * 图标含义（Bob 2026-11-08 23:04：垃圾桶不准）：这个动作是取消该应用的在
- * 用通知（从通知栏清除），不是删除数据，垃圾桶会误导；铃铛加斜杠就是
- * “清除这条通知”。
+ * 图标含义（Bob 2026-11-08 23:04：垃圾桶不准；23:31 定：换成“已读”）：
+ * 未读组用的就是未读信封，清除图标用信封 + 对勾的“已读”，意思就是“这条
+ * 已读、清除掉”；这个动作是取消该应用的在用通知（从通知栏清除），不是
+ * 删除数据，垃圾桶会误导。
  *
  * 手势隔离：行内 AppRow 的滑动浮层（★/眼睛）由调用方传 swipeActionsEnabled=false
  * 关掉，避免两套横滑抢事件；竖屏列表竖滑与右侧 rail 不受影响（横滑只消费横向拖动）。
@@ -176,22 +179,17 @@ internal fun ClearableUnreadRow(
             content()
         }
         // 蒙层：整行覆盖、Card 色 80% 透明、20dp 圆角（与 AppRow 同款）；
-        // 中央一个铃铛斜杠线条图标，无红色底、无“清除”文字。
-        // 点按（与 AppRow 浮层同款）：点图标 = 清理（onClear，与松手过阈值
-        // 同一条路）；点空白处 = dismiss（收起蒙层、不清理、不打开应用）。
-        // 两处的 clickable 都消费点按，不落到行点按（打开应用）。
+        // 中央一个“已读”线条图标（信封 + 对勾，视觉指示，不可点），无红色底、无“清除”文字。
+        // 清理只走“松手过阈值”这一条路；点图标/点空白按原有浮层行为收起，
+        // 不触发清理。点按落到行点按（打开应用）是未读行本来的行为，打开 +
+        // 清除见 AppCenter 未读段（竖屏）与横屏未读行。
         if (enabled && dimProgress > 0.01f) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
                     .clip(RoundedCornerShape(20.dp))
                     .background(AILauncherColors.current.Card.copy(alpha = 0.8f))
-                    .graphicsLayer { alpha = dimProgress }
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                        onClick = { dragOffset = 0f }
-                    ),
+                    .graphicsLayer { alpha = dimProgress },
                 contentAlignment = Alignment.Center
             ) {
                 Box(
@@ -200,21 +198,13 @@ internal fun ClearableUnreadRow(
                         .graphicsLayer {
                             scaleX = iconScale
                             scaleY = iconScale
-                        }
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                            onClick = {
-                                onClear()
-                                dragOffset = 0f
-                            }
-                        ),
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     // 图标形投影：深色副本下移 2dp（与 AppRow 同款）。
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Outlined.NotificationsOff,
+                            imageVector = Icons.Outlined.MarkEmailRead,
                             contentDescription = null,
                             tint = Color.Black.copy(alpha = 0.16f),
                             modifier = Modifier
@@ -223,7 +213,7 @@ internal fun ClearableUnreadRow(
                                 .semantics { invisibleToUser() }
                         )
                         Icon(
-                            imageVector = Icons.Outlined.NotificationsOff,
+                            imageVector = Icons.Outlined.MarkEmailRead,
                             contentDescription = "清除通知",
                             tint = Color(0xFF5A6C7D),
                             modifier = Modifier.size(26.dp)

@@ -1023,7 +1023,20 @@ fun LazyListScope.AppCenterUnreadSection(
                     ) {
                         AppRow(
                             app = app,
-                            onLaunch = { actions.onLaunchApp(app) },
+                            // 打开 + 清除（Bob 2026-11-08 23:20 澄清：点未读行打开应用
+                            // 后消息没被清除——原来行点按只走开应用、不取消通知）：
+                            // 像点通知栏通知一样，成功打开且有在用通知时，走左滑
+                            // 清理同一条取消路径（onClearUnreadNotifications）。
+                            // 短信行无在用通知（不在 activeNotifPkgs 里），只打开、
+                            // 不调取消，行等短信在应用内读完、库计数降了才离开未读组。
+                            // 打开失败（同一应用 500ms 内重复点按、或启动抛异常）
+                            // 不取消——用户没读到，通知留着。
+                            onLaunch = {
+                                val opened = actions.onLaunchApp(app)
+                                if (opened && app.packageName in activeNotifPkgs) {
+                                    onClearUnreadNotifications(app.packageName)
+                                }
+                            },
                             compact = true,
                             displayLabel = unreadDisplayNames[app.packageName],
                             preview = unreadPreviews[app.packageName],

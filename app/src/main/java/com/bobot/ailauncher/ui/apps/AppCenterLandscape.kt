@@ -125,7 +125,11 @@ fun AppCenterLandscape(
     onToggleFold: () -> Unit = {},
     // 折叠组（421 安静版）：组底“取消折叠”——调用点传入竖屏同一双写逻辑。
     onUnfold: () -> Unit = {},
-    onLaunch: (AppInfo) -> Unit,
+    // 打开 + 清除（Bob 2026-11-08 23:20）：未读行点按要像点通知栏通知一样，
+    // 成功打开时取消通知——调用点传 ::launchApp（Boolean），未读行处按
+    // opened 门控取消；其余行只透传（Boolean→Unit 是 Kotlin 允许的
+    // Unit 适配，LandscapeAppRow 的 onLaunch 仍是 (AppInfo) -> Unit）。
+    onLaunch: (AppInfo) -> Boolean,
     onLongPress: (AppInfo) -> Unit,
     onOpenSettings: () -> Unit,
     // v0.68.82（横屏专项第 1 项）：两套手势对齐竖屏（底部上滑已删）
@@ -627,7 +631,11 @@ fun AppCenterLandscape(
                                 item(key = "s:${app.packageName}") {
                                     // Bob 2026-11-03：行距压缩——横屏搜索行同步走紧凑行
                                     LandscapeAppRow(
-                                        app = app, onLaunch = onLaunch,
+                                        // Unit 适配：onLaunch 现为 (AppInfo) -> Boolean，
+                                        // 函数类型值不能直接当 (AppInfo) -> Unit 传，
+                                        // 包一层 lambda 丢掉返回值（lambda 体尾表达式
+                                        // 的 Unit 强制转换适用）。
+                                        app = app, onLaunch = { onLaunch(it) },
                                         compact = true,
                                         // 内容深链标识：这句查询下点按会走深链
                                         // 直达的应用才出「直达」标签。
@@ -826,7 +834,15 @@ fun AppCenterLandscape(
                                                     ) {
                                                         LandscapeAppRow(
                                                             app = item.app,
-                                                            onLaunch = onLaunch,
+                                                            // 打开 + 清除（Bob 2026-11-08 23:20，与竖屏同款）：
+                                                            // 成功打开且有在用通知时，走左滑清理同一条取消路径。
+                                                            // 短信行无在用通知，只打开、不调取消。
+                                                            onLaunch = { app ->
+                                                                val opened = onLaunch(app)
+                                                                if (opened && pkg in activeNotifPkgs) {
+                                                                    onClearNotifications(pkg)
+                                                                }
+                                                            },
                                                             compact = true,
                                                             displayLabel = unreadDisplayNames[pkg],
                                                             preview = unreadPreviews[pkg]
@@ -837,7 +853,8 @@ fun AppCenterLandscape(
                                         } else {
                                             LandscapeAppRow(
                                                 app = item.app,
-                                                onLaunch = onLaunch,
+                                                // Unit 适配（同搜索行）：包一层 lambda 丢返回值。
+                                                onLaunch = { onLaunch(it) },
                                                 compact = true
                                             )
                                         }
