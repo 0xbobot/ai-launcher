@@ -448,6 +448,91 @@ data class ConnectorState(
     val lastUsedLabel: String
 )
 
+/**
+ * 提醒来源开关状态（设计稿 §2，2026-11-08 Bob 真机 verdict：每行只有一个控件）：
+ * 开关 = 真实接上状态（权限已授 + 来源启用）。权限未授时开关就是关的，
+ * 不许出现“开关开着、状态写着未接上”（455 真机：日历、消息开关开着却
+ * 显示“未接上”）。纯函数，单测锁死。
+ */
+fun isConnectorConnected(state: ConnectorState): Boolean = state.granted && state.enabled
+
+/**
+ * 提醒来源状态行文案（只做展示、不可点）：未接上 / 已关闭 / 已接上·最后使用。
+ * 纯函数，单测锁死。
+ */
+fun connectorStatusText(state: ConnectorState): String = when {
+    !state.granted -> "未接上"
+    !state.enabled -> "已关闭"
+    else -> "已接上 · ${state.lastUsedLabel}"
+}
+
+/**
+ * 开关点按后的动作（纯函数，单测锁死）：
+ * - 关 → 立即停用该来源（卡片不再出该来源内容），不追问；系统权限本身
+ *   应用内撤不掉，关开关的意思是“不再用这个来源”，不是去系统里撤权限。
+ * - 开且权限已授 → 只把来源启用，不跑接上流程。
+ * - 开且权限未授 → 走该来源既有的接上流程（显著披露/系统框/跳系统设置页）；
+ *   用户取消或拒绝，权限仍未授，开关按 isConnectorConnected 仍为关。
+ */
+enum class ConnectorToggleAction { DISABLE, ENABLE, CONNECT }
+
+fun resolveConnectorToggle(granted: Boolean, turnOn: Boolean): ConnectorToggleAction =
+    when {
+        !turnOn -> ConnectorToggleAction.DISABLE
+        granted -> ConnectorToggleAction.ENABLE
+        else -> ConnectorToggleAction.CONNECT
+    }
+
+/**
+ * 智能源顺序（设计稿 §2，2026-11-08 Bob 定：按源对智能的提升比例，
+ * 贡献大的在前，已按卡片实际的源依赖核对）：消息 > 通知 > 日历 > 电话拨号器 > 联系人。
+ * buildConnectorStates 与设置页“智能”区行序都以它为准；引导卡（v3）
+ * 的顺序不在本批动，下批再对。
+ */
+val SMART_SOURCE_ORDER: List<String> = listOf(
+    UiPrefs.CONNECTOR_MESSAGE,
+    UiPrefs.CONNECTOR_NOTIFICATION,
+    UiPrefs.CONNECTOR_CALENDAR,
+    UiPrefs.CONNECTOR_PHONE,
+    UiPrefs.CONNECTOR_CONTACTS
+)
+
+/**
+ * 智能源说明 v1（设计稿 §2，2026-11-08 Bob 定；待 Bob 真机定）：
+ * 按“接上后智能会什么”写，不只写提供什么提醒。纯函数，单测逐字锁死。
+ */
+fun connectorDescription(key: String): String = when (key) {
+    UiPrefs.CONNECTOR_MESSAGE -> "接上后，智能会提前提醒你账单到期、体检预约。"
+    UiPrefs.CONNECTOR_NOTIFICATION -> "接上后，智能会提醒你待办、未接来电、包裹和航班。"
+    UiPrefs.CONNECTOR_CALENDAR -> "接上后，智能知道你今天的会。"
+    UiPrefs.CONNECTOR_PHONE -> "接上后，未接来电点一下就能回拨。"
+    UiPrefs.CONNECTOR_CONTACTS -> "接上后，未接来电会显示成名字。"
+    else -> ""
+}
+
+/**
+ * 智能等级 = 已接上的源个数（开关开且权限已授；电话拨号器随通知计：
+ * 通知源已接上（权限已授＋它自己的开关开）且电话拨号器自己的开关开才算）。
+ * 默认桌面不是源，不进这个列表、不计入等级。纯函数，单测锁死。
+ *
+ * 注意口径分层：电话拨号器行的开关显示仍按单行规则（通知权限已授＋本开关开，
+ * 见 isConnectorConnected），计数则多看一层通知源的开关——通知开关关了，
+ * 未接来电卡片实际不出（仓库 refresh 门控 notifOn && phoneOn），等级就不该
+ * 再把它算进去。两者只在“通知开关关了、电话拨号器开关还开着”这一角落不一致，
+ * 已在收据里标明，待 Bob 定要不要让电话拨号器开关也跟着通知走。
+ */
+fun connectedSourceCount(states: List<ConnectorState>): Int {
+    val byKey = states.associateBy { it.key }
+    val notificationConnected =
+        byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { isConnectorConnected(it) } ?: false
+    return states.count { state ->
+        when (state.key) {
+            UiPrefs.CONNECTOR_PHONE -> notificationConnected && state.enabled
+            else -> isConnectorConnected(state)
+        }
+    }
+}
+
 /** 最后使用时间文案（纯函数，单测锁死） */
 fun formatLastUsed(lastMs: Long, nowMs: Long): String {
     if (lastMs <= 0L) return "还没用过"
@@ -459,52 +544,53 @@ fun formatLastUsed(lastMs: Long, nowMs: Long): String {
     }
 }
 
-/** 五个本机连接器的状态（设置 → 提醒来源列表用） */
+/** 五个本机连接器的状态（设置 → “智能”区列表用，按 SMART_SOURCE_ORDER 排） */
 fun buildConnectorStates(context: Context): List<ConnectorState> {
     val now = System.currentTimeMillis()
     fun lastUsed(key: String) =
         formatLastUsed(SmartCardRepository.lastUsedMs(context, key), now)
     val notifGranted = NotificationRepository.hasAccess(context)
-    return listOf(
-        ConnectorState(
+    val byKey = mapOf(
+        UiPrefs.CONNECTOR_NOTIFICATION to ConnectorState(
             key = UiPrefs.CONNECTOR_NOTIFICATION,
             name = "通知",
-            desc = "应用通知里的待办、未接来电和快递航班提醒",
+            desc = connectorDescription(UiPrefs.CONNECTOR_NOTIFICATION),
             granted = notifGranted,
             enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_NOTIFICATION),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_NOTIFICATION)
         ),
-        ConnectorState(
+        UiPrefs.CONNECTOR_CALENDAR to ConnectorState(
             key = UiPrefs.CONNECTOR_CALENDAR,
             name = "日历",
-            desc = "首页显示今天的会、点一下加入",
+            desc = connectorDescription(UiPrefs.CONNECTOR_CALENDAR),
             granted = CalendarRepository.hasCalendarPermission(context),
             enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CALENDAR),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_CALENDAR)
         ),
-        ConnectorState(
+        UiPrefs.CONNECTOR_MESSAGE to ConnectorState(
             key = UiPrefs.CONNECTOR_MESSAGE,
             name = "消息",
-            desc = "短信里的账单到期、体检预约提醒",
+            desc = connectorDescription(UiPrefs.CONNECTOR_MESSAGE),
             granted = SmsRepository.hasSmsPermission(context),
             enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_MESSAGE),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_MESSAGE)
         ),
-        ConnectorState(
+        UiPrefs.CONNECTOR_PHONE to ConnectorState(
             key = UiPrefs.CONNECTOR_PHONE,
             name = "电话拨号器",
-            desc = "未接来电显示号码、点一下回拨（随通知一起开，不另要权限）",
+            desc = connectorDescription(UiPrefs.CONNECTOR_PHONE),
             granted = notifGranted,
             enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_PHONE),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_PHONE)
         ),
-        ConnectorState(
+        UiPrefs.CONNECTOR_CONTACTS to ConnectorState(
             key = UiPrefs.CONNECTOR_CONTACTS,
             name = "联系人",
-            desc = "未接来电显示成名字",
+            desc = connectorDescription(UiPrefs.CONNECTOR_CONTACTS),
             granted = ContactNames.hasContactsPermission(context),
             enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CONTACTS),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_CONTACTS)
         )
     )
+    return SMART_SOURCE_ORDER.map { byKey.getValue(it) }
 }
