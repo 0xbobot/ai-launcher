@@ -17,6 +17,9 @@ enum class SmartCardKind {
     BILL,
     /** 体检/预约准备（短信主路径，通知兜底） */
     APPOINTMENT,
+    /** 日程/会议（本机日历，第十二批）：会议类开始前 30 分钟、
+     * 非会议日程开始前 2 小时出现，过了结束时间消失 */
+    CALENDAR,
     /** 未接来电回拨（只走通知，不读通话记录） */
     MISSED_CALL,
     /** 快递/外卖/航班等有时效的通知 */
@@ -46,6 +49,15 @@ sealed class SmartCardAction {
 
     /** 点通知自带的 contentIntent，直达应用内页面（快递取件码/航班值机等） */
     data class OpenNotification(val pendingIntent: PendingIntent?) : SmartCardAction()
+
+    /** 加入会议 / 看日程（第十二批，日历卡）：有会议链接直开链接，
+     * 无链接打开日历应用（再兜底事件详情）。走
+     * performAction 执行（CalendarMeeting.openCalendarEvent 同一条链），
+     * 成功打开即算处理完一张。 */
+    data class CalendarEvent(
+        val eventId: Long,
+        val meetingUrl: String?
+    ) : SmartCardAction()
 
     /** 引导卡的“连接”：去接上某个来源（UiPrefs 连接器 key）。
      * 不走 performAction——接来源要弹应用内显著披露/系统框，得由宿主
@@ -78,12 +90,12 @@ sealed class SmartCardAction {
     ) : SmartCardAction()
 }
 
-/** 卡片两个响应的按钮文案（设计稿 §4.2，第十一批 Bob 2026-11-09 定）：
- * 左“我知道了”、右“下一步”，真卡与引导卡都一样；右按钮不再显示
- * 动作文案（去还款/回拨/看预约/查看），动作的具体含义由卡片事实文案＋
- * 右下方应用小标承担。单测逐字锁死（SmartCardButtonCopyTest）。 */
+/** 卡片两个响应的按钮文案（设计稿 §4.2；第十二批 Bob 2026-11-09 定）：
+ * 左“我知道了”不动；右按钮不再写“下一步”几个字（第十一批通用文案作废），
+ * 显示该卡 [SmartCard.actionLabel]——下一步的意图（去还款 / 帮我建提醒 /
+ * 看预约 / 回拨 / 查看 / 加入会议 / 看日程 / 连接＋来源名）。
+ * 单测逐字锁死（SmartCardButtonCopyTest）。 */
 const val SMART_CARD_DISMISS_LABEL = "我知道了"
-const val SMART_CARD_NEXT_LABEL = "下一步"
 
 /**
  * 卡片右下方应用小标的目标应用（第十一批，Bob 定“要小、要优雅”）：
@@ -105,12 +117,18 @@ data class SmartCard(
     val sourceLabel: String,
     /** 一句话事实（含截止点），不写成“你的 XX”（身份未确认） */
     val fact: String,
-    /** 可选的一行准备清单（如体检：今晚 20:00 后禁食 · 明天空腹去 · 带身份证） */
+    /** 可选的一行准备清单：由大模型读脱敏原文生成、异步填上
+     * （第十二批；构建时为 null——体检写死模板已作废，没回来就是没有，
+     * 不贴模板）。异步结果走仓库的 prepById，UI 层按 id 覆盖本字段。 */
     val prep: String?,
+    /** 脱敏后的原文（第十二批）：只供大模型生成准备清单用，不展示。
+     * 只有预约卡（短信）与日程卡（日历）才带，其余为 null；发之前已在
+     * 本地脱敏（SmartCardPrep.sanitizeForLlm），原文不出仓库。 */
+    val prepSource: String? = null,
     /**
-     * 动作含义（无障碍描述等用）：去还款 / 看预约 / 回拨 / 查看 / 连接。
-     * 按钮上不再显示它（第十一批起按钮固定为“我知道了 / 下一步”），
-     * 不删——含义由卡片事实文案＋右下方应用小标承担。
+     * 动作含义（第十二批起也是右按钮的文案来源）：去还款 / 帮我建提醒 /
+     * 看预约 / 回拨 / 查看 / 加入会议 / 看日程 / 连接＋来源名。
+     * 预约卡没建过提醒时是“帮我建提醒”，建完提醒后变回“看预约”。
      */
     val actionLabel: String,
     /** 排序键：最早截止的在最上面（体检按禁食截止 20:00 排，比开始时间更早） */
@@ -142,9 +160,10 @@ data class SmartCard(
 internal fun kindRank(kind: SmartCardKind): Int = when (kind) {
     SmartCardKind.BILL -> 0
     SmartCardKind.APPOINTMENT -> 1
-    SmartCardKind.MISSED_CALL -> 2
-    SmartCardKind.NOTIFICATION -> 3
-    SmartCardKind.GUIDE -> 4
+    SmartCardKind.CALENDAR -> 2
+    SmartCardKind.MISSED_CALL -> 3
+    SmartCardKind.NOTIFICATION -> 4
+    SmartCardKind.GUIDE -> 5
 }
 
 /**
@@ -172,20 +191,34 @@ fun dedupeSmartCards(cards: List<SmartCard>): List<SmartCard> {
 fun isCardExpired(card: SmartCard, nowMs: Long): Boolean = nowMs > card.deadlineMs
 
 /**
- * 跳过后的顺序（纯函数）：跳过的卡片沉到摞底，轮到最后再出现，不是直接消失
- * （2026-11-06 晚 Bob 定）；摞内相对顺序不变。
+ * 还活着的卡片 id（纯函数）：去重 → 掐掉未到出现窗口、已处理与已过期的。
+ * 仓库用它判断“本轮有没有新卡到”（见 shouldStartNewRound）；跳过不影响
+ * 存活——划走的卡还活着，只是本轮不显示。
  */
-fun applySkipOrder(cards: List<SmartCard>, skippedIds: List<String>): List<SmartCard> {
-    if (skippedIds.isEmpty()) return cards
-    val skipped = skippedIds.toSet()
-    val head = cards.filter { it.id !in skipped }
-    val tail = cards.filter { it.id in skipped }
-    return head + tail
-}
+fun aliveSmartCardIds(
+    cards: List<SmartCard>,
+    doneIds: Set<String>,
+    nowMs: Long
+): Set<String> = dedupeSmartCards(cards)
+    .filter { it.id !in doneIds && nowMs >= it.appearFromMs && !isCardExpired(it, nowMs) }
+    .map { it.id }
+    .toSet()
+
+/**
+ * 是否开新一轮（纯函数，第十二批）：本轮没见过的 id 出现了，就算新一轮——
+ * 仓库随即清空跳过集合，上一轮划走的卡按原排序回来（排在新卡之后、摞底）。
+ * currentIds 为空（本轮一张活卡都没有）时不开新一轮。
+ */
+fun shouldStartNewRound(seenIds: Set<String>, currentIds: Set<String>): Boolean =
+    currentIds.any { it !in seenIds }
 
 /**
  * 可见卡片（纯函数）：去重 → 掐掉未到出现窗口、已处理与已过期的 → 排序 →
- * 跳过的沉底。仓库层在 publish 前调它；UI 层只负责渲染，不再算顺序。
+ * 跳过的本轮收起来（第十二批，Bob 2026-11-09 实拍：划走了角标还在——
+ * 旧口径只把跳过的沉底，角标数 cards.size 照数；新口径跳过即移出可见
+ * 列表，角标自动跟着掉；全部划走后区域清空、角标不显示）。
+ * 划走的卡在新一轮回来：仓库在 shouldStartNewRound 为真时清空跳过集合
+ * 再调这里。applySkipOrder 已随旧口径删除，别留名不副实的函数。
  */
 fun visibleSmartCards(
     cards: List<SmartCard>,
@@ -193,7 +226,11 @@ fun visibleSmartCards(
     skippedIds: List<String>,
     nowMs: Long
 ): List<SmartCard> {
+    val skipped = skippedIds.toSet()
     val alive = dedupeSmartCards(cards)
-        .filter { it.id !in doneIds && nowMs >= it.appearFromMs && !isCardExpired(it, nowMs) }
-    return applySkipOrder(sortSmartCards(alive), skippedIds)
+        .filter {
+            it.id !in doneIds && it.id !in skipped &&
+                nowMs >= it.appearFromMs && !isCardExpired(it, nowMs)
+        }
+    return sortSmartCards(alive)
 }

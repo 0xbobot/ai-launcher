@@ -36,7 +36,9 @@ data class ParsedAppointment(
     val endMin: Int?,
     /** 地点（启发式提取，提不到为空，不硬凑） */
     val place: String?,
-    /** 是否体检类（正文含“体检”）——体检才附准备清单 */
+    /** 是否体检类（正文含“体检”）：只决定排序（按禁食截止排）与建提醒
+     * 时间（前一晚 20:00）；准备清单不再由它决定——写死模板已作废，
+     * 一律走大模型生成（第十二批）。 */
     val isCheckup: Boolean
 )
 
@@ -297,6 +299,3 @@ fun isAppointmentInWindow(nowMs: Long, appt: ParsedAppointment): Boolean {
     val windowStart = startMs - APPOINTMENT_APPEAR_HOURS_BEFORE * 60L * 60 * 1000
     return nowMs in windowStart until endMs
 }
-
-/** 体检准备清单（锚点例子原话，不写成“你的体检”） */
-fun checkupPrepLine(): String = "今晚 20:00 后禁食 · 明天空腹去 · 带身份证 · 穿宽松衣服"

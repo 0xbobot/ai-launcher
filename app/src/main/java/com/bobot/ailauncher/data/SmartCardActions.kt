@@ -19,6 +19,8 @@ import android.net.Uri
  *   不直接拨号、不读通话记录。
  * - 查看：点通知自带的 contentIntent，直达应用内页面。
  * - 帮我建提醒：不走这里（要先拿 WRITE_CALENDAR 授权），宿主拦截执行。
+ * - 加入会议 / 看日程（第十二批，日历卡）：有会议链接直开链接，无链接
+ *   打开日历应用（再兜底事件详情）。
  */
 object SmartCardActions {
 
@@ -261,6 +263,11 @@ object SmartCardActions {
                 // 授权）、走 CalendarReminderWriter 执行，永不进这里；
                 // 万一漏网也不 markDone、不写日历。
                 is SmartCardAction.CreateReminder -> false
+                // 日历卡（第十二批）：有会议链接直开链接，无链接打开日历
+                // 应用（再兜底事件详情），与 PetZone 的
+                // joinCalendarEvent 同一条链（CalendarMeeting）。
+                is SmartCardAction.CalendarEvent ->
+                    openCalendarEvent(context, action.eventId, action.meetingUrl)
             }
         } catch (_: Exception) {
             false

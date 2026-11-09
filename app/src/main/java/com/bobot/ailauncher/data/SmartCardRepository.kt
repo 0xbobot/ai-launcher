@@ -4,18 +4,29 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * 智能卡片仓库（第一阶段，447/v1.2.0，设计稿 §2–§4）：
- * 短信（READ_SMS 主路径）＋通知监听＋日历（本阶段无日历卡片，会议仍在
- * 简报里、不重复）＋用量统计（去还款落到用户真正用的银行应用）拼成一摞卡。
+ * 短信（READ_SMS 主路径）＋通知监听＋日历（第十二批：日历卡，会议仍在
+ * 简报里并存——简报按提案等日历卡验过、Bob 点头后再退，本批不动）＋
+ * 用量统计（去还款落到用户真正用的银行应用）拼成一摞卡。
  *
  * - 数据只在本地处理，不上云；通知正文解析完不长期存原文（设计稿 §4.5）。
- * - 同一信息只在一处呈现：会议已在简报的会行里，卡片不再重复同一场会。
+ *   例外（第十二批，Bob 2026-11-09 22:08 批复 A）：准备清单走云端大模型，
+ *   只发脱敏后的原文（SmartCardPrep.sanitizeForLlm），只在用户配了 Key
+ *   时才调，只有预约卡与日程卡才调，每卡最多一次，失败静默。
+ * - 同一信息只在一处呈现：短信预约与日历日程是同一件事时只留短信那张
+ *   （共用去重键 appt|…）。
  * - 处理/跳过状态按稳定 id 存 SharedPreferences，带截止点、过期自清。
+ *   跳过＝本轮收起来（第十二批）：划走的卡移出可见列表、角标跟着掉；
+ *   新卡到了开新一轮，上一轮划走的卡回来（摞底）。
  * - 连接器开关（通知/日历/消息/电话拨号器/联系人）存在 UiPrefs，
  *   关掉后该来源的卡片立即停用。
  */
@@ -41,6 +52,26 @@ object SmartCardRepository {
     /** 预约卡已建过提醒（第十一批）：按卡片 id 记，带截止点、过期自清。
      * 建完提醒后卡片动作换回看预约（防重复建），卡上显示“已建提醒”。 */
     private const val KEY_REMINDER_CREATED_PREFIX = "reminder_created_"
+    /** 本轮见过的活卡 id（第十二批）：某次刷新出现本轮没见过的 id 就算
+     * 新一轮，清空跳过集合。持久化存（进程重启不丢本轮），内容是上一轮
+     * 的活卡 id 集合、每次刷新用当前活卡 id 覆盖。 */
+    private const val KEY_SEEN_ROUND_IDS = "seen_round_ids"
+
+    /** 准备清单异步结果（第十二批）：按卡片 id 缓存的大模型返回，
+     * UI 层订阅后覆盖卡片构建时的 prep（构建时为 null）。失败不写，
+     * 卡片只显示事实＋动作。内存缓存，随进程走。 */
+    private val _prepById = MutableStateFlow<Map<String, String>>(emptyMap())
+    val prepById: StateFlow<Map<String, String>> = _prepById.asStateFlow()
+    /** 已向大模型请求过准备清单的卡片 id（每卡最多调一次，失败也算一次，
+     * 本轮不重试）。内存记，随进程走。 */
+    private val prepRequested = mutableSetOf<String>()
+    private val prepScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** 顶卡划走动画复位代次（第十二批）：skip() 与新一轮清空跳过时各加一，
+     * UI 层把 TopSmartCard 的组合键挂上它——同一张卡以新代次重新呈现时
+     * 动画状态（offsetX/alpha）重建，不会再出现“数着卡、看不见卡”。 */
+    private val _skipEpoch = MutableStateFlow(0)
+    val skipEpoch: StateFlow<Int> = _skipEpoch.asStateFlow()
 
     /** 短信重读节流：5 分钟内不重复查短信库（查询本身便宜，但没必要每分钟查） */
     private const val SMS_REFRESH_MIN_INTERVAL_MS = 5L * 60 * 1000
@@ -147,11 +178,74 @@ object SmartCardRepository {
         refresh(context, lastNotifications, System.currentTimeMillis())
     }
 
-    /** 横滑跳过：沉到摞底，轮到最后再出现，不是直接消失 */
+    /** 横滑跳过：本轮收起来（移出可见列表，角标跟着掉），不是沉底；
+     * 新卡到了开新一轮时回来（见 refresh 里的新一轮判定）。 */
     fun skip(context: Context, card: SmartCard) {
         prefs(context).edit()
             .putLong(KEY_SKIPPED_PREFIX + card.id, card.deadlineMs).apply()
+        _skipEpoch.value += 1
         refresh(context, lastNotifications, System.currentTimeMillis())
+    }
+
+    /** 本轮见过的活卡 id（持久化，见 KEY_SEEN_ROUND_IDS） */
+    private fun seenRoundIds(context: Context): Set<String> =
+        prefs(context).getStringSet(KEY_SEEN_ROUND_IDS, emptySet())
+            ?.toSet() ?: emptySet()
+
+    private fun saveSeenRoundIds(context: Context, ids: Set<String>) {
+        prefs(context).edit().putStringSet(KEY_SEEN_ROUND_IDS, ids).apply()
+    }
+
+    /** 清空跳过集合（新一轮）：上一轮划走的卡按原排序回来（摞底）。 */
+    private fun clearSkipped(context: Context) {
+        val p = prefs(context)
+        val editor = p.edit()
+        var changed = false
+        for (key in p.all.keys) {
+            if (key.startsWith(KEY_SKIPPED_PREFIX)) {
+                editor.remove(key)
+                changed = true
+            }
+        }
+        if (changed) editor.apply()
+        _skipEpoch.value += 1
+    }
+
+    /**
+     * 为一张卡请求大模型准备清单（第十二批，宿主在可见卡片变化时调）：
+     * 本地过滤（只有预约卡/日程卡）＋有脱敏原文＋没请求过＋用户配了 Key，
+     * 四条全满足才调；否则直接返回（不调、不报错、不追问配 Key）。
+     * 每卡最多调一次（prepRequested 记下，失败也算一次）；结果写进
+     * prepById，UI 订阅后覆盖卡片的 prep；超时/失败/校验不过静默丢弃，
+     * 卡片只显示事实＋动作。走已有通路 LlmRouter.postChatCompletions。
+     */
+    fun requestPrep(context: Context, card: SmartCard) {
+        if (!needsLlmPrep(card)) return
+        val source = card.prepSource?.takeIf { it.isNotBlank() } ?: return
+        if (card.id in prepRequested || _prepById.value.containsKey(card.id)) return
+        val appContext = context.applicationContext
+        if (!LlmConfig.hasKey(appContext)) return
+        prepRequested += card.id
+        prepScope.launch {
+            val prep = runCatching {
+                val r = LlmRouter.postChatCompletions(
+                    LlmConfig.getBaseUrl(appContext),
+                    LlmConfig.getApiKey(appContext),
+                    LlmConfig.getModel(appContext),
+                    PREP_SYSTEM_PROMPT,
+                    source,
+                    temperature = 0.2,
+                    maxTokens = 200,
+                    tag = "SmartCardPrep"
+                )
+                if (r.networkError != null || r.httpCode !in 200..299) null
+                else parsePrepResponse(r.rawBody)
+            }.getOrNull()
+            if (prep != null) {
+                _prepById.value = _prepById.value + (card.id to prep)
+            }
+            // 失败静默：不写 prep、不重试（每卡一次）、不向用户报大模型错误。
+        }
     }
 
     /**
@@ -190,7 +284,7 @@ object SmartCardRepository {
             }
             val appt = parseAppointmentSms(sms.body, nowMs)
             if (appt != null) {
-                out += appointmentCard(appt, sms.address, context, nowMs, created)
+                out += appointmentCard(appt, sms.address, sms.body, context, nowMs, created)
                 apptCount++
             }
         }
@@ -260,10 +354,15 @@ object SmartCardRepository {
      * （CreateReminder，点下一步由宿主拿授权后写系统日历）；
      * 已建过提醒时换回看预约（短信会话），防重复建。
      * 小标＝下一步的目标应用：建提醒时是日历，建完后是短信应用。
+     * 准备清单（第十二批）：构建时 prep 为 null，写死模板已作废；
+     * 脱敏后的原文存在 prepSource 里，大模型回来后经 prepById 填上。
+     * CreateReminder 的 description 不再贴准备清单（第十二批）：
+     * 标题＋地点已是事件本身的内容，备注留空，不泄露敏感信息。
      */
     private fun appointmentCard(
         appt: ParsedAppointment,
         address: String,
+        sourceText: String,
         context: Context,
         nowMs: Long,
         reminderCreated: Set<String>
@@ -291,7 +390,7 @@ object SmartCardRepository {
                 endMs = endMs,
                 title = reminderEventTitle(kindWord, appt.startMin, appt.endMin),
                 place = appt.place,
-                description = if (appt.isCheckup) checkupPrepLine() else null,
+                description = null,
                 isCheckup = appt.isCheckup,
                 fallback = fallback
             )
@@ -301,8 +400,9 @@ object SmartCardRepository {
             kind = SmartCardKind.APPOINTMENT,
             sourceLabel = "短信",
             fact = fact,
-            prep = if (appt.isCheckup) checkupPrepLine() else null,
-            actionLabel = "看预约",
+            prep = null,
+            prepSource = sanitizeForLlm(sourceText),
+            actionLabel = if (created) "看预约" else "帮我建提醒",
             sortMs = sortMs,
             deadlineMs = endMs,
             action = action,
@@ -368,6 +468,7 @@ object SmartCardRepository {
     private fun notificationAppointmentCard(
         appt: ParsedAppointment,
         n: SimpleNotification,
+        combinedText: String,
         nowMs: Long,
         context: Context,
         reminderCreated: Set<String>
@@ -394,7 +495,7 @@ object SmartCardRepository {
                 endMs = endMs,
                 title = reminderEventTitle(kindWord, appt.startMin, appt.endMin),
                 place = appt.place,
-                description = if (appt.isCheckup) checkupPrepLine() else null,
+                description = null,
                 isCheckup = appt.isCheckup,
                 fallback = fallback
             )
@@ -404,8 +505,9 @@ object SmartCardRepository {
             kind = SmartCardKind.APPOINTMENT,
             sourceLabel = "短信",
             fact = fact,
-            prep = if (appt.isCheckup) checkupPrepLine() else null,
-            actionLabel = "看预约",
+            prep = null,
+            prepSource = sanitizeForLlm(combinedText),
+            actionLabel = if (created) "看预约" else "帮我建提醒",
             sortMs = sortMs,
             deadlineMs = endMs,
             action = action,
@@ -545,9 +647,50 @@ object SmartCardRepository {
     }
 
     /**
+     * 日历卡（第十二批）：本机日历里的日程/会议。出现窗口：会议类开始前
+     * 30 分钟、非会议日程开始前 2 小时（calendarCardWindow）；过了结束
+     * 时间消失。全天事件不进卡（没有可排的开始时间）；标题空白、起止
+     * 倒挂的也不要。去重键与短信预约卡同格式，同一件事短信在前、日历
+     * 在后，去重后短信版优先。准备清单走大模型（prepSource 是脱敏后的
+     * 标题＋地点＋描述）。小标＝日历应用。
+     * 已知局限：loadTodayEvents 只查当日窗口，跨日的日程本批不处理。
+     */
+    private fun calendarCard(
+        event: CalEvent,
+        context: Context,
+        nowMs: Long
+    ): SmartCard? {
+        if (event.allDay || event.title.isBlank() || event.end <= event.begin) {
+            return null
+        }
+        val meetingUrl = extractMeetingUrl(event)
+        val (appearFromMs, deadlineMs) = calendarCardWindow(event)
+        val sourceText = listOf(event.title, event.location, event.description)
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+        return SmartCard(
+            id = "cal|${event.eventId}|${event.begin}",
+            kind = SmartCardKind.CALENDAR,
+            sourceLabel = "日历",
+            fact = calendarCardFact(event, nowMs),
+            prep = null,
+            prepSource = sanitizeForLlm(sourceText),
+            actionLabel = if (meetingUrl != null) "加入会议" else "看日程",
+            sortMs = event.begin,
+            deadlineMs = deadlineMs,
+            action = SmartCardAction.CalendarEvent(event.eventId, meetingUrl),
+            sourceKey = calendarCardSourceKey(event),
+            appearFromMs = appearFromMs,
+            targetApp = resolveCalendarApp(context)
+        )
+    }
+
+    /**
      * 重算可见卡片（分钟 ticker / 通知变化 / 处理/跳过后调）。
      * 每条通知最多出一张卡：未接来电 → 账单/预约（消息兜底）→ 快递/航班，
-     * 按此顺序先中先得；短信候选在前，去重后短信版优先。
+     * 按此顺序先中先得；短信候选在前，日历候选次之，去重后短信版优先。
+     * 新一轮（第十二批）：活卡里出现本轮没见过的 id，就算新一轮——
+     * 清空跳过集合，上一轮划走的卡按原排序回来（摞底）。
      */
     fun refresh(context: Context, notifications: List<SimpleNotification>, nowMs: Long) {
         lastNotifications = notifications
@@ -555,9 +698,14 @@ object SmartCardRepository {
         val notifOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_NOTIFICATION)
         val phoneOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_PHONE)
         val contactsOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CONTACTS)
+        val calendarOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CALENDAR)
         val candidates = mutableListOf<SmartCard>()
         val created = reminderCreatedIds(context, nowMs)
         if (messageOn) candidates += smsCards
+        if (calendarOn && CalendarRepository.hasCalendarPermission(context)) {
+            candidates += CalendarRepository.loadTodayEvents(context)
+                .mapNotNull { calendarCard(it, context, nowMs) }
+        }
         for (n in notifications) {
             if (n.packageName == context.packageName) continue
             if (notifOn && phoneOn && n.phoneNumber.isNotBlank()) {
@@ -573,7 +721,9 @@ object SmartCardRepository {
                 }
                 val appt = parseAppointmentSms(combined, nowMs)
                 if (appt != null) {
-                    candidates += notificationAppointmentCard(appt, n, nowMs, context, created)
+                    candidates += notificationAppointmentCard(
+                        appt, n, combined, nowMs, context, created
+                    )
                     continue
                 }
             }
@@ -582,7 +732,15 @@ object SmartCardRepository {
             }
         }
         val doneIds = liveIds(context, KEY_DONE_PREFIX, nowMs)
-        val skippedIds = liveIdList(context, KEY_SKIPPED_PREFIX, nowMs)
+        // 新一轮判定要在读跳过集合之前：新一轮先清空跳过，本轮再按清空后
+        // 的集合算可见；seen 按本次活卡 id 覆盖（划走的卡还活着，仍在 seen
+        // 里，不会误触发新一轮）。
+        val aliveIds = aliveSmartCardIds(candidates, doneIds, nowMs)
+        val newRound = shouldStartNewRound(seenRoundIds(context), aliveIds)
+        if (newRound) clearSkipped(context)
+        saveSeenRoundIds(context, aliveIds)
+        val skippedIds = if (newRound) emptyList()
+        else liveIdList(context, KEY_SKIPPED_PREFIX, nowMs)
         val visible = visibleSmartCards(candidates, doneIds, skippedIds, nowMs)
         _cards.value = visible
         recordLastUsed(context, visible, nowMs)
@@ -595,6 +753,7 @@ object SmartCardRepository {
             when (card.kind) {
                 SmartCardKind.BILL, SmartCardKind.APPOINTMENT ->
                     used += UiPrefs.CONNECTOR_MESSAGE
+                SmartCardKind.CALENDAR -> used += UiPrefs.CONNECTOR_CALENDAR
                 SmartCardKind.MISSED_CALL -> {
                     used += UiPrefs.CONNECTOR_PHONE
                     used += UiPrefs.CONNECTOR_NOTIFICATION
@@ -615,8 +774,9 @@ object SmartCardRepository {
         prefs(context).getLong(KEY_LAST_USED_PREFIX + connectorKey, 0L)
 
     /**
-     * 日历来源的使用记录：本阶段日历卡片还没有，会议仍在简报的会行里——
-     * 会行出现即算日历来源用过一次（PetZone 在 coverNextEvent 非空时调）。
+     * 日历来源的使用记录：简报会行出现即算日历来源用过一次
+     * （PetZone 在 coverNextEvent 非空时调）；日历卡本身出现时由
+     * recordLastUsed 记（CALENDAR 分支），两条都记同一来源。
      */
     fun recordCalendarUsed(context: Context) {
         prefs(context).edit()

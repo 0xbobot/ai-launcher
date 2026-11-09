@@ -22,7 +22,11 @@ class GuideCardsTest {
         assertEquals("guide|contacts", cards[3].id)
         assertEquals("guide|phone", cards[4].id)
         assertTrue(cards.all { it.kind == SmartCardKind.GUIDE })
-        assertTrue(cards.all { it.actionLabel == "连接" })
+        // 第十二批：右按钮显示下一步的意图——引导卡是“连接＋来源名”。
+        assertEquals(
+            listOf("连接消息", "连接通知", "连接日历", "连接联系人", "连接电话拨号器"),
+            cards.map { it.actionLabel }
+        )
         assertTrue(cards.all { it.action is SmartCardAction.Connect })
         assertEquals(
             listOf("消息", "通知", "日历", "联系人", "电话拨号器"),

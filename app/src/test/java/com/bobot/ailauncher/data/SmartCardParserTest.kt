@@ -251,8 +251,6 @@ assertFalse(isDeliveryOrTravelNotification("微信", "你有一条新消息"))
 assertFalse(isDeliveryOrTravelNotification("日历", "10:00 项目会"))
 }
 
-@Test
-fun checkupPrepLine_isStatic() {
-assertEquals("今晚 20:00 后禁食 · 明天空腹去 · 带身份证 · 穿宽松衣服", checkupPrepLine())
-}
+/* checkupPrepLine 已删除（第十二批）：体检准备清单写死模板作废，准备清单
+ * 一律走大模型生成（SmartCardPrep），没回来就是没有，不贴模板。 */
 }

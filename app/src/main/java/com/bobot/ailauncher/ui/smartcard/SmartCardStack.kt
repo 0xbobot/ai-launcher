@@ -61,7 +61,6 @@ import com.bobot.ailauncher.data.CONNECTED_FEEDBACK_MS
 import com.bobot.ailauncher.data.ConnectedFeedback
 import com.bobot.ailauncher.data.GUIDE_VERSION
 import com.bobot.ailauncher.data.SMART_CARD_DISMISS_LABEL
-import com.bobot.ailauncher.data.SMART_CARD_NEXT_LABEL
 import com.bobot.ailauncher.data.SmartCardKind
 import com.bobot.ailauncher.data.buildConnectorStates
 import com.bobot.ailauncher.data.celebrationLevelText
@@ -112,7 +111,8 @@ import kotlin.math.abs
  * 收集卡片流、回桌面与分钟翻页时重算；没有卡时什么都不渲染、不留占位。
  *
  * 叠层交互：多张卡叠成一摞，最上面一张完整显示、下面露个边（最多露两张）；
- * 点下一步动作算处理完一张、卡片消失；横滑跳过沉到摞底、轮到最后再出现；
+ * 点下一步动作算处理完一张、卡片消失；横滑跳过播离场动画再本轮收起来
+ * （第十二批：移出可见列表，角标跟着掉；新卡到了开新一轮，划走的卡回来）；
  * 全部处理完或跳过后区域清空、不留占位条。
  *
  * 每张卡两个响应（设计稿 §4.2，449/v1.2.2，Bob 2026-11-07 晚真机 verdict；
@@ -121,7 +121,7 @@ import kotlin.math.abs
  * （走 §5 已有流程）；真卡片的下一步＝卡片定义的下一步动作（去还款 / 回拨 /
  * 看预约 / 查看，走已有的深链/启动路径直接执行；预约卡是“帮我建提醒”，
  * 先拿 WRITE_CALENDAR 授权再写系统日历）。我知道了真卡片即记处理完
- * （截止点前不再出现）；我知道了引导卡即永久记下这张（不是滑走，滑走只是本轮沉底）。
+ * （截止点前不再出现）；我知道了引导卡即永久记下这张（不是滑走，滑走只是本轮收起来）。
  *
  * 引导卡片（设计稿 §4.7，448；v3 按权限重做，455；换版重看，456）：
  * 真卡片为空、且本版引导还没看过时，叠层位置出现一叠引导卡片
@@ -139,6 +139,8 @@ import kotlin.math.abs
 fun SmartCardStackHost() {
     val context = LocalContext.current
     val cards by SmartCardRepository.cards.collectAsState()
+    val prepById by SmartCardRepository.prepById.collectAsState()
+    val skipEpoch by SmartCardRepository.skipEpoch.collectAsState()
     val notifications by NotificationRepository.notifications.collectAsState()
     val nowMillis by rememberNowMillis()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -158,6 +160,12 @@ fun SmartCardStackHost() {
     // 通知变化 / 分钟翻页：重算窗口与顺序（过期卡片最迟 1 分钟内摘掉）
     LaunchedEffect(notifications, nowMillis) {
         SmartCardRepository.refresh(context, notifications, nowMillis)
+    }
+    // 准备清单（第十二批）：可见卡片变化时，为需要大模型的那两类卡
+    // （预约/日程）请求一次准备清单；仓库内做本地过滤＋脱敏＋每卡一次，
+    // 结果回来经 prepById 填上，失败静默、卡片先按事实＋动作显示。
+    LaunchedEffect(cards) {
+        for (card in cards) SmartCardRepository.requestPrep(context, card)
     }
     // 引导卡片要用的权限状态与 opener：必须放在下面的提前返回之前——
     // remember 调用在重组间顺序要稳定，不能只在真卡片为空的分支里才跑。
@@ -276,6 +284,8 @@ fun SmartCardStackHost() {
     if (cards.isNotEmpty()) {
         SmartCardStack(
             cards = cards,
+            prepById = prepById,
+            skipEpoch = skipEpoch,
             onAction = { card ->
                 if (card.action is SmartCardAction.CreateReminder) {
                     // 预约卡“帮我建提醒”：已授权直接建；没授权先说明（显著披露）
@@ -299,6 +309,12 @@ fun SmartCardStackHost() {
                 // 点预约卡正文（除按钮外）看原文：建提醒前是短信会话/
                 // 通知跳转，建完后按钮本身就是看预约、这里同动作。
                 if (card.kind == SmartCardKind.APPOINTMENT) viewAppointment(card)
+                // 点日历卡正文：与右按钮同一动作（加入会议 / 看日程），
+                // 打开即算处理完一张（performAction 内 markDone）。
+                if (card.kind == SmartCardKind.CALENDAR) {
+                    val opened = SmartCardActions.performAction(context, card)
+                    if (!opened) IslandToasts.show("没能打开")
+                }
             }
         )
         return
@@ -317,11 +333,11 @@ fun SmartCardStackHost() {
     // 显著披露要针对哪个连接器（消息/联系人先讲清再弹系统框，日历直接弹、
     // 通知/电话拨号器跳系统设置页）；null＝没在弹。
     var disclosureConnector by remember { mutableStateOf<String?>(null) }
-    // 用户在叠层里点了“下一步”的卡（等授权结果）；接上后先显示“已连接”
-    // 反馈再离开。只对在叠层里点了“下一步”的卡给反馈；在设置里接上
+    // 用户在叠层里点了右按钮（连接＋来源名）的卡（等授权结果）；接上后先显示“已连接”
+    // 反馈再离开。只对在叠层里点了右按钮的卡给反馈；在设置里接上
     // 的权限，其卡片直接消失、不补反馈。
     var pendingConnectIds by remember { mutableStateOf(setOf<String>()) }
-    // 用户点“下一步”那一刻的真实已接源个数（457 的 connectedSourceCount，
+    // 用户点右按钮那一刻的真实已接源个数（457 的 connectedSourceCount，
     // 同一处计数）：接上后拿它跟新个数一减，就是本次智能涨了多少。
     var pendingConnectLevels by remember { mutableStateOf(mapOf<String, Int>()) }
     // 正在显示“已连接”庆祝反馈的卡（3 秒后离开）：状态里带动效触发标志
@@ -399,12 +415,13 @@ fun SmartCardStackHost() {
     if (guideSeen || displayed.isEmpty()) return
     SmartCardStack(
         cards = displayed,
+        skipEpoch = skipEpoch,
         connectedFeedbacks = connectedFeedbacks,
         onAction = { card ->
             val key = (card.action as? SmartCardAction.Connect)?.connectorKey
                 ?: return@SmartCardStack true
             pendingConnectIds += card.id
-            // 点“下一步”这一刻的真实等级：接上后拿它算增量（见上）。
+            // 点右按钮这一刻的真实等级：接上后拿它算增量（见上）。
             pendingConnectLevels +=
                 card.id to connectedSourceCount(buildConnectorStates(context))
             when (key) {
@@ -540,8 +557,8 @@ fun SmartCardStackHost() {
 
 /**
  * 卡片叠层：最上面一张完整显示，下面两张露个边（8dp 一层）。
- * 点动作立即执行（不拖 250ms 动画等开应用）；横滑跳过播离场动画再沉底。
- * 每张卡两个响应：我知道了（消失、不再出现）与下一步（卡片定义的下一步）。
+ * 点动作立即执行（不拖 250ms 动画等开应用）；横滑跳过播离场动画再本轮收起来。
+ * 每张卡两个响应：我知道了（消失、不再出现）与右按钮（卡片定义的下一步意图）。
  * onClose 非空时（引导卡片模式）× 在顶卡表头右上角、卡片内部：点一下
  * 整叠消失，不再出现；仍在叠层自己的槽位里，不另开浮层。
  * 待办数角标（本批，Bob 2026-11-07 晚定）：叠层右上角压住顶卡角，
@@ -602,12 +619,22 @@ fun SmartCardStack(
     // 只显示“已连接”＋接下来会发生什么，外加庆祝形态（对勾弹入＋金色等级行
     // ＋整卡轻弹，见 SmartCardView）。反馈卡顶掉的是它自己的引导卡，不多占
     // 一张待办，角标计数不变（cards.size 本就是替换后的张数）。
-    connectedFeedbacks: Map<String, ConnectedFeedback> = emptyMap()
+    connectedFeedbacks: Map<String, ConnectedFeedback> = emptyMap(),
+    // 大模型准备清单（第十二批）：按卡片 id 的异步结果，覆盖卡片构建时
+    // 的 prep（构建时为 null）。没回来就是没有，不贴模板。
+    prepById: Map<String, String> = emptyMap(),
+    // 顶卡划走动画复位代次（第十二批）：仓库 skip()/新一轮清空时加一；
+    // TopSmartCard 的组合键挂上它，同一张卡以新代次重新呈现时动画状态
+    // （offsetX/alpha）重建，不会再出现“数着卡、看不见卡”。
+    skipEpoch: Int = 0
 ) {
     if (cards.isEmpty()) return
-    val top = cards[0]
+    // 准备清单覆盖：大模型回来了就显示，没回来显示构建时的 prep（null
+    // 即没有，不贴模板）。copy 只换 prep，不动 id/动作/排序键。
+    val top = cards[0].let { it.copy(prep = prepById[it.id] ?: it.prep) }
     val connectedIds: Set<String> = connectedFeedbacks.keys
     val peeks = cards.drop(1).take(2)
+        .map { it.copy(prep = prepById[it.id] ?: it.prep) }
     // 第十批：卡片按桌面卡片语言收边——两侧各留 SmartCardStackSideMargin，
     // 不贴边、不满宽。收边放在最外层 Column：顶卡、露边卡、角标一起收，
     // 摞高量测（SubcomposeLayout）与手势带（cardStackBandPx 的上下缘）
@@ -631,7 +658,10 @@ fun SmartCardStack(
         Box(modifier = Modifier.fillMaxWidth()) {
             SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
                 val topPlaceables = subcompose(SmartCardStackSlot.Top) {
-                    key(top.id) {
+                    // 组合键挂上 skipEpoch（第十二批）：同一张卡以新代次重新
+                    // 呈现时 TopSmartCard 重建，划走动画的 offsetX/alpha
+                    // 回到 0/1，不会再出现“数着卡、看不见卡”。
+                    key(top.id, skipEpoch) {
                         TopSmartCard(
                             card = top,
                             onAction = onAction,
@@ -706,7 +736,7 @@ private enum class SmartCardStackSlot {
     }
 }
 
-/** 顶卡：横滑跳过（过 120dp 阈值离场沉底，不够回弹）；点动作立即执行 */
+/** 顶卡：横滑跳过（过 120dp 阈值离场、本轮收起来，不够回弹）；点动作立即执行 */
 @Composable
 private fun TopSmartCard(
     card: SmartCard,
@@ -791,9 +821,9 @@ private fun TopSmartCard(
 
 /**
  * 单张卡片：来源标签＋一句话事实（含截止点）＋（可选）一行准备清单＋
- * 一行两个响应：我知道了（左）与下一步（右，第十一批 Bob 定：右按钮
- * 固定文案“下一步”，不再显示动作文案；动作含义由事实文案＋右下方
- * 应用小标承担）。
+ * 一行两个响应：我知道了（左）与右按钮（右，第十二批 Bob 定：显示下一步
+ * 的意图，去还款 / 帮我建提醒 / 看预约 / 回拨 / 查看 / 加入会议 / 看日程 /
+ * 连接＋来源名；动作含义由事实文案＋右下方应用小标补充）。
  * 右下方应用小标（第十一批）：只画在真卡上，独立一行贴右下角——16dp
  * 应用图标＋应用名（Caption 12sp，次要色；字阶最小档就是 12sp，11sp
  * 中文可读性不足、token 规则禁用的下限，取 Bob 给的 11–12sp 的上限），
@@ -1013,25 +1043,27 @@ private fun SmartCardView(
                             color = AILauncherColors.current.Hint
                         )
                     }
-                    // 下一步：卡片定义的下一步动作（第十一批 Bob 定：右按钮
-                    // 固定文案“下一步”，不再显示动作文案；含义由事实文案＋
-                    // 右下方应用小标承担）。金色只留主操作（去 AI 味四条）。
+                    // 右按钮（第十二批 Bob 定）：显示下一步的意图（actionLabel：
+                    // 去还款 / 帮我建提醒 / 看预约 / 回拨 / 查看 / 加入会议 /
+                    // 看日程 / 连接＋来源名），不再写“下一步”几个字。
+                    // 金色只留主操作（去 AI 味四条）。
                     TextButton(
                         onClick = onActionClick,
                         modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Text(
-                            text = SMART_CARD_NEXT_LABEL,
+                            text = card.actionLabel,
                             fontSize = AILauncherType.Callout.fontSize,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.current.Accent
                         )
                     }
                 } else {
-                    // 露边卡：按钮够不着，只留“下一步”作下一张的提示（与 448 同款）。
-                    // 露边只露 8dp，这行基本看不见，不占布局。
+                    // 露边卡：按钮够不着，只留这张卡下一步的意图作下一张的
+                    // 提示（第十二批：不再写“下一步”，显示它自己的
+                    // actionLabel）。露边只露 8dp，这行基本看不见，不占布局。
                     Text(
-                        text = SMART_CARD_NEXT_LABEL,
+                        text = card.actionLabel,
                         fontSize = AILauncherType.Callout.fontSize,
                         fontWeight = FontWeight.Medium,
                         color = AILauncherColors.current.Accent,
@@ -1059,7 +1091,7 @@ private fun SmartCardView(
  * 卡片右下方应用小标（第十一批，Bob 定“要小、要优雅”）：
  * 独立一行贴卡片右下角、右对齐——16dp 应用图标＋应用名（Caption 12sp，
  * 次要色），无底色、无边框，不抢按钮视觉；名字过长截断（最多 160dp）；
- * 只做展示、不可点（没有 clickable，点“下一步”才是动作）。
+ * 只做展示、不可点（没有 clickable，点右按钮才是动作）。
  * 图标按包名取真实应用图标；包被卸了、图标读不到时只显示名字。
  */
 @Composable
