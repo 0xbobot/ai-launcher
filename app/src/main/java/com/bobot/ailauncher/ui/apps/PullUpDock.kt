@@ -93,6 +93,7 @@ import com.bobot.ailauncher.data.AppCatalog
 import kotlinx.coroutines.launch
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppUsageTracker
+import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.BadgeStickyStore
 import com.bobot.ailauncher.data.InstalledApps
 import com.bobot.ailauncher.data.NotificationRepository
@@ -279,7 +280,9 @@ fun PullUpDock(
                 context.startActivity(intent)
                 // 角标粘性数（Bob 2026-11-08）：在我们桌面里点图标启动应用 = 去读消息了，
                 // 成功打开才清掉该包粘性数；打开失败不清。
+                // 探针数同款清掉（Bob 2026-11-09 12:20 ①：启动=去读消息了）。
                 BadgeStickyStore.clearForPackage(context, app.packageName)
+                BadgeProbe.clearForPackage(context, app.packageName)
             } else IslandToasts.show("无法打开「${app.label}」")
         } catch (_: Exception) {
             IslandToasts.show("无法打开「${app.label}」")

@@ -103,6 +103,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -161,7 +162,9 @@ import com.bobot.ailauncher.data.DeepLinkServiceReport
 import com.bobot.ailauncher.data.LlmCallResult
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
+import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.BadgeStickyStore
+import com.bobot.ailauncher.data.ForegroundConfirm
 import com.bobot.ailauncher.data.MarketGuide
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SmsRepository
@@ -177,6 +180,8 @@ import com.bobot.ailauncher.ui.theme.pageTextureBackground
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import com.bobot.ailauncher.ui.theme.statusBarsTopPadding
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -235,6 +240,19 @@ fun AppCenterContent(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // 监听翻 true 补推一次（Bob 2026-11-09 12:20 ①：版本升级后角标要等下一条
+    // 通知才更新——进组合时那次同步重算撞上服务还没回来（instance 为 null 时
+    // 空操作），重绑是异步 toggle；监听翻成 true 说明重绑落地了，这时再推
+    // 一次，把在用通知/短信/探针/粘性数合进角标。只在 false→true 跳变时推
+    // 一次（drop(1) 跳过进组合时的初值，已连接时那次同步推已覆盖；推数只改
+    // badgeCounts、不改 isConnected，不会自激）。与 DisposableEffect 里的
+    // 同步推互补，不共用重绑的 30 秒节流。
+    LaunchedEffect(Unit) {
+        snapshotFlow { NotificationRepository.isConnected.value }
+            .drop(1)
+            .filter { it }
+            .collect { LauncherNotificationService.requestBadgeRecompute() }
     }
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -681,7 +699,12 @@ fun AppCenterContent(
         ActionUsageTracker.recordTapAction(context, query, app.packageName, opened)
         // 角标粘性数（Bob 2026-11-08）：在我们桌面里点图标启动应用 = 去读消息了，
         // 成功打开才清掉该包粘性数；打开失败不清（用户没读到）。
-        if (opened) BadgeStickyStore.clearForPackage(context, app.packageName)
+        // 探针数同款清掉（Bob 2026-11-09 12:20 ①：启动=去读消息了，广播自报
+        // 的未读数已过期；不清的话取消通知后角标四路里探针那路还算着）。
+        if (opened) {
+            BadgeStickyStore.clearForPackage(context, app.packageName)
+            BadgeProbe.clearForPackage(context, app.packageName)
+        }
         return opened
     }
 
@@ -725,10 +748,31 @@ fun AppCenterContent(
                 AppUsageTracker.recordLaunch(context, app.packageName)
                 inactiveTick++
                 BadgeStickyStore.clearForPackage(context, app.packageName)
+                BadgeProbe.clearForPackage(context, app.packageName)
                 return true
             }
         }
         return launchApp(app)
+    }
+
+    // 未读行点按的“取消”那一半（Bob 2026-11-09 12:20 ②：点未读行有时只清
+    // 消息、不打开应用——contentIntent.send() / startActivity 返回成功不等于
+    // 应用真的到了前台，中兴跳转确认框里点取消时应用根本没打开、通知却已经
+    // 取消了）：先打开、确认应用真的到了前台再取消。ForegroundConfirm 在主
+    // 线程 Handler 上轮询（200ms 一次、最多 1 秒），窗内任一时刻见到目标
+    // 应用到过前台就取消（打开后 1 秒内又切走也算，打开过就是读到了）；1 秒
+    // 内没见到就不取消，通知留着、行留在未读组（用户可左滑清）；没拿到用量
+    // 统计权限时退回“调起成功就取消”（老行为）。
+    // 注意：不能绑组合作用域——用户点行打开应用后应用中心浮层就没了，作用域
+    // 取消会把延迟取消一起杀掉；ForegroundConfirm 用 applicationContext +
+    // 主线程 Handler，活过应用中心 dispose。
+    fun scheduleUnreadCancelAfterOpen(app: AppInfo) {
+        ForegroundConfirm.scheduleCancelIfForeground(
+            context.applicationContext,
+            app.packageName
+        ) {
+            onClearUnreadNotifications(app.packageName)
+        }
     }
 
     // ---------- 反馈闭环（Bob 2026-11-06） ----------
@@ -907,6 +951,7 @@ fun AppCenterContent(
         context = context,
         onLaunchApp = ::launchApp,
         onOpenUnreadApp = ::openUnreadApp,
+        onUnreadRowOpened = ::scheduleUnreadCancelAfterOpen,
         onHideApp = ::hideApp
     )
 
@@ -1030,6 +1075,7 @@ fun AppCenterContent(
                 onUnlockHiddenApps = { unlockHiddenApps() },
                 onLaunch = ::launchApp,
                 onOpenUnreadApp = ::openUnreadApp,
+                onUnreadRowOpened = ::scheduleUnreadCancelAfterOpen,
                 onLongPress = { popupApp = it },
                 onOpenSettings = onOpenSettings,
                 // v0.68.82（横屏专项第 1 项）：两套手势对齐竖屏（底部上滑已删）

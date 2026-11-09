@@ -29,12 +29,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,6 +56,9 @@ import com.bobot.ailauncher.ui.theme.AILauncherType
 import kotlinx.coroutines.delay
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.service.LauncherNotificationService
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import com.bobot.ailauncher.service.PanelAccessibilityService
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
@@ -252,6 +257,16 @@ fun HomeScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // 监听翻 true 补推一次（Bob 2026-11-09 12:20 ①，与应用中心同款）：
+    // Dock 角标画在首页，升级重启后用户先待在首页；首页 ON_RESUME 重绑
+    // 也是异步 toggle，翻成 true 说明重绑落地了，这时再推一次角标，
+    // 不只等下一条通知。只在 false→true 跳变时推一次，不循环。
+    LaunchedEffect(Unit) {
+        snapshotFlow { NotificationRepository.isConnected.value }
+            .drop(1)
+            .filter { it }
+            .collect { LauncherNotificationService.requestBadgeRecompute() }
     }
 
     // v0.31.0：首屏只留 Dock（Bob），日历/宠物逻辑待重想，先移除

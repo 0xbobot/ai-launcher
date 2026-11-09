@@ -75,6 +75,14 @@ fun shouldRebindListener(
 }
 
 /**
+ * 监听翻 true 是否要补推一次角标（纯函数，供单测；Bob 2026-11-09 12:20 ①）：
+ * 只在 false→true 跳变时推一次——进组合/回前台那次同步推已覆盖“已连接”
+ * 的情况；推数只改 badgeCounts、不改 isConnected，不会自激。
+ */
+fun shouldPushOnConnected(previous: Boolean, current: Boolean): Boolean =
+    !previous && current
+
+/**
  * 前台复核入口（首页 ON_RESUME、应用中心进组合 + ON_RESUME 共用）：
  * 已授权限但监听未连接时重绑一次，返回是否触发了重绑。
  * 已连接时先查一次系统现查的活信号（activeNotifications 为 null 即
