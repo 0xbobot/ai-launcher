@@ -104,6 +104,27 @@ internal fun blindStartExcluded(
         //（不依赖 Rect.contains 对零面积矩形的边界语义）。
         (cardStackRect?.let { !it.isEmpty && it.contains(start) } == true)
 
+/**
+ * 下滑左下开控制中心的判定（Bob 2026-11-09 21:24：首页偶尔还是会触发下拉手势）。
+ * 旧规则 totalX < -24dp 太松：150dp 的下滑偏 10° 就有约 26dp 左移，自然拇指
+ * 弧线（10–15°）动不动就落进“左下”。新规则两条同时成立才算左下：
+ * ① 左移绝对量超过 xBiasPx（48dp，与纵向阈值同值）；② 左移超过下滑量的
+ * 一半（|totalX| > 0.5 * totalY，约 27°），即横向分量占主导的一半以上。
+ * 控制中心带约 27°–56°（56° 以上归盲操扇形：横向需 > 1.5× 纵向才触发扇形，
+ * 见 BlindCaptureController.onMove）。纯函数，单测锁死。
+ */
+internal const val CONTROL_CENTER_DIAGONAL_RATIO = 0.5f
+
+internal fun isControlCenterSwipe(
+    totalX: Float,
+    totalY: Float,
+    swipeThresholdPx: Float,
+    xBiasPx: Float,
+): Boolean =
+    totalY > swipeThresholdPx &&
+        totalX < -xBiasPx &&
+        totalX < -totalY * CONTROL_CENTER_DIAGONAL_RATIO
+
 @Composable
 fun HomeScreen(
     onOpenAppDrawer: () -> Unit,
@@ -204,8 +225,11 @@ fun HomeScreen(
     }
     // v0.27.3：上滑阈值降低（120dp→48dp），更容易触发 D3
     val swipeThresholdPx = with(density) { 48.dp.toPx() }
-    // 斜滑方向判定：x 偏移超过此值才算"往左/往右"
-    val xBiasPx = with(density) { 24.dp.toPx() }
+    // 下滑左下开控制中心的左移绝对量下限（48dp，与纵向阈值同值）：
+    // 旧值 24dp 太松，自然下滑带一点左偏就误判成左下（Bob 2026-11-09
+    // 21:24）。绝对量只是第一道门，真正的主导判定在 isControlCenterSwipe
+    //（左移还须超过下滑量的一半）。
+    val xBiasPx = with(density) { 48.dp.toPx() }
     // v0.68.32：底部 Dock 区高度同步给盲操控制器（圆心钳制用）
     androidx.compose.runtime.LaunchedEffect(blindDockZoneDp) {
         blindCtl.dockZonePx = with(density) { blindDockZoneDp.dp.toPx() }
@@ -343,10 +367,11 @@ fun HomeScreen(
                                 totalY < -swipeThresholdPx -> {
                                     openDrawerState()
                                 }
-                                // 下滑 → 仅左下开控制中心；右下 / 纯下滑不做任何事
-                                // （Bob 2026-11-08：桌面的下滑打开通知中心删除）
+                                // 下滑 → 仅刻意左下斜滑开控制中心；纯下滑 / 微左下滑 /
+                                // 右下不做任何事（Bob 2026-11-08：桌面的下滑打开通知中心
+                                // 删除；2026-11-09 21:24：24dp 太松，自然下滑误触）。
                                 totalY > swipeThresholdPx -> {
-                                    if (totalX < -xBiasPx) {
+                                    if (isControlCenterSwipe(totalX, totalY, swipeThresholdPx, xBiasPx)) {
                                         if (ensurePanelService())
                                             PanelAccessibilityService.openControlCenter()
                                     }
