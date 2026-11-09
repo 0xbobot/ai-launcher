@@ -105,6 +105,15 @@ class LauncherNotificationService : NotificationListenerService() {
         }
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        // 探针数恢复（Bob 2026-11-09 12:20 ①）：进程（重）启后内存是空的，
+        // 先从磁盘把广播数捡回来，再跑后面的连接/推送，否则升级重启后探针
+        // 那路要等下一条新广播才有数。manifest 广播接收器那条路另在
+        // BadgeBroadcastReceiver.onReceive 里先恢复（进程可能只为接收器启动）。
+        BadgeProbe.restorePersistedCounts(this)
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         instance = this

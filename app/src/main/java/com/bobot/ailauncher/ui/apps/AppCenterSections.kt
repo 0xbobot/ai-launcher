@@ -405,6 +405,10 @@ data class AppCenterRowActions(
     // （调用点 AppCenter.kt 的 openUnreadApp）。只未读行用，其余行仍走
     // onLaunchApp。
     val onOpenUnreadApp: (AppInfo) -> Boolean,
+    // 未读行点按的“取消”那一半（Bob 2026-11-09 12:20 ②）：先打开、确认应用
+    // 真的到了前台再取消（调用点 AppCenter.kt 的 scheduleUnreadCancelAfterOpen）。
+    // 只未读行点按用；左滑清理仍走 onClearUnreadNotifications 立即取消。
+    val onUnreadRowOpened: (AppInfo) -> Unit,
     val onHideApp: (AppInfo) -> Unit,
 )
 
@@ -995,11 +999,17 @@ fun LazyListScope.AppCenterUnreadSection(
                             app = app,
                             // 打开 + 清除（Bob 2026-11-08 23:20 澄清：点未读行打开应用
                             // 后消息没被清除——原来行点按只走开应用、不取消通知）：
-                            // 像点通知栏通知一样，成功打开且有在用通知时，走左滑
-                            // 清理同一条取消路径（onClearUnreadNotifications）。
+                            // 像点通知栏通知一样，成功打开且有在用通知时取消通知。
                             // “打开”那一半（Bob 2026-11-08 23:49）：走
                             // onOpenUnreadApp——优先发通知自己的 contentIntent
                             // 直达会话/消息，没有或失败时退回普通打开应用。
+                            // “取消”那一半（Bob 2026-11-09 12:20 ②）：不再调起
+                            // 返回成功就立即取消——contentIntent.send() /
+                            // startActivity 返回成功不等于应用真的到了前台，
+                            // 中兴跳转确认框点取消时应用根本没打开、通知却已
+                            // 取消。改走 onUnreadRowOpened：先打开、确认应用
+                            // 真的到了前台（200ms 一轮、最多 1 秒）再取消；
+                            // 1 秒内没见到就不取消，通知留着。
                             // 短信行无在用通知（不在 activeNotifPkgs 里），只打开、
                             // 不调取消，行等短信在应用内读完、库计数降了才离开未读组。
                             // 打开失败（同一应用 500ms 内重复点按、或启动抛异常）
@@ -1007,7 +1017,7 @@ fun LazyListScope.AppCenterUnreadSection(
                             onLaunch = {
                                 val opened = actions.onOpenUnreadApp(app)
                                 if (opened && app.packageName in activeNotifPkgs) {
-                                    onClearUnreadNotifications(app.packageName)
+                                    actions.onUnreadRowOpened(app)
                                 }
                             },
                             compact = true,

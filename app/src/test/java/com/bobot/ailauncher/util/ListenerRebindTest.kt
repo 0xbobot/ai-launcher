@@ -95,4 +95,20 @@ class ListenerRebindTest {
             shouldRebindListener(true, true, true, never, now, liveNotifications = true)
         )
     }
+
+    @Test
+    fun `connected flip false to true pushes once`() {
+        assertTrue(shouldPushOnConnected(false, true))
+    }
+
+    @Test
+    fun `already connected does not push`() {
+        assertFalse(shouldPushOnConnected(true, true))
+    }
+
+    @Test
+    fun `disconnect does not push`() {
+        assertFalse(shouldPushOnConnected(true, false))
+        assertFalse(shouldPushOnConnected(false, false))
+    }
 }

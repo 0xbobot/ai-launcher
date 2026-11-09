@@ -61,6 +61,14 @@ object BadgeProbe {
     private val _lastBroadcast = MutableStateFlow<LastBroadcast?>(null)
     val lastBroadcast: StateFlow<LastBroadcast?> = _lastBroadcast.asStateFlow()
 
+    /**
+     * 各包广播数的上报时间（与 _broadcastCounts 同步变，只供持久化与过期用；
+     * 缺失时按“刚上报”算，不把内存里的数当过期丢掉）。
+     * ConcurrentHashMap：currentProbeCounts 会在 ZTE 探针后台线程被调，
+     * onBroadcastReceived 在主线程写，普通 HashMap 并发读写不安全。
+     */
+    private val broadcastAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     // ---------- ZTE provider 探针结果 ----------
 
     data class ZteProbeResult(
@@ -80,15 +88,63 @@ object BadgeProbe {
     private val _zteResult = MutableStateFlow<ZteProbeResult?>(null)
     val zteResult: StateFlow<ZteProbeResult?> = _zteResult.asStateFlow()
 
-    /** 探针第四路信号：广播数 + ZTE provider 读到的数，每包取最大值。 */
+    /** 探针第四路信号：广播数 + ZTE provider 读到的数，每包取最大值。广播数
+     * 读时剪掉超过 7 天的过期条目（只过滤、不改内存；物理删除在恢复与保存时做）。 */
     fun currentProbeCounts(): Map<String, Int> {
+        val now = System.currentTimeMillis()
         val out = mutableMapOf<String, Int>()
-        for ((pkg, n) in _broadcastCounts.value) out[pkg] = maxOf(out[pkg] ?: 0, n)
+        for ((pkg, n) in _broadcastCounts.value) {
+            val at = broadcastAt[pkg] ?: now
+            if (now - at <= PROBE_MAX_AGE_MILLIS) out[pkg] = maxOf(out[pkg] ?: 0, n)
+        }
         val zte = _zteResult.value
         if (zte != null) {
             for ((pkg, n) in zte.counts) out[pkg] = maxOf(out[pkg] ?: 0, n)
         }
         return out
+    }
+
+    /** 当前广播数快照（包名 → 数 to 上报时间），供持久化写穿用。 */
+    private fun broadcastEntries(): Map<String, Pair<Int, Long>> {
+        val now = System.currentTimeMillis()
+        return _broadcastCounts.value.mapValues { (pkg, n) ->
+            n to (broadcastAt[pkg] ?: now)
+        }
+    }
+
+    /**
+     * 从磁盘恢复探针数（Bob 2026-11-09 12:20 ①：升级重启丢探针数）。
+     * 进程启动后第一次用到探针数之前调（监听服务 onCreate、manifest 广播
+     * 接收器 onReceive）：过期剪掉、与内存里已有的按时间戳取新合并，
+     * 不覆盖内存里更新的数。重复调无害（合并幂等）。
+     */
+    fun restorePersistedCounts(context: Context) {
+        val restored = try {
+            BadgeProbeStore.loadEntries(context)
+        } catch (_: Exception) {
+            emptyMap()
+        }
+        if (restored.isEmpty()) return
+        val pruned = pruneProbeEntries(restored, System.currentTimeMillis())
+        if (pruned.isEmpty()) return
+        val merged = mergeProbeEntries(broadcastEntries(), pruned)
+        _broadcastCounts.value = merged.mapValues { it.value.first }
+        broadcastAt.clear()
+        broadcastAt.putAll(merged.mapValues { it.value.second })
+    }
+
+    /**
+     * 启动应用时清掉该包探针数（启动=去读消息了，与粘性数同款；
+     * 调用点与 BadgeStickyStore.clearForPackage 同款三处）。
+     */
+    fun clearForPackage(context: Context, pkg: String) {
+        _broadcastCounts.value = _broadcastCounts.value - pkg
+        broadcastAt.remove(pkg)
+        try {
+            BadgeProbeStore.clearForPackage(context, pkg)
+        } catch (_: Exception) {
+            // 清盘失败不影响内存里的数（下次广播/恢复会纠正）
+        }
     }
 
     /**
@@ -104,8 +160,21 @@ object BadgeProbe {
         val now = System.currentTimeMillis()
         _lastBroadcast.value = LastBroadcast(pkg, count, now)
         val cur = _broadcastCounts.value.toMutableMap()
-        if (count > 0) cur[pkg] = count else cur.remove(pkg)
+        if (count > 0) {
+            cur[pkg] = count
+            broadcastAt[pkg] = now
+        } else {
+            cur.remove(pkg)
+            broadcastAt.remove(pkg)
+        }
         _broadcastCounts.value = cur
+        // 写穿存盘（Bob 2026-11-09 12:20 ①）：升级重启不丢；count==0 的移除
+        // 也写穿（磁盘上删掉，不复活）。
+        try {
+            BadgeProbeStore.saveEntries(context, broadcastEntries())
+        } catch (_: Exception) {
+            // 存盘失败不影响内存里的数（下次广播再写穿）
+        }
         Log.d(TAG, "badge broadcast: $pkg=$count")
         return true
     }
@@ -273,6 +342,9 @@ object BadgeProbe {
  */
 class BadgeBroadcastReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // 进程可能刚为这个接收器启动、内存还是空的：先从磁盘恢复探针数，
+        // 再记新广播，否则恢复会晚于本次合入、旧数丢一轮。
+        BadgeProbe.restorePersistedCounts(context)
         if (BadgeProbe.onBroadcastReceived(context, intent)) {
             // 记下之后立即触发一次角标重算（校验没通过不推，避免伪造
             // 广播刷重算）。未连接时无-op，数不丢，下次连接的 push
