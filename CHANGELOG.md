@@ -10,6 +10,10 @@
 
 ---
 
+## v1.3.24（versionCode 481）— 2026-11-09
+
+首页下滑手势整个拿掉（Bob 2026-11-09 21:52）。删的是手势，不是逻辑：首页任何方向下滑不再触发任何面板；480 的收紧判定（isControlCenterSwipe / 48dp / 27°）随手势作废。留的是能力：PanelAccessibilityService + openControlCenter + manifest 声明一字不动。随手势一起删的死代码：isControlCenterSwipe、CONTROL_CENTER_DIAGONAL_RATIO、xBiasPx、ensurePanelService、引导卡 PanelPermissionGuide 及其状态/UiPrefs 四函数两键、HomeControlCenterSwipeTest（10 项）。不动：上滑开应用中心、Dock 换档、盲操、智能卡片叠层、应用中心下拉回 D2。单测从 595 回到 585。
+
 ## v1.3.23（versionCode 480）— 2026-11-09
 
 首页下滑误触控制中心修法（Bob 2026-11-09 21:24）。旧规则 totalX < -24dp 太松：150dp 的下滑偏 10° 就有约 26dp 左移，自然拇指弧线（10–15°）动不动就落进“左下”，控制中心偶尔弹出来。新规则两条同时成立才算左下：①左移绝对量超过 48dp（与纵向阈值同值）；②左移超过下滑量的一半（|totalX| > 0.5 * totalY，约 27°）。判定抽成纯函数 isControlCenterSwipe，单测 10 项锁死。另删掉 MainScreen.kt 里未用的 detectDragGesturesAfterLongPress import。下滑左下开控制中心本身保留（Bob 471 明确保留），上滑开应用中心、Dock 换档、盲操、智能卡片叠层横滑均不动。
