@@ -35,6 +35,12 @@ object CalendarRepository {
             context, Manifest.permission.READ_CALENDAR
         ) == PackageManager.PERMISSION_GRANTED
 
+    /** 日历写入权限（第十一批“帮我建提醒”用）：与读分开判，写要另外授权。 */
+    fun hasWriteCalendarPermission(context: Context): Boolean =
+        ContextCompat.checkSelfPermission(
+            context, Manifest.permission.WRITE_CALENDAR
+        ) == PackageManager.PERMISSION_GRANTED
+
     /** 今日 [本地 00:00, 次日 00:00) 窗口——从查询里抽出的纯函数，便于单测。 */
     internal fun todayWindow(nowMillis: Long): Pair<Long, Long> {
         val cal = Calendar.getInstance().apply {
