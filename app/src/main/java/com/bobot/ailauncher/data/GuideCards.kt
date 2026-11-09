@@ -64,7 +64,7 @@ private fun guideCard(
     sourceLabel = sourceLabel,
     fact = fact,
     prep = prep,
-    actionLabel = "连接",
+    actionLabel = "连接$sourceLabel",
     sortMs = 0L,
     deadlineMs = Long.MAX_VALUE,
     action = SmartCardAction.Connect(connectorKey),

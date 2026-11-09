@@ -491,26 +491,11 @@ internal fun ThinkDots(modifier: Modifier = Modifier) {
 /**
  * v0.58.0（需求4）：从日历事件的 location/description/title 提取在线会议链接。
  * 返回 null 表示没有识别到会议链接。
+ * 实现在 data 层（CalendarMeeting.extractMeetingUrl，第十二批下沉）：
+ * 日历智能卡片与简报会行共用同一条链路与同一份域名白名单。
  */
-private val MEETING_DOMAINS = listOf(
-    "meeting.tencent.com", "wemeet", "voovmeeting.com",
-    "zoom.us", "zoom.com",
-    "teams.microsoft.com", "teams.live.com",
-    "meeting.feishu.cn", "feishu.cn",
-    "webex.com",
-    "dingtalk.com"
-)
-private val URL_REGEX = Regex("""https?://[^\s<>"']+""")
-
-private fun extractMeetingUrl(event: CalEvent): String? {
-    val combined = "${event.location}\n${event.description}\n${event.title}"
-    return URL_REGEX.findAll(combined)
-        .map { it.value.trimEnd('.', ',', ')', ']', '!', '；', '。') }
-        .firstOrNull { url ->
-            val lower = url.lowercase()
-            MEETING_DOMAINS.any { lower.contains(it) }
-        }
-}
+private fun extractMeetingUrl(event: CalEvent): String? =
+    com.bobot.ailauncher.data.extractMeetingUrl(event)
 
 /**
  * v0.68.101（D-5）：入会防多发守卫（纯逻辑，单测锁死）——同一事件在
@@ -539,64 +524,19 @@ private val joinGuard = JoinGuard()
  * 1) 事件里有可解析的在线会议链接 → 直开链接（会议 App/浏览器接管）；
  * 2) 无链接 → 打开日历 App / 事件详情（三级兜底，与非封面 TODAY 会议行同款）；
  * 3) 全失败 → 系统提示兜底，绝不无反应。
+ * 打开链路在 data 层（CalendarMeeting.openCalendarEvent，第十二批下沉）：
+ * 日历智能卡片的“加入会议/看日程”与这里同一条链。
  */
 fun joinCalendarEvent(context: android.content.Context, e: CalEvent) {
     // D-5：窗口内重复触发直接吞掉（见 JoinGuard）
     val joinKey = "${e.eventId}|${extractMeetingUrl(e) ?: ""}"
     if (!joinGuard.shouldFire(joinKey, System.currentTimeMillis())) return
-    val url = getValidMeetingUrl(context, e)
-    if (url != null) {
-        try {
-            context.startActivity(
-                android.content.Intent(
-                    android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse(url)
-                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-            return
-        } catch (_: Exception) { /* 链接打开失败 → 落日历兜底 */ }
-    }
-    var opened = false
-    try {
-        val intent = android.content.Intent(
-            android.content.Intent.ACTION_MAIN
-        ).addCategory(
-            android.content.Intent.CATEGORY_APP_CALENDAR
-        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (intent.resolveActivity(context.packageManager) != null) {
-            context.startActivity(intent)
-            opened = true
-        }
-    } catch (_: Exception) { }
-    if (!opened && e.eventId > 0) {
-        try {
-            val uri = android.net.Uri.parse(
-                "content://com.android.calendar/events/${e.eventId}"
-            )
-            val viewIntent = android.content.Intent(
-                android.content.Intent.ACTION_VIEW, uri
-            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (viewIntent.resolveActivity(context.packageManager) != null) {
-                context.startActivity(viewIntent)
-                opened = true
-            }
-        } catch (_: Exception) { }
-    }
+    val opened = com.bobot.ailauncher.data.openCalendarEvent(
+        context, e.eventId, extractMeetingUrl(e)
+    )
     if (!opened) {
         IslandToasts.show("没找到日历应用")
     }
-}
-
-// v0.63.1：验证会议 URL 有效且系统能解析，避免无效 URL 弹出应用选择器
-internal fun getValidMeetingUrl(context: android.content.Context, event: CalEvent): String? {
-    val url = extractMeetingUrl(event) ?: return null
-    if (url.isBlank()) return null
-    if (!url.startsWith("http://") && !url.startsWith("https://")) return null
-    val intent = android.content.Intent(
-        android.content.Intent.ACTION_VIEW,
-        android.net.Uri.parse(url)
-    )
-    return if (intent.resolveActivity(context.packageManager) != null) url else null
 }
 
 // 批B ②：hasCalendarPermission / loadTodayEvents 已下沉 data 层 CalendarRepository
