@@ -33,8 +33,16 @@ sealed class SmartCardAction {
     /** 打开拨号器并填好号码（ACTION_DIAL，不直接拨号，不用权限） */
     data class Dial(val number: String) : SmartCardAction()
 
-    /** 打开已装应用（去还款落到用户真正用的那家银行应用，见 SmartCardActions） */
-    data class LaunchApp(val packageName: String) : SmartCardAction()
+    /**
+     * 打开已装应用（去还款落到用户真正用的那家银行/支付应用，见 SmartCardActions）。
+     * [deepLinkUri] 非空时先试深链直达应用内页面（还款页），打不开或
+     * 没接住时退回打开应用本体——深链是社区核实的地址（非官方文档、
+     * 未在真机上逐条验证），执行层必须带解析校验＋退回兜底，不许只认深链。
+     */
+    data class LaunchApp(
+        val packageName: String,
+        val deepLinkUri: String? = null
+    ) : SmartCardAction()
 
     /** 点通知自带的 contentIntent，直达应用内页面（快递取件码/航班值机等） */
     data class OpenNotification(val pendingIntent: PendingIntent?) : SmartCardAction()
@@ -43,7 +51,51 @@ sealed class SmartCardAction {
      * 不走 performAction——接来源要弹应用内显著披露/系统框，得由宿主
      * 拿 opener 执行；performAction 里遇见它只返回 false（防御分支）。 */
     data class Connect(val connectorKey: String) : SmartCardAction()
+
+    /**
+     * 预约卡的“帮我建提醒”（第十一批，设计稿 §3）：在系统日历里建一个
+     * 提醒事件（时间地点＋准备清单）。不走 performAction——建提醒要先
+     * 拿 WRITE_CALENDAR 授权（说明＋系统框），得由宿主拿 opener 执行；
+     * performAction 里遇见它只返回 false（防御分支）。
+     * [fallback] 是拒绝授权或建提醒失败时退回的动作（看预约：短信会话
+     * 或通知自己的跳转）；建完提醒后仓库也会把卡片动作换成它，避免重复建。
+     */
+    data class CreateReminder(
+        /** 提醒事件开始时间（毫秒） */
+        val startMs: Long,
+        /** 提醒事件结束时间（毫秒） */
+        val endMs: Long,
+        /** 事件标题（如“体检预约 08:00–09:00”） */
+        val title: String,
+        /** 地点（提不到为空，不硬凑） */
+        val place: String?,
+        /** 备注＝准备清单（体检才有） */
+        val description: String?,
+        /** 是否体检类（体检的提醒时间按禁食截止点：前一晚 20:00） */
+        val isCheckup: Boolean,
+        /** 退回动作（看预约） */
+        val fallback: SmartCardAction
+    ) : SmartCardAction()
 }
+
+/** 卡片两个响应的按钮文案（设计稿 §4.2，第十一批 Bob 2026-11-09 定）：
+ * 左“我知道了”、右“下一步”，真卡与引导卡都一样；右按钮不再显示
+ * 动作文案（去还款/回拨/看预约/查看），动作的具体含义由卡片事实文案＋
+ * 右下方应用小标承担。单测逐字锁死（SmartCardButtonCopyTest）。 */
+const val SMART_CARD_DISMISS_LABEL = "我知道了"
+const val SMART_CARD_NEXT_LABEL = "下一步"
+
+/**
+ * 卡片右下方应用小标的目标应用（第十一批，Bob 定“要小、要优雅”）：
+ * 只存包名＋应用名（UI 层按包名取真实图标）；只做展示、不可点。
+ * 账单＝还款目标应用；预约＝日历（建提醒的目标；建完提醒后是看预约
+ * 的目标应用）；未接来电＝电话；快递/航班＝通知所属应用。
+ */
+data class TargetApp(
+    val packageName: String,
+    /** 应用显示名（PackageManager 读到的真实标签） */
+    val label: String
+)
 
 data class SmartCard(
     /** 稳定 id：同一件事刷新前后 id 不变（处理/跳过状态靠它持久化） */
@@ -55,7 +107,11 @@ data class SmartCard(
     val fact: String,
     /** 可选的一行准备清单（如体检：今晚 20:00 后禁食 · 明天空腹去 · 带身份证） */
     val prep: String?,
-    /** 下一步动作按钮文案：去还款 / 看预约 / 回拨 / 查看 */
+    /**
+     * 动作含义（无障碍描述等用）：去还款 / 看预约 / 回拨 / 查看 / 连接。
+     * 按钮上不再显示它（第十一批起按钮固定为“我知道了 / 下一步”），
+     * 不删——含义由卡片事实文案＋右下方应用小标承担。
+     */
     val actionLabel: String,
     /** 排序键：最早截止的在最上面（体检按禁食截止 20:00 排，比开始时间更早） */
     val sortMs: Long,
@@ -67,7 +123,12 @@ data class SmartCard(
     /** 未接来电的联系人姓名（接了联系人才有，没有只显示号码） */
     val contactName: String? = null,
     /** 出现窗口起点：账单＝到期前 2 天，预约＝开始前 24 小时，其他＝来源到达时间 */
-    val appearFromMs: Long = 0L
+    val appearFromMs: Long = 0L,
+    /** 右下方应用小标的目标应用（第十一批；引导卡与“已连接”反馈卡没有） */
+    val targetApp: TargetApp? = null,
+    /** 预约卡已建过提醒（第十一批）：卡上显示“已建提醒”，动作已换回
+     * 看预约（防重复建）。只对 APPOINTMENT 卡有意义。 */
+    val reminderCreated: Boolean = false
 ) {
     /** 未接来电卡片显示的称呼：有人名显示人名，否则显示号码 */
     val displayName: String

@@ -1,6 +1,8 @@
 package com.bobot.ailauncher.data
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +38,9 @@ object SmartCardRepository {
     /** 引导卡片的“忽略”（设计稿 §4.2，449/v1.2.2）：单张永久不再出现。
      * 与“滑走”不同——滑走只是本轮沉底/看完才记一次，忽略是当即永久记下。 */
     private const val KEY_GUIDE_DISMISSED = "guide_dismissed"
+    /** 预约卡已建过提醒（第十一批）：按卡片 id 记，带截止点、过期自清。
+     * 建完提醒后卡片动作换回看预约（防重复建），卡上显示“已建提醒”。 */
+    private const val KEY_REMINDER_CREATED_PREFIX = "reminder_created_"
 
     /** 短信重读节流：5 分钟内不重复查短信库（查询本身便宜，但没必要每分钟查） */
     private const val SMS_REFRESH_MIN_INTERVAL_MS = 5L * 60 * 1000
@@ -119,6 +124,22 @@ object SmartCardRepository {
         prefs(context).edit().putStringSet(KEY_GUIDE_DISMISSED, next).apply()
     }
 
+    /**
+     * 记下某张预约卡已建过提醒（第十一批）：按卡片 id 记、带截止点；
+     * 记完立即重建卡片——动作换回看预约、卡上显示“已建提醒”，
+     * 卡片本身不摘（预约还没到，用户还可能要点开看原文）。
+     */
+    fun markReminderCreated(context: Context, card: SmartCard) {
+        prefs(context).edit()
+            .putLong(KEY_REMINDER_CREATED_PREFIX + card.id, card.deadlineMs).apply()
+        refreshSms(context, force = true)
+        refresh(context, lastNotifications, System.currentTimeMillis())
+    }
+
+    /** 已建过提醒的预约卡 id（未过期的那部分） */
+    private fun reminderCreatedIds(context: Context, nowMs: Long): Set<String> =
+        liveIds(context, KEY_REMINDER_CREATED_PREFIX, nowMs)
+
     /** 点下一步动作算处理完一张（仓库层立即摘掉，UI 侧先播离场动画再调这里） */
     fun markDone(context: Context, card: SmartCard) {
         prefs(context).edit()
@@ -157,6 +178,7 @@ object SmartCardRepository {
         }
         val out = mutableListOf<SmartCard>()
         val smsList = SmsRepository.loadRecentSms(context)
+        val created = reminderCreatedIds(context, nowMs)
         var billCount = 0
         var apptCount = 0
         for (sms in smsList) {
@@ -168,7 +190,7 @@ object SmartCardRepository {
             }
             val appt = parseAppointmentSms(sms.body, nowMs)
             if (appt != null) {
-                out += appointmentCard(appt, sms.address, context, nowMs)
+                out += appointmentCard(appt, sms.address, context, nowMs, created)
                 apptCount++
             }
         }
@@ -197,6 +219,9 @@ object SmartCardRepository {
     ): SmartCard {
         val dueStart = startOfDayMs(bill.dueDayEndMs)
         val key = billKey(bill)
+        // 动作：还款目标应用（银行 → 云闪付/支付宝/微信，带还款页深链）
+        // → 短信会话兜底（smsCardAction 内含这条链）。
+        val action = SmartCardActions.smsCardAction(context, address, bill.bank)
         return SmartCard(
             id = key,
             kind = SmartCardKind.BILL,
@@ -206,17 +231,42 @@ object SmartCardRepository {
             actionLabel = "去还款",
             sortMs = bill.dueDayEndMs,
             deadlineMs = bill.dueDayEndMs,
-            action = SmartCardActions.smsCardAction(context, address, bill.bank),
+            action = action,
             sourceKey = key,
-            appearFromMs = dueStart - BILL_APPEAR_DAYS_BEFORE * DAY_MS
+            appearFromMs = dueStart - BILL_APPEAR_DAYS_BEFORE * DAY_MS,
+            // 小标＝还款目标应用；退回短信会话时是默认短信应用。
+            targetApp = repaymentTargetApp(context, action)
         )
     }
 
+    /**
+     * 账单卡小标的目标应用（第十一批）：动作是 LaunchApp 时就是那家应用；
+     * 动作是短信会话时是默认短信应用（点下一步会打开它）。
+     */
+    private fun repaymentTargetApp(
+        context: Context,
+        action: SmartCardAction
+    ): TargetApp? {
+        val pkg = when (action) {
+            is SmartCardAction.LaunchApp -> action.packageName
+            else -> SmartCardActions.defaultSmsPackage(context)
+        } ?: return null
+        val label = SmartCardActions.appLabel(context, pkg) ?: return null
+        return TargetApp(pkg, label)
+    }
+
+    /**
+     * 预约卡的动作（第十一批）：没建过提醒时是“帮我建提醒”
+     * （CreateReminder，点下一步由宿主拿授权后写系统日历）；
+     * 已建过提醒时换回看预约（短信会话），防重复建。
+     * 小标＝下一步的目标应用：建提醒时是日历，建完后是短信应用。
+     */
     private fun appointmentCard(
         appt: ParsedAppointment,
         address: String,
         context: Context,
-        nowMs: Long
+        nowMs: Long,
+        reminderCreated: Set<String>
     ): SmartCard {
         val startMs = appt.dayStartMs + appt.startMin * 60L * 1000
         val endMs = appt.dayStartMs + (appt.endMin ?: (appt.startMin + 60)) * 60L * 1000
@@ -231,6 +281,21 @@ object SmartCardRepository {
             if (appt.place != null) append("，${appt.place}")
         }
         val key = "appt|${appt.dayStartMs}|${appt.startMin}|${appt.place?.hashCode() ?: 0}"
+        val fallback = SmartCardActions.smsCardAction(context, address, null)
+        val created = key in reminderCreated
+        val action = if (created) {
+            fallback
+        } else {
+            SmartCardAction.CreateReminder(
+                startMs = startMs,
+                endMs = endMs,
+                title = reminderEventTitle(kindWord, appt.startMin, appt.endMin),
+                place = appt.place,
+                description = if (appt.isCheckup) checkupPrepLine() else null,
+                isCheckup = appt.isCheckup,
+                fallback = fallback
+            )
+        }
         return SmartCard(
             id = key,
             kind = SmartCardKind.APPOINTMENT,
@@ -240,16 +305,45 @@ object SmartCardRepository {
             actionLabel = "看预约",
             sortMs = sortMs,
             deadlineMs = endMs,
-            action = SmartCardActions.smsCardAction(context, address, null),
+            action = action,
             sourceKey = key,
-            appearFromMs = startMs - APPOINTMENT_APPEAR_HOURS_BEFORE * HOUR_MS
+            appearFromMs = startMs - APPOINTMENT_APPEAR_HOURS_BEFORE * HOUR_MS,
+            targetApp = appointmentTargetApp(context, action, fallback),
+            reminderCreated = created
         )
+    }
+
+    /**
+     * 预约卡小标的目标应用（第十一批）：下一步是建提醒时是日历；
+     * 建完提醒、下一步变回看预约时，是短信会话/通知所属应用。
+     */
+    private fun appointmentTargetApp(
+        context: Context,
+        action: SmartCardAction,
+        fallback: SmartCardAction
+    ): TargetApp? {
+        if (action is SmartCardAction.CreateReminder) {
+            return resolveCalendarApp(context)
+        }
+        return when (val target = fallback) {
+            is SmartCardAction.LaunchApp ->
+                SmartCardActions.appLabel(context, target.packageName)
+                    ?.let { TargetApp(target.packageName, it) }
+            is SmartCardAction.OpenNotification ->
+                target.pendingIntent?.creatorPackage?.let { pkg ->
+                    SmartCardActions.appLabel(context, pkg)?.let { TargetApp(pkg, it) }
+                }
+            else -> SmartCardActions.defaultSmsPackage(context)?.let { pkg ->
+                SmartCardActions.appLabel(context, pkg)?.let { TargetApp(pkg, it) }
+            }
+        }
     }
 
     /** 通知渠道兜底的账单卡（消息连接器拒绝权限/Play 版时走这条；id 与短信版一致，去重后短信版优先） */
     private fun notificationBillCard(
         bill: ParsedBill,
-        n: SimpleNotification
+        n: SimpleNotification,
+        context: Context
     ): SmartCard {
         val dueStart = startOfDayMs(bill.dueDayEndMs)
         val key = billKey(bill)
@@ -264,14 +358,19 @@ object SmartCardRepository {
             deadlineMs = bill.dueDayEndMs,
             action = SmartCardActions.notificationAction(n),
             sourceKey = key,
-            appearFromMs = dueStart - BILL_APPEAR_DAYS_BEFORE * DAY_MS
+            appearFromMs = dueStart - BILL_APPEAR_DAYS_BEFORE * DAY_MS,
+            // 小标＝通知所属应用（点下一步会打开它）。
+            targetApp = SmartCardActions.appLabel(context, n.packageName)
+                ?.let { TargetApp(n.packageName, it) }
         )
     }
 
     private fun notificationAppointmentCard(
         appt: ParsedAppointment,
         n: SimpleNotification,
-        nowMs: Long
+        nowMs: Long,
+        context: Context,
+        reminderCreated: Set<String>
     ): SmartCard {
         val startMs = appt.dayStartMs + appt.startMin * 60L * 1000
         val endMs = appt.dayStartMs + (appt.endMin ?: (appt.startMin + 60)) * 60L * 1000
@@ -285,6 +384,21 @@ object SmartCardRepository {
             if (appt.place != null) append("，${appt.place}")
         }
         val key = "appt|${appt.dayStartMs}|${appt.startMin}|${appt.place?.hashCode() ?: 0}"
+        val fallback = SmartCardActions.notificationAction(n)
+        val created = key in reminderCreated
+        val action = if (created) {
+            fallback
+        } else {
+            SmartCardAction.CreateReminder(
+                startMs = startMs,
+                endMs = endMs,
+                title = reminderEventTitle(kindWord, appt.startMin, appt.endMin),
+                place = appt.place,
+                description = if (appt.isCheckup) checkupPrepLine() else null,
+                isCheckup = appt.isCheckup,
+                fallback = fallback
+            )
+        }
         return SmartCard(
             id = key,
             kind = SmartCardKind.APPOINTMENT,
@@ -294,9 +408,11 @@ object SmartCardRepository {
             actionLabel = "看预约",
             sortMs = sortMs,
             deadlineMs = endMs,
-            action = SmartCardActions.notificationAction(n),
+            action = action,
             sourceKey = key,
-            appearFromMs = startMs - APPOINTMENT_APPEAR_HOURS_BEFORE * HOUR_MS
+            appearFromMs = startMs - APPOINTMENT_APPEAR_HOURS_BEFORE * HOUR_MS,
+            targetApp = appointmentTargetApp(context, action, fallback),
+            reminderCreated = created
         )
     }
 
@@ -323,11 +439,13 @@ object SmartCardRepository {
             action = SmartCardAction.Dial(number),
             sourceKey = key,
             contactName = name,
-            appearFromMs = n.time
+            appearFromMs = n.time,
+            // 小标＝电话（默认拨号应用；拿不到时不画）。
+            targetApp = resolveDialerApp(context)
         )
     }
 
-    private fun deliveryCard(n: SimpleNotification): SmartCard {
+    private fun deliveryCard(n: SimpleNotification, context: Context): SmartCard {
         val key = "notif|${n.notifKey}"
         val fact = n.text.ifBlank { n.title }.trim()
         return SmartCard(
@@ -341,8 +459,89 @@ object SmartCardRepository {
             deadlineMs = n.time + 12 * HOUR_MS,
             action = SmartCardActions.notificationAction(n),
             sourceKey = key,
-            appearFromMs = n.time
+            appearFromMs = n.time,
+            // 小标＝通知所属应用（点下一步会打开它）。
+            targetApp = SmartCardActions.appLabel(context, n.packageName)
+                ?.let { TargetApp(n.packageName, it) }
         )
+    }
+
+    /**
+     * 日历应用（第十一批，预约卡小标＝建提醒的目标）：
+     * 意图逻辑 rili 能力的提供方（capabilities.json：Google 日历 /
+     * 系统日历），已装的按最近使用排；都没有时退到系统日历入口
+     * （CATEGORY_APP_CALENDAR）解析；再拿不到就不画小标。
+     */
+    private fun resolveCalendarApp(context: Context): TargetApp? {
+        return try {
+            CapabilityRegistry.load(context)
+            val cap = CapabilityRegistry.find("rili")
+            val providers = cap?.let { CapabilityResolution.effectiveProviders(it) }
+                ?.flatMap { it.packageNames }.orEmpty()
+            val installed = providers.filter { pkg ->
+                try {
+                    context.packageManager.getApplicationInfo(pkg, 0)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            val pkg = SmartCardActions.selectByRecency(installed) {
+                AppUsageTracker.effectiveLastUsed(context, it)
+            } ?: resolveCalendarIntentPackage(context)
+            pkg?.let { p ->
+                SmartCardActions.appLabel(context, p)?.let { TargetApp(p, it) }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 系统日历入口解析（CATEGORY_APP_CALENDAR 拿不到时再试日历内容 URI） */
+    private fun resolveCalendarIntentPackage(context: Context): String? {
+        return try {
+            val pm = context.packageManager
+            val calendarIntent = Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_APP_CALENDAR)
+            pm.resolveActivity(calendarIntent, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+                ?: run {
+                    val viewIntent = Intent(
+                        Intent.ACTION_VIEW,
+                        android.provider.CalendarContract.CONTENT_URI
+                    )
+                    pm.resolveActivity(viewIntent, PackageManager.MATCH_DEFAULT_ONLY)
+                        ?.activityInfo?.packageName
+                }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 默认拨号应用（第十一批，未接来电卡小标＝电话）：
+     * 系统默认拨号器；拿不到时退到 ACTION_DIAL 解析；再拿不到不画小标。
+     */
+    private fun resolveDialerApp(context: Context): TargetApp? {
+        return try {
+            val tm = context.getSystemService(Context.TELECOM_SERVICE)
+                as? android.telecom.TelecomManager
+            val pkg = tm?.defaultDialerPackage
+                ?: run {
+                    val dialIntent = Intent(
+                        Intent.ACTION_DIAL,
+                        android.net.Uri.parse("tel:10086")
+                    )
+                    context.packageManager.resolveActivity(
+                        dialIntent, PackageManager.MATCH_DEFAULT_ONLY
+                    )?.activityInfo?.packageName
+                }
+            pkg?.let { p ->
+                SmartCardActions.appLabel(context, p)?.let { TargetApp(p, it) }
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**
@@ -357,6 +556,7 @@ object SmartCardRepository {
         val phoneOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_PHONE)
         val contactsOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CONTACTS)
         val candidates = mutableListOf<SmartCard>()
+        val created = reminderCreatedIds(context, nowMs)
         if (messageOn) candidates += smsCards
         for (n in notifications) {
             if (n.packageName == context.packageName) continue
@@ -368,17 +568,17 @@ object SmartCardRepository {
                 val combined = "${n.title}\n${n.text}"
                 val bill = parseBillSms(combined, n.appName, nowMs)
                 if (bill != null) {
-                    candidates += notificationBillCard(bill, n)
+                    candidates += notificationBillCard(bill, n, context)
                     continue
                 }
                 val appt = parseAppointmentSms(combined, nowMs)
                 if (appt != null) {
-                    candidates += notificationAppointmentCard(appt, n, nowMs)
+                    candidates += notificationAppointmentCard(appt, n, nowMs, context, created)
                     continue
                 }
             }
             if (notifOn && isDeliveryOrTravelNotification(n.title, n.text)) {
-                candidates += deliveryCard(n)
+                candidates += deliveryCard(n, context)
             }
         }
         val doneIds = liveIds(context, KEY_DONE_PREFIX, nowMs)

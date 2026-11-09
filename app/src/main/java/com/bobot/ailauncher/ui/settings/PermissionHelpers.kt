@@ -58,6 +58,10 @@ fun openHomeSettings(context: Context) {
     )
 }
 
+/** 检测日历写入权限是否已开启（CalendarRepository 的 UI 侧门面，第十一批“帮我建提醒”用） */
+fun isWriteCalendarGranted(context: Context): Boolean =
+    CalendarRepository.hasWriteCalendarPermission(context)
+
 /** 跳系统设置：通知读取 */
 fun openNotificationSettings(context: Context) {
     context.startActivity(
@@ -155,6 +159,7 @@ fun rememberCalendarPermissionOpener(
 
 private const val KEY_SMS_ASKED = "sms_asked"
 private const val KEY_CONTACTS_ASKED = "contacts_asked"
+private const val KEY_WRITE_CALENDAR_ASKED = "write_calendar_asked"
 
 private fun wasAsked(context: Context, key: String): Boolean =
     context.getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE)
@@ -163,6 +168,42 @@ private fun wasAsked(context: Context, key: String): Boolean =
 private fun markAsked(context: Context, key: String) {
     context.getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE)
         .edit().putBoolean(key, true).apply()
+}
+
+/**
+ * 智能卡片·预约“帮我建提醒”操作（第十一批）：调用方先弹应用内显著披露
+ * （要在系统日历里建一个提醒），用户点“同意”后再调这里弹系统框。
+ * 永久拒绝后改跳应用详情设置页（口径与日历 opener 同款）。
+ * 注意：READ_CALENDAR 与 WRITE_CALENDAR 是两个独立权限——只读了日历
+ * 不等于能写，写要另外授权；授权框回调里直接写回 grantedState。
+ * [onResult]：系统框出结果时调（允许 true / 拒绝 false）；跳应用详情
+ * 设置页时不调（用户去设置里开完回来，靠 ON_RESUME 重读状态翻转补做）。
+ */
+@Composable
+fun rememberWriteCalendarPermissionOpener(
+    grantedState: MutableState<Boolean>,
+    onResult: ((Boolean) -> Unit)? = null
+): () -> Unit {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        grantedState.value = granted
+        onResult?.invoke(granted)
+    }
+    return {
+        val activity = context as? Activity
+        if (activity != null &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(
+                activity, Manifest.permission.WRITE_CALENDAR
+            ) && wasAsked(context, KEY_WRITE_CALENDAR_ASKED)
+        ) {
+            openAppDetailsSettings(context)
+        } else {
+            markAsked(context, KEY_WRITE_CALENDAR_ASKED)
+            launcher.launch(Manifest.permission.WRITE_CALENDAR)
+        }
+    }
 }
 
 /**

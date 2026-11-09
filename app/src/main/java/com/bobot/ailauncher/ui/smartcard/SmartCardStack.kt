@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -58,11 +60,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.CONNECTED_FEEDBACK_MS
 import com.bobot.ailauncher.data.ConnectedFeedback
 import com.bobot.ailauncher.data.GUIDE_VERSION
+import com.bobot.ailauncher.data.SMART_CARD_DISMISS_LABEL
+import com.bobot.ailauncher.data.SMART_CARD_NEXT_LABEL
+import com.bobot.ailauncher.data.SmartCardKind
 import com.bobot.ailauncher.data.buildConnectorStates
 import com.bobot.ailauncher.data.celebrationLevelText
 import com.bobot.ailauncher.data.connectedFeedback
 import com.bobot.ailauncher.data.connectedSourceCount
 import com.bobot.ailauncher.data.connectorKeyForGuideId
+import com.bobot.ailauncher.data.createCalendarReminder
 import com.bobot.ailauncher.data.guideCards
 import com.bobot.ailauncher.data.guideIdsForConnector
 import com.bobot.ailauncher.data.isGuideConnectorGranted
@@ -75,6 +81,7 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.shouldShowGuideVersion
 import com.bobot.ailauncher.data.visibleGuideCards
 import com.bobot.ailauncher.ui.components.AppBadge
+import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.island.IslandToasts
@@ -84,11 +91,13 @@ import com.bobot.ailauncher.ui.settings.isCalendarGranted
 import com.bobot.ailauncher.ui.settings.isContactsGranted
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.settings.isSmsGranted
+import com.bobot.ailauncher.ui.settings.isWriteCalendarGranted
 import com.bobot.ailauncher.ui.settings.openNotificationSettings
 import com.bobot.ailauncher.ui.settings.rememberCalendarPermissionOpener
 import com.bobot.ailauncher.ui.settings.rememberContactsPermissionOpener
 import com.bobot.ailauncher.ui.settings.rememberPermissionState
 import com.bobot.ailauncher.ui.settings.rememberSmsPermissionOpener
+import com.bobot.ailauncher.ui.settings.rememberWriteCalendarPermissionOpener
 import com.bobot.ailauncher.util.rebindListener
 import kotlinx.coroutines.delay
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -106,12 +115,13 @@ import kotlin.math.abs
  * 点下一步动作算处理完一张、卡片消失；横滑跳过沉到摞底、轮到最后再出现；
  * 全部处理完或跳过后区域清空、不留占位条。
  *
- * 每张卡两个响应（设计稿 §4.2，449/v1.2.2，Bob 2026-11-07 晚真机 verdict）：
- * 忽略（我知道了，卡片消失、不再出现、不追问）与继续（按卡片定义的
- * 下一步跟进）。引导卡的继续＝去连接对应的来源（走 §5 已有流程）；
- * 真卡片的继续＝卡片定义的下一步动作（去还款 / 回拨 / 看预约 / 查看，
- * 走已有的深链/启动路径直接执行）。忽略真卡片即记处理完（截止点前不再
- * 出现）；忽略引导卡即永久记下这张（不是滑走，滑走只是本轮沉底）。
+ * 每张卡两个响应（设计稿 §4.2，449/v1.2.2，Bob 2026-11-07 晚真机 verdict；
+ * 第十一批 Bob 2026-11-09 定文案）：我知道了（卡片消失、不再出现、不追问）
+ * 与下一步（按卡片定义的下一步跟进）。引导卡的下一步＝去连接对应的来源
+ * （走 §5 已有流程）；真卡片的下一步＝卡片定义的下一步动作（去还款 / 回拨 /
+ * 看预约 / 查看，走已有的深链/启动路径直接执行；预约卡是“帮我建提醒”，
+ * 先拿 WRITE_CALENDAR 授权再写系统日历）。我知道了真卡片即记处理完
+ * （截止点前不再出现）；我知道了引导卡即永久记下这张（不是滑走，滑走只是本轮沉底）。
  *
  * 引导卡片（设计稿 §4.7，448；v3 按权限重做，455；换版重看，456）：
  * 真卡片为空、且本版引导还没看过时，叠层位置出现一叠引导卡片
@@ -165,16 +175,131 @@ fun SmartCardStackHost() {
     }
     // 应用运行中去设置里开通知读取权限时系统不回调，在这里重绑监听
     OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
+    // 预约卡“帮我建提醒”的 WRITE_CALENDAR 授权（第十一批）：状态与 opener
+    // 必须放在下面的提前返回之前——remember 调用在重组间顺序要稳定。
+    // 等授权结果的卡（pendingReminderCard）：授权框里点了允许就建提醒，
+    // 拒绝就退回看预约（打开短信会话）；去设置里开完回来也一样（ON_RESUME
+    // 重读状态翻转为已开时 OnGrantedTransition 补建）。
+    val writeCalendarGranted = rememberPermissionState { isWriteCalendarGranted(context) }
+    var pendingReminderCard by remember { mutableStateOf<SmartCard?>(null) }
+    var reminderDisclosureCard by remember { mutableStateOf<SmartCard?>(null) }
+    fun createReminderFor(card: SmartCard) {
+        val action = card.action as? SmartCardAction.CreateReminder ?: return
+        val created = createCalendarReminder(context, action)
+        if (created) {
+            SmartCardRepository.markReminderCreated(context, card)
+        } else {
+            IslandToasts.show("没能建提醒")
+        }
+    }
+    fun viewAppointment(card: SmartCard) {
+        // 看预约原文：建提醒前的退回动作（短信会话或通知自己的跳转）；
+        // 已建过提醒的卡，动作本身就是看预约，直接执行。
+        val fallback = (card.action as? SmartCardAction.CreateReminder)?.fallback
+        val opened = if (fallback != null) {
+            SmartCardActions.performAction(context, card.copy(action = fallback))
+        } else {
+            SmartCardActions.performAction(context, card)
+        }
+        if (!opened) IslandToasts.show("没能打开")
+    }
+    val openWriteCalendar = rememberWriteCalendarPermissionOpener(
+        writeCalendarGranted,
+        onResult = { granted ->
+            val pending = pendingReminderCard
+            pendingReminderCard = null
+            if (pending != null) {
+                if (granted) createReminderFor(pending) else viewAppointment(pending)
+            }
+        }
+    )
+    OnGrantedTransition(writeCalendarGranted.value) {
+        // 去设置里开完 WRITE_CALENDAR 回来：等授权结果的卡还在，就补建提醒。
+        pendingReminderCard?.let {
+            pendingReminderCard = null
+            createReminderFor(it)
+        }
+    }
+    // 建提醒的显著披露（§5.4 同款）：先讲清要什么、为什么，用户点“同意”
+    // 后再弹系统框；点“取消”或划掉＝这次不建，卡片留在叠层里（pending 清掉，
+    // 不退回看预约——退回只在系统框里拒绝授权时发生）。
+    // 放在提前返回之前：真卡片在场时也要能弹（引导卡模式同理）。
+    if (reminderDisclosureCard != null) {
+        val card = reminderDisclosureCard!!
+        AlertDialog(
+            onDismissRequest = {
+                reminderDisclosureCard = null
+                pendingReminderCard = null
+            },
+            title = {
+                Text(
+                    text = "建个提醒",
+                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title
+                )
+            },
+            text = {
+                Text(
+                    text = "要在系统日历里为这次预约建一个提醒，到点提醒你。提醒写进系统日历，删改在日历应用里做。",
+                    fontSize = AILauncherType.Body.fontSize,
+                    color = AILauncherColors.current.Body
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    reminderDisclosureCard = null
+                    openWriteCalendar()
+                }) {
+                    Text(
+                        text = "同意",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Accent,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    reminderDisclosureCard = null
+                    pendingReminderCard = null
+                }) {
+                    Text(
+                        text = "取消",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Hint
+                    )
+                }
+            }
+        )
+    }
     if (cards.isNotEmpty()) {
         SmartCardStack(
             cards = cards,
             onAction = { card ->
-                val opened = SmartCardActions.performAction(context, card)
-                if (!opened) IslandToasts.show("没能打开")
-                opened
+                if (card.action is SmartCardAction.CreateReminder) {
+                    // 预约卡“帮我建提醒”：已授权直接建；没授权先说明（显著披露）
+                    // 再弹系统框；拒绝退回看预约（onResult 里做）。
+                    if (writeCalendarGranted.value) {
+                        createReminderFor(card)
+                    } else {
+                        pendingReminderCard = card
+                        reminderDisclosureCard = card
+                    }
+                    true
+                } else {
+                    val opened = SmartCardActions.performAction(context, card)
+                    if (!opened) IslandToasts.show("没能打开")
+                    opened
+                }
             },
             onSkip = { card -> SmartCardRepository.skip(context, card) },
-            onIgnore = { card -> SmartCardRepository.markDone(context, card) }
+            onIgnore = { card -> SmartCardRepository.markDone(context, card) },
+            onBodyClick = { card ->
+                // 点预约卡正文（除按钮外）看原文：建提醒前是短信会话/
+                // 通知跳转，建完后按钮本身就是看预约、这里同动作。
+                if (card.kind == SmartCardKind.APPOINTMENT) viewAppointment(card)
+            }
         )
         return
     }
@@ -192,11 +317,11 @@ fun SmartCardStackHost() {
     // 显著披露要针对哪个连接器（消息/联系人先讲清再弹系统框，日历直接弹、
     // 通知/电话拨号器跳系统设置页）；null＝没在弹。
     var disclosureConnector by remember { mutableStateOf<String?>(null) }
-    // 用户在叠层里点了“继续”的卡（等授权结果）；接上后先显示“已连接”
-    // 反馈再离开。只对“用户在叠层里点了继续”的卡给反馈；在设置里接上
+    // 用户在叠层里点了“下一步”的卡（等授权结果）；接上后先显示“已连接”
+    // 反馈再离开。只对在叠层里点了“下一步”的卡给反馈；在设置里接上
     // 的权限，其卡片直接消失、不补反馈。
     var pendingConnectIds by remember { mutableStateOf(setOf<String>()) }
-    // 用户点“继续”那一刻的真实已接源个数（457 的 connectedSourceCount，
+    // 用户点“下一步”那一刻的真实已接源个数（457 的 connectedSourceCount，
     // 同一处计数）：接上后拿它跟新个数一减，就是本次智能涨了多少。
     var pendingConnectLevels by remember { mutableStateOf(mapOf<String, Int>()) }
     // 正在显示“已连接”庆祝反馈的卡（3 秒后离开）：状态里带动效触发标志
@@ -279,7 +404,7 @@ fun SmartCardStackHost() {
             val key = (card.action as? SmartCardAction.Connect)?.connectorKey
                 ?: return@SmartCardStack true
             pendingConnectIds += card.id
-            // 点“继续”这一刻的真实等级：接上后拿它算增量（见上）。
+            // 点“下一步”这一刻的真实等级：接上后拿它算增量（见上）。
             pendingConnectLevels +=
                 card.id to connectedSourceCount(buildConnectorStates(context))
             when (key) {
@@ -416,7 +541,7 @@ fun SmartCardStackHost() {
 /**
  * 卡片叠层：最上面一张完整显示，下面两张露个边（8dp 一层）。
  * 点动作立即执行（不拖 250ms 动画等开应用）；横滑跳过播离场动画再沉底。
- * 每张卡两个响应：忽略（消失、不再出现）与继续（卡片定义的下一步）。
+ * 每张卡两个响应：我知道了（消失、不再出现）与下一步（卡片定义的下一步）。
  * onClose 非空时（引导卡片模式）× 在顶卡表头右上角、卡片内部：点一下
  * 整叠消失，不再出现；仍在叠层自己的槽位里，不另开浮层。
  * 待办数角标（本批，Bob 2026-11-07 晚定）：叠层右上角压住顶卡角，
@@ -470,6 +595,9 @@ fun SmartCardStack(
     onIgnore: (SmartCard) -> Unit,
     modifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
+    // 点卡片正文（除按钮外）——第十一批：预约卡看原文（短信会话/通知跳转）；
+    // 其他卡没有正文动作，默认空实现。
+    onBodyClick: (SmartCard) -> Unit = {},
     // 正在显示“已连接”庆祝反馈的卡（第八批）：不画动作行（没有“连接”可点），
     // 只显示“已连接”＋接下来会发生什么，外加庆祝形态（对勾弹入＋金色等级行
     // ＋整卡轻弹，见 SmartCardView）。反馈卡顶掉的是它自己的引导卡，不多占
@@ -510,6 +638,7 @@ fun SmartCardStack(
                             onSkip = onSkip,
                             onIgnore = onIgnore,
                             onClose = onClose,
+                            onBodyClick = onBodyClick,
                             hideActionRow = top.id in connectedIds,
                             celebration = connectedFeedbacks[top.id],
                             modifier = Modifier
@@ -586,6 +715,7 @@ private fun TopSmartCard(
     onIgnore: (SmartCard) -> Unit,
     onClose: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    onBodyClick: (SmartCard) -> Unit = {},
     hideActionRow: Boolean = false,
     celebration: ConnectedFeedback? = null
 ) {
@@ -603,6 +733,7 @@ private fun TopSmartCard(
         onActionClick = { onAction(card) },
         onIgnoreClick = { onIgnore(card) },
         onCloseClick = onClose,
+        onBodyClick = { onBodyClick(card) },
         hideActionRow = hideActionRow,
         celebration = celebration,
         modifier = modifier
@@ -660,7 +791,13 @@ private fun TopSmartCard(
 
 /**
  * 单张卡片：来源标签＋一句话事实（含截止点）＋（可选）一行准备清单＋
- * 一行两个响应：忽略（左）与继续（右，卡片定义的下一步动作）。
+ * 一行两个响应：我知道了（左）与下一步（右，第十一批 Bob 定：右按钮
+ * 固定文案“下一步”，不再显示动作文案；动作含义由事实文案＋右下方
+ * 应用小标承担）。
+ * 右下方应用小标（第十一批）：只画在真卡上，独立一行贴右下角——16dp
+ * 应用图标＋应用名（Caption 12sp，次要色；字阶最小档就是 12sp，11sp
+ * 中文可读性不足、token 规则禁用的下限，取 Bob 给的 11–12sp 的上限），
+ * 无底色、无边框，不抢按钮视觉；名字过长截断；只做展示、不可点。
  * 没有标题党、没有解释行。
  * 视觉走启动器同一套玻璃卡片语言（与 Dock 面板、意图面板同款
  * glassSurface STRONG，圆角 20dp；SIMULATED 档/无玻璃环境退化为
@@ -680,6 +817,8 @@ private fun SmartCardView(
     onIgnoreClick: () -> Unit,
     onCloseClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    // 点卡片正文（除按钮外）——第十一批：预约卡看原文；null＝没有正文动作。
+    onBodyClick: (() -> Unit)? = null,
     // “已连接”反馈卡：不画动作行（忽略/连接两个按钮与露边提示都不画），
     // 只留来源标签＋“已连接”＋接下来会发生什么。
     hideActionRow: Boolean = false,
@@ -819,15 +958,41 @@ private fun SmartCardView(
             fontWeight = FontWeight.SemiBold,
             color = AILauncherColors.current.Title,
             maxLines = 3,
-            overflow = TextOverflow.Ellipsis
+            overflow = TextOverflow.Ellipsis,
+            modifier = if (onBodyClick != null) {
+                Modifier.clickable(onClick = onBodyClick)
+            } else Modifier
         )
         card.prep?.let { prep ->
             Text(
                 text = prep,
                 fontSize = AILauncherType.Footnote.fontSize,
                 color = AILauncherColors.current.Body,
-                lineHeight = AILauncherType.Footnote.lineHeight
+                lineHeight = AILauncherType.Footnote.lineHeight,
+                modifier = if (onBodyClick != null) {
+                    Modifier.clickable(onClick = onBodyClick)
+                } else Modifier
             )
+        }
+        // “已建提醒”（第十一批）：预约卡建完提醒后的一行小字，告诉用户
+        // 提醒已在系统日历里了、不用重复建；动作已换回看预约。
+        if (card.reminderCreated) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = AILauncherColors.current.Hint,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "已建提醒",
+                    fontSize = AILauncherType.Footnote.fontSize,
+                    color = AILauncherColors.current.Hint
+                )
+            }
         }
         if (!hideActionRow) {
             Row(
@@ -836,36 +1001,37 @@ private fun SmartCardView(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (showAction) {
-                    // 忽略：我知道了，卡片消失、不再出现、不追问（设计稿 §4.2）
+                    // 我知道了：卡片消失、不再出现、不追问（设计稿 §4.2）。
                     TextButton(
                         onClick = onIgnoreClick,
                         modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Text(
-                            text = "忽略",
+                            text = SMART_CARD_DISMISS_LABEL,
                             fontSize = AILauncherType.Callout.fontSize,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.current.Hint
                         )
                     }
-                    // 继续：卡片定义的下一步动作（去还款 / 回拨 / 看预约 /
-                    // 查看；引导卡是“连接”）。金色只留主操作（去 AI 味四条）。
+                    // 下一步：卡片定义的下一步动作（第十一批 Bob 定：右按钮
+                    // 固定文案“下一步”，不再显示动作文案；含义由事实文案＋
+                    // 右下方应用小标承担）。金色只留主操作（去 AI 味四条）。
                     TextButton(
                         onClick = onActionClick,
                         modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Text(
-                            text = card.actionLabel,
+                            text = SMART_CARD_NEXT_LABEL,
                             fontSize = AILauncherType.Callout.fontSize,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.current.Accent
                         )
                     }
                 } else {
-                    // 露边卡：按钮够不着，只留动作名作下一张的提示（与 448 同款）。
+                    // 露边卡：按钮够不着，只留“下一步”作下一张的提示（与 448 同款）。
                     // 露边只露 8dp，这行基本看不见，不占布局。
                     Text(
-                        text = card.actionLabel,
+                        text = SMART_CARD_NEXT_LABEL,
                         fontSize = AILauncherType.Callout.fontSize,
                         fontWeight = FontWeight.Medium,
                         color = AILauncherColors.current.Accent,
@@ -875,6 +1041,57 @@ private fun SmartCardView(
                     )
                 }
             }
+            // 右下方应用小标（第十一批）：只画在真卡上——引导卡的下一步是
+            // 去连接来源、不是打开某个应用，不画；“已连接”反馈卡没有按钮行
+            // （hideActionRow），也不画。独立一行贴右下角、右对齐：16dp
+            // 应用图标＋应用名（Caption 12sp，次要色），无底色、无边框，
+            // 不抢按钮视觉；名字过长截断；只做展示、不可点。
+            if (card.kind != SmartCardKind.GUIDE) {
+                card.targetApp?.let { target ->
+                    AppSubscript(targetApp = target)
+                }
+            }
         }
+    }
+}
+
+/**
+ * 卡片右下方应用小标（第十一批，Bob 定“要小、要优雅”）：
+ * 独立一行贴卡片右下角、右对齐——16dp 应用图标＋应用名（Caption 12sp，
+ * 次要色），无底色、无边框，不抢按钮视觉；名字过长截断（最多 160dp）；
+ * 只做展示、不可点（没有 clickable，点“下一步”才是动作）。
+ * 图标按包名取真实应用图标；包被卸了、图标读不到时只显示名字。
+ */
+@Composable
+private fun AppSubscript(targetApp: com.bobot.ailauncher.data.TargetApp) {
+    val context = LocalContext.current
+    val drawable = remember(targetApp.packageName) {
+        try {
+            context.packageManager.getApplicationIcon(targetApp.packageName)
+        } catch (_: Exception) {
+            null
+        }
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (drawable != null) {
+            AppIconImage(
+                drawable = drawable,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+        }
+        Text(
+            text = targetApp.label,
+            fontSize = AILauncherType.Caption.fontSize,
+            color = AILauncherColors.current.Hint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 160.dp)
+        )
     }
 }

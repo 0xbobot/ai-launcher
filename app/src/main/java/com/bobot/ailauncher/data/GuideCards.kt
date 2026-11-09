@@ -194,7 +194,7 @@ data class ConnectedFeedback(
     val card: SmartCard,
     /** 接上之后真实已接源个数（connectedSourceCount） */
     val level: Int,
-    /** 接上之前真实已接源个数（用户点“继续”那一刻记下） */
+    /** 接上之前真实已接源个数（用户点“下一步”那一刻记下） */
     val previousLevel: Int
 ) {
     /** 本次接上让智能涨了多少（正常为 1；通知＋电话拨号器同涨时为 2） */
