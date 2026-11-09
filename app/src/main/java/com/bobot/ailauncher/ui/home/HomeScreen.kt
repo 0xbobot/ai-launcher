@@ -1,17 +1,12 @@
 package com.bobot.ailauncher.ui.home
 
-import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
-import android.provider.Settings
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,11 +17,6 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -48,24 +37,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.bobot.ailauncher.ui.theme.AILauncherType
 import kotlinx.coroutines.delay
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.LauncherNotificationService
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
-import com.bobot.ailauncher.service.PanelAccessibilityService
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.smartcard.SmartCardStackHost
-import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.util.rebindListener
-import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
  * v0.27.0：重建的极简主页——只留宠物。
@@ -103,27 +87,6 @@ internal fun blindStartExcluded(
         // 叠层为空时槽位零高度、bounds 零面积：isEmpty 守卫，不误拦背景手势
         //（不依赖 Rect.contains 对零面积矩形的边界语义）。
         (cardStackRect?.let { !it.isEmpty && it.contains(start) } == true)
-
-/**
- * 下滑左下开控制中心的判定（Bob 2026-11-09 21:24：首页偶尔还是会触发下拉手势）。
- * 旧规则 totalX < -24dp 太松：150dp 的下滑偏 10° 就有约 26dp 左移，自然拇指
- * 弧线（10–15°）动不动就落进“左下”。新规则两条同时成立才算左下：
- * ① 左移绝对量超过 xBiasPx（48dp，与纵向阈值同值）；② 左移超过下滑量的
- * 一半（|totalX| > 0.5 * totalY，约 27°），即横向分量占主导的一半以上。
- * 控制中心带约 27°–56°（56° 以上归盲操扇形：横向需 > 1.5× 纵向才触发扇形，
- * 见 BlindCaptureController.onMove）。纯函数，单测锁死。
- */
-internal const val CONTROL_CENTER_DIAGONAL_RATIO = 0.5f
-
-internal fun isControlCenterSwipe(
-    totalX: Float,
-    totalY: Float,
-    swipeThresholdPx: Float,
-    xBiasPx: Float,
-): Boolean =
-    totalY > swipeThresholdPx &&
-        totalX < -xBiasPx &&
-        totalX < -totalY * CONTROL_CENTER_DIAGONAL_RATIO
 
 @Composable
 fun HomeScreen(
@@ -225,46 +188,9 @@ fun HomeScreen(
     }
     // v0.27.3：上滑阈值降低（120dp→48dp），更容易触发 D3
     val swipeThresholdPx = with(density) { 48.dp.toPx() }
-    // 下滑左下开控制中心的左移绝对量下限（48dp，与纵向阈值同值）：
-    // 旧值 24dp 太松，自然下滑带一点左偏就误判成左下（Bob 2026-11-09
-    // 21:24）。绝对量只是第一道门，真正的主导判定在 isControlCenterSwipe
-    //（左移还须超过下滑量的一半）。
-    val xBiasPx = with(density) { 48.dp.toPx() }
     // v0.68.32：底部 Dock 区高度同步给盲操控制器（圆心钳制用）
     androidx.compose.runtime.LaunchedEffect(blindDockZoneDp) {
         blindCtl.dockZonePx = with(density) { blindDockZoneDp.dp.toPx() }
-    }
-    // Toast 防抖：2 秒内只提示一次
-    val hintShownAt = remember { mutableStateOf(0L) }
-    // v0.36.0：权限引导卡状态——null 不显示，0 整卡，1 轻提醒
-    var panelGuideMode by remember { mutableStateOf<Int?>(null) }
-
-    fun goAccessibilitySettings() {
-        try {
-            context.startActivity(
-                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            )
-        } catch (_: Exception) { }
-    }
-
-    fun ensurePanelService(): Boolean {
-        if (PanelAccessibilityService.isEnabled(context)) return true
-        // v0.36.0：第一次先弹 App 内说明卡，别直接把用户扔进系统设置
-        if (!UiPrefs.hasSeenPanelGuide(context)) {
-            panelGuideMode = 0
-        } else if (!UiPrefs.hasRemindedPanelGuide(context)) {
-            panelGuideMode = 1
-        } else {
-            val now = System.currentTimeMillis()
-            if (now - hintShownAt.value > 2000) {
-                hintShownAt.value = now
-                IslandToasts.show("请在无障碍设置中开启 AI 桌面，以使用下滑手势")
-                goAccessibilitySettings()
-            }
-        }
-        return false
     }
 
     // 通知监听重绑
@@ -360,22 +286,13 @@ fun HomeScreen(
                         // v0.68.0：盲操消费掉的手势不再走纵向逻辑；仲裁排除的
                         // 手势未起 blind 跟踪，不调 onEnd（恒按未消费走纵向逻辑）。
                         // 449：叠层区的手势除外——纵向也不走，归叠层自己。
+                        // Bob 2026-11-09 21:52：首页下滑手势整个拿掉——任何方向的
+                        // 下滑都不再触发面板；纵向只剩上滑开应用中心。
                         val blindConsumed = !gestureExcludedFromBlind && blindCtl.onEnd()
                         if (!blindConsumed && !gestureOnCardStack) {
-                            when {
-                                // 上滑 → D3（y 为负是上滑）
-                                totalY < -swipeThresholdPx -> {
-                                    openDrawerState()
-                                }
-                                // 下滑 → 仅刻意左下斜滑开控制中心；纯下滑 / 微左下滑 /
-                                // 右下不做任何事（Bob 2026-11-08：桌面的下滑打开通知中心
-                                // 删除；2026-11-09 21:24：24dp 太松，自然下滑误触）。
-                                totalY > swipeThresholdPx -> {
-                                    if (isControlCenterSwipe(totalX, totalY, swipeThresholdPx, xBiasPx)) {
-                                        if (ensurePanelService())
-                                            PanelAccessibilityService.openControlCenter()
-                                    }
-                                }
+                            // 上滑 → D3（y 为负是上滑）
+                            if (totalY < -swipeThresholdPx) {
+                                openDrawerState()
                             }
                         }
                     },
@@ -452,89 +369,7 @@ fun HomeScreen(
             )
             }
         }
-        // v0.36.0：无障碍权限引导卡
-        panelGuideMode?.let { mode ->
-            PanelPermissionGuide(
-                compact = mode == 1,
-                onGoSettings = {
-                    if (mode == 0) UiPrefs.setPanelGuideSeen(context)
-                    else UiPrefs.setPanelGuideReminded(context)
-                    panelGuideMode = null
-                    goAccessibilitySettings()
-                },
-                onDismiss = {
-                    if (mode == 0) UiPrefs.setPanelGuideSeen(context)
-                    else UiPrefs.setPanelGuideReminded(context)
-                    panelGuideMode = null
-                }
-            )
-        }
         // v0.68.32：扇形选择器已移到 MainScreen 最顶层绘制（盖住 Dock）
         // v0.68.39：诊断浮层已删除
-    }
-}
-
-/**
- * v0.36.0：下滑手势的无障碍权限引导卡——半透明遮罩 + 白卡片（跟行左滑引导同风格）。
- * 文案跟手势用途直接挂钩，不说通用话术。
- */
-@Composable
-private fun PanelPermissionGuide(
-    compact: Boolean,
-    onGoSettings: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.28f))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center
-    ) {
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-            modifier = Modifier
-                .padding(horizontal = 40.dp)
-                .clickable(enabled = false, onClick = {})
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text(
-                    text = if (compact) "还没开启权限" else "下滑手势需要开个权限",
-                    fontSize = AILauncherType.BodyLarge.fontSize,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.current.Title
-                )
-                Text(
-                    text = if (compact)
-                        "无障碍里的「AI 桌面」还没开，下滑手势暂时用不了。"
-                    else
-                        "下滑打开通知中心、斜滑打开控制中心，都要借用系统的无障碍能力。请在无障碍设置中开启「AI 桌面」，只用来帮你打开这两个面板，不会读取任何内容。",
-                    fontSize = AILauncherType.Footnote.fontSize,
-                    color = AILauncherColors.current.Body
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(
-                            text = if (compact) "知道了" else "暂不",
-                            color = AILauncherColors.current.Hint
-                        )
-                    }
-                    TextButton(onClick = onGoSettings) {
-                        Text(
-                            text = "去开启",
-                            color = AILauncherColors.current.Accent,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-        }
     }
 }
