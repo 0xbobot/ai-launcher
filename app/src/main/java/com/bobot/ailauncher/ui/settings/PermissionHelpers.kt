@@ -23,7 +23,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.bobot.ailauncher.data.CalendarRepository
-import com.bobot.ailauncher.data.ContactNames
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SmsRepository
 
@@ -46,10 +45,6 @@ fun isCalendarGranted(context: Context): Boolean =
 /** 检测读取消息权限（READ_SMS）是否已开启（SmsRepository 的 UI 侧门面） */
 fun isSmsGranted(context: Context): Boolean =
     SmsRepository.hasSmsPermission(context)
-
-/** 检测读取联系人权限（READ_CONTACTS）是否已开启（ContactNames 的 UI 侧门面） */
-fun isContactsGranted(context: Context): Boolean =
-    ContactNames.hasContactsPermission(context)
 
 /** 跳系统设置：设为默认桌面（App 内完成不了，只能带用户去选） */
 fun openHomeSettings(context: Context) {
@@ -158,7 +153,6 @@ fun rememberCalendarPermissionOpener(
 }
 
 private const val KEY_SMS_ASKED = "sms_asked"
-private const val KEY_CONTACTS_ASKED = "contacts_asked"
 private const val KEY_WRITE_CALENDAR_ASKED = "write_calendar_asked"
 
 private fun wasAsked(context: Context, key: String): Boolean =
@@ -236,31 +230,4 @@ fun rememberSmsPermissionOpener(
     }
 }
 
-/**
- * 智能卡片·联系人“接上”操作（447）：调用方先弹应用内显著披露（只按号码
- * 查姓名），用户点“同意”后再调这里弹系统框。永久拒绝后改跳应用详情设置页。
- */
-@Composable
-fun rememberContactsPermissionOpener(
-    grantedState: MutableState<Boolean>
-): () -> Unit {
-    val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        grantedState.value = granted
-    }
-    return {
-        val activity = context as? Activity
-        if (activity != null &&
-            !ActivityCompat.shouldShowRequestPermissionRationale(
-                activity, Manifest.permission.READ_CONTACTS
-            ) && wasAsked(context, KEY_CONTACTS_ASKED)
-        ) {
-            openAppDetailsSettings(context)
-        } else {
-            markAsked(context, KEY_CONTACTS_ASKED)
-            launcher.launch(Manifest.permission.READ_CONTACTS)
-        }
-    }
-}
+

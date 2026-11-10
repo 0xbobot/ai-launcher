@@ -16,18 +16,19 @@ object UiPrefs {
     private const val KEY_FOLD_EXPANDED = "fold_expanded"
     // idea 灯泡（422）：上次看过说明页时的智能尾巴（逗号拼包名）；null 表从未建立基线
     private const val KEY_INSIGHT_SEEN_TAIL = "dock_insight_seen_tail"
-    // 智能卡片连接器（447 起）：五个本机来源的键。第十三批删了各来源的开关
+    // 智能卡片连接器（447 起）：四个本机来源的键。第十三批删了各来源的开关
     // （smart_connector_* 启用标志，连同 KEY_CONNECTOR_PREFIX 一起删）：
     // 开关不再是一道关，卡片跟着权限走，UiPrefs 不再存启用标志——删了 API，
     // 编译器就能证明没有开关门残留。连接器键仍作标识用（引导卡、行序、
-    // 等级计数共用同一套 key）。
+    // 等级计数共用同一套 key）。第十四批删联系人键（Bob 2026-11-10 23:45
+    // 定：不是必须的，不申请 READ_CONTACTS）——删了常量，引导卡/设置行/
+    // 申请入口残留的引用编译不过。
 
-    /** 连接器键（与 SmartCardRepository.buildConnectorStates 的五项一致） */
+    /** 连接器键（与 SmartCardRepository.buildConnectorStates 的四项一致） */
     const val CONNECTOR_NOTIFICATION = "notification"
     const val CONNECTOR_CALENDAR = "calendar"
     const val CONNECTOR_MESSAGE = "message"
     const val CONNECTOR_PHONE = "phone"
-    const val CONNECTOR_CONTACTS = "contacts"
 
     /** Dock 数据变化通知：置顶增删/排序后 bump，Dock 侧重算 */
     val dockTick = MutableStateFlow(0)

@@ -4,18 +4,25 @@ package com.bobot.ailauncher.data
  * 首次加载的引导卡片（设计稿 §4.7，448/v1.2.1 起；v3 按权限重做，455/v1.2.8，
  * Bob 2026-11-08 凌晨 verdict）：
  *
- * v3 不再按场景分四张，改按权限分、一权限一张（消息、通知、日历、联系人、
- * 电话拨号器）。每张讲三件事：这是什么（来源标签＝权限名）、为什么要连
- * （fact 先讲连上能得到什么）、连上之后会发生什么（fact＋prep：会出现
- * 哪些卡片、什么时候出现、数据只在本地处理）。场景（账单、体检预约、
- * 未接来电、快递航班）写进对应权限卡片的 fact 里，当“连上之后你会看到”
- * 的例子，不单独成卡。
+ * v3 不再按场景分，改按权限分、一权限一张（消息、通知、日历、电话拨号器）。
+ * 每张讲三件事：这是什么（来源标签＝权限名）、为什么要连（fact 先讲连上
+ * 能得到什么）、连上之后会发生什么（fact＋prep：会出现哪些卡片、什么
+ * 时候出现、数据只在本地处理）。场景（账单、体检预约、未接来电、快递
+ * 航班）写进对应权限卡片的 fact 里，当“连上之后你会看到”的例子，不单
+ * 独成卡。联系人已取消（第十四批，Bob 2026-11-10 23:45 定：不是必须的，
+ * 不申请 READ_CONTACTS）——没有联系人引导卡。
  *
  * 文案按 Bob 的两条写（讲清楚、不用内部黑话、不造新词），不拿用户的
  * 真实短信内容当例子（没有尾号、金额、真实地点）。
  *
  * 复用真卡片同一套模型与叠层 UI（kind = GUIDE，动作为 Connect）；
  * 宿主在真卡片为空且引导未看过时才展示，见 SmartCardStackHost。
+ *
+ * 单卡提醒、轮换推（第十四批，Bob 2026-11-10 23:07 定）：一次只推一张，
+ * 接上一个来源后继续推下一张；点「我知道了」或横滑＝被拒一次，放队尾、
+ * 其他来源推完后再回来一次，再拒就本版不再推（等引导换版）。轮换状态
+ * （队列＋被拒次数）存在 SmartCardRepository 里、按 GUIDE_VERSION 存，
+ * 换版自动重来。
  *
  * 接上某个权限后，对应引导卡先显示“已连接”＋接下来会发生什么（3 秒），
  * 再消失；其他权限的引导卡留着（452 的问题：连一个权限整叠全消失，
@@ -27,7 +34,7 @@ package com.bobot.ailauncher.data
  * 引导内容版本号（设计稿 §4.7，456/v1.2.9，Bob 2026-11-08 定）：
  * 换版时只改这一个数。已看过的标记按版本记（guide_seen_version），
  * 不是终身一次——换版后自动重看一次，每版引导只出现一次。
- * 当前 v3：五张按权限分的引导卡（455/v1.2.8 的文案）。
+ * 当前 v3：四张按权限分的引导卡（455/v1.2.8 的文案，第十四批删联系人）。
  */
 const val GUIDE_VERSION = 3
 
@@ -71,67 +78,98 @@ private fun guideCard(
     sourceKey = id
 )
 
-/** 按权限分的引导卡片，固定顺序：消息、通知、日历、联系人、电话拨号器。 */
-fun guideCards(): List<SmartCard> = listOf(
-    guideCard(
+/**
+ * 按权限分的引导卡片，顺序与智能区同一份 SMART_SOURCE_ORDER（第十四批，
+ * Bob 2026-11-10 23:45 定统一）：消息、通知、日历、电话拨号器。
+ * 顺序由 SMART_SOURCE_ORDER 决定，这里只负责每张卡的文案——改顺序只改
+ * 一处，设置页“智能”区行序与引导卡不会两头各写一份再对不上。
+ * 电话拨号器卡随通知一起开（action key 是通知），但它是独立的一张卡。
+ */
+fun guideCards(): List<SmartCard> = SMART_SOURCE_ORDER.map(::guideCardFor)
+
+private fun guideCardFor(connectorKey: String): SmartCard = when (connectorKey) {
+    UiPrefs.CONNECTOR_MESSAGE -> guideCard(
         id = "guide|message",
         sourceLabel = "消息",
         fact = "连接消息后：信用卡快到期、体检预约快到了，我会提前提醒你。",
         prep = "读短信里的账单和预约，只在本地处理",
         connectorKey = UiPrefs.CONNECTOR_MESSAGE
-    ),
-    guideCard(
+    )
+    UiPrefs.CONNECTOR_NOTIFICATION -> guideCard(
         id = "guide|notification",
         sourceLabel = "通知",
         fact = "连接通知后：没接到的电话、包裹到了、航班要飞了，我会给你一张卡片，点一下就能处理。",
         prep = "只读通知内容，只在本地处理",
         connectorKey = UiPrefs.CONNECTOR_NOTIFICATION
-    ),
-    guideCard(
+    )
+    UiPrefs.CONNECTOR_CALENDAR -> guideCard(
         id = "guide|calendar",
         sourceLabel = "日历",
         fact = "连接日历后：会议会出现在简报里，到时间提醒你。",
         prep = "只读当天的日程，只在本地处理",
         connectorKey = UiPrefs.CONNECTOR_CALENDAR
-    ),
-    guideCard(
-        id = "guide|contacts",
-        sourceLabel = "联系人",
-        fact = "连接联系人后：来电和短信里的号码会显示名字。",
-        prep = "只用来把号码显示成名字，只在本地处理",
-        connectorKey = UiPrefs.CONNECTOR_CONTACTS
-    ),
-    guideCard(
+    )
+    UiPrefs.CONNECTOR_PHONE -> guideCard(
         id = "guide|phone",
         sourceLabel = "电话拨号器",
         fact = "回拨只进拨号盘，不会直接拨出去。",
         prep = "随通知一起开，不另要权限",
         connectorKey = UiPrefs.CONNECTOR_NOTIFICATION
     )
-)
+    else -> error("guideCards: SMART_SOURCE_ORDER 里有没配引导卡的来源 $connectorKey")
+}
 
 /**
- * 可见的引导卡片（纯函数，单测锁死）：
- * 已接上的权限，其卡片不再出现；横滑跳过的只本轮沉底（下次还在）；
- * 点过“忽略”的永久不再出现。
+ * 一张引导卡本版最多被拒几次（第十四批，设计稿 §4.7 轮换推）：
+ * 第 1 次放队尾、第 2 次本版不再推（等引导换版）。
+ */
+const val GUIDE_MAX_REJECTS = 2
+
+/**
+ * 被拒后队列怎么变（纯函数，单测锁死）：第 1 次（priorRejects = 0）
+ * 放队尾，第 2 次（priorRejects = 1）移出队列；不在队列里的 id 不动。
+ */
+fun guideQueueAfterReject(
+    queue: List<String>,
+    id: String,
+    priorRejects: Int
+): List<String> {
+    if (id !in queue) return queue
+    val rest = queue - id
+    return if (priorRejects + 1 >= GUIDE_MAX_REJECTS) rest else rest + id
+}
+
+/**
+ * 轮换推当前该推哪一张（纯函数，单测锁死）：队列里第一张仍符合出现条件
+ * 的卡（没接上、没被永久记下）。一次只推一张，宿主只展示这一张。
+ */
+fun currentGuideCard(
+    queue: List<String>,
+    eligible: List<SmartCard>
+): SmartCard? = queue.firstNotNullOfOrNull { id ->
+    eligible.find { it.id == id }
+}
+
+/**
+ * 符合出现条件的引导卡片（纯函数，单测锁死）：
+ * 已接上的权限，其卡片不再出现；处理完（接上后反馈已给完、或反馈卡被
+ * 横滑走）永久记下的，不再出现。点「我知道了」/横滑不再走这里——那是
+ * 轮换推的“被拒一次”（见 guideQueueAfterReject），队列会把它放队尾。
  * 电话拨号器随通知一起开：通知一接上，电话拨号器卡也不再出现。
  */
 fun visibleGuideCards(
     messageGranted: Boolean,
     notificationGranted: Boolean,
     calendarGranted: Boolean = false,
-    contactsGranted: Boolean = false,
-    swipedIds: Set<String> = emptySet(),
     dismissedIds: Set<String> = emptySet()
 ): List<SmartCard> = guideCards().filter { card ->
     val granted = when (card.id) {
         "guide|message" -> messageGranted
         "guide|notification", "guide|phone" -> notificationGranted
         "guide|calendar" -> calendarGranted
-        "guide|contacts" -> contactsGranted
         else -> true
     }
-    !granted && card.id !in swipedIds && card.id !in dismissedIds
+    !granted && card.id !in dismissedIds
 }
 
 /** 某张引导卡用的连接器 key；电话拨号器卡随通知一起开，key 是通知。 */
@@ -151,13 +189,11 @@ fun isGuideConnectorGranted(
     connectorKey: String,
     messageGranted: Boolean,
     notificationGranted: Boolean,
-    calendarGranted: Boolean,
-    contactsGranted: Boolean
+    calendarGranted: Boolean
 ): Boolean = when (connectorKey) {
     UiPrefs.CONNECTOR_MESSAGE -> messageGranted
     UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE -> notificationGranted
     UiPrefs.CONNECTOR_CALENDAR -> calendarGranted
-    UiPrefs.CONNECTOR_CONTACTS -> contactsGranted
     else -> true
 }
 
@@ -166,7 +202,6 @@ fun connectedNextStep(connectorKey: String): String = when (connectorKey) {
     UiPrefs.CONNECTOR_MESSAGE -> "有账单或预约短信时，这里会提前提醒你"
     UiPrefs.CONNECTOR_NOTIFICATION -> "有未接来电、包裹或航班提醒时，这里会出现一张卡片，点一下就能处理"
     UiPrefs.CONNECTOR_CALENDAR -> "会议会出现在简报里，到时间提醒你"
-    UiPrefs.CONNECTOR_CONTACTS -> "来电和短信里的号码会显示名字"
     UiPrefs.CONNECTOR_PHONE -> "回拨只进拨号盘，不会直接拨出去"
     else -> ""
 }
@@ -204,8 +239,8 @@ data class ConnectedFeedback(
 }
 
 /**
- * 等级行文案（纯函数，单测逐字锁死）：“智能 +1 · 已接 3/5 个源”。
- * total 默认取 SMART_SOURCE_ORDER 的个数（五个源），不写死 5。
+ * 等级行文案（纯函数，单测逐字锁死）：“智能 +1 · 已接 3/4 个源”。
+ * total 默认取 SMART_SOURCE_ORDER 的个数（四个源），不写死 4。
  */
 fun celebrationLevelText(
     level: Int,
