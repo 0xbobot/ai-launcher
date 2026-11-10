@@ -19,6 +19,8 @@
 # ni_build_stub 保留（第 20 段数据新鲜度与第 28 段 keystore 共用腾讯地图桩）。
 # v0.68.93（布局与交互 Loop 一批）追加：第 14 段内加会议双处呈现去重断言
 # （nextup-dedupe：种子事件在场时静态首页 dump 里标题只出现一次）；
+# 2026-11-11（486）：去重断言改写为反向断言 nextup_brief_row_absent_flow
+# （简报会行拿掉，会议在简报里零处出现；点按流 nextup_tap_flow 同批退役）。
 # 第 18 段（意图焦点点外部取消）已随 477 删除；crash 检查顺延为第 19 段。
 # 玻璃试点批合入后：玻璃取证续为第 19 段，crash 再顺延为第 20 段。
 # v0.68.95（布局与交互 Loop 二批-A）追加：第 20 段为数据新鲜度（装/卸桩应用
@@ -814,14 +816,14 @@ adb shell pidof "$PKG" | grep -q . && ok "font-scale-alive" || ng "font-scale-al
 # --- 13. 七仔反应已删除（2026-11-10）：宠物与意图面板已随 477 删除，
 # intent-focus / intent-present 截图与 intent-present-results 断言一并退役。
 
-# --- 14. 封面会议卡点按入会（2026-10-21 真机 Bug：文案"点一下加入"点了没反应）---
-# 根因：封面 NextUpStrip 的 onMeetingTap 误接提醒函数 remindMeeting（只让七仔说话、
-# 且带去重——第二次点按字面无反应），从未打开会议链接/日历。修复后点按必须兑现文案：
-# 有可解析会议链接 → 直开链接；无链接 → 打开日历/事件详情；全失败七仔说话兜底。
-# 取证：往设备日历种两条事件（先无链接、后带 Zoom 链接），每次 force-stop 重启让
-# TodaySection 读到，dump 定位卡片标题、量其 clickable 祖先，press 点按后断言前台
-# 离开本包 / logcat 有目标 START 派发。种事件失败时：基线腿（无 SMOKE_LABEL，
-# per-commit 门禁）判 FAIL；矩阵腿只记 INFO 跳过（不冒充已验）。
+# --- 14. 简报会行点按 / 去重（2026-11-11 退役，486 简报会行拿掉，Bob 2026-11-11 亲口）：
+# nextup_tap_flow 已删——断言对象（简报会行 today_nextup）已不存在；种子事件
+# 一旦能进 Instances 展开视图（当前镜像门让本段 SKIP），旧点按断言会判 FAIL，
+# 故整段退役。nextup_dedupe_flow 改写为反向断言 nextup_brief_row_absent_flow
+# （见下）：新口径是会议在简报里零处出现。种子机器（日历 + nextup_seed_event /
+# nextup_delete_event）保留——改写后的 dedupe、§21 LayoutProbe、玻璃 D4
+# 还在用。种事件失败时：基线腿（无 SMOKE_LABEL，per-commit 门禁）判 FAIL；
+# 矩阵腿只记 INFO 跳过（不冒充已验）。
 adb shell pm grant "$PKG" android.permission.READ_CALENDAR > /dev/null 2>&1 || true
 # content 操作走 root（本镜像 §11 已证 root 可用）：CalendarProvider 按调用 UID 查权限，
 # shell 身份在部分镜像上查不到日历表；root 后可绕过。后续段落不受影响（§11 本就会 root）。
@@ -913,131 +915,19 @@ if [ -z "$CAL_ID" ]; then
 fi
 log "nextup seed calendar_id=${CAL_ID:-none}"
 
-nextup_tap_flow() {
-  # $1=事件标题 $2=断言名 $3=期望前台/派发关键词
-  local TITLE="$1" ANAME="$2" EXPECT="$3"
-  adb shell am force-stop "$PKG" || true
-  sleep 1
-  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-  sleep 4
-  adb shell input keyevent KEYCODE_HOME || true
-  sleep 2
-  # 诊断：dump 前确认种子事件还在表里、且 Instances 展开视图能看到它（区分种子丢失 vs App 侧问题）
-  # projection 只能单列（实测逗号串会被当成一个列名报 Invalid column）。
-  local DIAG_EV DIAG_IN DIAG_DB WIN_B WIN_E
-  DIAG_EV=$(adb shell content query --uri content://com.android.calendar/events --projection title 2>&1 | head -4 | tr '\n' ' ')
-  WIN_B=$(( (EMU_S - 86400) * 1000 )); WIN_E=$(( (EMU_S + 86400) * 1000 ))
-  DIAG_IN=$(adb shell content query --uri "content://com.android.calendar/instances/when/$WIN_B/$WIN_E" --projection title 2>&1 | head -4 | tr '\n' ' ')
-  DIAG_DB=$(adb shell "sqlite3 /data/data/com.android.providers.calendar/databases/calendar.db \"SELECT 'cal',_id,visible,sync_events,deleted FROM Calendars; SELECT 'ev',_id,title,calendar_id FROM Events;\"" 2>&1 | head -6 | tr '\n' ' ')
-  log "nextup-$ANAME diag events: $DIAG_EV"
-  log "nextup-$ANAME diag instances: $DIAG_IN"
-  log "nextup-$ANAME diag db: $DIAG_DB"
-  # 环境门：App 读的是 Instances 展开视图；本镜像 provider 对 CLI/直写种入的事件
-  # 不做展开（实测 events 可见、instances 为空）→ 此环境测不了点按行为，明示 SKIP
-  # 不判 FAIL 也不冒充 PASS；种子在哪天能进 Instances（换镜像/provider 放行），断言自动生效。
-  if ! echo "$DIAG_IN" | grep -q "$TITLE"; then
-    log "nextup-$ANAME: SKIP (seeded event not visible in Instances on this image; tap behavior unverified here)"
-    return
-  fi
-  adb shell uiautomator dump /sdcard/nextup_dump.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/nextup_dump.xml "$OUT/nextup_${ANAME}.xml" > /dev/null 2>&1 || true
-  local NODE=""
-  if [ -f "$OUT/nextup_${ANAME}.xml" ]; then
-    NODE=$(grep -o "<node[^>]*text=\"[^\"]*${TITLE}[^\"]*\"[^>]*>" "$OUT/nextup_${ANAME}.xml" | head -1)
-  fi
-  if [ -z "$NODE" ]; then
-    # 日历加载是 IO 异步，给一次 +3s 重 dump 机会再判
-    sleep 3
-    adb shell uiautomator dump /sdcard/nextup_dump.xml > /dev/null 2>&1 || true
-    adb pull /sdcard/nextup_dump.xml "$OUT/nextup_${ANAME}.xml" > /dev/null 2>&1 || true
-    if [ -f "$OUT/nextup_${ANAME}.xml" ]; then
-      NODE=$(grep -o "<node[^>]*text=\"[^\"]*${TITLE}[^\"]*\"[^>]*>" "$OUT/nextup_${ANAME}.xml" | head -1)
-    fi
-  fi
-  if [ -z "$NODE" ]; then
-    ng "nextup-$ANAME-card"
-    return
-  fi
-  ok "nextup-$ANAME-card"
-  shot "nextup-$ANAME-card"
-  local NUMS X1 Y1 X2 Y2 TX TY
-  NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-  X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
-  X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
-  TX=$(( (X1 + X2) / 2 )); TY=$(( (Y1 + Y2) / 2 ))
-  # clickable 祖先量测（python3 在场时）：标题节点中心须落在某个 clickable=true 节点内
-  if command -v python3 > /dev/null 2>&1; then
-    if python3 - "$OUT/nextup_${ANAME}.xml" "$TX" "$TY" <<'PYEOF'
-import re, sys
-data = open(sys.argv[1], encoding='utf-8', errors='ignore').read()
-tx, ty = int(sys.argv[2]), int(sys.argv[3])
-for m in re.finditer(r'<node[^>]*clickable="true"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', data):
-    x1, y1, x2, y2 = map(int, m.groups())
-    if x1 <= tx <= x2 and y1 <= ty <= y2:
-        sys.exit(0)
-sys.exit(1)
-PYEOF
-    then
-      ok "nextup-$ANAME-clickable"
-    else
-      ng "nextup-$ANAME-clickable"
-    fi
-  else
-    log "nextup-$ANAME-clickable: python3 unavailable, skipped (not counted)"
-  fi
-  # 体检批D ⑥：点按点优先用会议卡 testTag 节点（today_nextup）中心——卡面即点按面；
-  # 标题中心保留给上面的可点祖先断言。未命中则沿用标题中心（原行为）。
-  local CTR2
-  CTR2=$(center_rid "$OUT/nextup_${ANAME}.xml" "today_nextup")
-  if [ -n "$CTR2" ]; then
-    TX=$(echo "$CTR2" | cut -d' ' -f1); TY=$(echo "$CTR2" | cut -d' ' -f2)
-    log "nextup-$ANAME tap by tag at ($TX,$TY)"
-  fi
-  adb logcat -c > /dev/null 2>&1 || true
-  adb shell input swipe "$TX" "$TY" "$TX" "$TY" 150 || true
-  shot "nextup-$ANAME-imm"
-  local OPENED=0 FG="" i
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
-    sleep 0.25
-    FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
-    if echo "$FG" | grep -qi "$EXPECT"; then OPENED=1; break; fi
-    if [ -n "$FG" ] && ! echo "$FG" | grep -q "$PKG"; then OPENED=1; break; fi
-  done
-  shot "nextup-$ANAME"
-  log "nextup-$ANAME foreground after tap: $FG"
-  # 把命中的 START 派发原文打进日志（上轮只验了存在性，看不到派发给了谁）
-  local STARTLINE DIEDLINE
-  STARTLINE=$(adb logcat -d 2>/dev/null | grep "START u0" | grep -iE "$EXPECT|calendar" | head -2 | tr '\n' ' ')
-  log "nextup-$ANAME start lines: $STARTLINE"
-  DIEDLINE=$(adb logcat -d 2>/dev/null | grep -i "com.android.calendar" | grep -iE "has died|FATAL" | head -2 | tr '\n' ' ')
-  if [ -n "$DIEDLINE" ]; then log "nextup-$ANAME calendar proc: $DIEDLINE"; fi
-  if [ "$ANAME" = "withlink" ] && ! echo "$FG" | grep -qi "$EXPECT"; then
-    log "nextup-withlink: link target NOT in foreground - either calendar fallback (no URL handler on this image) or failure; see foreground line above"
-  fi
-  if [ "$OPENED" = "1" ]; then
-    ok "nextup-$ANAME-open"
-  elif adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "$EXPECT"; then
-    log "nextup-$ANAME start dispatched (foreground did not stick)"
-    ok "nextup-$ANAME-open"
-  elif [ "$ANAME" = "withlink" ] && adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "calendar"; then
-    log "nextup-withlink calendar fallback dispatched (no URL handler on this image; link path unverifiable here)"
-    ok "nextup-$ANAME-open"
-  else
-    ng "nextup-$ANAME-open"
-  fi
-  adb shell input keyevent KEYCODE_HOME || true
-  sleep 2
-}
+# nextup_tap_flow 已退役（2026-11-11，486）：点按落点曾是简报会行
+# today_nextup——会行拿掉后断言对象已不存在，函数本体整段删除，
+# 不另留点按断言。加入动作的覆盖现在归日历卡（智能卡片线）。
 
 
-nextup_dedupe_flow() {
-  # $1=事件标题。v0.68.93（布局与交互 Loop 一批④）：同一会议双处呈现去重断言。
-  # v0.68.99（主页重构 R-1）：会议常驻主场由 NextUp 条迁移为简报会行
-  # （today_nextup 在简报内）。477 后首页无输入态、无意图面板：去重不变量
-  # 改为静态断言——种子事件在场时，简报会行标题在静态首页 dump 里只出现
-  # 一次（today_nextup 在场 + 标题计数 ==1；横屏 <=1，见下）。
-  # 环境门同 nextup_tap_flow：种子事件进不了 Instances 视图时简报会行无从
-  # 呈现，明示 SKIP 不计数（不冒充已验，报告如实标注）。
+nextup_brief_row_absent_flow() {
+  # $1=事件标题。486（2026-11-11，Bob 亲口）：简报会行拿掉，会议只在会前
+  # 30 分钟（非会议日程 2 小时）以日历卡出现；新口径——会议在简报里零处出现。
+  # 本函数是 nextup_dedupe_flow 的反向改写：种子事件在场时，静态首页 dump
+  # 里必须没有 today_nextup 节点（有则 ng）；不再数标题在全屏出现几次——
+  # 482 日历卡在 30 分钟窗口内可能合法地显示同一标题。
+  # 环境门同旧 tap 流：种子事件进不了 Instances 视图时简报会行无从呈现，
+  # 明示 SKIP 不计数（不冒充已验，报告如实标注）。
   local TITLE="$1"
   adb shell am force-stop "$PKG" || true
   sleep 1
@@ -1049,64 +939,34 @@ nextup_dedupe_flow() {
   WIN_B=$(( (EMU_S - 86400) * 1000 )); WIN_E=$(( (EMU_S + 86400) * 1000 ))
   DIAG_IN=$(adb shell content query --uri "content://com.android.calendar/instances/when/$WIN_B/$WIN_E" --projection title 2>&1 | head -4 | tr '\n' ' ')
   if ! echo "$DIAG_IN" | grep -q "$TITLE"; then
-    log "nextup-dedupe: SKIP (seeded event not visible in Instances on this image; dedupe unverified here)"
+    log "nextup-brief-row-absent: SKIP (seeded event not visible in Instances on this image; absence unverified here)"
     return
   fi
   adb shell uiautomator dump /sdcard/dedupe_dump0.xml > /dev/null 2>&1 || true
   adb pull /sdcard/dedupe_dump0.xml "$OUT/dedupe_dump0.xml" > /dev/null 2>&1 || true
   redump_if_empty dedupe_dump0
-  if [ -f "$OUT/dedupe_dump0.xml" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump0.xml"; then
-    ok "nextup-dedupe-home"
-  else
-    ng "nextup-dedupe-home"
+  if [ ! -f "$OUT/dedupe_dump0.xml" ]; then
+    log "nextup-brief-row-absent: dump unavailable, skipped (not counted)"
     return
   fi
-  # 标题出现次数限定在简报会行（today_nextup）bounds 内：477 后意图面板
-  # 已删，但首页另有智能卡片（482 日历卡）同场显示同一会议，整屏计数
-  # ==1 不再成立（run 42746521326：会行标题 + 日历卡标题各一处）；去重
-  # 不变量仍为「简报会行内标题只出现一次」，简报与卡片并存是否去重归
-  # 智能卡片线定（此处不判）。行自身的 content-desc 是另一属性，不计入。
-  local CNT
-  CNT=$(python3 - "$OUT/dedupe_dump0.xml" "$TITLE" <<'PYEOF'
-import re, sys
-x = open(sys.argv[1], encoding="utf-8", errors="replace").read()
-title = sys.argv[2]
-nodes = re.findall(r"<node[^>]*>", x)
-tb = None
-for n in nodes:
-    if 'resource-id="today_nextup"' in n:
-        b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
-        if b:
-            tb = tuple(int(v) for v in b.groups())
-        break
-if tb is None:
-    print(-1)
-    sys.exit(0)
-c = 0
-for n in nodes:
-    t = re.search(r'text="([^"]*)"', n)
-    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
-    if t and b and title in t.group(1):
-        x1, y1, x2, y2 = (int(v) for v in b.groups())
-        if x1 >= tb[0] and y1 >= tb[1] and x2 <= tb[2] and y2 <= tb[3]:
-            c += 1
-print(c)
-PYEOF
-)
-  log "nextup-dedupe: title occurrences inside brief row=$CNT (expect 1)"
-  if [ "$LANDSCAPE" = "1" ]; then
-    # 横屏静态下简报列高度饱和，会行可能被挤出合成（节点缺席而非复刻）——
-    # 去重的核心不变量是「绝不出现第二处」：横屏验 CNT<=1；会行在场的 ==1
-    # 由静态 nextup-dedupe-home 子项严验。竖屏维持 ==1 + today_nextup 在场。
-    if [ "$CNT" -le 1 ]; then
-      ok "nextup-dedupe"
-    else
-      ng "nextup-dedupe"
-    fi
-  elif [ "$CNT" = "1" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump0.xml"; then
-    ok "nextup-dedupe"
+  # 到家自验：会行缺席只有在静态首页上才有意义（cover_hero 在场才算到家，
+  # 否则是拍错了表面，缺席断言会假 PASS——只记日志跳过，不计数）。
+  if ! grep -q 'resource-id="cover_hero"' "$OUT/dedupe_dump0.xml"; then
+    log "nextup-brief-row-absent: home not reached (cover_hero absent), skipped (not counted)"
+    return
+  fi
+  if grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump0.xml"; then
+    ng "nextup-brief-row-absent"
   else
-    ng "nextup-dedupe"
+    ok "nextup-brief-row-absent"
+  fi
+  # 正向锚点：486 说「1 个会要开」计数行不动——dump 里仍有计数文本「个会要开」
+  # 时 ok 一项；观测不到只记日志、不计数（dump 里计数文本的呈现形态未在真机
+  # 外核实过，不因锚点缺席判 FAIL）。
+  if grep -q '个会要开' "$OUT/dedupe_dump0.xml"; then
+    ok "nextup-brief-count-kept"
+  else
+    log "nextup-brief-count-kept: count text not observed in dump (log-only, not counted)"
   fi
 }
 
@@ -1188,26 +1048,18 @@ if [ -n "$CAL_ID" ]; then
     fi
   }
   HAS_SQLITE=$(adb shell "command -v sqlite3" 2>/dev/null | head -1 | tr -d '\r ')
-  # 事件 A：无链接 → 点卡应打开日历（CATEGORY_APP_CALENDAR / 事件详情）
+  # 事件 A：无链接 → 486 后简报会行已不存在，断言改为反向：种子在场时静态
+  # 首页 dump 里不得有 today_nextup 节点，计数文本「个会要开」仍在。
   if nextup_seed_event "SmokeNoLink" ""; then
-    nextup_dedupe_flow "SmokeNoLink"
-    nextup_tap_flow "SmokeNoLink" "nolink" "calendar"
+    nextup_brief_row_absent_flow "SmokeNoLink"
   elif [ -z "$SMOKE_LABEL" ]; then
     ng "nextup-seed"
   else
     log "nextup seed-event failed on this leg - skipped (not counted)"
   fi
   nextup_delete_event "SmokeNoLink"
-  # 事件 B：描述带 Zoom 链接 → 有解析者时点卡直开链接；本镜像无浏览器/Zoom 时
-  # getValidMeetingUrl 按设计判无效、回落打开日历（flow 内以日志明示哪条路径）。
-  if nextup_seed_event "SmokeWithLink" "https://zoom.us/j/1234567890"; then
-    nextup_tap_flow "SmokeWithLink" "withlink" "zoom"
-  elif [ -z "$SMOKE_LABEL" ]; then
-    ng "nextup-seed-link"
-  else
-    log "nextup seed-link failed on this leg - skipped (not counted)"
-  fi
-  nextup_delete_event "SmokeWithLink"
+  # 事件 B（带 Zoom 链接）已随 nextup_tap_flow 退役（2026-11-11，486）：
+  # 链接点按落点现在归日历卡的「加入会议」，不在本段覆盖，不另种事件。
 else
   if [ -z "$SMOKE_LABEL" ]; then
     ng "nextup-seed"
@@ -1366,11 +1218,10 @@ glass_root_swap_wallpaper() {
   adb shell dumpsys wallpaper 2>/dev/null | head -25
 } > "$OUT/glass-wp-debug.txt" 2>&1 || true
 glass_nextup_shot() {
-  # $1=截图名。简报会行取证（v0.68.99 起 NextUp 紧凑条退役、会行长进简报，
-  # testTag today_nextup 迁移至简报会行；其玻璃语境即简报本体、无独立玻璃面）：
-  # 477 后首页无输入态：只做静态取证——第 14 段种子事件窗口（+20~+80 分钟）
-  # 仍覆盖本段时 today_nextup 在场即截图；事件不在场只记日志不判负
-  # （玻璃证据以全景图为准，无事件时简报会行不渲染）。
+  # $1=截图名。简报会行取证已退役（2026-11-11，486 简报会行拿掉，Bob
+  # 2026-11-11 亲口）：today_nextup 节点不再渲染，本函数只做静态取证——
+  # 仍拍一张静态图、只记日志，不判负（玻璃证据以全景图为准）。行为不动，
+  # 仅注释更新；第 14 段种子事件窗口仍覆盖本段时也不再有会行可拍。
   local name="$1"
   adb shell uiautomator dump /sdcard/glass_nu_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/glass_nu_dump.xml "$OUT/glass_nu_dump.xml" > /dev/null 2>&1 || true
@@ -1800,58 +1651,10 @@ if [ "$LAYOUT_FAILS" -gt 0 ]; then ng "layout-geometry($LAYOUT_FAILS)"; else ok 
 # --- 26. 输入态不误退（D-2）已删除（2026-11-10）：首页输入态已随 477 删除；
 # 跨越兜底时窗不误退的口径由 IntentCoordinator 相关单测覆盖（协调器本身已删，见 477 收据）。
 
-# --- 27. 点「加入」只发一次意图 + 不回弹（v0.68.101·D-5）：种子会议（带
-# Zoom 链接）→ 点加入一次 → 数 logcat 中该链接的 START 派发次数（恰 1）
-# + 本应用 MainActivity 的 START 次数（0——回弹/重启信号）；无 URL
-# handler 的镜像走日历兜底派发，同样数恰 1。环境门同第 14 段：种子进
-# 不了 Instances 视图则 SKIP 不计数。---
-log "join-once: segment start"
-if nextup_seed_event "SmokeJoinOnce" "https://zoom.us/j/9876543210"; then
-  adb shell am force-stop "$PKG" || true
-  sleep 1
-  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-  sleep 4
-  adb shell input keyevent KEYCODE_HOME || true
-  sleep 2
-  WIN_B=$(( (EMU_S - 86400) * 1000 )); WIN_E=$(( (EMU_S + 86400) * 1000 ))
-  DIAG_IN=$(adb shell content query --uri "content://com.android.calendar/instances/when/$WIN_B/$WIN_E" --projection title 2>&1 | head -4 | tr '\n' ' ')
-  if ! echo "$DIAG_IN" | grep -q "SmokeJoinOnce"; then
-    log "join-once: SKIP (seeded event not visible in Instances on this image)"
-  else
-    adb shell uiautomator dump /sdcard/join_dump.xml > /dev/null 2>&1 || true
-    adb pull /sdcard/join_dump.xml "$OUT/join_dump.xml" > /dev/null 2>&1 || true
-    redump_if_empty join_dump
-    JCTR=$(center_rid "$OUT/join_dump.xml" "today_nextup")
-    if [ -z "$JCTR" ]; then
-      log "join-once: meeting row (today_nextup) not found in dump"
-      ng "join-fires-once"
-    else
-      JTX=$(echo "$JCTR" | cut -d' ' -f1); JTY=$(echo "$JCTR" | cut -d' ' -f2)
-      adb logcat -c > /dev/null 2>&1 || true
-      adb shell input swipe "$JTX" "$JTY" "$JTX" "$JTY" 150 || true
-      sleep 3
-      shot "join-once"
-      LINK_STARTS=$(adb logcat -d 2>/dev/null | grep "START u0" | grep -ci "zoom" || true)
-      CAL_STARTS=$(adb logcat -d 2>/dev/null | grep "START u0" | grep -ci "calendar" || true)
-      SELF_STARTS=$(adb logcat -d 2>/dev/null | grep "START u0" | grep -c "$PKG" || true)
-      FGJ=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
-      log "join-once dispatches: link=$LINK_STARTS calendar=$CAL_STARTS self=$SELF_STARTS fg=$FGJ"
-      DISPATCHES=$LINK_STARTS
-      if [ "$LINK_STARTS" = "0" ]; then DISPATCHES=$CAL_STARTS; fi
-      if [ "$DISPATCHES" = "1" ] && [ "$SELF_STARTS" = "0" ]; then
-        ok "join-fires-once"
-      else
-        log "join-once: expected exactly 1 external dispatch and 0 self relaunches"
-        ng "join-fires-once"
-      fi
-    fi
-  fi
-  nextup_delete_event "SmokeJoinOnce"
-  adb shell input keyevent KEYCODE_HOME || true
-  sleep 1
-else
-  log "join-once: seed failed - segment skipped (not counted)"
-fi
+# --- 27. 点「加入」只发一次意图已删除（2026-11-11，486 简报会行拿掉，
+# Bob 2026-11-11 亲口）：断言对象（简报会行 today_nextup）已不存在，种子
+# 调用与断言段一并退役。join-once 保证现在落在日历卡的「加入会议」动作上，
+# 新覆盖归智能卡片线；勿在此把点按改指到日历卡（窗口与时序都不同，会 flaky）。
 
 # --- 30. 应用中心底部条带可点（D-6，Bob .100 真机点名）：v0.40.0 的底部
 # 88dp 透明手势条（detectVerticalDragGestures + 回调 consume）压在列表上
