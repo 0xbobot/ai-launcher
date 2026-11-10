@@ -703,8 +703,11 @@ object SmartCardRepository {
         val notifGranted = NotificationRepository.hasAccess(context)
         val candidates = mutableListOf<SmartCard>()
         val created = reminderCreatedIds(context, nowMs)
-        // 短信卡：buildSmsCards 里已只认 READ_SMS，这里直接拼。
-        candidates += smsCards
+        // 短信卡：buildSmsCards 只认 READ_SMS，但短信卡片是 5 分钟节流缓存
+        // 的——权限刚撤掉、缓存还没重建时，这里再按实时权限校验一次，
+        // 撤权限后卡片最迟 1 分钟随分钟 ticker 的 refresh 摘掉，
+        // 不等下次重建（通知/日历两条路每分钟都重读实时权限，短信不能例外）。
+        if (SmsRepository.hasSmsPermission(context)) candidates += smsCards
         if (CalendarRepository.hasCalendarPermission(context)) {
             candidates += CalendarRepository.loadTodayEvents(context)
                 .mapNotNull { calendarCard(it, context, nowMs) }
