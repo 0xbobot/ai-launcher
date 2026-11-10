@@ -7,103 +7,35 @@ import org.junit.Test
 
 /**
  * 智能区单测（第七批，设计稿 §2；2026-11-08 Bob 定：提醒来源收进“智能”区，
- * 每行一个控件＋智能等级＋新顺序＋说明 v1）：
- * 开关状态＝真实接上状态、点按决议、状态文案、等级计数、顺序、说明 v1。
+ * 每行一个控件＋智能等级＋新顺序＋说明 v1；第十三批重写：卡片跟着权限走，
+ * 开关不再是一道关——开关只显示接没接上，接上＝权限给了；等级计数、
+ * 状态文案、电话拨号器行都只认权限）。
  * 纯函数、JVM 可跑。状态文字不可点、无文字按钮是结构保证：
  * SettingsConnectorRow 的签名里已没有 actionText/onOpen 这类按钮参数，
  * 行内也没有 TextButton（grep 可验），不是靠运行时断言。
+ * 仓库的门（refresh/buildSmsCards）是 Context 绑定的，JVM 单测够不着，
+ * 锁死方式是删了 UiPrefs 的开关 API（isConnectorEnabled/setConnectorEnabled），
+ * 残留的开关门编译不过——见收据。
  */
 class ConnectorSwitchTest {
 
     private fun state(
         key: String,
         granted: Boolean,
-        enabled: Boolean,
         lastUsedLabel: String = "今天用过"
     ) = ConnectorState(
         key = key, name = key, desc = "", granted = granted,
-        enabled = enabled, lastUsedLabel = lastUsedLabel
+        lastUsedLabel = lastUsedLabel
     )
 
-    // 开关状态 = 真实接上状态（权限已授 + 来源启用）
+    // 开关显示 = 权限给了没给（第十三批：开关不再是一道关）
 
     @Test
-    fun switchOn_onlyWhenGrantedAndEnabled() {
-        val key = UiPrefs.CONNECTOR_MESSAGE
-        assertTrue(isConnectorConnected(state(key, granted = true, enabled = true)))
-        assertFalse(isConnectorConnected(state(key, granted = true, enabled = false)))
-        assertFalse(isConnectorConnected(state(key, granted = false, enabled = false)))
-    }
-
-    @Test
-    fun switchOff_whenNotGranted_evenIfEnabledFlagOn() {
-        // 455 真机 bug：日历、消息开关开着却显示“未接上”——根因是开关只读
-        // enabled（默认 true），不读 granted。此后开关必须读两者：权限未授
-        // 时开关就是关的，哪怕启用标志还开着。
-        val key = UiPrefs.CONNECTOR_CALENDAR
-        assertFalse(isConnectorConnected(state(key, granted = false, enabled = true)))
-    }
-
-    // 点按决议：关→立即停用；开且已授→只启用；开且未授→走接上流程
-
-    @Test
-    fun resolveToggle_offAlwaysDisables() {
-        assertEquals(
-            ConnectorToggleAction.DISABLE,
-            resolveConnectorToggle(granted = true, turnOn = false)
-        )
-        assertEquals(
-            ConnectorToggleAction.DISABLE,
-            resolveConnectorToggle(granted = false, turnOn = false)
-        )
-    }
-
-    @Test
-    fun resolveToggle_onGrantedOnlyEnables() {
-        assertEquals(
-            ConnectorToggleAction.ENABLE,
-            resolveConnectorToggle(granted = true, turnOn = true)
-        )
-    }
-
-    @Test
-    fun resolveToggle_onNotGrantedConnects() {
-        assertEquals(
-            ConnectorToggleAction.CONNECT,
-            resolveConnectorToggle(granted = false, turnOn = true)
-        )
-    }
-
-    @Test
-    fun cancelConnect_keepsSwitchOff() {
-        // 接上流程取消或拒绝：granted 仍为 false；哪怕点开关开时先把启用
-        // 意愿记下了（enabled=true），开关按真实接上状态仍为关。
-        assertEquals(
-            ConnectorToggleAction.CONNECT,
-            resolveConnectorToggle(granted = false, turnOn = true)
-        )
-        assertFalse(
-            isConnectorConnected(
-                state(UiPrefs.CONNECTOR_MESSAGE, granted = false, enabled = true)
-            )
-        )
-    }
-
-    @Test
-    fun disable_stopsSourceContent() {
-        // 关开关 → DISABLE → UiPrefs.setConnectorEnabled(key, false)；仓库
-        // refresh() 按 isConnectorEnabled 门控各来源（447 既有，不变），
-        // 该来源不再出卡片。系统权限本身应用内撤不掉：关开关 = 不再用这个
-        // 来源，不是去系统里撤权限（见收据口径）。
-        assertEquals(
-            ConnectorToggleAction.DISABLE,
-            resolveConnectorToggle(granted = true, turnOn = false)
-        )
-        assertFalse(
-            isConnectorConnected(
-                state(UiPrefs.CONNECTOR_NOTIFICATION, granted = true, enabled = false)
-            )
-        )
+    fun switchShowsGranted() {
+        // 开关的显示值就是 state.granted：权限给了开关开，没给开关关；
+        // 没有第二个“启用”标志能把它再关掉——双重关已删。
+        assertTrue(state(UiPrefs.CONNECTOR_MESSAGE, granted = true).granted)
+        assertFalse(state(UiPrefs.CONNECTOR_CALENDAR, granted = false).granted)
     }
 
     // 状态行文案（只做展示）
@@ -112,19 +44,7 @@ class ConnectorSwitchTest {
     fun statusText_notGranted() {
         assertEquals(
             "未接上",
-            connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = false, enabled = true))
-        )
-        assertEquals(
-            "未接上",
-            connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = false, enabled = false))
-        )
-    }
-
-    @Test
-    fun statusText_grantedButDisabled() {
-        assertEquals(
-            "已关闭",
-            connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = true, enabled = false))
+            connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = false))
         )
     }
 
@@ -132,7 +52,21 @@ class ConnectorSwitchTest {
     fun statusText_connected() {
         assertEquals(
             "已接上 · 今天用过",
-            connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = true, enabled = true))
+            connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = true))
+        )
+    }
+
+    @Test
+    fun statusText_noClosedBranch() {
+        // 旧文案“已关闭”（权限给了、开关关了）已随开关一起删掉；
+        // 两个分支之外没有第三种文案。
+        assertEquals(
+            "未接上",
+            connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = false))
+        )
+        assertEquals(
+            "已接上 · 今天用过",
+            connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = true))
         )
     }
 
@@ -179,22 +113,21 @@ class ConnectorSwitchTest {
         assertEquals("", connectorDescription("unknown"))
     }
 
-    // 智能等级 = 已接上的源个数
+    // 智能等级 = 权限已授的源个数；电话拨号器随通知计
 
     private fun allStates(
-        message: Pair<Boolean, Boolean> = true to true,
-        notification: Pair<Boolean, Boolean> = true to true,
-        calendar: Pair<Boolean, Boolean> = true to true,
-        phone: Pair<Boolean, Boolean> = true to true,
-        contacts: Pair<Boolean, Boolean> = true to true
+        message: Boolean = true,
+        notification: Boolean = true,
+        calendar: Boolean = true,
+        contacts: Boolean = true
     ) = listOf(
-        state(UiPrefs.CONNECTOR_MESSAGE, message.first, message.second),
-        state(UiPrefs.CONNECTOR_NOTIFICATION, notification.first, notification.second),
-        state(UiPrefs.CONNECTOR_CALENDAR, calendar.first, calendar.second),
+        state(UiPrefs.CONNECTOR_MESSAGE, message),
+        state(UiPrefs.CONNECTOR_NOTIFICATION, notification),
+        state(UiPrefs.CONNECTOR_CALENDAR, calendar),
         // 电话拨号器无自己的权限：granted 取通知的授权状态（与
         // buildConnectorStates 一致），计数时另看通知源是否已接上。
-        state(UiPrefs.CONNECTOR_PHONE, notification.first, phone.second),
-        state(UiPrefs.CONNECTOR_CONTACTS, contacts.first, contacts.second)
+        state(UiPrefs.CONNECTOR_PHONE, notification),
+        state(UiPrefs.CONNECTOR_CONTACTS, contacts)
     )
 
     @Test
@@ -208,151 +141,90 @@ class ConnectorSwitchTest {
             0,
             connectedSourceCount(
                 allStates(
-                    message = false to false, notification = false to false,
-                    calendar = false to false, phone = false to false,
-                    contacts = false to false
+                    message = false, notification = false,
+                    calendar = false, contacts = false
                 )
             )
         )
     }
 
     @Test
-    fun levelCount_countsOnlyConnected() {
-        assertEquals(
-            1,
-            connectedSourceCount(
-                allStates(
-                    message = true to true, notification = false to true,
-                    calendar = true to false, phone = true to true,
-                    contacts = false to false
-                )
-            )
-        )
-    }
-
-    // 电话拨号器开关跟着通知走（第九批，设计稿 §2，2026-11-08 Bob 定）
-
-    @Test
-    fun dialerDisplayOff_whenNotificationSwitchOff() {
-        // 通知权限已授、通知开关关、电话拨号器自己的开关开 → 电话拨号器
-        // 显示关（457 的分层边界就此关掉：显示与计数一致），等级里也不算它。
-        val states = allStates(
-            message = true to true,
-            notification = true to false,
-            calendar = true to true,
-            phone = true to true,
-            contacts = false to false
-        )
-        val effective = effectiveDialerState(states)
-        assertTrue(effective != null)
-        assertFalse(isConnectorConnected(effective!!))
-        assertEquals("已关闭", connectorStatusText(effective))
-        assertFalse(isDialerRowEnabled(states))
-        assertEquals(2, connectedSourceCount(states))
-    }
-
-    @Test
-    fun dialerDisplayFollowsOwnState_whenNotificationOn() {
-        // 通知开着 → 电话拨号器显示回到它自己的状态：自己开着就显示开、
-        // 自己关着就显示关；行可点。
-        val onStates = allStates(notification = true to true, phone = true to true)
-        val onEffective = effectiveDialerState(onStates)
-        assertTrue(onEffective != null)
-        assertTrue(isConnectorConnected(onEffective!!))
-        assertTrue(isDialerRowEnabled(onStates))
-
-        val offStates = allStates(notification = true to true, phone = true to false)
-        val offEffective = effectiveDialerState(offStates)
-        assertTrue(offEffective != null)
-        assertFalse(isConnectorConnected(offEffective!!))
-        assertEquals("已关闭", connectorStatusText(offEffective))
-        assertTrue(isDialerRowEnabled(offStates))
-    }
-
-    @Test
-    fun dialerOwnFlagPreserved_notificationOffThenOn() {
-        // 通知开关关→开一次，电话拨号器自己的启用标志不变：同一组输入状态
-        // 先后算有效态，关时显示关、开时显示开——证明没丢状态（JVM 层只测
-        // 推导函数，不写持久化标志；设置页也不写回 setConnectorEnabled）。
-        val base = allStates(notification = true to true, phone = true to true)
-        val offStates = base.map {
-            if (it.key == UiPrefs.CONNECTOR_NOTIFICATION) it.copy(enabled = false) else it
-        }
-        assertFalse(isConnectorConnected(effectiveDialerState(offStates)!!))
-        // 通知再开：输入表里的电话拨号器 enabled 仍是 true，显示回到开。
-        assertTrue(isConnectorConnected(effectiveDialerState(base)!!))
-        assertTrue(base.first { it.key == UiPrefs.CONNECTOR_PHONE }.enabled)
-    }
-
-    @Test
-    fun dialerDisplayOff_whenNotificationNotGranted() {
-        // 通知权限未授 → 电话拨号器显示关（计数口径已有覆盖，显示也要一致），
-        // 行变灰点不动。
-        val states = allStates(
-            message = true to true,
-            notification = false to true,
-            calendar = true to true,
-            phone = true to true,
-            contacts = false to false
-        )
-        val effective = effectiveDialerState(states)
-        assertTrue(effective != null)
-        assertFalse(isConnectorConnected(effective!!))
-        assertEquals("未接上", connectorStatusText(effective))
-        assertFalse(isDialerRowEnabled(states))
-        assertEquals(2, connectedSourceCount(states))
-    }
-
-    @Test
-    fun dialerRowEnabled_followsNotificationConnected() {
-        // 行可点当且仅当通知源已接上（权限已授＋通知自己的开关开）。
-        assertTrue(isDialerRowEnabled(allStates(notification = true to true)))
-        assertFalse(isDialerRowEnabled(allStates(notification = true to false)))
-        assertFalse(isDialerRowEnabled(allStates(notification = false to true)))
-        assertFalse(isDialerRowEnabled(allStates(notification = false to false)))
-    }
-
-    @Test
-    fun levelCount_phoneNeedsNotificationConnected() {
-        // 电话拨号器随通知计：通知权限已授、但通知自己的开关关了 → 电话
-        // 不算（未接来电卡片实际也不出，仓库门控 notifOn && phoneOn）。
+    fun levelCount_countsOnlyGranted() {
+        // 只认权限：消息给了、日历给了，通知没给（电话随通知不算）、
+        // 联系人没给 → 2。旧口径里日历开关关着会再扣一个，那是双重关。
         assertEquals(
             2,
             connectedSourceCount(
                 allStates(
-                    message = true to true,
-                    notification = true to false,
-                    calendar = true to true,
-                    phone = true to true,
-                    contacts = false to false
+                    message = true, notification = false,
+                    calendar = true, contacts = false
                 )
             )
         )
-        // 通知接上且电话拨号器自己的开关开 → 算。
+    }
+
+    @Test
+    fun levelCount_phoneNeedsNotificationGranted() {
+        // 电话拨号器随通知计：通知给了 → 通知＋电话一次算 2 个；
+        // 通知没给 → 电话不算，哪怕输入表里电话的 granted 写的是 true
+        // （connectedSourceCount 按通知再校验一次，不多算）。
         assertEquals(
             4,
             connectedSourceCount(
                 allStates(
-                    message = true to true,
-                    notification = true to true,
-                    calendar = true to true,
-                    phone = true to true,
-                    contacts = false to false
+                    message = true, notification = true,
+                    calendar = true, contacts = false
                 )
             )
         )
-        // 通知权限未授 → 电话不算，哪怕它自己的开关开着。
         assertEquals(
             2,
             connectedSourceCount(
                 allStates(
-                    message = true to true,
-                    notification = false to true,
-                    calendar = true to true,
-                    phone = true to true,
-                    contacts = false to false
+                    message = true, notification = false,
+                    calendar = true, contacts = false
                 )
             )
         )
+        val inconsistent = listOf(
+            state(UiPrefs.CONNECTOR_MESSAGE, true),
+            state(UiPrefs.CONNECTOR_NOTIFICATION, false),
+            state(UiPrefs.CONNECTOR_CALENDAR, true),
+            state(UiPrefs.CONNECTOR_PHONE, true),
+            state(UiPrefs.CONNECTOR_CONTACTS, false)
+        )
+        assertEquals(2, connectedSourceCount(inconsistent))
+    }
+
+    // 电话拨号器行跟着通知的权限走（第十三批）
+
+    @Test
+    fun dialerRowEnabled_followsNotificationGranted() {
+        // 行可点当且仅当通知已接上（权限给了）。
+        assertTrue(isDialerRowEnabled(allStates(notification = true)))
+        assertFalse(isDialerRowEnabled(allStates(notification = false)))
+    }
+
+    @Test
+    fun dialerRowDisabled_whenNotificationNotGranted() {
+        // 通知权限未授 → 电话拨号器行变灰点不动（不能单独开它），等级里也不算它。
+        val states = allStates(
+            message = true, notification = false,
+            calendar = true, contacts = false
+        )
+        assertFalse(isDialerRowEnabled(states))
+        assertEquals(2, connectedSourceCount(states))
+    }
+
+    @Test
+    fun dialerCountsWithNotification_whenNotificationGranted() {
+        // 通知接上 → 电话拨号器跟着算一个（接通知一次涨 2：通知＋电话），
+        // 行可点；没有自己的开关能再单独关掉它。
+        val states = allStates(
+            message = true, notification = true,
+            calendar = true, contacts = false
+        )
+        assertTrue(isDialerRowEnabled(states))
+        assertEquals(4, connectedSourceCount(states))
     }
 }

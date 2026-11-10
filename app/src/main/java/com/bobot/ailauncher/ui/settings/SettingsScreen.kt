@@ -46,7 +46,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,17 +73,13 @@ import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.ConnectorState
-import com.bobot.ailauncher.data.ConnectorToggleAction
 import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.SMART_SOURCE_ORDER
 import com.bobot.ailauncher.data.buildConnectorStates
 import com.bobot.ailauncher.data.connectedSourceCount
 import com.bobot.ailauncher.data.connectorStatusText
-import com.bobot.ailauncher.data.effectiveDialerState
-import com.bobot.ailauncher.data.isConnectorConnected
 import com.bobot.ailauncher.data.isDialerRowEnabled
-import com.bobot.ailauncher.data.resolveConnectorToggle
 import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmKeyStore
 import com.bobot.ailauncher.data.LlmConnectionTester
@@ -612,6 +607,8 @@ fun SettingsScreen() {
         // 日历>电话拨号器>联系人）；默认桌面不是源，挪出本区、单独放一张卡。
         // 448 合并：旧“权限”分区并入本分区——日历、通知只出现一次（原两处重叠）。
         // 引导里跳过/拒绝后随时可补授权的承诺仍由本分区兑现。
+        // 第十三批（Bob 2026-11-10 定：双重关全改掉）：开关只显示接没接上
+        // （接上＝权限给了），点它走授权/去系统设置，不再是一道关；等级只认权限。
         item {
             SettingsSectionTitle("智能")
         }
@@ -634,23 +631,25 @@ fun SettingsScreen() {
             // 显著披露：先讲清要什么、为什么，用户点“同意”后再弹系统框
             // （设计稿 §5.4：显著披露在第一次请求权限之前）。
             var disclosure by remember { mutableStateOf<String?>(null) }
-            // 开关切换后重算列表（开关写 UiPrefs，不走组合状态）
-            var connectorTick by remember { mutableIntStateOf(0) }
             val connectorStates = remember(
                 calendarGranted.value, notificationGranted.value,
-                smsGranted.value, contactsGranted.value, connectorTick
+                smsGranted.value, contactsGranted.value
             ) { buildConnectorStates(context) }
             val byKey = connectorStates.associateBy { it.key }
-            fun toggle(key: String, enabled: Boolean) {
-                UiPrefs.setConnectorEnabled(context, key, enabled)
-                connectorTick++
+            // 开关只显示接没接上（第十三批，Bob 2026-11-10 定：双重关全改掉）：
+            // 接上＝权限给了，开关不再是一道关。点没接上的开关 → 走该来源
+            // 既有的接上流程（显著披露/系统框/跳系统设置页，按设计稿 §5.2，
+            // 不另起一套）；用户取消或拒绝，权限仍未授，开关仍为关。
+            // 点已接上的开关 → 跳系统设置页：权限在那里管，关掉回来后开关
+            // 跟着变（断开＝去系统里撤权限，应用内没有撤权限的开关了；
+            // 点按必须有反应，不静默无动作）。
+            fun openConnectorSettings(key: String) {
+                when (key) {
+                    UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
+                        openNotificationSettings(context)
+                    else -> openAppDetailsSettings(context)
+                }
             }
-            // 开关就是连接/断开（设计稿 §2，2026-11-08 Bob verdict：每行只有一个控件）。
-            // 走该来源既有的接上流程（显著披露/系统框/跳系统设置页，按设计稿 §5.2，
-            // 不另起一套）；用户取消或拒绝，权限仍未授，开关按真实接上状态仍为关。
-            // 点开关开且权限未授时先把启用意愿记下：接上成功后开关随权限翻转亮起；
-            // 取消或拒绝则权限未变、开关仍为关。关开关立即停用该来源，不追问，
-            // 系统权限本身不动（关开关 = 不再用这个来源，不是去系统里撤权限）。
             fun connect(key: String) {
                 when (key) {
                     UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
@@ -660,15 +659,11 @@ fun SettingsScreen() {
                     UiPrefs.CONNECTOR_CONTACTS -> disclosure = "contacts"
                 }
             }
-            fun onConnectorToggle(state: ConnectorState, granted: Boolean, turnOn: Boolean) {
-                when (resolveConnectorToggle(granted, turnOn)) {
-                    ConnectorToggleAction.DISABLE -> toggle(state.key, false)
-                    ConnectorToggleAction.ENABLE -> toggle(state.key, true)
-                    ConnectorToggleAction.CONNECT -> { toggle(state.key, true); connect(state.key) }
-                }
+            fun onConnectorToggle(state: ConnectorState, turnOn: Boolean) {
+                if (turnOn) connect(state.key) else openConnectorSettings(state.key)
             }
             // 智能等级（设计稿 §2，2026-11-08 Bob 定）：已接 N/5 个源，数字随
-            // 接上/断开实时变（connectorStates 本就随开关与权限状态重算）。
+            // 接上/断开实时变（connectorStates 本就随权限状态重算；第十三批起只认权限）。
             val connectedCount = connectedSourceCount(connectorStates)
             Column {
                 Card(
@@ -700,40 +695,40 @@ fun SettingsScreen() {
                         byKey[UiPrefs.CONNECTOR_MESSAGE]?.let { state ->
                             SettingsConnectorRow(
                                 state = state,
-                                onToggle = { onConnectorToggle(state, smsGranted.value, it) }
+                                onToggle = { onConnectorToggle(state, it) }
                             )
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { state ->
                             SettingsConnectorRow(
                                 state = state,
-                                onToggle = { onConnectorToggle(state, notificationGranted.value, it) }
+                                onToggle = { onConnectorToggle(state, it) }
                             )
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         byKey[UiPrefs.CONNECTOR_CALENDAR]?.let { state ->
                             SettingsConnectorRow(
                                 state = state,
-                                onToggle = { onConnectorToggle(state, calendarGranted.value, it) }
+                                onToggle = { onConnectorToggle(state, it) }
                             )
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         byKey[UiPrefs.CONNECTOR_PHONE]?.let { state ->
-                            // 电话拨号器开关跟着通知走（设计稿 §2，2026-11-08 Bob 定）：
-                            // 行按有效状态渲染（通知关了开关显示关、行变灰点不动），
-                            // 它自己的启用标志原样保留在 state 里，只推导显示、不写回。
-                            val dialerState = effectiveDialerState(connectorStates) ?: state
+                            // 电话拨号器开关跟着通知走（设计稿 §2，2026-11-08 Bob 定；
+                            // 第十三批改为跟着通知的权限走）：它的 granted 本就是
+                            // 从通知推导的，直接按 state 渲染；通知没接上时行变灰
+                            // 点不动（isDialerRowEnabled），不能单独开。
                             SettingsConnectorRow(
-                                state = dialerState,
+                                state = state,
                                 enabled = isDialerRowEnabled(connectorStates),
-                                onToggle = { onConnectorToggle(state, notificationGranted.value, it) }
+                                onToggle = { onConnectorToggle(state, it) }
                             )
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         byKey[UiPrefs.CONNECTOR_CONTACTS]?.let { state ->
                             SettingsConnectorRow(
                                 state = state,
-                                onToggle = { onConnectorToggle(state, contactsGranted.value, it) }
+                                onToggle = { onConnectorToggle(state, it) }
                             )
                         }
                     }
@@ -888,15 +883,15 @@ fun SettingsScreen() {
 
 /**
  * 设置 → 智能区的一行（447；2026-11-08 Bob 真机 verdict 后改：每行只有一个控件）。
- * 标题＋它提供什么＋开关＋状态行。开关就是连接/断开：开关状态 = 真实接上状态
- * （权限已授 + 来源启用），未接上时开关就是关的，不许出现“开关开着、状态写着
- * 未接上”；状态文字只做展示、不可点，不再有“去开启/接上”文字按钮。关开关立即
- * 停用该来源（卡片不再出该来源内容），系统权限本身不动；开开关走该来源既有的
- * 接上流程，用户取消或拒绝则开关保持关。电话拨号器无权限：开关就是纯粹的
- * 启用/停用，但显示跟着通知走（通知关了它也显示关、行变灰，见 effectiveDialerState）。触控：开关走 Material3 默认 48dp 热区。
- * 电话拨号器行跟着通知走（设计稿 §2，2026-11-08 Bob 定）：通知关了时该行
+ * 标题＋它提供什么＋开关＋状态行。开关只显示接没接上（第十三批：接上＝权限给了，
+ * 开关不再是一道关；不许出现“开关开着、状态写着未接上”）；状态文字只做展示、
+ * 不可点，不再有“去开启/接上”文字按钮。点没接上的开关走该来源的接上流程，
+ * 点已接上的开关跳系统设置页（在那里可以关掉这个权限）。电话拨号器无权限：
+ * 开关反映通知的状态，通知没接上时行变灰点不动（见 isDialerRowEnabled），
+ * 不能单独开。触控：开关走 Material3 默认 48dp 热区。
+ * 电话拨号器行跟着通知走（设计稿 §2，2026-11-08 Bob 定）：通知没接上时该行
  * enabled=false——标题/说明/状态文字走 Hint 色、开关用 Material3 自身的
- * 禁用态、点不动；通知开了行恢复，它自己的开/关状态不变。
+ * 禁用态、点不动；通知接上时行恢复可点。
  */
 @Composable
 private fun SettingsConnectorRow(
@@ -905,7 +900,7 @@ private fun SettingsConnectorRow(
     onToggle: (Boolean) -> Unit
 ) {
     val view = LocalView.current
-    val connected = isConnectorConnected(state)
+    val connected = state.granted
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {

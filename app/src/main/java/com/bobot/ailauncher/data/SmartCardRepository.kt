@@ -27,8 +27,11 @@ import kotlinx.coroutines.launch
  * - 处理/跳过状态按稳定 id 存 SharedPreferences，带截止点、过期自清。
  *   跳过＝本轮收起来（第十二批）：划走的卡移出可见列表、角标跟着掉；
  *   新卡到了开新一轮，上一轮划走的卡回来（摞底）。
- * - 连接器开关（通知/日历/消息/电话拨号器/联系人）存在 UiPrefs，
- *   关掉后该来源的卡片立即停用。
+ * - 卡片跟着权限走（第十三批，Bob 2026-11-10 定：双重关全改掉）：
+ *   每个来源的门就是系统权限本身（消息＝READ_SMS、通知＝通知监听、
+ *   日历＝READ_CALENDAR、联系人＝READ_CONTACTS；电话拨号器无独立权限、
+ *   跟通知监听走），不再另设开关。UiPrefs 的 smart_connector_* 启用
+ *   标志已删除——删了 API，编译器就能证明没有开关门残留。
  */
 object SmartCardRepository {
     private const val TAG = "SmartCardRepository"
@@ -262,10 +265,8 @@ object SmartCardRepository {
     }
 
     private fun buildSmsCards(context: Context, nowMs: Long): List<SmartCard> {
-        if (!UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_MESSAGE)) {
-            Log.d(TAG, "buildSmsCards: message connector off, 0 cards")
-            return emptyList()
-        }
+        // 第十三批：卡片跟着权限走——短信卡只认 READ_SMS，不再查开关
+        // （开关当初是第二道关；简报已经在用数据了，它管不住数据用不用）。
         if (!SmsRepository.hasSmsPermission(context)) {
             Log.d(TAG, "buildSmsCards: no READ_SMS permission, 0 cards")
             return emptyList()
@@ -520,11 +521,12 @@ object SmartCardRepository {
 
     private fun missedCallCard(
         n: SimpleNotification,
-        context: Context,
-        contactsOn: Boolean
+        context: Context
     ): SmartCard {
         val number = n.phoneNumber
-        val name = if (contactsOn && ContactNames.hasContactsPermission(context)) {
+        // 第十三批：联系人只做名字解析，只认 READ_CONTACTS——有就显示名字，
+        // 没有只显示号码，不卡卡片本身（联系人本身不是出卡的来源）。
+        val name = if (ContactNames.hasContactsPermission(context)) {
             contactNameCache.getOrPut(number) { ContactNames.lookup(context, number) }
         } else null
         val dayStart = startOfDayMs(n.time)
@@ -694,25 +696,30 @@ object SmartCardRepository {
      */
     fun refresh(context: Context, notifications: List<SimpleNotification>, nowMs: Long) {
         lastNotifications = notifications
-        val messageOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_MESSAGE)
-        val notifOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_NOTIFICATION)
-        val phoneOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_PHONE)
-        val contactsOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CONTACTS)
-        val calendarOn = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CALENDAR)
+        // 第十三批：卡片跟着权限走——每个来源的门就是它自己的系统权限，
+        // 开关不再进卡片构建路径（UiPrefs 的启用标志已删，编译不过即有残留）。
+        // 通知的权限要显式判：监听断开时 onListenerDisconnected 不清
+        // 通知列表，缓存的通知可能陈旧，不能只凭“列表非空”当已接上。
+        val notifGranted = NotificationRepository.hasAccess(context)
         val candidates = mutableListOf<SmartCard>()
         val created = reminderCreatedIds(context, nowMs)
-        if (messageOn) candidates += smsCards
-        if (calendarOn && CalendarRepository.hasCalendarPermission(context)) {
+        // 短信卡：buildSmsCards 里已只认 READ_SMS，这里直接拼。
+        candidates += smsCards
+        if (CalendarRepository.hasCalendarPermission(context)) {
             candidates += CalendarRepository.loadTodayEvents(context)
                 .mapNotNull { calendarCard(it, context, nowMs) }
         }
         for (n in notifications) {
             if (n.packageName == context.packageName) continue
-            if (notifOn && phoneOn && n.phoneNumber.isNotBlank()) {
-                candidates += missedCallCard(n, context, contactsOn)
+            // 未接来电：电话拨号器无独立权限，跟着通知监听走（461 的
+            // “通知＋电话拨号器两个都开”随开关一起作废）。
+            if (notifGranted && n.phoneNumber.isNotBlank()) {
+                candidates += missedCallCard(n, context)
                 continue
             }
-            if (messageOn) {
+            // 通知兜底的账单/预约：数据来自通知监听，门是通知监听权限，
+            // 不是 READ_SMS（旧口径错查了消息开关）。
+            if (notifGranted) {
                 val combined = "${n.title}\n${n.text}"
                 val bill = parseBillSms(combined, n.appName, nowMs)
                 if (bill != null) {
@@ -727,7 +734,7 @@ object SmartCardRepository {
                     continue
                 }
             }
-            if (notifOn && isDeliveryOrTravelNotification(n.title, n.text)) {
+            if (notifGranted && isDeliveryOrTravelNotification(n.title, n.text)) {
                 candidates += deliveryCard(n, context)
             }
         }
@@ -800,48 +807,22 @@ data class ConnectorState(
     val key: String,
     val name: String,
     val desc: String,
-    /** 是否已接上（权限/系统开关已开） */
+    /** 是否已接上（权限已授——第十三批起开关不再是一道关，
+     * 接上＝权限给了；本字段就是设置页开关的显示值） */
     val granted: Boolean,
-    /** 用户开关（关掉后该来源的卡片立即停用） */
-    val enabled: Boolean,
     /** 最后使用时间文案：今天用过 / 昨天用过 / N 天前用过 / 还没用过 */
     val lastUsedLabel: String
 )
 
 /**
- * 提醒来源开关状态（设计稿 §2，2026-11-08 Bob 真机 verdict：每行只有一个控件）：
- * 开关 = 真实接上状态（权限已授 + 来源启用）。权限未授时开关就是关的，
- * 不许出现“开关开着、状态写着未接上”（455 真机：日历、消息开关开着却
- * 显示“未接上”）。纯函数，单测锁死。
- */
-fun isConnectorConnected(state: ConnectorState): Boolean = state.granted && state.enabled
-
-/**
- * 提醒来源状态行文案（只做展示、不可点）：未接上 / 已关闭 / 已接上·最后使用。
- * 纯函数，单测锁死。
+ * 提醒来源状态行文案（只做展示、不可点）：未接上 / 已接上·最后使用。
+ * 纯函数，单测锁死。第十三批：“已关闭”分支随开关一起删掉——没有开关
+ * 可关，只有权限给了没给。
  */
 fun connectorStatusText(state: ConnectorState): String = when {
     !state.granted -> "未接上"
-    !state.enabled -> "已关闭"
     else -> "已接上 · ${state.lastUsedLabel}"
 }
-
-/**
- * 开关点按后的动作（纯函数，单测锁死）：
- * - 关 → 立即停用该来源（卡片不再出该来源内容），不追问；系统权限本身
- *   应用内撤不掉，关开关的意思是“不再用这个来源”，不是去系统里撤权限。
- * - 开且权限已授 → 只把来源启用，不跑接上流程。
- * - 开且权限未授 → 走该来源既有的接上流程（显著披露/系统框/跳系统设置页）；
- *   用户取消或拒绝，权限仍未授，开关按 isConnectorConnected 仍为关。
- */
-enum class ConnectorToggleAction { DISABLE, ENABLE, CONNECT }
-
-fun resolveConnectorToggle(granted: Boolean, turnOn: Boolean): ConnectorToggleAction =
-    when {
-        !turnOn -> ConnectorToggleAction.DISABLE
-        granted -> ConnectorToggleAction.ENABLE
-        else -> ConnectorToggleAction.CONNECT
-    }
 
 /**
  * 智能源顺序（设计稿 §2，2026-11-08 Bob 定：按源对智能的提升比例，
@@ -871,51 +852,38 @@ fun connectorDescription(key: String): String = when (key) {
 }
 
 /**
- * 智能等级 = 已接上的源个数（开关开且权限已授；电话拨号器随通知计：
- * 通知源已接上（权限已授＋它自己的开关开）且电话拨号器自己的开关开才算）。
+ * 智能等级 = 已接上的源个数（第十三批：只认权限给了没给，开关不再计入；
+ * 电话拨号器随通知计：通知接上才算，它没有自己的开关）。
  * 默认桌面不是源，不进这个列表、不计入等级。纯函数，单测锁死。
  *
  * 电话拨号器行的开关显示与计数走同一口径（2026-11-08 Bob 定：电话拨号器
- * 开关跟着通知走）：显示见 effectiveDialerState，通知开关关了，电话拨号器
- * 行的开关也显示关、行变灰点不动；通知再开时回到它自己的开/关状态。
- * 持久化的电话拨号器启用标志原样保留，只推导显示，不写回。
+ * 开关跟着通知走——第十三批改为跟着通知的权限走）：通知权限未授，电话拨号器
+ * 行显示关、行变灰点不动；通知接上时行可点，开关反映通知的状态。
+ * 电话拨号器没有自己的启用标志可留（第十三批已删），不写回任何东西。
  */
 fun connectedSourceCount(states: List<ConnectorState>): Int {
     val byKey = states.associateBy { it.key }
-    val notificationConnected =
-        byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { isConnectorConnected(it) } ?: false
+    // 电话拨号器随通知计：通知已接上才算（它的 granted 本就是从通知推导的，
+    // 见 buildConnectorStates——全批唯一推导出来的“权限”；这里再按通知
+    // 校验一次，输入表不一致时也不多算）。
+    val notificationGranted =
+        byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.granted ?: false
     return states.count { state ->
         when (state.key) {
-            UiPrefs.CONNECTOR_PHONE -> notificationConnected && state.enabled
-            else -> isConnectorConnected(state)
+            UiPrefs.CONNECTOR_PHONE -> notificationGranted
+            else -> state.granted
         }
     }
 }
 
 /**
- * 电话拨号器行用于显示的有效状态（设计稿 §2，2026-11-08 Bob 定：电话拨号器
- * 开关跟着通知走）：通知源已接上（权限已授＋它自己的开关开）且电话拨号器
- * 自己的开关开，行才显示开；通知关了或权限未授，行显示关。只推导显示——
- * 返回的是原状态的拷贝（enabled 按通知折算），持久化的电话拨号器启用标志
- * 原样保留、不写回；通知再开时，行回到它自己的开/关状态。列表里没有电话
- * 拨号器行时返回 null（设置页本来也不渲染这一行）。纯函数，单测锁死。
- */
-fun effectiveDialerState(states: List<ConnectorState>): ConnectorState? {
-    val byKey = states.associateBy { it.key }
-    val phone = byKey[UiPrefs.CONNECTOR_PHONE] ?: return null
-    val notificationConnected =
-        byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { isConnectorConnected(it) } ?: false
-    return phone.copy(enabled = notificationConnected && phone.enabled)
-}
-
-/**
- * 电话拨号器行能不能点（与 effectiveDialerState 同一条口径）：通知源已接上
- * 时行可点（这时开关反映它自己的开/关）；通知关了或权限未授时行变灰、开关
- * 点不动。纯函数，单测锁死。
+ * 电话拨号器行能不能点（与等级计数同一条口径）：通知已接上时行可点
+ * （这时开关反映通知已接上，点它去通知设置页）；通知权限未授时行变灰、
+ * 开关点不动——电话拨号器没有自己的开关，不能单独开。纯函数，单测锁死。
  */
 fun isDialerRowEnabled(states: List<ConnectorState>): Boolean {
     val byKey = states.associateBy { it.key }
-    return byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { isConnectorConnected(it) } ?: false
+    return byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.granted ?: false
 }
 
 /** 最后使用时间文案（纯函数，单测锁死） */
@@ -929,7 +897,10 @@ fun formatLastUsed(lastMs: Long, nowMs: Long): String {
     }
 }
 
-/** 五个本机连接器的状态（设置 → “智能”区列表用，按 SMART_SOURCE_ORDER 排） */
+/** 五个本机连接器的状态（设置 → “智能”区列表用，按 SMART_SOURCE_ORDER 排；
+ * 第十三批：只带权限状态，不再带开关——开关不再是一道关。
+ * 电话拨号器的 granted 从通知推导（notifGranted），不是直接判的权限：
+ * 它没有自己的权限，数据与动作都走通知监听，全批唯一推导出来的“权限”。） */
 fun buildConnectorStates(context: Context): List<ConnectorState> {
     val now = System.currentTimeMillis()
     fun lastUsed(key: String) =
@@ -941,7 +912,6 @@ fun buildConnectorStates(context: Context): List<ConnectorState> {
             name = "通知",
             desc = connectorDescription(UiPrefs.CONNECTOR_NOTIFICATION),
             granted = notifGranted,
-            enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_NOTIFICATION),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_NOTIFICATION)
         ),
         UiPrefs.CONNECTOR_CALENDAR to ConnectorState(
@@ -949,7 +919,6 @@ fun buildConnectorStates(context: Context): List<ConnectorState> {
             name = "日历",
             desc = connectorDescription(UiPrefs.CONNECTOR_CALENDAR),
             granted = CalendarRepository.hasCalendarPermission(context),
-            enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CALENDAR),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_CALENDAR)
         ),
         UiPrefs.CONNECTOR_MESSAGE to ConnectorState(
@@ -957,7 +926,6 @@ fun buildConnectorStates(context: Context): List<ConnectorState> {
             name = "消息",
             desc = connectorDescription(UiPrefs.CONNECTOR_MESSAGE),
             granted = SmsRepository.hasSmsPermission(context),
-            enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_MESSAGE),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_MESSAGE)
         ),
         UiPrefs.CONNECTOR_PHONE to ConnectorState(
@@ -965,7 +933,6 @@ fun buildConnectorStates(context: Context): List<ConnectorState> {
             name = "电话拨号器",
             desc = connectorDescription(UiPrefs.CONNECTOR_PHONE),
             granted = notifGranted,
-            enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_PHONE),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_PHONE)
         ),
         UiPrefs.CONNECTOR_CONTACTS to ConnectorState(
@@ -973,7 +940,6 @@ fun buildConnectorStates(context: Context): List<ConnectorState> {
             name = "联系人",
             desc = connectorDescription(UiPrefs.CONNECTOR_CONTACTS),
             granted = ContactNames.hasContactsPermission(context),
-            enabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CONTACTS),
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_CONTACTS)
         )
     )
