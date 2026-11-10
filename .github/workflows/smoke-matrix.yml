@@ -123,12 +123,14 @@ jobs:
           profile: ${{ matrix.profile }}
           disable-animations: true
           emulator-options: -no-snapshot -no-audio -no-boot-anim -no-window -camera-back none -gpu swiftshader_indirect
-          # smoke.sh 输出 tee 进 smoke-out/smoke.log（随 artifact 存档），
-          # PIPESTATUS[0] 保住 smoke.sh 自身的退出码，失败仍让本步失败。
+          # smoke.sh 输出 tee 进 smoke-out/smoke.log（随 artifact 存档）。
+          # 注意：script 块由 /usr/bin/sh 逐行执行，PIPESTATUS 是 bash
+          # 写法，sh 下会 Bad substitution（exit 2）。整段包进 bash -c，
+          # PIPESTATUS 在内层 bash 里生效，保住 smoke.sh 自身的退出码，
+          # 失败仍让本步失败。
           script: |
             mkdir -p smoke-out
-            bash scripts/smoke.sh 2>&1 | tee smoke-out/smoke.log
-            exit ${PIPESTATUS[0]}
+            bash -c 'bash scripts/smoke.sh 2>&1 | tee smoke-out/smoke.log; exit ${PIPESTATUS[0]}'
 
       - name: Upload matrix screenshots
         if: always()
