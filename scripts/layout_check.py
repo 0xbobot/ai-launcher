@@ -9,8 +9,9 @@
 477 后（2026-11-08）：首页无胶囊、无常驻宠物——one-pet 断言、
 Dock 宠物连接几何（check_dock_pet）、意图甲板聚焦几何
 （check_deck_focus）与聚焦态 dump（tpl_*_suggest.xml、deck_focus.xml）
-已随意图面板与宠物退役；首页只断言简报（cover_hero）/会行
-（today_nextup）/Dock（dock_panel）三者两两不相交 + 在屏。
+已随意图面板与宠物退役；486（2026-11-11）简报会行拿掉后 today_nextup
+节点不再出现，check_state 对缺失节点只记 LAYOUT INFO 跳过、不判 FAIL，
+故首页实际断言只剩简报（cover_hero）/Dock（dock_panel）一对。
 
 用法：layout_check.py <dump_dir> <screen_w_px> <screen_h_px>
 输入约定（smoke.sh 第 21 段与既有段产出的 dump，缺失记 INFO 跳过）：
