@@ -25,12 +25,15 @@ import kotlinx.coroutines.launch
  * - 同一信息只在一处呈现：短信预约与日历日程是同一件事时只留短信那张
  *   （共用去重键 appt|…）。
  * - 处理/跳过状态按稳定 id 存 SharedPreferences，带截止点、过期自清。
- *   跳过＝本轮收起来（第十二批）：划走的卡移出可见列表、角标跟着掉；
- *   新卡到了开新一轮，上一轮划走的卡回来（摞底）。
+ *   划走按卡种分（第十四批，Bob 2026-11-10 23:43 定，取代 482「本轮收
+ *   起来」）：用户的事项提醒（账单/预约/日历/未接来电/快递航班）划过
+ *   沉到摞底、看完其他卡就轮到它，只有点「我知道了」才丢；应用推的
+ *   提醒（小贴士、升级卡、引导卡）划过就丢。不再有“新卡到了开新一轮”——
+ *   划走的事项卡不用新卡来“放回来”，小贴士、升级卡的到来也不开新一轮。
  * - 卡片跟着权限走（第十三批，Bob 2026-11-10 定：双重关全改掉）：
  *   每个来源的门就是系统权限本身（消息＝READ_SMS、通知＝通知监听、
- *   日历＝READ_CALENDAR、联系人＝READ_CONTACTS；电话拨号器无独立权限、
- *   跟通知监听走），不再另设开关。UiPrefs 的 smart_connector_* 启用
+ *   日历＝READ_CALENDAR；联系人只做未接来电的名字解析、只认 READ_CONTACTS，
+ *   不卡卡片；电话拨号器无独立权限、跟通知监听走），不再另设开关。UiPrefs 的 smart_connector_* 启用
  *   标志已删除——删了 API，编译器就能证明没有开关门残留。
  */
 object SmartCardRepository {
@@ -49,16 +52,24 @@ object SmartCardRepository {
      * 一次，每版引导只出现一次，不是终身一次。旧版布尔 guide_seen 只读、
      * 只做迁移（true 视为已看 v2），不再写。 */
     private const val KEY_GUIDE_SEEN_VERSION = "guide_seen_version"
-    /** 引导卡片的“忽略”（设计稿 §4.2，449/v1.2.2）：单张永久不再出现。
-     * 与“滑走”不同——滑走只是本轮沉底/看完才记一次，忽略是当即永久记下。 */
+    /** 引导卡片已处理完（第十四批起的口径，设计稿 §4.7 轮换推）：接上某个
+     * 来源后“已连接”反馈给完、或反馈卡被横滑走，就当即永久记下这张，
+     * 不再出现。点「我知道了」/横滑一张引导卡不再走这里——那是轮换推
+     * 的“被拒一次”（放队尾，见 rejectGuideCard），不是永久记下。 */
     private const val KEY_GUIDE_DISMISSED = "guide_dismissed"
+    /** 引导卡轮换队列（第十四批，设计稿 §4.7 单卡提醒轮换推，Bob
+     * 2026-11-10 23:07 定）：按 GUIDE_VERSION 存的有序队列（逗号拼 id）。
+     * 该版本第一次读时默认 guideCards() 的顺序（即 SMART_SOURCE_ORDER：
+     * 消息、通知、日历、电话拨号器）；被拒一次放队尾、被拒两次移出
+     * 队列（本版不再推）。队列空了＝本版引导走完了，宿主随即记
+     * guide_seen_version。键带版本号，换版后自动从新队列开始。 */
+    private const val KEY_GUIDE_QUEUE_PREFIX = "guide_queue_v"
+    /** 某张引导卡本版被拒的次数（键带版本号＋卡 id）：0/1/2，2 即出局。 */
+    private const val KEY_GUIDE_REJECT_PREFIX = "guide_reject_v"
+
     /** 预约卡已建过提醒（第十一批）：按卡片 id 记，带截止点、过期自清。
      * 建完提醒后卡片动作换回看预约（防重复建），卡上显示“已建提醒”。 */
     private const val KEY_REMINDER_CREATED_PREFIX = "reminder_created_"
-    /** 本轮见过的活卡 id（第十二批）：某次刷新出现本轮没见过的 id 就算
-     * 新一轮，清空跳过集合。持久化存（进程重启不丢本轮），内容是上一轮
-     * 的活卡 id 集合、每次刷新用当前活卡 id 覆盖。 */
-    private const val KEY_SEEN_ROUND_IDS = "seen_round_ids"
 
     /** 准备清单异步结果（第十二批）：按卡片 id 缓存的大模型返回，
      * UI 层订阅后覆盖卡片构建时的 prep（构建时为 null）。失败不写，
@@ -70,9 +81,11 @@ object SmartCardRepository {
     private val prepRequested = mutableSetOf<String>()
     private val prepScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** 顶卡划走动画复位代次（第十二批）：skip() 与新一轮清空跳过时各加一，
-     * UI 层把 TopSmartCard 的组合键挂上它——同一张卡以新代次重新呈现时
-     * 动画状态（offsetX/alpha）重建，不会再出现“数着卡、看不见卡”。 */
+    /** 顶卡划走动画复位代次（第十二批）：skip() 时加一，UI 层把
+     * TopSmartCard 的组合键挂上它——同一张卡以新代次重新呈现时动画
+     * 状态（offsetX/alpha）重建，不会再出现“数着卡、看不见卡”。
+     * 第十四批：新一轮机制已删，代次只在 skip() 时加（“新一轮清空时
+     * 加一”那半句作废）。 */
     private val _skipEpoch = MutableStateFlow(0)
     val skipEpoch: StateFlow<Int> = _skipEpoch.asStateFlow()
 
@@ -152,10 +165,58 @@ object SmartCardRepository {
         prefs(context).getStringSet(KEY_GUIDE_DISMISSED, emptySet())
             ?.toSet() ?: emptySet()
 
-    /** 忽略一张引导卡：当即永久记下（不是滑走，不是只记本轮） */
+    /** 一张引导卡处理完了（接上后“已连接”反馈已给完、或反馈卡被横滑
+     * 走）：当即永久记下，不再出现。点「我知道了」/横滑一张引导卡不
+     * 走这里——那是轮换推的“被拒一次”（见 rejectGuideCard）。 */
     fun dismissGuideCard(context: Context, card: SmartCard) {
         val next = dismissedGuideIds(context) + card.id
         prefs(context).edit().putStringSet(KEY_GUIDE_DISMISSED, next).apply()
+    }
+
+    /**
+     * 当前版本的引导轮换队列（有序）：没存过时默认 guideCards() 的顺序
+     * （即 SMART_SOURCE_ORDER：消息、通知、日历、电话拨号器）；存过
+     * （哪怕已空）就按存的走——空队列是“走完了”，不是“没存过”。
+     * 队列里的旧 id（换版后不存在的卡）过滤掉，不挡新版。
+     */
+    fun guideQueue(context: Context): List<String> {
+        val key = KEY_GUIDE_QUEUE_PREFIX + GUIDE_VERSION
+        val p = prefs(context)
+        if (!p.contains(key)) return guideCards().map { it.id }
+        val raw = p.getString(key, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        val known = guideCards().map { it.id }.toSet()
+        return raw.split(",").filter { it in known }
+    }
+
+    private fun saveGuideQueue(context: Context, queue: List<String>) {
+        prefs(context).edit()
+            .putString(KEY_GUIDE_QUEUE_PREFIX + GUIDE_VERSION, queue.joinToString(","))
+            .apply()
+    }
+
+    /** 某张引导卡本版已被拒几次（0/1/2；2＝本版不再推，等引导换版）。 */
+    fun guideRejectCount(context: Context, id: String): Int =
+        prefs(context).getInt(
+            KEY_GUIDE_REJECT_PREFIX + GUIDE_VERSION + "_" + id, 0
+        )
+
+    /**
+     * 被拒一次（点「我知道了」或横滑，设计稿 §4.7 轮换推，Bob 2026-11-10
+     * 23:07 定）：第一次放队尾（下次推其他来源的卡，推完再回来一次），
+     * 第二次移出队列、本版不再推。键带版本号，换版后计数清零、队列重来。
+     */
+    fun rejectGuideCard(context: Context, card: SmartCard) {
+        val prior = guideRejectCount(context, card.id)
+        prefs(context).edit()
+            .putInt(
+                KEY_GUIDE_REJECT_PREFIX + GUIDE_VERSION + "_" + card.id,
+                prior + 1
+            ).apply()
+        saveGuideQueue(
+            context,
+            guideQueueAfterReject(guideQueue(context), card.id, prior)
+        )
     }
 
     /**
@@ -181,37 +242,24 @@ object SmartCardRepository {
         refresh(context, lastNotifications, System.currentTimeMillis())
     }
 
-    /** 横滑跳过：本轮收起来（移出可见列表，角标跟着掉），不是沉底；
-     * 新卡到了开新一轮时回来（见 refresh 里的新一轮判定）。 */
+    /**
+     * 横滑跳过（第十四批，Bob 2026-11-10 23:43 定：划走按卡种分）：
+     * 用户的事项提醒（账单/预约/日历/未接来电/快递航班）划过沉到摞底——
+     * 记进跳过集合，visibleSmartCards 按划走先后排后面，看完其他卡就
+     * 轮到它，带截止点、过期自清；应用推的提醒（引导卡，以及还没落地的
+     * 小贴士/升级卡）划过就丢——记进处理完集合，不再出现。
+     * 只有点第一个按钮「我知道了」才丢用户的事项提醒（那是 markDone）。
+     */
     fun skip(context: Context, card: SmartCard) {
+        val key = if (isUserMatterCard(card.kind)) {
+            KEY_SKIPPED_PREFIX + card.id
+        } else {
+            KEY_DONE_PREFIX + card.id
+        }
         prefs(context).edit()
-            .putLong(KEY_SKIPPED_PREFIX + card.id, card.deadlineMs).apply()
+            .putLong(key, card.deadlineMs).apply()
         _skipEpoch.value += 1
         refresh(context, lastNotifications, System.currentTimeMillis())
-    }
-
-    /** 本轮见过的活卡 id（持久化，见 KEY_SEEN_ROUND_IDS） */
-    private fun seenRoundIds(context: Context): Set<String> =
-        prefs(context).getStringSet(KEY_SEEN_ROUND_IDS, emptySet())
-            ?.toSet() ?: emptySet()
-
-    private fun saveSeenRoundIds(context: Context, ids: Set<String>) {
-        prefs(context).edit().putStringSet(KEY_SEEN_ROUND_IDS, ids).apply()
-    }
-
-    /** 清空跳过集合（新一轮）：上一轮划走的卡按原排序回来（摞底）。 */
-    private fun clearSkipped(context: Context) {
-        val p = prefs(context)
-        val editor = p.edit()
-        var changed = false
-        for (key in p.all.keys) {
-            if (key.startsWith(KEY_SKIPPED_PREFIX)) {
-                editor.remove(key)
-                changed = true
-            }
-        }
-        if (changed) editor.apply()
-        _skipEpoch.value += 1
     }
 
     /**
@@ -691,8 +739,8 @@ object SmartCardRepository {
      * 重算可见卡片（分钟 ticker / 通知变化 / 处理/跳过后调）。
      * 每条通知最多出一张卡：未接来电 → 账单/预约（消息兜底）→ 快递/航班，
      * 按此顺序先中先得；短信候选在前，日历候选次之，去重后短信版优先。
-     * 新一轮（第十二批）：活卡里出现本轮没见过的 id，就算新一轮——
-     * 清空跳过集合，上一轮划走的卡按原排序回来（摞底）。
+     * 划走的事项卡沉在摞底（跳过集合），看完其他卡就轮到它，不靠新卡
+     * “放回来”（第十四批：新一轮机制已删）。
      */
     fun refresh(context: Context, notifications: List<SimpleNotification>, nowMs: Long) {
         lastNotifications = notifications
@@ -742,15 +790,12 @@ object SmartCardRepository {
             }
         }
         val doneIds = liveIds(context, KEY_DONE_PREFIX, nowMs)
-        // 新一轮判定要在读跳过集合之前：新一轮先清空跳过，本轮再按清空后
-        // 的集合算可见；seen 按本次活卡 id 覆盖（划走的卡还活着，仍在 seen
-        // 里，不会误触发新一轮）。
-        val aliveIds = aliveSmartCardIds(candidates, doneIds, nowMs)
-        val newRound = shouldStartNewRound(seenRoundIds(context), aliveIds)
-        if (newRound) clearSkipped(context)
-        saveSeenRoundIds(context, aliveIds)
-        val skippedIds = if (newRound) emptyList()
-        else liveIdList(context, KEY_SKIPPED_PREFIX, nowMs)
+        // 跳过集合就是沉底顺序（liveIdList 按卡片截止点排，与正常排序
+        // 同一方向）：划走的事项卡一直在可见列表里、排后面，不再靠
+        // “新卡到了开新一轮”放回来（第十四批：新一轮机制已删，小贴士、
+        // 升级卡的到来也不开新一轮）。只有点「我知道了」（markDone）或
+        // 过了截止点才丢。
+        val skippedIds = liveIdList(context, KEY_SKIPPED_PREFIX, nowMs)
         val visible = visibleSmartCards(candidates, doneIds, skippedIds, nowMs)
         _cards.value = visible
         recordLastUsed(context, visible, nowMs)
@@ -829,16 +874,18 @@ fun connectorStatusText(state: ConnectorState): String = when {
 
 /**
  * 智能源顺序（设计稿 §2，2026-11-08 Bob 定：按源对智能的提升比例，
- * 贡献大的在前，已按卡片实际的源依赖核对）：消息 > 通知 > 日历 > 电话拨号器 > 联系人。
- * buildConnectorStates 与设置页“智能”区行序都以它为准；引导卡（v3）
- * 的顺序不在本批动，下批再对。
+ * 贡献大的在前，已按卡片实际的源依赖核对）：消息 > 通知 > 日历 > 电话拨号器。
+ * buildConnectorStates、设置页“智能”区行序与引导卡的顺序都以它为准，
+ * 是同一份（第十四批，Bob 2026-11-10 23:45 定统一——引导卡直接按这
+ * 份顺序出，不另写一份）。
+ * 联系人已取消（同日 Bob 定：不是必须的，不申请 READ_CONTACTS）——
+ * 不在顺序里，没有联系人行、没有联系人引导卡。
  */
 val SMART_SOURCE_ORDER: List<String> = listOf(
     UiPrefs.CONNECTOR_MESSAGE,
     UiPrefs.CONNECTOR_NOTIFICATION,
     UiPrefs.CONNECTOR_CALENDAR,
-    UiPrefs.CONNECTOR_PHONE,
-    UiPrefs.CONNECTOR_CONTACTS
+    UiPrefs.CONNECTOR_PHONE
 )
 
 /**
@@ -850,7 +897,6 @@ fun connectorDescription(key: String): String = when (key) {
     UiPrefs.CONNECTOR_NOTIFICATION -> "接上后，智能会提醒你待办、未接来电、包裹和航班。"
     UiPrefs.CONNECTOR_CALENDAR -> "接上后，智能知道你今天的会。"
     UiPrefs.CONNECTOR_PHONE -> "接上后，未接来电点一下就能回拨。"
-    UiPrefs.CONNECTOR_CONTACTS -> "接上后，未接来电会显示成名字。"
     else -> ""
 }
 
@@ -900,10 +946,11 @@ fun formatLastUsed(lastMs: Long, nowMs: Long): String {
     }
 }
 
-/** 五个本机连接器的状态（设置 → “智能”区列表用，按 SMART_SOURCE_ORDER 排；
+/** 四个本机连接器的状态（设置 → “智能”区列表用，按 SMART_SOURCE_ORDER 排；
  * 第十三批：只带权限状态，不再带开关——开关不再是一道关。
  * 电话拨号器的 granted 从通知推导（notifGranted），不是直接判的权限：
- * 它没有自己的权限，数据与动作都走通知监听，全批唯一推导出来的“权限”。） */
+ * 它没有自己的权限，数据与动作都走通知监听，全批唯一推导出来的“权限”。
+ * 联系人已取消（第十四批）：不在这个列表里，不申请 READ_CONTACTS。 */
 fun buildConnectorStates(context: Context): List<ConnectorState> {
     val now = System.currentTimeMillis()
     fun lastUsed(key: String) =
@@ -937,13 +984,6 @@ fun buildConnectorStates(context: Context): List<ConnectorState> {
             desc = connectorDescription(UiPrefs.CONNECTOR_PHONE),
             granted = notifGranted,
             lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_PHONE)
-        ),
-        UiPrefs.CONNECTOR_CONTACTS to ConnectorState(
-            key = UiPrefs.CONNECTOR_CONTACTS,
-            name = "联系人",
-            desc = connectorDescription(UiPrefs.CONNECTOR_CONTACTS),
-            granted = ContactNames.hasContactsPermission(context),
-            lastUsedLabel = lastUsed(UiPrefs.CONNECTOR_CONTACTS)
         )
     )
     return SMART_SOURCE_ORDER.map { byKey.getValue(it) }

@@ -7,9 +7,10 @@ import java.util.Calendar
 
 /**
  * 智能卡片排序/去重/跳过/过期单测（447）：纯函数、JVM 可跑。
- * 规则（设计稿 §4.2–§4.3；第十二批改跳过口径）：按截止点排、最早在最上面；
- * 同一件事只排一次（短信那条为准）；跳过＝本轮收起来（移出可见列表，
- * 角标跟着掉），不是沉底；新卡到了开新一轮，划走的卡回来（摞底）；
+ * 规则（设计稿 §4.2–§4.3；第十四批改跳过口径，Bob 2026-11-10 23:43 定）：
+ * 按截止点排、最早在最上面；同一件事只排一次（短信那条为准）；用户的
+ * 事项提醒划过沉到摞底（排后面，看完其他卡就轮到它），只有点第一个按钮
+ * 「我知道了」才丢；应用推的提醒划过就丢；不再有“新卡到了开新一轮”；
  * 过了截止点即消失。
  */
 class SmartCardLogicTest {
@@ -82,22 +83,36 @@ class SmartCardLogicTest {
     }
 
     @Test
-    fun visible_singleCardSkipped_emptiesList() {
-        // 只有一张卡、划走 → 可见列表空、角标 0（第十二批 Bob 实拍 bug：
-        // 旧口径只沉底，角标还数着它；新口径移出可见列表）。
+    fun isUserMatterCard_matterKindsSinkGuideDiscards() {
+        // 划走按卡种分（第十四批）：账单/预约/日历/未接来电/快递航班是用户
+        // 的事项，划过沉底；引导卡（以及还没落地的 TIP/UPDATE 种）是应用
+        // 推的，划过就丢。skip() 按这个分支记集合，仓库层凭它分流。
+        assertTrue(isUserMatterCard(SmartCardKind.BILL))
+        assertTrue(isUserMatterCard(SmartCardKind.APPOINTMENT))
+        assertTrue(isUserMatterCard(SmartCardKind.CALENDAR))
+        assertTrue(isUserMatterCard(SmartCardKind.MISSED_CALL))
+        assertTrue(isUserMatterCard(SmartCardKind.NOTIFICATION))
+        assertTrue(!isUserMatterCard(SmartCardKind.GUIDE))
+    }
+
+    @Test
+    fun visible_singleCardSkipped_staysAtBottom() {
+        // 只有一张卡、划走 → 它就是摞底那一张，还在可见列表里、角标照数
+        // （第十四批：划走 ≠ 丢，丢只靠点「我知道了」）。
         val now = ms(2026, 11, 5, 15, 0)
         val only = card("only", SmartCardKind.BILL, 100, ms(2026, 11, 7))
         val visible = visibleSmartCards(
             listOf(only), doneIds = emptySet(),
             skippedIds = listOf("only"), nowMs = now
         )
-        assertEquals(emptyList<String>(), visible.map { it.id })
-        assertEquals(0, visible.size)
+        assertEquals(listOf("only"), visible.map { it.id })
+        assertEquals(1, visible.size)
     }
 
     @Test
-    fun visible_skippedTop_nextComesUpAndBadgeDropsByOne() {
-        // 多张卡划走顶卡 → 下一张上顶、角标减一；划走的那张不在列表里。
+    fun visible_skippedTop_nextComesUpSkippedSinksToBottom() {
+        // 多张卡划走顶卡 → 下一张上顶、划走的那张沉到摞底（还在列表里，
+        // 角标照数 3 张）；看完 b、c 就轮到 a。
         val now = ms(2026, 11, 5, 15, 0)
         val a = card("a", SmartCardKind.BILL, 100, ms(2026, 11, 7))
         val b = card("b", SmartCardKind.APPOINTMENT, 200, ms(2026, 11, 7))
@@ -106,59 +121,37 @@ class SmartCardLogicTest {
             listOf(a, b, c), doneIds = emptySet(),
             skippedIds = listOf("a"), nowMs = now
         )
-        assertEquals(listOf("b", "c"), visible.map { it.id })
+        assertEquals(listOf("b", "c", "a"), visible.map { it.id })
+        assertEquals(3, visible.size)
     }
 
     @Test
-    fun visible_skippedReturnsWhenSkipSetCleared_newRound() {
-        // 新卡到了开新一轮：仓库清空跳过集合，上一轮划走的卡回来（摞底）。
+    fun visible_skippedInSkipOrderBehindFreshCards() {
+        // 划走两张：按 skippedIds 的顺序排在后面；新卡（没划走过）排在前面。
+        // 旧口径“新卡到了开新一轮、跳过集合清空”已删——新卡到不改变
+        // 划走的卡的位置，它本来就摞底、不用“放回来”。
         val now = ms(2026, 11, 5, 15, 0)
         val a = card("a", SmartCardKind.BILL, 300, ms(2026, 11, 7))
         val b = card("b", SmartCardKind.APPOINTMENT, 200, ms(2026, 11, 7))
         val newCard = card("new", SmartCardKind.CALENDAR, 50, ms(2026, 11, 7))
-        val thisRound = visibleSmartCards(
-            listOf(a, b), doneIds = emptySet(),
+        val visible = visibleSmartCards(
+            listOf(a, b, newCard), doneIds = emptySet(),
+            skippedIds = listOf("a", "b"), nowMs = now
+        )
+        assertEquals(listOf("new", "a", "b"), visible.map { it.id })
+    }
+
+    @Test
+    fun visible_doneStillRemovesSkippedCard() {
+        // 划走的卡点了「我知道了」（done）才丢：done 过滤在沉底之前。
+        val now = ms(2026, 11, 5, 15, 0)
+        val a = card("a", SmartCardKind.BILL, 100, ms(2026, 11, 7))
+        val b = card("b", SmartCardKind.APPOINTMENT, 200, ms(2026, 11, 7))
+        val visible = visibleSmartCards(
+            listOf(a, b), doneIds = setOf("a"),
             skippedIds = listOf("a"), nowMs = now
         )
-        assertEquals(listOf("b"), thisRound.map { it.id })
-        // 新一轮：跳过集合已清空（仓库 clearSkipped），a 回到摞底、
-        // 新卡排在前面（sortMs 更早）。
-        val nextRound = visibleSmartCards(
-            listOf(a, b, newCard), doneIds = emptySet(),
-            skippedIds = emptyList(), nowMs = now
-        )
-        assertEquals(listOf("new", "b", "a"), nextRound.map { it.id })
-    }
-
-    @Test
-    fun shouldStartNewRound_onlyUnseenIdStartsNewRound() {
-        assertTrue(shouldStartNewRound(setOf("a", "b"), setOf("a", "b", "c")))
-        assertTrue(shouldStartNewRound(emptySet(), setOf("a")))
-        assertTrue(!shouldStartNewRound(setOf("a", "b"), setOf("a", "b")))
-        assertTrue(!shouldStartNewRound(setOf("a", "b"), setOf("a")))
-        assertTrue(!shouldStartNewRound(setOf("a"), emptySet()))
-    }
-
-    @Test
-    fun aliveSmartCardIds_excludesDoneExpiredAndNotYetAppeared() {
-        val now = ms(2026, 11, 5, 15, 0)
-        val alive = card("alive", SmartCardKind.BILL, 100, ms(2026, 11, 7))
-        val done = card("done", SmartCardKind.BILL, 50, ms(2026, 11, 7))
-        val expired = card("expired", SmartCardKind.BILL, 10, ms(2026, 11, 5, 14, 0))
-        val future = card(
-            "future", SmartCardKind.BILL, 300, ms(2026, 11, 7),
-            appearFromMs = ms(2026, 11, 6)
-        )
-        // 跳过不影响存活：划走的卡还活着，只是不显示——不然它一划走
-        // 就从 seen 里掉出去，下次刷新会误判新一轮。
-        val skipped = card("skipped", SmartCardKind.BILL, 150, ms(2026, 11, 7))
-        assertEquals(
-            setOf("alive", "skipped"),
-            aliveSmartCardIds(
-                listOf(expired, done, future, alive, skipped),
-                doneIds = setOf("done"), nowMs = now
-            )
-        )
+        assertEquals(listOf("b"), visible.map { it.id })
     }
 
     @Test
@@ -181,8 +174,8 @@ class SmartCardLogicTest {
     }
 
     @Test
-    fun visible_skippedRemovedNotLast() {
-        // 旧口径“跳过沉底”已作废（第十二批）：跳过的卡不在可见列表里。
+    fun visible_skippedSinksNotRemoved() {
+        // 第十四批：跳过的事项卡沉底，不移出可见列表（482“本轮收起来”作废）。
         val now = ms(2026, 11, 5, 15, 0)
         val a = card("a", SmartCardKind.BILL, 100, ms(2026, 11, 7))
         val b = card("b", SmartCardKind.APPOINTMENT, 200, ms(2026, 11, 7))
@@ -190,7 +183,7 @@ class SmartCardLogicTest {
             listOf(a, b), doneIds = emptySet(),
             skippedIds = listOf("a"), nowMs = now
         )
-        assertEquals(listOf("b"), visible.map { it.id })
+        assertEquals(listOf("b", "a"), visible.map { it.id })
     }
 
     @Test

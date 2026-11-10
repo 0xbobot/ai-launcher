@@ -23,18 +23,16 @@ class ConnectedCelebrationTest {
             lastUsedLabel = "今天用过"
         )
 
-    /** 五个源的状态：消息/通知/日历/联系人各一对，电话拨号器随通知。 */
+    /** 四个源的状态：消息/通知/日历各一对，电话拨号器随通知。 */
     private fun states(
         message: Boolean = false,
         notification: Boolean = false,
-        calendar: Boolean = false,
-        contacts: Boolean = false
+        calendar: Boolean = false
     ) = listOf(
         state(UiPrefs.CONNECTOR_MESSAGE, message),
         state(UiPrefs.CONNECTOR_NOTIFICATION, notification),
         state(UiPrefs.CONNECTOR_CALENDAR, calendar),
-        state(UiPrefs.CONNECTOR_PHONE, notification),
-        state(UiPrefs.CONNECTOR_CONTACTS, contacts)
+        state(UiPrefs.CONNECTOR_PHONE, notification)
     )
 
     private fun messageCard() = guideCards().first { it.id == "guide|message" }
@@ -77,7 +75,7 @@ class ConnectedCelebrationTest {
         val card = guideCards().first { it.id == "guide|notification" }
         val feedback = connectedFeedback(card, level = 2, previousLevel = 0)
         assertEquals(2, feedback.levelDelta)
-        assertEquals("智能 +2 · 已接 2/5 个源", celebrationLevelText(2, 0))
+        assertEquals("智能 +2 · 已接 2/4 个源", celebrationLevelText(2, 0))
     }
 
     @Test
@@ -102,14 +100,14 @@ class ConnectedCelebrationTest {
 
     @Test
     fun levelText_plusOneAndCount() {
-        assertEquals("智能 +1 · 已接 3/5 个源", celebrationLevelText(3, 2))
-        assertEquals("智能 +1 · 已接 1/5 个源", celebrationLevelText(1, 0))
-        assertEquals("智能 +1 · 已接 5/5 个源", celebrationLevelText(5, 4))
+        assertEquals("智能 +1 · 已接 3/4 个源", celebrationLevelText(3, 2))
+        assertEquals("智能 +1 · 已接 1/4 个源", celebrationLevelText(1, 0))
+        assertEquals("智能 +1 · 已接 4/4 个源", celebrationLevelText(4, 3))
     }
 
     @Test
     fun levelText_noDeltaShowsCountOnly() {
-        assertEquals("已接 2/5 个源", celebrationLevelText(2, 2))
+        assertEquals("已接 2/4 个源", celebrationLevelText(2, 2))
     }
 
     @Test

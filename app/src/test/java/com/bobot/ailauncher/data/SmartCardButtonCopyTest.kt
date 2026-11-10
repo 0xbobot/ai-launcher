@@ -74,13 +74,14 @@ class SmartCardButtonCopyTest {
         assertEquals("连接消息", labels["消息"])
         assertEquals("连接通知", labels["通知"])
         assertEquals("连接日历", labels["日历"])
-        assertEquals("连接联系人", labels["联系人"])
         assertEquals("连接电话拨号器", labels["电话拨号器"])
+        // 联系人已取消（第十四批，Bob 2026-11-10 23:45 定）：没有联系人
+        // 引导卡，labels 里也不再有“联系人”这一项（断言缺席即等于锁死）。
     }
 
     @Test
     fun noActionLabel_containsXiaYiBu() {
-        // 全仓扫一遍：真卡五种意图文案＋五张引导卡，右按钮文案里都不许
+        // 全仓扫一遍：真卡五种意图文案＋四张引导卡，右按钮文案里都不许
         // 出现“下一步”三字（露边卡提示行同样显示 actionLabel，也干净）。
         val labels = listOf("去还款", "帮我建提醒", "看预约", "回拨", "查看", "加入会议", "看日程") +
             guideCards().map { it.actionLabel }

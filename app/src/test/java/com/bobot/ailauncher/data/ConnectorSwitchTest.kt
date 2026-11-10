@@ -70,7 +70,8 @@ class ConnectorSwitchTest {
         )
     }
 
-    // 智能源顺序：消息 > 通知 > 日历 > 电话拨号器 > 联系人
+    // 智能源顺序：消息 > 通知 > 日历 > 电话拨号器
+    // （第十四批：联系人已取消，不在顺序里）
 
     @Test
     fun sourceOrder_bySmartContribution() {
@@ -79,8 +80,7 @@ class ConnectorSwitchTest {
                 UiPrefs.CONNECTOR_MESSAGE,
                 UiPrefs.CONNECTOR_NOTIFICATION,
                 UiPrefs.CONNECTOR_CALENDAR,
-                UiPrefs.CONNECTOR_PHONE,
-                UiPrefs.CONNECTOR_CONTACTS
+                UiPrefs.CONNECTOR_PHONE
             ),
             SMART_SOURCE_ORDER
         )
@@ -106,11 +106,8 @@ class ConnectorSwitchTest {
             "接上后，未接来电点一下就能回拨。",
             connectorDescription(UiPrefs.CONNECTOR_PHONE)
         )
-        assertEquals(
-            "接上后，未接来电会显示成名字。",
-            connectorDescription(UiPrefs.CONNECTOR_CONTACTS)
-        )
         assertEquals("", connectorDescription("unknown"))
+        assertEquals("", connectorDescription("contacts"))
     }
 
     // 智能等级 = 权限已授的源个数；电话拨号器随通知计
@@ -118,21 +115,20 @@ class ConnectorSwitchTest {
     private fun allStates(
         message: Boolean = true,
         notification: Boolean = true,
-        calendar: Boolean = true,
-        contacts: Boolean = true
+        calendar: Boolean = true
     ) = listOf(
         state(UiPrefs.CONNECTOR_MESSAGE, message),
         state(UiPrefs.CONNECTOR_NOTIFICATION, notification),
         state(UiPrefs.CONNECTOR_CALENDAR, calendar),
         // 电话拨号器无自己的权限：granted 取通知的授权状态（与
         // buildConnectorStates 一致），计数时另看通知源是否已接上。
-        state(UiPrefs.CONNECTOR_PHONE, notification),
-        state(UiPrefs.CONNECTOR_CONTACTS, contacts)
+        state(UiPrefs.CONNECTOR_PHONE, notification)
     )
 
     @Test
-    fun levelCount_allConnectedIsFive() {
-        assertEquals(5, connectedSourceCount(allStates()))
+    fun levelCount_allConnectedIsFour() {
+        // 四个源全接上：消息、通知、日历、电话拨号器（随通知计）。
+        assertEquals(4, connectedSourceCount(allStates()))
     }
 
     @Test
@@ -142,7 +138,7 @@ class ConnectorSwitchTest {
             connectedSourceCount(
                 allStates(
                     message = false, notification = false,
-                    calendar = false, contacts = false
+                    calendar = false
                 )
             )
         )
@@ -150,14 +146,14 @@ class ConnectorSwitchTest {
 
     @Test
     fun levelCount_countsOnlyGranted() {
-        // 只认权限：消息给了、日历给了，通知没给（电话随通知不算）、
-        // 联系人没给 → 2。旧口径里日历开关关着会再扣一个，那是双重关。
+        // 只认权限：消息给了、日历给了，通知没给（电话随通知不算）→ 2。
+        // 旧口径里日历开关关着会再扣一个，那是双重关。
         assertEquals(
             2,
             connectedSourceCount(
                 allStates(
                     message = true, notification = false,
-                    calendar = true, contacts = false
+                    calendar = true
                 )
             )
         )
@@ -173,7 +169,7 @@ class ConnectorSwitchTest {
             connectedSourceCount(
                 allStates(
                     message = true, notification = true,
-                    calendar = true, contacts = false
+                    calendar = true
                 )
             )
         )
@@ -182,7 +178,7 @@ class ConnectorSwitchTest {
             connectedSourceCount(
                 allStates(
                     message = true, notification = false,
-                    calendar = true, contacts = false
+                    calendar = true
                 )
             )
         )
@@ -190,8 +186,7 @@ class ConnectorSwitchTest {
             state(UiPrefs.CONNECTOR_MESSAGE, true),
             state(UiPrefs.CONNECTOR_NOTIFICATION, false),
             state(UiPrefs.CONNECTOR_CALENDAR, true),
-            state(UiPrefs.CONNECTOR_PHONE, true),
-            state(UiPrefs.CONNECTOR_CONTACTS, false)
+            state(UiPrefs.CONNECTOR_PHONE, true)
         )
         assertEquals(2, connectedSourceCount(inconsistent))
     }
@@ -210,7 +205,7 @@ class ConnectorSwitchTest {
         // 通知权限未授 → 电话拨号器行变灰点不动（不能单独开它），等级里也不算它。
         val states = allStates(
             message = true, notification = false,
-            calendar = true, contacts = false
+            calendar = true
         )
         assertFalse(isDialerRowEnabled(states))
         assertEquals(2, connectedSourceCount(states))
@@ -222,7 +217,7 @@ class ConnectorSwitchTest {
         // 行可点；没有自己的开关能再单独关掉它。
         val states = allStates(
             message = true, notification = true,
-            calendar = true, contacts = false
+            calendar = true
         )
         assertTrue(isDialerRowEnabled(states))
         assertEquals(4, connectedSourceCount(states))

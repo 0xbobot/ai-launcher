@@ -19,7 +19,7 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- 智能卡片（第十一批）：预约卡“帮我建提醒”——在系统日历里建提醒事件。
          与读分开授权（READ_CALENDAR 不等于能写），只在用户点“帮我建提醒”时
-         先说明再弹系统框。Play 版上架前须与 READ_SMS / READ_CONTACTS 一起评估，
+         先说明再弹系统框。Play 版上架前须与 READ_SMS 一起评估，
          本声明只走测试版 / OTA 渠道。 -->
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <!-- 智能卡片（447）：消息连接器主路径——直接读短信（设备上显示为“读取消息”），
@@ -27,9 +27,6 @@
          处理程序才能声明 READ_SMS，启动器不是默认短信应用——Play 版上架的同时
          必须去掉本声明（改走通知通道兜底），本声明只走测试版 / OTA 渠道。 -->
     <uses-permission android:name="android.permission.READ_SMS" />
-    <!-- 智能卡片（447）：联系人连接器——只按号码查姓名（未接来电显示成名字）。
-         同为敏感权限：Play 版上架前须复核是否保留（2026 年 4 月联系人政策收紧方向）。 -->
-    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- v0.68.12：盲操诊断浮层状态变化短震动（50ms，普通权限安装即授） -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 取全量应用列表：个人侧载应用，无上架政策顾虑；launcher 必备（Android 11+ 包可见性过滤） -->

@@ -95,14 +95,12 @@ import com.bobot.ailauncher.ui.theme.pageTextureBackground
 import com.bobot.ailauncher.ui.theme.tickHaptic
 import com.bobot.ailauncher.ui.settings.OnGrantedTransition
 import com.bobot.ailauncher.ui.settings.isCalendarGranted
-import com.bobot.ailauncher.ui.settings.isContactsGranted
 import com.bobot.ailauncher.ui.settings.isDefaultLauncher
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.settings.isSmsGranted
 import com.bobot.ailauncher.ui.settings.openHomeSettings
 import com.bobot.ailauncher.ui.settings.openNotificationSettings
 import com.bobot.ailauncher.ui.settings.rememberCalendarPermissionOpener
-import com.bobot.ailauncher.ui.settings.rememberContactsPermissionOpener
 import com.bobot.ailauncher.ui.settings.rememberPermissionState
 import com.bobot.ailauncher.ui.settings.rememberSmsPermissionOpener
 import com.bobot.ailauncher.util.rebindListener
@@ -600,11 +598,13 @@ fun SettingsScreen() {
             }
         }
 
-        // 分区：智能——智能卡片的五个本机连接器就是智能的源（447 起，设计稿 §2/§5）
+        // 分区：智能——智能卡片的四个本机连接器就是智能的源（447 起，设计稿 §2/§5）
         // 各自单独接、有明确理由、随时可断；数据只在手机上处理，不发到别处。
         // 2026-11-08 Bob 定：分区改名“智能”（不再叫“提醒来源”），区顶显示
-        // 智能等级（已接 N/5 个源），行序按源对智能的提升比例（消息>通知>
-        // 日历>电话拨号器>联系人）；默认桌面不是源，挪出本区、单独放一张卡。
+        // 智能等级（已接 N/4 个源），行序按源对智能的提升比例（消息>通知>
+        // 日历>电话拨号器）；默认桌面不是源，挪出本区、单独放一张卡。
+        // 联系人已取消（第十四批，2026-11-10 Bob 定：不是必须的，不申请
+        // READ_CONTACTS）——没有联系人行，等级按四个源算。
         // 448 合并：旧“权限”分区并入本分区——日历、通知只出现一次（原两处重叠）。
         // 引导里跳过/拒绝后随时可补授权的承诺仍由本分区兑现。
         // 第十三批（Bob 2026-11-10 定：双重关全改掉）：开关只显示接没接上
@@ -617,11 +617,9 @@ fun SettingsScreen() {
             val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
             val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
             val smsGranted = rememberPermissionState { isSmsGranted(context) }
-            val contactsGranted = rememberPermissionState { isContactsGranted(context) }
             val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
             val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
             val openSms = rememberSmsPermissionOpener(smsGranted)
-            val openContacts = rememberContactsPermissionOpener(contactsGranted)
             // 应用运行中去设置里开通知读取权限时系统不回调，在这里重绑监听
             OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
             // 消息刚接上就立即重读短信（不然卡片要等下次回桌面才出现）
@@ -633,7 +631,7 @@ fun SettingsScreen() {
             var disclosure by remember { mutableStateOf<String?>(null) }
             val connectorStates = remember(
                 calendarGranted.value, notificationGranted.value,
-                smsGranted.value, contactsGranted.value
+                smsGranted.value
             ) { buildConnectorStates(context) }
             val byKey = connectorStates.associateBy { it.key }
             // 开关只显示接没接上（第十三批，Bob 2026-11-10 定：双重关全改掉）：
@@ -656,13 +654,12 @@ fun SettingsScreen() {
                         openNotificationSettings(context)
                     UiPrefs.CONNECTOR_CALENDAR -> openCalendar()
                     UiPrefs.CONNECTOR_MESSAGE -> disclosure = "sms"
-                    UiPrefs.CONNECTOR_CONTACTS -> disclosure = "contacts"
                 }
             }
             fun onConnectorToggle(state: ConnectorState, turnOn: Boolean) {
                 if (turnOn) connect(state.key) else openConnectorSettings(state.key)
             }
-            // 智能等级（设计稿 §2，2026-11-08 Bob 定）：已接 N/5 个源，数字随
+            // 智能等级（设计稿 §2，2026-11-08 Bob 定）：已接 N/4 个源，数字随
             // 接上/断开实时变（connectorStates 本就随权限状态重算；第十三批起只认权限）。
             val connectedCount = connectedSourceCount(connectorStates)
             Column {
@@ -724,13 +721,6 @@ fun SettingsScreen() {
                                 onToggle = { onConnectorToggle(state, it) }
                             )
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        byKey[UiPrefs.CONNECTOR_CONTACTS]?.let { state ->
-                            SettingsConnectorRow(
-                                state = state,
-                                onToggle = { onConnectorToggle(state, it) }
-                            )
-                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
@@ -775,45 +765,6 @@ fun SettingsScreen() {
                     },
                     confirmButton = {
                         TextButton(onClick = { disclosure = null; openSms() }) {
-                            Text(
-                                text = "同意",
-                                fontSize = AILauncherType.Callout.fontSize,
-                                color = AILauncherColors.current.Accent,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { disclosure = null }) {
-                            Text(
-                                text = "取消",
-                                fontSize = AILauncherType.Callout.fontSize,
-                                color = AILauncherColors.current.Hint
-                            )
-                        }
-                    }
-                )
-            }
-            if (disclosure == "contacts") {
-                AlertDialog(
-                    onDismissRequest = { disclosure = null },
-                    title = {
-                        Text(
-                            text = "接上联系人",
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title
-                        )
-                    },
-                    text = {
-                        Text(
-                            text = "要把未接来电的号码显示成名字。只按号码查姓名，不读其他联系人信息。",
-                            fontSize = AILauncherType.Body.fontSize,
-                            color = AILauncherColors.current.Body
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { disclosure = null; openContacts() }) {
                             Text(
                                 text = "同意",
                                 fontSize = AILauncherType.Callout.fontSize,

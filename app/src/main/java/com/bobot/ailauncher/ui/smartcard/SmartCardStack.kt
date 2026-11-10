@@ -77,6 +77,7 @@ import com.bobot.ailauncher.data.SmartCardAction
 import com.bobot.ailauncher.data.SmartCardActions
 import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.data.UiPrefs
+import com.bobot.ailauncher.data.currentGuideCard
 import com.bobot.ailauncher.data.shouldShowGuideVersion
 import com.bobot.ailauncher.data.visibleGuideCards
 import com.bobot.ailauncher.ui.components.AppBadge
@@ -87,13 +88,11 @@ import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.settings.OnGrantedTransition
 import com.bobot.ailauncher.ui.settings.isCalendarGranted
-import com.bobot.ailauncher.ui.settings.isContactsGranted
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.settings.isSmsGranted
 import com.bobot.ailauncher.ui.settings.isWriteCalendarGranted
 import com.bobot.ailauncher.ui.settings.openNotificationSettings
 import com.bobot.ailauncher.ui.settings.rememberCalendarPermissionOpener
-import com.bobot.ailauncher.ui.settings.rememberContactsPermissionOpener
 import com.bobot.ailauncher.ui.settings.rememberPermissionState
 import com.bobot.ailauncher.ui.settings.rememberSmsPermissionOpener
 import com.bobot.ailauncher.ui.settings.rememberWriteCalendarPermissionOpener
@@ -111,9 +110,11 @@ import kotlin.math.abs
  * 收集卡片流、回桌面与分钟翻页时重算；没有卡时什么都不渲染、不留占位。
  *
  * 叠层交互：多张卡叠成一摞，最上面一张完整显示、下面露个边（最多露两张）；
- * 点下一步动作算处理完一张、卡片消失；横滑跳过播离场动画再本轮收起来
- * （第十二批：移出可见列表，角标跟着掉；新卡到了开新一轮，划走的卡回来）；
- * 全部处理完或跳过后区域清空、不留占位条。
+ * 点下一步动作算处理完一张、卡片消失；横滑跳过播离场动画——用户的事项
+ * 提醒（账单/预约/日历/未接来电/快递航班）沉到摞底，看完其他卡就轮到它，
+ * 只有点「我知道了」才丢（第十四批，Bob 2026-11-10 23:43 定，取代 482
+ * 「本轮收起来」）；应用推的提醒划过就丢。全部处理完或跳过后区域清空、
+ * 不留占位条。
  *
  * 每张卡两个响应（设计稿 §4.2，449/v1.2.2，Bob 2026-11-07 晚真机 verdict；
  * 第十一批 Bob 2026-11-09 定文案）：我知道了（卡片消失、不再出现、不追问）
@@ -121,19 +122,22 @@ import kotlin.math.abs
  * （走 §5 已有流程）；真卡片的下一步＝卡片定义的下一步动作（去还款 / 回拨 /
  * 看预约 / 查看，走已有的深链/启动路径直接执行；预约卡是“帮我建提醒”，
  * 先拿 WRITE_CALENDAR 授权再写系统日历）。我知道了真卡片即记处理完
- * （截止点前不再出现）；我知道了引导卡即永久记下这张（不是滑走，滑走只是本轮收起来）。
+ * （截止点前不再出现）；我知道了引导卡即被拒一次（放队尾，第十四批
+ * 轮换推），不是永久记下。
  *
  * 引导卡片（设计稿 §4.7，448；v3 按权限重做，455；换版重看，456）：
- * 真卡片为空、且本版引导还没看过时，叠层位置出现一叠引导卡片
+ * 真卡片为空、且本版引导还没看过时，叠层位置出现引导卡片
  * （而不是空着），每版引导只出现一次、不是终身一次——引导内容带
  * 版本号，换版后自动重看一次（452 记下的旧版 guide_seen 视为已看 v2，
  * 不挡 v3）。
- * 按权限分五张（消息、通知、日历、联系人、电话拨号器）；点 × 整叠消失、
- * 不再出现；一张张滑过去看完也记一次；点“连接”走 §5 流程（消息/联系人
- * 先显著披露再弹系统框，日历直接弹，通知跳系统设置页）；接上某个权限后
- * 对应卡先显示“已连接”＋接下来会发生什么（3 秒）再消失，其他引导卡
- * 留着；有真事项时真卡片顶掉整叠引导卡。文案 v3：每张讲三件事——这是
- * 什么、为什么要连、连上之后会发生什么。
+ * 按权限分四张（消息、通知、日历、电话拨号器；第十四批删联系人）；点 ×
+ * 整叠消失、不再出现；单卡提醒、轮换推（第十四批，Bob 2026-11-10 23:07
+ * 定）：一次只推一张，接上一个来源后继续推下一张；点「我知道了」或横滑
+ * ＝被拒一次，放队尾、其他来源推完后再回来一次，再拒就本版不再推（等引
+ * 导换版）；点“连接”走 §5 流程（消息先显著披露再弹系统框，日历直接弹，
+ * 通知跳系统设置页）；接上某个权限后对应卡先显示“已连接”＋接下来会发生
+ * 什么（3 秒）再消失，其他引导卡留着；有真事项时真卡片顶掉整叠引导卡。
+ * 文案 v3：每张讲三件事——这是什么、为什么要连、连上之后会发生什么。
  */
 @Composable
 fun SmartCardStackHost() {
@@ -173,10 +177,8 @@ fun SmartCardStackHost() {
     val notificationGranted =
         rememberPermissionState { isNotificationAccessGranted(context) }
     val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
-    val contactsGranted = rememberPermissionState { isContactsGranted(context) }
     val openSms = rememberSmsPermissionOpener(smsGranted)
     val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
-    val openContacts = rememberContactsPermissionOpener(contactsGranted)
     // 消息刚接上就立即重读短信（不然真卡片要等下次回桌面才出现、顶不掉引导卡）
     OnGrantedTransition(smsGranted.value) {
         SmartCardRepository.refreshSms(context, force = true)
@@ -326,11 +328,15 @@ fun SmartCardStackHost() {
         mutableStateOf(SmartCardRepository.guideSeenVersion(context))
     }
     val guideSeen = !shouldShowGuideVersion(seenGuideVersion)
-    var swipedGuideIds by remember { mutableStateOf(setOf<String>()) }
+    // 轮换推的代次（第十四批）：点「我知道了」/横滑一张引导卡时仓库改队列
+    // （放队尾或出局），SharedPreferences 本身不可观测，靠这个代次触发
+    // 重组、重读队列。队列与被拒次数存在仓库里（按 GUIDE_VERSION 存），
+    // 进程重启不丢。
+    var guideTick by remember { mutableIntStateOf(0) }
     var dismissedGuideIds by remember {
         mutableStateOf(SmartCardRepository.dismissedGuideIds(context))
     }
-    // 显著披露要针对哪个连接器（消息/联系人先讲清再弹系统框，日历直接弹、
+    // 显著披露要针对哪个连接器（消息先讲清再弹系统框，日历直接弹、
     // 通知/电话拨号器跳系统设置页）；null＝没在弹。
     var disclosureConnector by remember { mutableStateOf<String?>(null) }
     // 用户在叠层里点了右按钮（连接＋来源名）的卡（等授权结果）；接上后先显示“已连接”
@@ -346,26 +352,18 @@ fun SmartCardStackHost() {
         mutableStateOf(mapOf<String, ConnectedFeedback>())
     }
     val connectedIds: Set<String> = connectedFeedbacks.keys
-    val guides = visibleGuideCards(
-        messageGranted = smsGranted.value,
-        notificationGranted = notificationGranted.value,
-        calendarGranted = calendarGranted.value,
-        contactsGranted = contactsGranted.value,
-        swipedIds = swipedGuideIds,
-        dismissedIds = dismissedGuideIds
-    )
     // 接上某个权限后，对应引导卡先显示“已连接”＋接下来会发生什么（3 秒），
     // 再消失——用户点了连接不能是懵的（设计稿 §4.7 v3）。
     LaunchedEffect(
         smsGranted.value, notificationGranted.value,
-        calendarGranted.value, contactsGranted.value
+        calendarGranted.value
     ) {
         val newly = pendingConnectIds.filter { id ->
             val key = connectorKeyForGuideId(id) ?: return@filter false
             isGuideConnectorGranted(
                 key,
                 smsGranted.value, notificationGranted.value,
-                calendarGranted.value, contactsGranted.value
+                calendarGranted.value
             )
         }
         if (newly.isNotEmpty()) {
@@ -397,8 +395,21 @@ fun SmartCardStackHost() {
         }
     }
     val connectedCards = connectedFeedbacks.values.map { it.card }
-    // 反馈卡排在最前面（刚接上的事立刻看得见），其余引导卡留着。
-    val displayed = connectedCards + guides
+    // 单卡提醒、轮换推（第十四批，Bob 2026-11-10 23:07 定）：只展示队列里
+    // 第一张仍符合出现条件的引导卡（currentGuideCard），不是整叠——接上
+    // 一个来源后继续推下一张；被拒那张在队列尾，推完其他来源再回来一次。
+    // 队列按 GUIDE_VERSION 存在仓库里（guideTick 变化时重读）；符合条件的
+    // 集合（visibleGuideCards：没接上、没处理完）每帧重算。
+    val queue = remember(guideTick) { SmartCardRepository.guideQueue(context) }
+    val guides = visibleGuideCards(
+        messageGranted = smsGranted.value,
+        notificationGranted = notificationGranted.value,
+        calendarGranted = calendarGranted.value,
+        dismissedIds = dismissedGuideIds
+    )
+    val currentGuide = currentGuideCard(queue, guides)
+    // 反馈卡排在最前面（刚接上的事立刻看得见），其余只轮到当前这一张。
+    val displayed = connectedCards + listOfNotNull(currentGuide)
     // 叠层空下来才记当前版本（看完、忽略完、或全部接上且反馈已给完）：
     // 每版引导只出现一次。注意不要按 guides.isEmpty() 记——接上最后一个
     // 权限时 guides 先空、反馈卡还在显示，那时记下会把反馈也吞掉（452 的
@@ -427,8 +438,6 @@ fun SmartCardStackHost() {
             when (key) {
                 UiPrefs.CONNECTOR_MESSAGE ->
                     disclosureConnector = UiPrefs.CONNECTOR_MESSAGE
-                UiPrefs.CONNECTOR_CONTACTS ->
-                    disclosureConnector = UiPrefs.CONNECTOR_CONTACTS
                 UiPrefs.CONNECTOR_CALENDAR -> openCalendar()
                 UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
                     openNotificationSettings(context)
@@ -444,12 +453,18 @@ fun SmartCardStackHost() {
                 connectedFeedbacks -= card.id
                 pendingConnectLevels -= card.id
             } else {
-                swipedGuideIds += card.id
+                // 横滑一张引导卡＝被拒一次：放队尾（第十四批轮换推），
+                // 其他来源推完后再回来一次，再拒就本版不再推。
+                SmartCardRepository.rejectGuideCard(context, card)
+                guideTick++
             }
         },
         onIgnore = { card ->
-            SmartCardRepository.dismissGuideCard(context, card)
-            dismissedGuideIds += card.id
+            // 点「我知道了」＝被拒一次（第十四批轮换推）：放队尾，不是
+            // 永久记下——旧口径“这张不用了、不再出现”作废一半（不追问是
+            // 对的，但不是永久不出现）。
+            SmartCardRepository.rejectGuideCard(context, card)
+            guideTick++
         },
         onClose = {
             SmartCardRepository.markGuideSeen(context)
@@ -509,55 +524,12 @@ fun SmartCardStackHost() {
             }
         )
     }
-    if (disclosureConnector == UiPrefs.CONNECTOR_CONTACTS) {
-        AlertDialog(
-            onDismissRequest = { cancelDisclosure(UiPrefs.CONNECTOR_CONTACTS) },
-            title = {
-                Text(
-                    text = "接上联系人",
-                    fontSize = AILauncherType.BodyLarge.fontSize,
-                    fontWeight = FontWeight.Medium,
-                    color = AILauncherColors.current.Title
-                )
-            },
-            text = {
-                Text(
-                    text = "要把未接来电的号码显示成名字。只按号码查姓名，不读其他联系人信息。",
-                    fontSize = AILauncherType.Body.fontSize,
-                    color = AILauncherColors.current.Body
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    disclosureConnector = null
-                    openContacts()
-                }) {
-                    Text(
-                        text = "同意",
-                        fontSize = AILauncherType.Callout.fontSize,
-                        color = AILauncherColors.current.Accent,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    cancelDisclosure(UiPrefs.CONNECTOR_CONTACTS)
-                }) {
-                    Text(
-                        text = "取消",
-                        fontSize = AILauncherType.Callout.fontSize,
-                        color = AILauncherColors.current.Hint
-                    )
-                }
-            }
-        )
-    }
 }
 
 /**
  * 卡片叠层：最上面一张完整显示，下面两张露个边（8dp 一层）。
- * 点动作立即执行（不拖 250ms 动画等开应用）；横滑跳过播离场动画再本轮收起来。
+ * 点动作立即执行（不拖 250ms 动画等开应用）；横滑跳过播离场动画——
+ * 用户的事项提醒沉到摞底（第十四批）、应用推的提醒划过就丢。
  * 每张卡两个响应：我知道了（消失、不再出现）与右按钮（卡片定义的下一步意图）。
  * onClose 非空时（引导卡片模式）× 在顶卡表头右上角、卡片内部：点一下
  * 整叠消失，不再出现；仍在叠层自己的槽位里，不另开浮层。
@@ -623,7 +595,7 @@ fun SmartCardStack(
     // 大模型准备清单（第十二批）：按卡片 id 的异步结果，覆盖卡片构建时
     // 的 prep（构建时为 null）。没回来就是没有，不贴模板。
     prepById: Map<String, String> = emptyMap(),
-    // 顶卡划走动画复位代次（第十二批）：仓库 skip()/新一轮清空时加一；
+    // 顶卡划走动画复位代次（第十二批）：仓库 skip() 时加一；
     // TopSmartCard 的组合键挂上它，同一张卡以新代次重新呈现时动画状态
     // （offsetX/alpha）重建，不会再出现“数着卡、看不见卡”。
     skipEpoch: Int = 0
@@ -736,7 +708,7 @@ private enum class SmartCardStackSlot {
     }
 }
 
-/** 顶卡：横滑跳过（过 120dp 阈值离场、本轮收起来，不够回弹）；点动作立即执行 */
+/** 顶卡：横滑跳过（过 120dp 阈值离场、沉到摞底，不够回弹）；点动作立即执行 */
 @Composable
 private fun TopSmartCard(
     card: SmartCard,
@@ -853,7 +825,7 @@ private fun SmartCardView(
     // 只留来源标签＋“已连接”＋接下来会发生什么。
     hideActionRow: Boolean = false,
     // “已连接”庆祝反馈（第八批，设计稿 §4.7）：非空时卡片换成庆祝形态——
-    // 金色对勾弹入＋金色等级行（“智能 +1 · 已接 3/5 个源”）＋整卡轻弹。
+    // 金色对勾弹入＋金色等级行（“智能 +1 · 已接 3/4 个源”）＋整卡轻弹。
     // 颜色只用已有的主操作金 Accent / AccentSoft，不引新色；图标是线性
     // Check，不用 emoji；尺寸走 8dp 网格（40dp 圆、8dp 间距）；减动效时
     // 直接落到终态，不播动画。文案仍按 Bob 的两条写。

@@ -191,34 +191,34 @@ fun dedupeSmartCards(cards: List<SmartCard>): List<SmartCard> {
 fun isCardExpired(card: SmartCard, nowMs: Long): Boolean = nowMs > card.deadlineMs
 
 /**
- * 还活着的卡片 id（纯函数）：去重 → 掐掉未到出现窗口、已处理与已过期的。
- * 仓库用它判断“本轮有没有新卡到”（见 shouldStartNewRound）；跳过不影响
- * 存活——划走的卡还活着，只是本轮不显示。
+ * 用户的事项提醒（设计稿 §4.2，第十四批 Bob 2026-11-10 23:43 定，取代
+ * 482「本轮收起来」）：账单 BILL、预约 APPOINTMENT、日历 CALENDAR、
+ * 未接来电 MISSED_CALL、快递/航班 NOTIFICATION——划过只排后面（沉到
+ * 摞底），不丢。
+ * 应用推的提醒（引导卡 GUIDE，以及还没落地的 TIP 小贴士 / UPDATE
+ * 升级卡）不在这里——划过就丢，不沉底。新种默认走“应用推的”分支，
+ * 除非明确列进这里。
  */
-fun aliveSmartCardIds(
-    cards: List<SmartCard>,
-    doneIds: Set<String>,
-    nowMs: Long
-): Set<String> = dedupeSmartCards(cards)
-    .filter { it.id !in doneIds && nowMs >= it.appearFromMs && !isCardExpired(it, nowMs) }
-    .map { it.id }
-    .toSet()
+fun isUserMatterCard(kind: SmartCardKind): Boolean = when (kind) {
+    SmartCardKind.BILL,
+    SmartCardKind.APPOINTMENT,
+    SmartCardKind.CALENDAR,
+    SmartCardKind.MISSED_CALL,
+    SmartCardKind.NOTIFICATION -> true
+    SmartCardKind.GUIDE -> false
+}
 
 /**
- * 是否开新一轮（纯函数，第十二批）：本轮没见过的 id 出现了，就算新一轮——
- * 仓库随即清空跳过集合，上一轮划走的卡按原排序回来（排在新卡之后、摞底）。
- * currentIds 为空（本轮一张活卡都没有）时不开新一轮。
- */
-fun shouldStartNewRound(seenIds: Set<String>, currentIds: Set<String>): Boolean =
-    currentIds.any { it !in seenIds }
-
-/**
- * 可见卡片（纯函数）：去重 → 掐掉未到出现窗口、已处理与已过期的 → 排序 →
- * 跳过的本轮收起来（第十二批，Bob 2026-11-09 实拍：划走了角标还在——
- * 旧口径只把跳过的沉底，角标数 cards.size 照数；新口径跳过即移出可见
- * 列表，角标自动跟着掉；全部划走后区域清空、角标不显示）。
- * 划走的卡在新一轮回来：仓库在 shouldStartNewRound 为真时清空跳过集合
- * 再调这里。applySkipOrder 已随旧口径删除，别留名不副实的函数。
+ * 可见卡片（纯函数）：去重 → 掐掉未到出现窗口、已处理与已过期的 →
+ * 排序 → 划走的事项卡沉到摞底（第十四批，Bob 2026-11-10 23:43 定，
+ * 取代 482「本轮收起来」）。
+ *
+ * 划走 ≠ 丢：用户的事项提醒划过只排后面——没划走的按截止点排在前面，
+ * 划走的按 skippedIds 的顺序（仓库的 liveIdList，按卡片截止点排，与
+ * 正常排序同一方向）排在后面，看完其他卡就轮到它；只有点第一个按钮
+ * 「我知道了」（markDone）才丢掉。划走的卡一直在可见列表里（角标照数），不再靠“新卡到了开新一轮”放回来——
+ * shouldStartNewRound 已随旧口径删除，小贴士、升级卡的到来也不开
+ * 新一轮（第十四批同一条决定）。
  */
 fun visibleSmartCards(
     cards: List<SmartCard>,
@@ -229,8 +229,11 @@ fun visibleSmartCards(
     val skipped = skippedIds.toSet()
     val alive = dedupeSmartCards(cards)
         .filter {
-            it.id !in doneIds && it.id !in skipped &&
+            it.id !in doneIds &&
                 nowMs >= it.appearFromMs && !isCardExpired(it, nowMs)
         }
-    return sortSmartCards(alive)
+    val (sunk, fresh) = alive.partition { it.id in skipped }
+    val sunkInSkipOrder =
+        skippedIds.mapNotNull { id -> sunk.find { it.id == id } }
+    return sortSmartCards(fresh) + sunkInSkipOrder
 }
