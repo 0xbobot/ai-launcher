@@ -45,7 +45,6 @@ import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.ui.glass.GlassPolicy
 import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
-import com.bobot.ailauncher.ui.home.BriefMeetingRow
 import com.bobot.ailauncher.ui.home.CoverHero
 import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.theme.AILauncherColors
@@ -63,9 +62,12 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * 宠物区（封面模式）：杂志 hero（简报区）+ 简报会行 + TODAY 数据管线。
+ * 宠物区（封面模式）：杂志 hero（简报区）+ TODAY 数据管线。
  * 放在首页顶栏下方。
  *
+ * 2026-11-11（Bob 亲口）：简报会行（BriefMeetingRow）拿掉——会议只走
+ * 日历卡（会前 30 分钟/非会议日程 2 小时出现），不再在简报里提前预览。
+ * coverNextEvent / TodaySection 数据管线不动（日历卡还靠它）。
  * v0.68.99（主页重构 R-1）：静态主页只剩简报 + Dock 两层——意图胶囊槽位
  * 撤除（改由 HomeScreen 在输入态下底部浮现），NextUp 紧凑条退役、会行以
  * BriefMeetingRow 形式长进简报。
@@ -162,11 +164,6 @@ fun PetZone(
     // 改为一次性任务：TodaySection 数据管线的会议提醒调度（开会前 30/15 分钟
     // 各一次）；日历数据变化时重算，边界刷新天然兜底（防任务被杀）
     val notifiedCalendarKeys = remember { mutableSetOf<String>() }
-    // 封面紧凑条点按（文案承诺"点一下加入"，必须真入会/打开日程，不能只提醒）：
-    // 实现已抽为文件级 joinCalendarEvent（意图入口建议面的会议行共用同一条入会
-    // 路径，三级路径说明见该函数）；点按每次都要有结果。
-    fun joinMeeting(e: CalEvent) = joinCalendarEvent(context, e)
-
     // v0.68.44：封面模式状态（hero 标题/下个会议）
     var coverSummary by remember { mutableStateOf("难得清闲") }
     var coverNextEvent by remember { mutableStateOf<CalEvent?>(null) }
@@ -176,11 +173,11 @@ fun PetZone(
     LaunchedEffect(coverNextEvent) {
         TodayEventsHolder.update(coverNextEvent)
     }
-    // v0.68.93（布局与交互 Loop 一批④）：会议呈现状态与数据同源上报——呈现点
-    // 的渲染条件就是 coverNextEvent != null（.99 起为简报会行 BriefMeetingRow，
-    // 原 NextUpStrip），呈现的事件 id 与 coverNextEvent.eventId 同拍写入/清空，
-    // 供建议面按 id 去重（去重契约随呈现点迁移不变）。
-    // 会行出现即算日历来源用过一次（设置连接器列表的“最后使用时间”用）。
+    // v0.68.93（布局与交互 Loop 一批④）：会议呈现状态与数据同源上报。
+    // 2026-11-11：简报会行已拿掉（Bob），呈现点不存在；presentedNextEventId
+    // 的写入暂时保留（当前无 live 读方，建议面暂无会议行），去重契约待新的
+    // 呈现点出现时再定。recordCalendarUsed 仍按 nextEvent 非空记（沿用旧口径，
+    // 设置连接器列表的“最后使用时间”用）。
     LaunchedEffect(coverNextEvent) {
         TodayEventsHolder.updatePresentedNextEventId(
             coverNextEvent?.eventId
@@ -215,9 +212,9 @@ fun PetZone(
     // A 取样：只看字实际所在的左 40% 横向范围的顶部带（briefingLuminance，
     // 与 PetZone 本身高度对应的带数、连续加权），不用整幅宽带均值——
     // 23:14 白字案就是整幅宽均值被右上深红块拉暗而误判暗底。
-    // 与时间段配色（CoverPalette）的关系：本处只覆盖传给 CoverHero／
-    // BriefMeetingRow 的 palette，简报区字色以壁纸亮度为准，其他区域的
-    // 时间段配色不动；intentSlot 与 Dock 不经过本处，一律不动。
+    // 与时间段配色（CoverPalette）的关系：本处只覆盖传给 CoverHero 的 palette，
+    // 简报区字色以壁纸亮度为准，其他区域的时间段配色不动；intentSlot 与 Dock
+    // 不经过本处，一律不动。
     val glassState = LocalGlassBackdrop.current
     var briefingColumnHPx by remember { mutableIntStateOf(0) }
     val briefingBackdropHPx = glassState?.backdropHeightPx ?: 0
@@ -363,47 +360,11 @@ fun PetZone(
         } else {
             intentSlot()
         }
-        // v0.68.99（主页重构 R-1）：简报会行——有会议才显示，无会时 hero 已有
-        // "难得清闲"，不重复。横屏走 coverLeftFrac 左区分区（.97 成果延续）。
-        // 输入态专注壳·A：专注态会议行撤场——竖屏区块切换（2026-10-27）
-        // 用 None（与简报同帧整体显隐）；横屏沿用 fade-only 250ms，
-        // 不缩小、不移位；退场完成后零高度、不留占位。
-        androidx.compose.animation.AnimatedVisibility(
-            visible = !inputActive,
-            enter = if (isLandscapeCover) androidx.compose.animation.fadeIn(
-                animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
-                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                )
-            ) else androidx.compose.animation.EnterTransition.None,
-            exit = if (isLandscapeCover) androidx.compose.animation.fadeOut(
-                animationSpec = androidx.compose.animation.core.tween(
-                    com.bobot.ailauncher.ui.theme.MotionTokens.Medium,
-                    easing = com.bobot.ailauncher.ui.theme.MotionTokens.Easing
-                )
-            ) else androidx.compose.animation.ExitTransition.None
-        ) {
-            // 简报会行（第十三批：不再查日历连接器开关，跟着权限走——
-            // 数据加载在 TodaySection 里只认 READ_CALENDAR）。
-            if (coverNextEvent != null) {
-                // 418（Bob）：简报与日程之间留白——16dp 时分隔线贴着简报
-                // 正文、两段读成一块；提到 32dp（大于简报内部 24dp 的段间
-                // 距，8dp 网格），日程作为独立一段站得住。
-                Spacer(modifier = Modifier.height(32.dp))
-                BriefMeetingRow(
-                    event = coverNextEvent!!,
-                    palette = briefingPalette,
-                    accent = briefingAccent,
-                    onJoin = { e -> joinMeeting(e) },
-                    modifier = Modifier.fillMaxWidth(coverLeftFrac),
-                    // v0.68.164：标签时间取 PetZone 已有的分钟 ticker，与色板
-                    // 同一口径；选会时间取 TodaySection 的 ticker，两者均为
-                    // 分钟对齐，标签与选会至多在同一分钟边界内先后翻转。
-                    nowMillis = coverNowMillis
-                )
-            }
-        }
-        // 智能卡片（447）：叠层槽位——会行下方、独立一段，与简报一起在输入态
+        // 2026-11-11（Bob 亲口）：简报里的日历提醒（NextUp 会行）直接拿掉——
+        // 会议只在会前 30 分钟（非会议日程 2 小时）以日历卡出现，不再在简报里
+        // 提前预览。coverNextEvent / TodaySection 数据管线不动（日历卡还靠它），
+        // BriefMeetingRow 定义保留（CoverHero.kt），暂无调用点。
+        // 智能卡片（447）：叠层槽位——简报下方、独立一段，与简报一起在输入态
         // 淡出（竖屏区块切换用 None、横屏沿用 fade，与会行同款）；无卡时
         // SmartCardStackHost 零高度、不留占位。
         androidx.compose.animation.AnimatedVisibility(
