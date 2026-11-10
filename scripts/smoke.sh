@@ -2,43 +2,36 @@
 # AI Launcher 冒烟测试 v1：安装 -> 预写 prefs 跳过引导/对话框 -> 设为默认桌面 -> 首页/扇形/点七仔/D3
 # 跑在 reactivecircus/android-emulator-runner 的 script 里（adb 已就绪，工作目录为仓库根）。
 # 每步容错：失败记 FAIL 继续往下走，不设 -e；最后汇总 PASS/FAIL 并以 FAIL 数作为退出码。
-# 截图（smoke-out/）：home.png / fan.png / pet.png / appcenter.png / dark-home.png / dark-appcenter.png /
-# dark-settings.png（R3-B 设置页深色）/ intent-focus.png / intent-present.png（R3-C 七仔反应）/
+# 截图（smoke-out/）：home.png / fan.png / home-static.png / appcenter.png / dark-home.png / dark-appcenter.png /
+# dark-settings.png（R3-B 设置页深色）/
 # font13-home.png / font13-appcenter.png / font15-home.png / font15-appcenter.png（R3-A 字体缩放）/
-# intent-home.png / intent-nokey.png / intent-local.png / intent-opened.png / appcenter2.png /
+# appcenter2.png / appcenter-empty.png（第 9 段空态重试）/
 # appcenter-filter.png / appcenter-cleared.png / intent-tpl-giant.png / intent-tpl-headline.png /
-# intent-tpl-minimal.png（含各自 -local 结果条图），供人工验证。
-# 意图改进一批追加：intent-tpl-<tpl>-suggest.png（三模板建议面）/ intent-suggest.png /
-# intent-suggest-full.png（第 15 段：键盘弹起态与收键盘全布局态各一张）。
+# intent-tpl-minimal.png，供人工验证。
+
 # 首启对话框（onboarding 引导、低电量保护询问）用 run-as 预写 SharedPreferences 跳过，
 # 不依赖 UI 坐标；若预写失败，用固定坐标点按做兜底（pixel_6 1080x2400，对话框位置稳定）。
 # R4 矩阵化：写死坐标一律按 1080x2400 基准经 SX/SY 按实际分辨率换算；SMOKE_FONT_SCALE /
 # SMOKE_NIGHT / SMOKE_LABEL 环境参数供 smoke-matrix.yml 多组合复用（不带 env 时行为不变）；
-# 第 15 段为意图改进一批（零打字初始态 + 提交后焦点释放），第 16 段为 a11y 触控目标
-# 尺寸断言（scripts/a11y_check.py 量 uiautomator dump，含建议面布局不变量）。
-# 第 17 段为意图改进二批：本机 mock LLM（scripts/mock_llm.py）+ 预写 llm prefs 把
-# 协调器逼进缺参追问态实拍（intent-needsinput.png / intent-needsinput-answered.png），
-# 并断言发往模型的请求体含带参数说明的 hints 与上下文包。
+# 第 15 段（意图改进一批）已随 477 删除；第 16 段为 a11y 触控目标
+# 尺寸断言（scripts/a11y_check.py 量 uiautomator dump，Dock 行读静态首页 dump）。
+# 第 17 段（意图改进二批）已随 477 删除（协调器与 mock LLM 追问流退役）；
+# ni_build_stub 保留（第 20 段数据新鲜度与第 28 段 keystore 共用腾讯地图桩）。
 # v0.68.93（布局与交互 Loop 一批）追加：第 14 段内加会议双处呈现去重断言
-# （nextup-dedupe：种子事件在场时聚焦出建议面，标题全屏只出现一次）；
-# 第 18 段为意图焦点点外部取消（focus-cancel-outside：聚焦输字后点七仔，
-# dump 无 focused 节点且文本保留）；crash 检查顺延为第 19 段。
+# （nextup-dedupe：种子事件在场时静态首页 dump 里标题只出现一次）；
+# 第 18 段（意图焦点点外部取消）已随 477 删除；crash 检查顺延为第 19 段。
 # 玻璃试点批合入后：玻璃取证续为第 19 段，crash 再顺延为第 20 段。
 # v0.68.95（布局与交互 Loop 二批-A）追加：第 20 段为数据新鲜度（装/卸桩应用
 # 在应用中心开着时实时刷新 A-Z 列表，catalog-install/uninstall-refresh），
 # crash 检查再顺延为第 21 段。
 # v0.68.97（布局普查批）追加：第 21 段为布局几何断言（scripts/layout_check.py
 # 量 tpl_*.xml / fan_dump.xml 与本段新拉的 layout_home/ac/settings dump：
-# cover_hero / 胶囊 / 发送键 / NextUp / 七仔 / Dock 面板两两不相交 + 关键元素
+# cover_hero / NextUp / Dock 面板两两不相交 + 关键元素
 # 完整在屏内），crash 检查再顺延为第 22 段。
-# v0.68.98（布局与交互 Loop 二批-C·F-06）追加：第 22 段为 Planning 取消
-# （planning-strip / planning-cancel-dismisses / planning-cancel-drops-late：
-# mock 慢响应把协调器停在 Planning 态 -> 思考条带「取消」-> 点取消后条消失 ->
-# 等迟到结果落地窗口过后断言追问不上屏），crash 检查再顺延为第 23 段。
+# 第 22 段（Planning 取消）已随 477 删除；crash 检查为第 23 段。
 # v0.68.100（卫生批）追加：第 24 段为崩溃本地日志（crash-log-written /
-# v0.68.102（310 合并批）段号统一：R-2 槽位甲板 = 第 25 段；热修 D-2 输入态
-# 不误退 = 第 26 段；热修 D-5 点加入只发一次 = 第 27 段（三段同插在第 22 段
-# 之后、第 23/24 段之前——第 24 段故意崩溃必须保持最后两段的既有约束）。
+# v0.68.102（310 合并批）段号统一：第 25 段（甲板点选填充）与第 26 段
+# （输入态不误退）已随 477 删除；第 27 段（点加入只发一次）保留。
 # D-6（应用中心底部条带点不动，Bob .100 真机点名）= 第 30 段（列车统一编号：原线 D-6 第 28 段，与线 B 第 28 段撞号），插在第 27 段
 # 之后、第 23 段之前：D3 内对同一个应用做底部 88dp 带内点（A）与滚到中屏
 # 点（B）的同应用对照，并把带区节点打进日志留档（ac_band*.xml）。
@@ -55,29 +48,24 @@
 # 原线 B 第 25 段与 310 的第 25 段槽位甲板撞号，本段执行序仍在第 24 段之后）
 # （keystore-fixture-old-encrypted / keystore-fixture-upgrade-install /
 # keystore-migration-value-match / keystore-migration-new-format /
-# keystore-migration-legacy-removed）：下载已发布 v0.68.100 包（同固定签名），
+# keystore-migration-legacy-removed）：从 tag v0.68.100 现场构建旧版 APK
+# （同固定签名；v0.x release 已删完，下载链接已 404），
 # 在旧版里走真实设置 UI 把假 Key 存进 alpha06 加密层，再覆盖装新版，
 # 断言发往 mock 的 Authorization 与旧版写入逐字一致、新格式密文落盘、
-# 删旧格式文件后仍可读。旧包下载不到 = 环境问题整段跳过不计 FAIL；
+# 删旧格式文件后仍可读。旧版 tag 构建失败 = 环境问题整段跳过不计 FAIL；
 # 形态覆写腿（横屏/平板/大字体）设置 UI 布局不同，整段跳过。形态 env 追加 SMOKE_WM_SIZE /
-# 并行线 D 追加：第 29 段（列车统一编号）为胶囊有效查询派生的存活性守卫
-# （pinyin-latin-responds / pinyin-han-committed /
-# pinyin-recovers-after-han：拉丁串出本地结果 -> 末尾追加汉字且回读
-# 确认进字段后结果随已上屏查询变化 -> 清空重输拉丁、结果恢复；汉字
-# 注不进的镜像后半段跳过不计。程序化置文无 composing，派生口径本体
-# 由 LocalSearchGateTest 单测锁死，composing 排除归真机项）。
+# 第 29 段（胶囊有效查询派生）已随 477 删除。
 # 形态 env 追加 SMOKE_WM_SIZE /
 # SMOKE_USER_ROTATION：第 0 段几何读取前覆写显示尺寸与旋转锁定（矩阵的
 # 横屏手机短高、平板竖屏腿用），不带 env 时行为不变。
 # 第 19 段为玻璃试点批双背景取证：默认壁纸 / 沙丘照片壁纸（scripts/gen_wallpaper.py
-# 生成）/ 纯纸面三态各截首页（Dock+TODAY 卡），照片与纸面下再长按七仔截气泡
-# （glass-default / glass-photo / glass-bubble-photo / glass-paper /
-# glass-bubble-paper.png，气泡图各双拍一张 -b 保险，另有 glass-wp-debug.txt
-# 壁纸诊断）。玻璃质感是视觉判断、不设像素断言，硬断言只有换壁纸+重启后应用
-# 存活且首页可达（glass-alive-after-wallpaper-switches）。
+# 生成）/ 纯纸面三态各截首页（Dock+TODAY 卡）；477 后宠物已移除，气泡取证
+# （长按七仔）无宠物在场时跳过不拍。玻璃质感是视觉判断、不设像素断言，
+# 硬断言只有换壁纸+重启后应用存活且首页可达（glass-alive-after-wallpaper-switches）。
 # 体检批D ⑥（testTag 分段改造）：关键 composable 已加 testTag（intent_input /
-# intent_submit / intent_clear / result_item / pet_qizai / today_nextup /
-# appcenter_settings / dock_item），MainActivity 根容器开 testTagsAsResourceId，
+# intent_clear / today_nextup / appcenter_settings / dock_item——477 后
+# intent_submit / result_item / pet_qizai 已随意图面板与宠物退役，应用中心
+# 胶囊 intent_input 仍在），MainActivity 根容器开 testTagsAsResourceId，
 # dump 里以 resource-id 暴露。各点按段的定位优先序：testTag 节点 > 原文本/
 # content-desc 定位 > SX/SY 兜底坐标；断言口径未动。
 # 剩余硬编码坐标清单（无法或不宜语义定位，保留并在此登记）：
@@ -178,11 +166,9 @@ if [ "$SCR_W" -gt "$SCR_H" ]; then
   log "landscape leg: app-center assertions follow AppCenterLandscape expectations"
 fi
 
-# v0.68.99（主页重构 R-1）：静态主页撤胶囊——简报 + Dock 两层，Dock 左端
-# 七仔格（dock_pet_cell）是意图入口。原「胶囊常驻」类段全部改走
-# enter_input_mode helper（点七仔格进输入态）再沿原路径验证；第 11 段静态
-# 断言改为简报（cover_hero）+ 七仔格在场；第 18 段升级为「退出 + 重进文本
-# 保留」三段断言；today_nextup 已迁移到简报会行（第 14/19/21 段语义不变）。
+# 477 后（2026-11-08）：首页意图搜索已删除——静态主页只剩简报（cover_hero）
+# + Dock（dock_panel），无胶囊、无常驻宠物；第 6/11 段静态断言改为简报 + Dock
+# 在场且胶囊/宠物节点缺席；enter_input_mode helper 已删除（原点七仔格进输入态）。
 
 # --- 体检批D ⑥：testTag 语义定位 helper ---
 # center_rid <dumpfile> <resource-id>：在已拉取的 dump 里按 resource-id（=testTag）
@@ -212,60 +198,7 @@ tap_rid() {
   return 0
 }
 
-# --- v0.68.99（主页重构 R-1）：进输入态 helper ---
-# 静态主页已无常驻胶囊：需要胶囊的段先调本 helper——dump 到目标文件，若
-# intent_input 已在场直接成功；否则点 Dock 七仔格（兜底点简报讲述者七仔）
-# 进输入态（胶囊底部浮现 + 自动聚焦 + 键盘弹起）后重新 dump 同一文件确认。
-# 返回 0 = 胶囊在场。注意返回时键盘是弹起态，需要「键盘收起坐标系」的段
-# 自行先 BACK 再重 dump（第 9 段法）。
-enter_input_mode() {
-  local F="$1"
-  # eim_dump：dump+pull 一次；拉回为空（uiautomator 0 字节偶发）时重拉一次。
-  # 空文件是「未知」不是「不在场」——dark 腿两轮实测：校验 dump 为空被误判
-  # 未进入，调用段随后用兜底坐标误点建议面应用（Contacts 被打开）级联失败。
-  eim_dump() {
-    adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
-    adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
-    if [ ! -s "$F" ]; then
-      sleep 1
-      adb shell uiautomator dump /sdcard/eim_dump.xml > /dev/null 2>&1 || true
-      adb pull /sdcard/eim_dump.xml "$F" > /dev/null 2>&1 || true
-    fi
-  }
-  eim_dump
-  if [ -f "$F" ] && grep -q 'resource-id="intent_input"' "$F"; then
-    log "enter_input_mode: capsule already present"
-    return 0
-  fi
-  if ! tap_rid "$F" "dock_pet_cell"; then
-    tap_rid "$F" "pet_qizai" || true
-  fi
-  sleep 2
-  eim_dump
-  if [ -f "$F" ] && grep -q 'resource-id="intent_input"' "$F"; then
-    log "enter_input_mode: capsule present after pet-cell tap"
-    return 0
-  fi
-  # uiautomator 偶发残缺 dump 会让第一份 dump 缺七仔格、点按落空（R-1 二轮
-  # 实测 giant 模板中招，同第 10 段登记过的残缺层级现象）：第二份 dump 里
-  # 七仔格在场则再点一次重试，不把偶发当产品失败。校验 dump 既无胶囊又无
-  # 七仔格（层级残缺/未知）时同样重试一次。
-  if [ -f "$F" ] && { grep -q 'resource-id="dock_pet_cell"' "$F" || \
-      ! grep -q 'resource-id="pet_qizai"' "$F"; }; then
-    log "enter_input_mode: retrying pet-cell tap (first dump may have been partial)"
-    if ! tap_rid "$F" "dock_pet_cell"; then
-      tap_rid "$F" "pet_qizai" || true
-    fi
-    sleep 2
-    eim_dump
-    if [ -f "$F" ] && grep -q 'resource-id="intent_input"' "$F"; then
-      log "enter_input_mode: capsule present after retry"
-      return 0
-    fi
-  fi
-  log "enter_input_mode: capsule NOT present"
-  return 1
-}
+
 
 # --- 1. 安装 ---
 if [ -f "$APK" ]; then
@@ -397,24 +330,18 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 
-# --- 6. 点七仔进输入态（v0.68.101 单宠物：静态唯一七仔 = Dock 上沿坐姿，
-# testTag 沿用 dock_pet_cell；旧讲述者 pet_qizai 静态已撤）---
-# press 150ms 模拟真手指（瞬时 tap 会被首页手势层取消，见第 9 段注）
+# --- 6. 首页静态断言（477 后：首页无胶囊、无常驻宠物）---
+# 静态首页只剩简报（cover_hero）+ Dock（dock_panel）：断言两者在场、
+# 且胶囊/宠物节点缺席（home-static-no-capsule-pet）。pet_dump.xml 继续产出
+# （第 16 段 a11y_check.py 的 Dock 触控目标断言读它）。
 adb shell uiautomator dump /sdcard/pet_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/pet_dump.xml "$OUT/pet_dump.xml" > /dev/null 2>&1 || true
-if ! tap_rid "$OUT/pet_dump.xml" "dock_pet_cell"; then
-  log "seg6: dock_pet_cell not found in dump - seat tap skipped (shot still taken)"
+if [ -f "$OUT/pet_dump.xml" ] && grep -q 'resource-id="cover_hero"' "$OUT/pet_dump.xml" && grep -q 'resource-id="dock_panel"' "$OUT/pet_dump.xml" && ! grep -q 'resource-id="dock_pet_cell"' "$OUT/pet_dump.xml" && ! grep -q 'resource-id="pet_qizai"' "$OUT/pet_dump.xml" && ! grep -q 'resource-id="intent_input"' "$OUT/pet_dump.xml"; then
+  ok "home-static-no-capsule-pet"
+else
+  ng "home-static-no-capsule-pet"
 fi
-sleep 0.7
-shot "pet"
-# 点坐姿七仔 = 进入输入态（胶囊浮现 + 键盘弹起 + 伴随七仔立在胶囊旁），
-# pet.png 即输入态开启瞬间。随后退回静态基线：第 1 次 BACK 收键盘
-# （焦点保留）、第 2 次 BACK 走输入态 BackHandler 收起胶囊、Dock 回位
-# ——否则下一段上滑会被输入态/键盘干扰。
-adb shell input keyevent KEYCODE_BACK || true
-sleep 1
-adb shell input keyevent KEYCODE_BACK || true
-sleep 1
+shot "home-static"
 
 # --- 7. 上滑开 D3 应用中心 ---
 adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
@@ -433,7 +360,7 @@ adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || tr
 sleep 3
 shot "dark-appcenter"
 # R3-B：设置页深色亲验——点应用中心齿轮（content-desc="设置"，dump 定位，兜底坐标按
-# dark-appcenter 截图实测齿轮约 (985,505)）进设置页，断言"让七仔更聪明"卡在场后截图，BACK 返回。
+# dark-appcenter 截图实测齿轮约 (985,505)）进设置页，断言"让助手更聪明"卡在场后截图，BACK 返回。
 SGX=$(SX 985); SGY=$(SY 505)
 adb shell uiautomator dump /sdcard/set_dump.xml > /dev/null 2>&1 || true
 adb pull /sdcard/set_dump.xml "$OUT/set_dump.xml" > /dev/null 2>&1 || true
@@ -457,7 +384,7 @@ sleep 3
 shot "dark-settings"
 adb shell uiautomator dump /sdcard/set_dump2.xml > /dev/null 2>&1 || true
 adb pull /sdcard/set_dump2.xml "$OUT/set_dump2.xml" > /dev/null 2>&1 || true
-if [ -f "$OUT/set_dump2.xml" ] && grep -q "让七仔更聪明" "$OUT/set_dump2.xml"; then
+if [ -f "$OUT/set_dump2.xml" ] && grep -q "让助手更聪明" "$OUT/set_dump2.xml"; then
   ok "dark-settings"
 else
   ng "dark-settings"
@@ -467,245 +394,80 @@ sleep 2
 if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night auto || true; fi
 sleep 2
 
-# --- 9. 意图入口（R2 UI）：回首页截含胶囊图 -> 点胶囊输入一句话 -> 提交 -> 截无 Key 错误态 ---
-# CI 全新环境未配大模型 Key：提交后应进 Error 态（"先在设置里配置大模型 Key"小条 + 去设置），不崩溃、不误启 App。
-# 胶囊位置随封面模板（3 模板按日轮换）变化：用 uiautomator dump 找占位文案"想做什么？"的 bounds 取中心点，
-# 找不到时用固定坐标兜底（pixel_6 1080x2400，按 home 截图实测胶囊中心约 y=1247）。输入用英文：adb input text
-# 打不了中文，走的是同一条无 Key 路径，不影响断言目的。
-# 基线：上一段结束时停在 D3 应用中心（Dock 状态在 MainActivity 内，am start/HOME 回不到首页视图，
-# 首轮实测 intent-home 拍成 D3、点按误开 Contacts）→ 同第 5 段清理法：force-stop 重启回首页基线。
-log "RESULT-PARTIAL pass=$PASS fail=$FAIL"
-# death_watch（§9 改造方案 A）：每秒探活 device+pid，最长 ~20s。
-# 设备无响应（整机死亡签名）或始终等不到应用进程 → 返回 1（环境死亡），
-# 由 §9 驱动记 ENV-DEATH 并重启重试，不在此判产品 FAIL。
-death_watch() {
-  local i
-  for i in $(seq 1 20); do
-    adb get-state 2> /dev/null | grep -qx device || return 1
-    adb shell pidof "$PKG" 2> /dev/null | grep -q . && return 0
-    sleep 1
-  done
-  adb get-state 2> /dev/null | grep -qx device || return 1
-  return 1
-}
-s9_body() {
-adb shell am force-stop "$PKG" || true
-sleep 1
-adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-sleep 4
-adb shell input keyevent KEYCODE_HOME || true
-sleep 2
-shot "intent-home"
-CX=$(SX 540); CY=$(SY 1247); BX=$(SX 928); BY=$(SY 1246)
-# v0.68.99（主页重构 R-1）：静态无胶囊——先点 Dock 七仔格进输入态；进态后
-# 先 BACK 收键盘（焦点与输入态保留），再拉 dump 量坐标——与旧流程「dump
-# 时键盘未弹起」的坐标系一致，后续点提交的坐标才准。
-enter_input_mode "$OUT/intent_dump.xml" || true
-  # 进态后先 death_watch 探活（方案 A）：死亡签名提前返回 9，不带死机跑断言
-  death_watch || return 9
-adb shell input keyevent KEYCODE_BACK || true
-sleep 1
-adb shell uiautomator dump /sdcard/intent_dump.xml > /dev/null 2>&1 || true
-adb pull /sdcard/intent_dump.xml "$OUT/intent_dump.xml" > /dev/null 2>&1 || true
-if [ -f "$OUT/intent_dump.xml" ]; then
-  NODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/intent_dump.xml" | head -1)
-  if [ -n "$NODE" ]; then
-    NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
-    X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
-    if [ -n "$X1" ] && [ -n "$Y2" ]; then
-      CX=$(( (X1 + X2) / 2 )); CY=$(( (Y1 + Y2) / 2 ))
-      log "intent capsule at ($CX,$CY)"
-    fi
-  fi
-  # 提交按钮中心同法从 dump 取（content-desc="提交" 的图标节点 ≈ 按钮中心）
-  BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/intent_dump.xml" | head -1)
-  if [ -n "$BNODE" ]; then
-    BNUMS=$(echo "$BNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    BX1=$(echo "$BNUMS" | sed -n 1p); BY1=$(echo "$BNUMS" | sed -n 2p)
-    BX2=$(echo "$BNUMS" | sed -n 3p); BY2=$(echo "$BNUMS" | sed -n 4p)
-    if [ -n "$BX1" ] && [ -n "$BY2" ]; then
-      BX=$(( (BX1 + BX2) / 2 )); BY=$(( (BY1 + BY2) / 2 ))
-      log "intent submit button at ($BX,$BY)"
-    fi
-  fi
-fi
-# 体检批D ⑥：testTag 优先（命中则覆盖文本/content-desc 定位结果）
-CTR=$(center_rid "$OUT/intent_dump.xml" "intent_input")
-if [ -n "$CTR" ]; then CX=$(echo "$CTR" | cut -d' ' -f1); CY=$(echo "$CTR" | cut -d' ' -f2); log "intent capsule by tag at ($CX,$CY)"; fi
-CTR=$(center_rid "$OUT/intent_dump.xml" "intent_submit")
-if [ -n "$CTR" ]; then BX=$(echo "$CTR" | cut -d' ' -f1); BY=$(echo "$CTR" | cut -d' ' -f2); log "intent submit by tag at ($BX,$BY)"; fi
-# 点按用带时长的 press（swipe 同点 150ms）模拟真手指：adb 瞬时 tap 在本应用首页
-# 手势层下会被取消（实测：瞬时 tap 点提交/点宠物均不触发，IME Done 与长按压正常）。
-adb shell input swipe "$CX" "$CY" "$CX" "$CY" 150 || true
-sleep 2
-adb shell input text "open%swechat" || true
-sleep 1
-# 先收键盘再点提交：键盘弹起时窗口 resize、首页内容上移，胶囊不在 dump 坐标处
-# （二轮实测：文字输进去了但提交点空、无错误条）。BACK 只收键盘，输入与焦点保留。
-adb shell input keyevent KEYCODE_BACK || true
-sleep 1
-adb shell input swipe "$BX" "$BY" "$BX" "$BY" 150 || true
-sleep 2
-shot "intent-nokey"
-# 点后 dump 层级复核错误条确实进了 UI 树（截图+层级双证据）；没有则再走 IME Done 复验并如实记录。
-adb shell uiautomator dump /sdcard/intent_after.xml > /dev/null 2>&1 || true
-adb pull /sdcard/intent_after.xml smoke-out/intent_after.xml > /dev/null 2>&1 || true
-if grep -q "先在设置里配置大模型" smoke-out/intent_after.xml 2>/dev/null; then
-  echo "[smoke] intent error strip: FOUND in hierarchy after button press"
-else
-  echo "[smoke] intent error strip: NOT in hierarchy after button press; trying IME Done (keyevent 66)"
-  adb shell input keyevent 66 || true
-  sleep 2
-  shot "intent-done"
-  adb shell uiautomator dump /sdcard/intent_after2.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/intent_after2.xml smoke-out/intent_after2.xml > /dev/null 2>&1 || true
-  if grep -q "先在设置里配置大模型" smoke-out/intent_after2.xml 2>/dev/null; then
-    echo "[smoke] intent error strip: FOUND after IME Done"
-  else
-    echo "[smoke] intent error strip: NOT FOUND after IME Done either"
-  fi
-fi
-  # 结尾探活（方案 A）：设备无响应或进程不在 → 死亡签名，返回 9 交驱动
-  adb get-state 2> /dev/null | grep -qx device || return 9
-  adb shell pidof "$PKG" 2> /dev/null | grep -q . || return 9
-  return 0
-}
-
-# §9 驱动（方案 A）：首跑死亡 → adb reboot 后重试一次；恢复则
-# PASS(recovered)，再死记 FAIL(env-double-death) 且整轮 ENV-INVALID。
-s9_body
-S9_RC=$?
-if [ "$S9_RC" = "9" ]; then
-  ENV_DEATHS=$((ENV_DEATHS+1))
-  log "ENV-DEATH: section 9 attempt 1 (device/pid lost); adb reboot + retry once"
-  adb reboot > /dev/null 2>&1 || true
-  for i in $(seq 1 40); do
-    if adb get-state 2> /dev/null | grep -qx device && [ "$(adb shell getprop sys.boot_completed 2> /dev/null | tr -d '\r')" = "1" ]; then break; fi
-    sleep 3
-  done
-  sleep 5
-  s9_body
-  S9_RC=$?
-  if [ "$S9_RC" = "9" ]; then
-    ENV_DEATHS=$((ENV_DEATHS+1))
-    ENV_INVALID=1
-    ng "env-double-death"
-    log "ENV-INVALID: section 9 died twice in one run; gate readers must void this run (not a product failure)"
-  else
-    ok_rec "intent-alive"
-  fi
-else
-  ok "intent-alive"
-fi
-
-# --- 10. 本地直达层 + 应用中心同组件（R2 UI 10-21 新规格）---
-# 首页打字出本地结果：点胶囊输 "clo" -> 七仔结果条应出现 Clock（英文标签，名称包含匹配）；
-# 探针选 Clock 不选 Camera：API 29 default 镜像根本没有相机应用（R4 实测 11 款里无 Camera，
-# 曾致 api29 腿本地结果全红），Clock 在 API 29/34 与 Nexus 9 镜像里都有。
-# press 点第一个结果 -> 前台包应切换。应用中心：顶部应换成新胶囊（占位"想做什么？"），
-# 输 "clo" 后网格过滤出 Clock 且出现「问七仔」行。基线用 force-stop 重启回首页（同第 9 段法）。
-adb shell am force-stop "$PKG" || true
-sleep 1
-adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-sleep 4
-adb shell input keyevent KEYCODE_HOME || true
-sleep 2
-# 定位胶囊（v0.68.99：先点七仔格进输入态再 dump 找占位，兜底坐标同第 9 段）
-LCX=$(SX 540); LCY=$(SY 1247)
-enter_input_mode "$OUT/local_dump0.xml" || true
-if [ -f "$OUT/local_dump0.xml" ]; then
-  NODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/local_dump0.xml" | head -1)
-  if [ -n "$NODE" ]; then
-    NUMS=$(echo "$NODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    X1=$(echo "$NUMS" | sed -n 1p); Y1=$(echo "$NUMS" | sed -n 2p)
-    X2=$(echo "$NUMS" | sed -n 3p); Y2=$(echo "$NUMS" | sed -n 4p)
-    if [ -n "$X1" ] && [ -n "$Y2" ]; then
-      LCX=$(( (X1 + X2) / 2 )); LCY=$(( (Y1 + Y2) / 2 ))
-      log "local capsule at ($LCX,$LCY)"
-    fi
-  fi
-fi
-# 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
-CTR=$(center_rid "$OUT/local_dump0.xml" "intent_input")
-if [ -n "$CTR" ]; then LCX=$(echo "$CTR" | cut -d' ' -f1); LCY=$(echo "$CTR" | cut -d' ' -f2); log "local capsule by tag at ($LCX,$LCY)"; fi
-adb shell input swipe "$LCX" "$LCY" "$LCX" "$LCY" 150 || true
-sleep 2
-adb shell input text "clo" || true
-sleep 1
-# 收键盘再截图/定位：键盘会遮挡结果条下沿且 dump 坐标会变（同第 9 段教训）
-adb shell input keyevent KEYCODE_BACK || true
-sleep 1
-shot "intent-local"
-adb shell uiautomator dump /sdcard/local_dump.xml > /dev/null 2>&1 || true
-adb pull /sdcard/local_dump.xml "$OUT/local_dump.xml" > /dev/null 2>&1 || true
-# uiautomator 偶发返回残缺层级（R4 small 腿实测 26 节点、独缺探针标签）：未命中时重 dump 一次再判
-if ! grep -q 'text="Clock"' "$OUT/local_dump.xml" 2>/dev/null; then
+# 打开应用中心并验证到达（appcenter_settings 在场才算进；上滑最多重试 3 次——
+# 首滑偶被首页引导卡吃掉，第 31 段 dock-drag 实测同款口径）。$1=dump 文件基名。
+# 返回 0=已进，1=未进。调用方：未进时整段跳过（不计 FAIL），与 dock-drag 段同口径。
+ac_open_d3() {
+  local DUMP="${1:-ac_open}"
+  adb shell am force-stop "$PKG" || true
   sleep 1
-  adb shell uiautomator dump /sdcard/local_dump.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/local_dump.xml "$OUT/local_dump.xml" > /dev/null 2>&1 || true
-fi
-RCX=""; RCY=""
-if [ -f "$OUT/local_dump.xml" ]; then
-  # 结果条里的应用名节点（首页基线 UI 无其它 "Clock" 文本）
-  RNODE=$(grep -o '<node[^>]*text="Clock"[^>]*>' "$OUT/local_dump.xml" | head -1)
-  if [ -z "$RNODE" ]; then
-    # 结果项标签 TextView 偶发未进语义树（R4 small/MINIMAL 两轮实测，视觉与图标均正常）：
-    # 退到结果项图标 View 的 content-desc 节点（同为无障碍可读信号，坐标在其可点容器内）
-    RNODE=$(grep -o '<node[^>]*class="android.view.View"[^>]*content-desc="Clock"[^>]*>' "$OUT/local_dump.xml" | head -1)
-  fi
-  if [ -n "$RNODE" ]; then
-    ok "intent-local-results"
-    RNUMS=$(echo "$RNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    RX1=$(echo "$RNUMS" | sed -n 1p); RY1=$(echo "$RNUMS" | sed -n 2p)
-    RX2=$(echo "$RNUMS" | sed -n 3p); RY2=$(echo "$RNUMS" | sed -n 4p)
-    if [ -n "$RX1" ] && [ -n "$RY2" ]; then
-      RCX=$(( (RX1 + RX2) / 2 )); RCY=$(( (RY1 + RY2) / 2 ))
-      log "clock result label at ($RCX,$RCY)"
-    fi
-  else
-    ng "intent-local-results"
-  fi
-fi
-# press 点结果 -> Clock 应被打开。先清 logcat 再点，双路取证：
-# 前台轮询 6 秒任一命中 clock，或 logcat 出现目标包的 START 派发记录，都算链路通。
-if [ -n "$RCX" ]; then
-  adb logcat -c > /dev/null 2>&1 || true
-  adb shell input swipe "$RCX" "$RCY" "$RCX" "$RCY" 150 || true
-  OPENED=0
-  FG=""
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    sleep 0.5
-    FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
-    if echo "$FG" | grep -qi "clock"; then OPENED=1; break; fi
-  done
-  shot "intent-opened"
-  log "foreground after open: $FG"
-  if [ "$OPENED" = "1" ]; then
-    ok "intent-open-app"
-  elif adb logcat -d 2>/dev/null | grep "START u0" | grep -qi "clock"; then
-    log "clock start dispatched (foreground did not stick)"
-    ok "intent-open-app"
-  else
-    ng "intent-open-app"
-  fi
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
   adb shell input keyevent KEYCODE_HOME || true
   sleep 2
+  local TRY
+  for TRY in 1 2 3; do
+    adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+    sleep 3
+    adb shell uiautomator dump "/sdcard/$DUMP.xml" > /dev/null 2>&1 || true
+    adb pull "/sdcard/$DUMP.xml" "$OUT/$DUMP.xml" > /dev/null 2>&1 || true
+    if [ -f "$OUT/$DUMP.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/$DUMP.xml"; then
+      return 0
+    fi
+    log "ac_open_d3: open try $TRY did not land in App Center, retrying swipe"
+  done
+  log "ac_open_d3: could not enter App Center after 3 swipe tries"
+  return 1
+}
+
+# --- 9. 应用中心空态重试入口（477 后：首页意图入口已删，存活的 LLM 触点只剩应用中心空态）---
+# 477 删了首页意图搜索与无 Key 错误条；反馈闭环保留在应用中心：查询无结果时出
+# 空态「有应用能打开，重试」。本段验该入口在场：进应用中心 → 输无意义串 →
+# 空态重试行在场。不断言点按后的 LLM 流程（无 Key 时进选择器，属另一条链路）。
+# 到达验证走 ac_open_d3；未进则整段跳过不计 FAIL。
+if ac_open_d3 ac9_dump; then
+  AC9X=$(SX 540); AC9Y=$(SY 330)
+  CTR=$(center_rid "$OUT/ac9_dump.xml" "intent_input")
+  if [ -n "$CTR" ]; then AC9X=$(echo "$CTR" | cut -d' ' -f1); AC9Y=$(echo "$CTR" | cut -d' ' -f2); log "ac9 capsule by tag at ($AC9X,$AC9Y)"; fi
+  adb shell input swipe "$AC9X" "$AC9Y" "$AC9X" "$AC9Y" 150 || true
+  sleep 2
+  adb shell input text "zzzzqqqx" || true
+  sleep 1
+  adb shell input keyevent KEYCODE_BACK || true
+  sleep 2
+  shot "appcenter-empty"
+  adb shell uiautomator dump /sdcard/ac9_after.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/ac9_after.xml "$OUT/ac9_after.xml" > /dev/null 2>&1 || true
+  if [ ! -s "$OUT/ac9_after.xml" ]; then
+    sleep 1
+    adb shell uiautomator dump /sdcard/ac9_after.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/ac9_after.xml "$OUT/ac9_after.xml" > /dev/null 2>&1 || true
+  fi
+  if [ -f "$OUT/ac9_after.xml" ] && grep -q "有应用能打开，重试" "$OUT/ac9_after.xml"; then
+    ok "appcenter-empty-retry"
+  else
+    ng "appcenter-empty-retry"
+  fi
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 1
 else
-  ng "intent-open-app"
+  log "appcenter-empty-retry: could not enter App Center after retries - segment skipped (not counted)"
 fi
-# 应用中心：上滑开 D3（同第 7 段基线）。竖横屏顶部同为统一胶囊契约
-# （F2 销账后横屏并入 IntentCapsuleField），断言集同构、仅入场车道有别。
-adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
-sleep 3
-shot "appcenter2"
-adb shell uiautomator dump /sdcard/ac_dump.xml > /dev/null 2>&1 || true
-adb pull /sdcard/ac_dump.xml "$OUT/ac_dump.xml" > /dev/null 2>&1 || true
+
+# --- 10. 应用中心搜索（477 后：首页本地直达已删，只剩应用中心搜索面）---
+# 477 删了首页意图搜索（首页本地结果条 + 点结果开应用）与应用中心「问七仔」行；
+# 应用中心胶囊搜索（输字过滤 + ✕ 清空）保留。本段只验应用中心面：
+# 胶囊在场（appcenter-capsule）/ 输 "clo" 过滤出 Clock（appcenter-filter）/
+# 「问七仔」行缺席（appcenter-no-ask-row）/ ✕ 清空后占位复原（appcenter-cleared）。
+# 横屏断言集同构（appcenter-landscape-*）。到达验证走 ac_open_d3（第 9 段前定义，
+# 与第 31 段 dock-drag 同款口径）；未进则整段跳过不计 FAIL。
+if ac_open_d3 ac_dump; then
+  shot "appcenter2"
 if [ "$LANDSCAPE" = "1" ]; then
   # 横屏分支（F2 销账·线 C）：横屏搜索已与竖屏统一契约（同一 IntentCapsuleField /
-  # TextFieldValue 状态层 / 问七仔行 / ✕ 清空），断言按新契约与竖屏同集：
-  # search（胶囊在场）/ filter（输 clo 过滤出 Clock）/ ask-row（问七仔行在场）/
-  # clear（✕ 清空后占位复原、问七仔行消失）。旧口径只判自绘 pill 的占位文案
+  # TextFieldValue 状态层 / ✕ 清空），断言按新契约与竖屏同集：
+  # search（胶囊在场）/ filter（输 clo 过滤出 Clock）/ no-ask-row（问七仔行缺席）/
+  # clear（✕ 清空后占位复原）。旧口径只判自绘 pill 的占位文案
   # 「搜索应用，支持拼音/首字母」+ filter 并明文跳过其余三项；新口径走统一占位
   # 与 testTag 锚点，与竖屏等价且更强（覆盖面从 2 条扩到 4 条，不再依赖横屏
   # 专属文案）。
@@ -802,11 +564,11 @@ PYEOF
     else
       ng "appcenter-landscape-filter"
     fi
-    # 问七仔行：与竖屏 appcenter-ask-row 同判据（同 dump、同文案）
-    if [ -f "$OUT/ac_dump2.xml" ] && grep -q '问七仔' "$OUT/ac_dump2.xml"; then
-      ok "appcenter-landscape-ask-row"
+    # 问七仔行已随 477 删除：此处反向断言——行缺席才算过
+    if [ -f "$OUT/ac_dump2.xml" ] && ! grep -q '问七仔' "$OUT/ac_dump2.xml"; then
+      ok "appcenter-landscape-no-ask-row"
     else
-      ng "appcenter-landscape-ask-row"
+      ng "appcenter-landscape-no-ask-row"
     fi
     # ✕ 清空：定位同竖屏（content-desc「清空」优先，testTag intent_clear 覆写），
     # 点法同竖屏（150ms 长按式点按防竞态）；判据同竖屏 appcenter-cleared
@@ -836,7 +598,7 @@ PYEOF
         adb shell uiautomator dump /sdcard/ac_dump3.xml > /dev/null 2>&1 || true
         adb pull /sdcard/ac_dump3.xml "$OUT/ac_dump3.xml" > /dev/null 2>&1 || true
       fi
-      if [ -f "$OUT/ac_dump3.xml" ] && grep -q 'text="想做什么？"' "$OUT/ac_dump3.xml" && ! grep -q '问七仔' "$OUT/ac_dump3.xml"; then
+      if [ -f "$OUT/ac_dump3.xml" ] && grep -q 'text="想做什么？"' "$OUT/ac_dump3.xml"; then
         ok "appcenter-landscape-clear"
       else
         ng "appcenter-landscape-clear"
@@ -846,13 +608,16 @@ PYEOF
     fi
   else
     ng "appcenter-landscape-filter"
-    ng "appcenter-landscape-ask-row"
+    ng "appcenter-landscape-no-ask-row"
     ng "appcenter-landscape-clear"
   fi
 else
 ACX=$(SX 540); ACY=$(SY 330)
 if [ -f "$OUT/ac_dump.xml" ]; then
-  if grep -q 'text="想做什么？"' "$OUT/ac_dump.xml"; then
+  # 占位文案会滚动（无输入时约 3 秒一换能力关键词），dump 时常抓到关键词
+  # 而非默认「想做什么？」（run 42746521326：抓到「查我明天的日程」）；
+  # 胶囊在场以 testTag intent_input 为准，与横屏分支同口径。
+  if grep -q 'text="想做什么？"' "$OUT/ac_dump.xml" || grep -q 'resource-id="intent_input"' "$OUT/ac_dump.xml"; then
     ok "appcenter-capsule"
   else
     ng "appcenter-capsule"
@@ -881,10 +646,10 @@ shot "appcenter-filter"
 adb shell uiautomator dump /sdcard/ac_dump2.xml > /dev/null 2>&1 || true
 adb pull /sdcard/ac_dump2.xml "$OUT/ac_dump2.xml" > /dev/null 2>&1 || true
 if [ -f "$OUT/ac_dump2.xml" ]; then
-  if grep -q '问七仔' "$OUT/ac_dump2.xml"; then
-    ok "appcenter-ask-row"
+  if ! grep -q '问七仔' "$OUT/ac_dump2.xml"; then
+    ok "appcenter-no-ask-row"
   else
-    ng "appcenter-ask-row"
+    ng "appcenter-no-ask-row"
   fi
   if grep -q 'text="Clock"' "$OUT/ac_dump2.xml"; then
     ok "appcenter-filter"
@@ -893,7 +658,7 @@ if [ -f "$OUT/ac_dump2.xml" ]; then
   fi
 fi
 # ✕ 一键清空（10-21 追加，应用中心变体专属）：ac_dump2 里应有 content-desc="清空" 节点；
-# press 点它后文本清空——占位"想做什么？"回来、「问七仔」行消失（网格恢复由截图人工验）。
+# press 点它后文本清空——占位"想做什么？"回来（网格恢复由截图人工验）。
 KX=""; KY=""
 if [ -f "$OUT/ac_dump2.xml" ]; then
   KNODE=$(grep -o '<node[^>]*content-desc="清空"[^>]*>' "$OUT/ac_dump2.xml" | head -1)
@@ -929,7 +694,7 @@ if [ -n "$KX" ]; then
     adb shell uiautomator dump /sdcard/ac_dump3.xml > /dev/null 2>&1 || true
     adb pull /sdcard/ac_dump3.xml "$OUT/ac_dump3.xml" > /dev/null 2>&1 || true
   fi
-  if [ -f "$OUT/ac_dump3.xml" ] && grep -q 'text="想做什么？"' "$OUT/ac_dump3.xml" && ! grep -q '问七仔' "$OUT/ac_dump3.xml"; then
+  if [ -f "$OUT/ac_dump3.xml" ] && grep -q 'text="想做什么？"' "$OUT/ac_dump3.xml"; then
     ok "appcenter-cleared"
   else
     ng "appcenter-cleared"
@@ -938,15 +703,15 @@ else
   ng "appcenter-cleared"
 fi
 fi
+else
+  log "appcenter-search: could not enter App Center after retries - segment skipped (not counted)"
+fi
 
-# --- 11. 封面 3 模板下的胶囊 + 结果条（R2 UI 10-21 追加：Bob 提醒主页有 3 模板轮换）---
+# --- 11. 封面 3 模板静态断言（477 后：模板段只验静态简报 + Dock，不再进输入态）---
 # 模板选择是纯日期逻辑：CoverHero 里 coverTemplateFor() = DAY_OF_YEAR % 3 ->
 # values()[0]=GIANT_TIME（时间巨像）/ [1]=HEADLINE（头条简报）/ [2]=MINIMAL（留白时刻），不走 prefs。
 # 故靠改模拟器日期（今天起 +0/+1/+2 天必覆盖三余数）逐个切换；每次 force-stop 重启回首页，
-# 截 intent-tpl-<name>.png 并 dump 断言静态在场，再点七仔格进输入态输 "clo" 截 -local 图并断言结果条 Clock。
-# v0.68.99（主页重构 R-1）：静态断言改为简报（cover_hero）+ Dock 七仔格在场
-# （断言名 tpl-<tpl>-brief；静态已无胶囊）；聚焦态 dump 文件名不变
-# （tpl_<tpl>_suggest.xml 仍供第 21 段 FOCUS_PAIRS 几何断言消费）。
+# 截 intent-tpl-<name>.png 并 dump 断言静态在场（cover_hero + dock_panel，且无胶囊/宠物节点）。
 # 日期改不动（如镜像无权限）时只 log 记录、不判失败——此时以代码级证据为准：
 # 三模板共用同一 CoverHero 渲染路径与同一 Dock，静态构图同源。
 adb shell settings put global auto_time 0 > /dev/null 2>&1 || true
@@ -1005,68 +770,8 @@ for OFF in 0 1 2; do
   shot "intent-tpl-$TPL"
   adb shell uiautomator dump /sdcard/tpl_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/tpl_dump.xml "$OUT/tpl_${TPL}.xml" > /dev/null 2>&1 || true
-  # v0.68.99：tpl_<tpl>.xml 仍是静态 dump（第 21 段消费：静态下 intent_input /
-  # intent_submit 缺席走 INFO 跳过，cover_hero / dock_panel / pet_qizai 照常断言）
-  if [ -f "$OUT/tpl_${TPL}.xml" ] && grep -q 'resource-id="cover_hero"' "$OUT/tpl_${TPL}.xml" && grep -q 'resource-id="dock_pet_cell"' "$OUT/tpl_${TPL}.xml"; then
+  if [ -f "$OUT/tpl_${TPL}.xml" ] && grep -q 'resource-id="cover_hero"' "$OUT/tpl_${TPL}.xml" && grep -q 'resource-id="dock_panel"' "$OUT/tpl_${TPL}.xml" && ! grep -q 'resource-id="dock_pet_cell"' "$OUT/tpl_${TPL}.xml" && ! grep -q 'resource-id="pet_qizai"' "$OUT/tpl_${TPL}.xml" && ! grep -q 'resource-id="intent_input"' "$OUT/tpl_${TPL}.xml"; then
     ok "tpl-$TPL-brief"
-    # 点七仔格进输入态后，在输入态 dump 里定位胶囊
-    enter_input_mode "$OUT/tpl_${TPL}_in.xml" || true
-    TNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/tpl_${TPL}_in.xml" | head -1)
-    TNUMS=$(echo "$TNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    TX1=$(echo "$TNUMS" | sed -n 1p); TY1=$(echo "$TNUMS" | sed -n 2p)
-    TX2=$(echo "$TNUMS" | sed -n 3p); TY2=$(echo "$TNUMS" | sed -n 4p)
-    if [ -n "$TX1" ] && [ -n "$TY2" ]; then
-      TCX=$(( (TX1 + TX2) / 2 )); TCY=$(( (TY1 + TY2) / 2 ))
-      # 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
-      CTR=$(center_rid "$OUT/tpl_${TPL}_in.xml" "intent_input")
-      if [ -n "$CTR" ]; then TCX=$(echo "$CTR" | cut -d' ' -f1); TCY=$(echo "$CTR" | cut -d' ' -f2); log "tpl capsule by tag at ($TCX,$TCY)"; fi
-      adb shell input swipe "$TCX" "$TCY" "$TCX" "$TCY" 150 || true
-      sleep 2
-      # 2026-10-25 意图卡片统一：聚焦+空文本先截初始态（三模板各一张供人工亲验）
-      # 并断言面板在场且应用推荐标题已消失（应用推荐行已删）；之后照旧输
-      # "clo" 验本地结果（文本非空后初始态必须让位给本地结果）
-      shot "intent-tpl-$TPL-suggest"
-      # v0.68.99（R-1）：几何断言用的聚焦态 dump 改在收键盘后拉——胶囊底部
-      # 锚定，IME 弹起时窗口被压缩，胶囊在压缩帧里压住 hero 下沿（真实视觉
-      # 即输入浮层盖住简报下部，与聊天类 App 一致）；收键盘后焦点与面板
-      # 保留、窗口恢复全高，此时验 hero/pet 与胶囊两两不相交（同第 15 段
-      # suggest_dump 的既有口径）。截图仍是键盘弹起态，不受影响。
-      adb shell input keyevent KEYCODE_BACK || true
-      sleep 1
-      adb shell uiautomator dump /sdcard/tpl_dump_s.xml > /dev/null 2>&1 || true
-      adb pull /sdcard/tpl_dump_s.xml "$OUT/tpl_${TPL}_suggest.xml" > /dev/null 2>&1 || true
-      if [ -f "$OUT/tpl_${TPL}_suggest.xml" ] && grep -q 'resource-id="intent_panel"' "$OUT/tpl_${TPL}_suggest.xml" && ! grep -q '七仔猜你现在想用' "$OUT/tpl_${TPL}_suggest.xml"; then
-        ok "tpl-$TPL-suggest"
-      else
-        ng "tpl-$TPL-suggest"
-      fi
-      # 收键盘后重新点胶囊唤回键盘再输字（同第 15 段后半段法：BACK 只收
-      # 键盘、焦点保留，但输字前重点一次最稳）；其后的 BACK 仍是收键盘
-      CTR=$(center_rid "$OUT/tpl_${TPL}_suggest.xml" "intent_input")
-      if [ -n "$CTR" ]; then
-        adb shell input swipe $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) $(echo "$CTR" | cut -d' ' -f1) $(echo "$CTR" | cut -d' ' -f2) 150 || true
-        sleep 2
-      fi
-      adb shell input text "clo" || true
-      sleep 1
-      adb shell input keyevent KEYCODE_BACK || true
-      sleep 1
-      shot "intent-tpl-$TPL-local"
-      adb shell uiautomator dump /sdcard/tpl_dump2.xml > /dev/null 2>&1 || true
-      adb pull /sdcard/tpl_dump2.xml "$OUT/tpl_${TPL}_local.xml" > /dev/null 2>&1 || true
-      if ! grep -q 'text="Clock"' "$OUT/tpl_${TPL}_local.xml" 2>/dev/null; then
-        sleep 1
-        adb shell uiautomator dump /sdcard/tpl_dump2.xml > /dev/null 2>&1 || true
-        adb pull /sdcard/tpl_dump2.xml "$OUT/tpl_${TPL}_local.xml" > /dev/null 2>&1 || true
-      fi
-      if [ -f "$OUT/tpl_${TPL}_local.xml" ] && { grep -q 'text="Clock"' "$OUT/tpl_${TPL}_local.xml" || grep -q '<node[^>]*class="android.view.View"[^>]*content-desc="Clock"' "$OUT/tpl_${TPL}_local.xml"; }; then
-        ok "tpl-$TPL-local"
-      else
-        ng "tpl-$TPL-local"
-      fi
-    else
-      ng "tpl-$TPL-local"
-    fi
   else
     ng "tpl-$TPL-brief"
   fi
@@ -1106,54 +811,8 @@ adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 adb shell pidof "$PKG" | grep -q . && ok "font-scale-alive" || ng "font-scale-alive"
 
-# --- 13. 七仔反应（R3-C 对话感）：聚焦倾听态 / 本地结果呈现态 ---
-# force-stop 回首页基线 -> press 点胶囊（键盘弹起、七仔应进倾听姿态 FETCH）截 intent-focus；
-# 输 "clo" 收键盘截 intent-present（结果条在场 + 七仔应为呈现姿态）。
-# Planning 思考态在无 Key 环境瞬时跳过（协调器无 Key 直接进 Error），本轮取不到图，如实标注未验。
-adb shell am force-stop "$PKG" || true
-sleep 1
-adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-sleep 4
-adb shell input keyevent KEYCODE_HOME || true
-sleep 2
-FCX=$(SX 540); FCY=$(SY 1247)
-# v0.68.99：先点七仔格进输入态（胶囊聚焦即倾听姿态），再定位
-enter_input_mode "$OUT/focus_dump.xml" || true
-if [ -f "$OUT/focus_dump.xml" ]; then
-  FNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/focus_dump.xml" | head -1)
-  if [ -n "$FNODE" ]; then
-    FNUMS=$(echo "$FNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    FX1=$(echo "$FNUMS" | sed -n 1p); FY1=$(echo "$FNUMS" | sed -n 2p)
-    FX2=$(echo "$FNUMS" | sed -n 3p); FY2=$(echo "$FNUMS" | sed -n 4p)
-    if [ -n "$FX1" ] && [ -n "$FY2" ]; then
-      FCX=$(( (FX1 + FX2) / 2 )); FCY=$(( (FY1 + FY2) / 2 ))
-      log "reaction capsule at ($FCX,$FCY)"
-    fi
-  fi
-fi
-# 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
-CTR=$(center_rid "$OUT/focus_dump.xml" "intent_input")
-if [ -n "$CTR" ]; then FCX=$(echo "$CTR" | cut -d' ' -f1); FCY=$(echo "$CTR" | cut -d' ' -f2); log "reaction capsule by tag at ($FCX,$FCY)"; fi
-adb shell input swipe "$FCX" "$FCY" "$FCX" "$FCY" 150 || true
-sleep 2
-shot "intent-focus"
-adb shell input text "clo" || true
-sleep 1
-adb shell input keyevent KEYCODE_BACK || true
-sleep 1
-shot "intent-present"
-adb shell uiautomator dump /sdcard/present_dump.xml > /dev/null 2>&1 || true
-adb pull /sdcard/present_dump.xml "$OUT/present_dump.xml" > /dev/null 2>&1 || true
-if ! grep -q 'text="Clock"' "$OUT/present_dump.xml" 2>/dev/null; then
-  sleep 1
-  adb shell uiautomator dump /sdcard/present_dump.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/present_dump.xml "$OUT/present_dump.xml" > /dev/null 2>&1 || true
-fi
-if [ -f "$OUT/present_dump.xml" ] && { grep -q 'text="Clock"' "$OUT/present_dump.xml" || grep -q '<node[^>]*class="android.view.View"[^>]*content-desc="Clock"' "$OUT/present_dump.xml"; }; then
-  ok "intent-present-results"
-else
-  ng "intent-present-results"
-fi
+# --- 13. 七仔反应已删除（2026-11-10）：宠物与意图面板已随 477 删除，
+# intent-focus / intent-present 截图与 intent-present-results 断言一并退役。
 
 # --- 14. 封面会议卡点按入会（2026-10-21 真机 Bug：文案"点一下加入"点了没反应）---
 # 根因：封面 NextUpStrip 的 onMeetingTap 误接提醒函数 remindMeeting（只让七仔说话、
@@ -1374,8 +1033,9 @@ PYEOF
 nextup_dedupe_flow() {
   # $1=事件标题。v0.68.93（布局与交互 Loop 一批④）：同一会议双处呈现去重断言。
   # v0.68.99（主页重构 R-1）：会议常驻主场由 NextUp 条迁移为简报会行
-  # （today_nextup 在简报内）：种子事件在场、进输入态出意图面板时，该标题在
-  # 全屏 dump 里只能出现一次（简报会行标题），面板内不得再有会议行。
+  # （today_nextup 在简报内）。477 后首页无输入态、无意图面板：去重不变量
+  # 改为静态断言——种子事件在场时，简报会行标题在静态首页 dump 里只出现
+  # 一次（today_nextup 在场 + 标题计数 ==1；横屏 <=1，见下）。
   # 环境门同 nextup_tap_flow：种子事件进不了 Instances 视图时简报会行无从
   # 呈现，明示 SKIP 不计数（不冒充已验，报告如实标注）。
   local TITLE="$1"
@@ -1401,47 +1061,49 @@ nextup_dedupe_flow() {
     ng "nextup-dedupe-home"
     return
   fi
-  # v0.68.99：点 Dock 七仔格进输入态（静态无胶囊可聚焦）
-  enter_input_mode "$OUT/dedupe_in.xml" || true
-  # BACK 只收键盘、焦点与面板保留、输入态不退（同第 15 段法）：之后 dump
-  # 里简报会行与意图面板同屏——正是去重要验的同屏状态。
-  adb shell input keyevent KEYCODE_BACK || true
-  sleep 1
-  shot "intent-dedupe-suggest"
-  adb shell uiautomator dump /sdcard/dedupe_dump.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/dedupe_dump.xml "$OUT/dedupe_dump.xml" > /dev/null 2>&1 || true
-  # 0 字节空 dump 是「未知」不是「不在场」（v0.68.101 矩阵 tablet 腿实测：
-  # 空文件让前提检查误判建议面缺席）——同 focus 段的 redump 守卫
-  redump_if_empty dedupe_dump
-  if [ ! -s "$OUT/dedupe_dump.xml" ]; then
-    ng "nextup-dedupe"
-    return
-  fi
-  # 前提：意图面板真的在场（否则"无会议行"是空断言，直接判失败而非通过）
-  # 2026-10-25 意图卡片统一：建议面（应用推荐行）已删除，前提改验面板在场；
-  # 去重不变量本身不变（会行标题仍只应出现一处，面板不再是复刻源）。
-  if ! grep -q 'resource-id="intent_panel"' "$OUT/dedupe_dump.xml"; then
-    log "nextup-dedupe: intent panel not present - assertion precondition missing"
-    ng "nextup-dedupe"
-    return
-  fi
-  # 标题出现次数：简报会行标题一处（纯标题文本节点；行自身的
-  # content-desc 是另一属性不计入）；意图面板不再出会议行（应用推荐行已删），
-  # 第二处同名文本只可能来自其他复刻源。
+  # 标题出现次数限定在简报会行（today_nextup）bounds 内：477 后意图面板
+  # 已删，但首页另有智能卡片（482 日历卡）同场显示同一会议，整屏计数
+  # ==1 不再成立（run 42746521326：会行标题 + 日历卡标题各一处）；去重
+  # 不变量仍为「简报会行内标题只出现一次」，简报与卡片并存是否去重归
+  # 智能卡片线定（此处不判）。行自身的 content-desc 是另一属性，不计入。
   local CNT
-  CNT=$(grep -o "text=\"[^\"]*${TITLE}[^\"]*\"" "$OUT/dedupe_dump.xml" | wc -l | tr -d ' ')
-  log "nextup-dedupe: title occurrences=$CNT (expect 1, brief meeting row only)"
+  CNT=$(python3 - "$OUT/dedupe_dump0.xml" "$TITLE" <<'PYEOF'
+import re, sys
+x = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+title = sys.argv[2]
+nodes = re.findall(r"<node[^>]*>", x)
+tb = None
+for n in nodes:
+    if 'resource-id="today_nextup"' in n:
+        b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+        if b:
+            tb = tuple(int(v) for v in b.groups())
+        break
+if tb is None:
+    print(-1)
+    sys.exit(0)
+c = 0
+for n in nodes:
+    t = re.search(r'text="([^"]*)"', n)
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if t and b and title in t.group(1):
+        x1, y1, x2, y2 = (int(v) for v in b.groups())
+        if x1 >= tb[0] and y1 >= tb[1] and x2 <= tb[2] and y2 <= tb[3]:
+            c += 1
+print(c)
+PYEOF
+)
+  log "nextup-dedupe: title occurrences inside brief row=$CNT (expect 1)"
   if [ "$LANDSCAPE" = "1" ]; then
-    # v0.68.99（R-1 断言迁移，登记项 L-7）：横屏输入态下简报列（hero+胶囊+
-    # 建议面）高度饱和，会行被挤出合成（节点缺席而非复刻）——去重的核心
-    # 不变量是「绝不出现第二处」：横屏验 CNT<=1；会行在场的 ==1 由静态
-    # nextup-dedupe-home 子项严验。竖屏维持 ==1 + today_nextup 在场。
+    # 横屏静态下简报列高度饱和，会行可能被挤出合成（节点缺席而非复刻）——
+    # 去重的核心不变量是「绝不出现第二处」：横屏验 CNT<=1；会行在场的 ==1
+    # 由静态 nextup-dedupe-home 子项严验。竖屏维持 ==1 + today_nextup 在场。
     if [ "$CNT" -le 1 ]; then
       ok "nextup-dedupe"
     else
       ng "nextup-dedupe"
     fi
-  elif [ "$CNT" = "1" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump.xml"; then
+  elif [ "$CNT" = "1" ] && grep -q 'resource-id="today_nextup"' "$OUT/dedupe_dump0.xml"; then
     ok "nextup-dedupe"
   else
     ng "nextup-dedupe"
@@ -1554,134 +1216,11 @@ else
   fi
 fi
 
-# --- 15. 意图改进一批：零打字初始态 + 提交后焦点释放 ---
-# force-stop 回首页基线 -> press 点胶囊（聚焦+空文本）-> 意图面板在场且应用
-# 推荐标题已消失（2026-10-25 意图卡片统一：应用推荐行删除，点 Top1 打开
-# 随之退役）；再聚焦输整句、在键盘弹起状态下定位提交钮直接提交（不预收键盘）
-# -> 无 Key 错误条出现且 dump 无 focused="true" 节点，即焦点已释放——
-# clearFocus+收 IME 的可观测代理证据（IME 本体可见性在 CI 无稳定读法，
-# 以焦点状态取证，报告中如实标注）。会议行在 CI 无日历事件，不在此段覆盖。
-adb shell am force-stop "$PKG" || true
-sleep 1
-adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-sleep 4
-adb shell input keyevent KEYCODE_HOME || true
-sleep 2
-SGX=$(SX 540); SGY=$(SY 1247)
-# v0.68.99：先点七仔格进输入态（聚焦即出建议面），再在输入态 dump 里定位
-enter_input_mode "$OUT/suggest_dump0.xml" || true
-if [ -f "$OUT/suggest_dump0.xml" ]; then
-  SNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/suggest_dump0.xml" | head -1)
-  if [ -n "$SNODE" ]; then
-    SNUMS=$(echo "$SNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    SX1=$(echo "$SNUMS" | sed -n 1p); SY1=$(echo "$SNUMS" | sed -n 2p)
-    SX2=$(echo "$SNUMS" | sed -n 3p); SY2=$(echo "$SNUMS" | sed -n 4p)
-    if [ -n "$SX1" ] && [ -n "$SY2" ]; then
-      SGX=$(( (SX1 + SX2) / 2 )); SGY=$(( (SY1 + SY2) / 2 ))
-      log "suggest capsule at ($SGX,$SGY)"
-    fi
-  fi
-fi
-# 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
-CTR=$(center_rid "$OUT/suggest_dump0.xml" "intent_input")
-if [ -n "$CTR" ]; then SGX=$(echo "$CTR" | cut -d' ' -f1); SGY=$(echo "$CTR" | cut -d' ' -f2); log "suggest capsule by tag at ($SGX,$SGY)"; fi
-adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
-sleep 2
-shot "intent-suggest"
-# 量测用 dump 在收键盘后拉：键盘弹起时窗口 resize，坐标与层级都不可靠；
-# BACK 只收键盘，焦点与建议面保留（同第 10 段法），再截一张图。
-# v0.68.99 注：输入态下 Dock 按设计让位（D1/D2 卡隐藏），本图不再验 Dock
-# 在位（Dock 在静态基线由 home.png / 第 21 段几何断言覆盖）。
-adb shell input keyevent KEYCODE_BACK || true
-sleep 1
-shot "intent-suggest-full"
-adb shell uiautomator dump /sdcard/suggest_dump.xml > /dev/null 2>&1 || true
-adb pull /sdcard/suggest_dump.xml "$OUT/suggest_dump.xml" > /dev/null 2>&1 || true
-if ! grep -q 'resource-id="intent_panel"' "$OUT/suggest_dump.xml" 2>/dev/null; then
-  sleep 1
-  adb shell uiautomator dump /sdcard/suggest_dump.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/suggest_dump.xml "$OUT/suggest_dump.xml" > /dev/null 2>&1 || true
-fi
-# 2026-10-25 意图卡片统一：初始态断言 = 面板在场 + 应用推荐标题已消失
-if [ -f "$OUT/suggest_dump.xml" ] && grep -q 'resource-id="intent_panel"' "$OUT/suggest_dump.xml" && ! grep -q '七仔猜你现在想用' "$OUT/suggest_dump.xml"; then
-  ok "suggest-panel"
-else
-  ng "suggest-panel"
-fi
-# 2026-10-25 意图卡片统一：点 Top1 建议应用打开随应用推荐行删除而退役
-# （初始状态不再出应用行，无 Top1 可点）；本段余下直接走提交后焦点释放。
-log "suggest-open-app retired with deck apps row (2026-10-25 intent-card-unify)"
-# 提交后焦点释放：重新聚焦 -> 输整句 -> 键盘弹起时重新 dump 定位提交钮（坐标随
-# 窗口 resize 变）-> 直接点提交 -> 错误条在场且无 focused 节点
-# 注（首轮实测）：输完 "open wechat" 后末词在 LatinIME 里仍处 composing（下划线+
-# 候选栏），新 composing 守卫会正确挡下提交（截图中提交钮呈禁用暗色，即守卫实证）；
-# 真实中文输入法流程同样是先点候选上屏再提交——这里补输一个空格让组合上屏，
-# 与真实流程对齐后再验提交+收键盘。
-# 重新进输入态再定位（enter_input_mode；已在输入态时为重复聚焦，无害）
-enter_input_mode "$OUT/suggest_dump1.xml" || true
-if [ -f "$OUT/suggest_dump1.xml" ]; then
-  SNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/suggest_dump1.xml" | head -1)
-  if [ -n "$SNODE" ]; then
-    SNUMS=$(echo "$SNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    SX1=$(echo "$SNUMS" | sed -n 1p); SY1=$(echo "$SNUMS" | sed -n 2p)
-    SX2=$(echo "$SNUMS" | sed -n 3p); SY2=$(echo "$SNUMS" | sed -n 4p)
-    if [ -n "$SX1" ] && [ -n "$SY2" ]; then
-      SGX=$(( (SX1 + SX2) / 2 )); SGY=$(( (SY1 + SY2) / 2 ))
-    fi
-  fi
-fi
-# 体检批D ⑥：testTag 优先（命中则覆盖文本定位结果）
-CTR=$(center_rid "$OUT/suggest_dump1.xml" "intent_input")
-if [ -n "$CTR" ]; then SGX=$(echo "$CTR" | cut -d' ' -f1); SGY=$(echo "$CTR" | cut -d' ' -f2); log "suggest capsule2 by tag at ($SGX,$SGY)"; fi
-adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
-sleep 2
-adb shell input text "open%swechat" || true
-sleep 1
-adb shell input text "%s" || true
-sleep 1
-adb shell uiautomator dump /sdcard/suggest_kb.xml > /dev/null 2>&1 || true
-adb pull /sdcard/suggest_kb.xml "$OUT/suggest_kb.xml" > /dev/null 2>&1 || true
-redump_if_empty suggest_kb
-SUBX=""; SUBY=""
-if [ -f "$OUT/suggest_kb.xml" ]; then
-  BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/suggest_kb.xml" | head -1)
-  if [ -n "$BNODE" ]; then
-    BNUMS=$(echo "$BNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-    BX1=$(echo "$BNUMS" | sed -n 1p); BY1=$(echo "$BNUMS" | sed -n 2p)
-    BX2=$(echo "$BNUMS" | sed -n 3p); BY2=$(echo "$BNUMS" | sed -n 4p)
-    if [ -n "$BX1" ] && [ -n "$BY2" ]; then
-      SUBX=$(( (BX1 + BX2) / 2 )); SUBY=$(( (BY1 + BY2) / 2 ))
-      log "submit button (keyboard up) at ($SUBX,$SUBY)"
-    fi
-  fi
-fi
-# 体检批D ⑥：testTag 优先（命中则覆盖 content-desc 定位结果）
-CTR=$(center_rid "$OUT/suggest_kb.xml" "intent_submit")
-if [ -n "$CTR" ]; then SUBX=$(echo "$CTR" | cut -d' ' -f1); SUBY=$(echo "$CTR" | cut -d' ' -f2); log "submit button by tag at ($SUBX,$SUBY)"; fi
-if [ -n "$SUBX" ]; then
-  adb shell input swipe "$SUBX" "$SUBY" "$SUBX" "$SUBY" 150 || true
-  sleep 2
-  shot "intent-submit-nokeyboard"
-  adb shell uiautomator dump /sdcard/suggest_after.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/suggest_after.xml "$OUT/suggest_after.xml" > /dev/null 2>&1 || true
-  # v0.68.99（R-1 五轮实测）：uiautomator 偶发 0 字节空 dump（本文件在
-  # 五轮中招；同批 ac_dump3 / ni_btn 亦然）——空文件时重拉一次再判。
-  if [ ! -s "$OUT/suggest_after.xml" ]; then
-    sleep 1
-    adb shell uiautomator dump /sdcard/suggest_after.xml > /dev/null 2>&1 || true
-    adb pull /sdcard/suggest_after.xml "$OUT/suggest_after.xml" > /dev/null 2>&1 || true
-  fi
-  if grep -q "先在设置里配置大模型" "$OUT/suggest_after.xml" 2>/dev/null && ! grep -q 'focused="true"' "$OUT/suggest_after.xml"; then
-    ok "submit-releases-focus"
-  else
-    ng "submit-releases-focus"
-  fi
-else
-  ng "submit-releases-focus"
-fi
+# --- 15. 意图改进一批已删除（2026-11-10）：意图面板已随 477 删除，
+# suggest-panel / submit-releases-focus 的断言对象已不存在。
 
 # --- 16. 无障碍触控尺寸断言（R4）：量已拉取 dump 里关键目标的实际 dp 尺寸（>=48dp）---
-# 覆盖：提交按钮（intent_dump）/ 清空按钮 + 问七仔行（ac_dump2）/ 本地结果项（local_dump）。
+# 覆盖：清空按钮 + 过滤结果项（ac_dump2，Clock）/ Dock 在屏内（pet_dump 静态首页帧）。
 # 扇形段（fan_dump）只测量记录：扇形是 Canvas 手势面，无段语义节点即记为发现项，
 # TalkBack 走查归真机验收，CI 不冒充已验；liveRegion/stateDescription 不出现在
 # uiautomator dump 里，同样归真机验收项（a11y_check.py 会明示）。
@@ -1698,123 +1237,11 @@ else
   log "python3 unavailable - a11y check skipped (not counted)"
 fi
 
-# --- 17. 缺参追问态 + 能力动态绑定端到端（意图改进二批 + v0.68.88）---
-# 手段（仅测试路径，生产逻辑零改动）：LlmConfig 读 SharedPreferences "llm"——
-# run-as 预写 api_key/base_url/model，把 base_url 指向 runner 本机 mock LLM
-#（scripts/mock_llm.py，对任何输入恒回 daohang 空参）。通路沿用二批定案：
-# adb reverse + 127.0.0.1 + src/debug 网络配置放行回环明文。
-#
-# 阶段 A（出厂镜像：没装任何地图应用）：
-# - 提交 -> mock 回 daohang 空参 -> 协调器执行前校验拦下进 NeedsInput 追问
-#   （needsinput-question，沿用二批）；
-# - 该次请求里的 hints 不得含未装应用的能力（wechat/doubao）——v0.68.88
-#   「不许诺做不到的事」（hints-excludes-unavailable）；上下文包【现在】应在；
-# - 补参后执行：无提供方且本镜像无 geo 处理者 -> 如实报「本机没有安装支持」
-#   并离开追问态（fill-without-provider-honest）。
-# 阶段 B（装上腾讯地图桩 scripts/tencent-stub，包名 com.tencent.map——复现
-# Bob 真机「只装腾讯地图」场景；桩由 build-tools 在 runner 上现场拼装签名）：
-# - 同一句提交，这次请求里的 hints 必须含 daohang 的参数说明——绑定随实装
-#   变化（planner-pack-injected，含上下文包断言）；
-# - 追问补参后执行应真正分发：前台变成 com.tencent.map
-#   （needsinput-fill-executes，语义较二批升级：从「如实失败」变「真打开了」）。
-# mock 起不来或 prefs 预写失败时整段跳过不计 FAIL（环境问题不冒充产品失败）；
-# 段末清掉 llm prefs 并 force-stop，桩卸载，不污染后续段落与真机配置。
-MOCK_PORT=18741
-MOCK_LOG="$OUT/mock_llm_requests.log"
-MOCK_PID=""
-MOCK_UP=0
-if command -v python3 > /dev/null 2>&1; then
-  rm -f "$MOCK_LOG"
-  python3 scripts/mock_llm.py "$MOCK_PORT" "$MOCK_LOG" &
-  MOCK_PID=$!
-  for i in $(seq 1 20); do
-    if curl -s "http://127.0.0.1:$MOCK_PORT/health" 2> /dev/null | grep -q ok; then
-      MOCK_UP=1; break
-    fi
-    sleep 0.5
-  done
-fi
-
-# 定位胶囊 -> CGX/CGY（体检批D ⑥：优先 testTag intent_input；未命中退回 dump 占位文案，与第 15 段同法）
-ni_locate_capsule() {
-  CGX=""; CGY=""
-  # v0.68.99（主页重构 R-1）：静态无胶囊——先确保已进输入态（点七仔格），
-  # helper 的 dump 即 ni_dump0，后续定位逻辑不变。第 22 段共用本函数。
-  enter_input_mode "$OUT/ni_dump0.xml" || true
-  local CTR=$(center_rid "$OUT/ni_dump0.xml" "intent_input")
-  if [ -n "$CTR" ]; then
-    CGX=$(echo "$CTR" | cut -d' ' -f1); CGY=$(echo "$CTR" | cut -d' ' -f2)
-    log "ni capsule by tag at ($CGX,$CGY)"
-    return 0
-  fi
-  if [ -f "$OUT/ni_dump0.xml" ]; then
-    local CNODE=$(grep -o '<node[^>]*text="想做什么？"[^>]*>' "$OUT/ni_dump0.xml" | head -1)
-    if [ -n "$CNODE" ]; then
-      local CNUMS=$(echo "$CNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-      local CX1=$(echo "$CNUMS" | sed -n 1p); local CY1=$(echo "$CNUMS" | sed -n 2p)
-      local CX2=$(echo "$CNUMS" | sed -n 3p); local CY2=$(echo "$CNUMS" | sed -n 4p)
-      if [ -n "$CX1" ] && [ -n "$CY2" ]; then
-        CGX=$(( (CX1 + CX2) / 2 )); CGY=$(( (CY1 + CY2) / 2 ))
-      fi
-    fi
-  fi
-  [ -n "$CGX" ]
-}
-
-# 定位并点按金色提交钮（体检批D ⑥：优先 testTag intent_submit；未命中退回 content-desc=提交）；成功返回 0
-ni_tap_submit() {
-  adb shell uiautomator dump /sdcard/ni_btn.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/ni_btn.xml "$OUT/ni_btn.xml" > /dev/null 2>&1 || true
-  # v0.68.99（R-1 三轮实测）：uiautomator 偶发空 dump（ni_btn.xml 零节点）
-  # 让提交钮无从定位、第 17 段阶段 B 整段连坐——dump 里连 intent_submit
-  # 都没有时重拉一次（同第 10 段未命中重 dump 的既有口径）。
-  if ! grep -q 'intent_submit' "$OUT/ni_btn.xml" 2> /dev/null; then
-    sleep 1
-    adb shell uiautomator dump /sdcard/ni_btn.xml > /dev/null 2>&1 || true
-    adb pull /sdcard/ni_btn.xml "$OUT/ni_btn.xml" > /dev/null 2>&1 || true
-  fi
-  if tap_rid "$OUT/ni_btn.xml" "intent_submit"; then
-    return 0
-  fi
-  local BNODE=$(grep -o '<node[^>]*content-desc="提交"[^>]*>' "$OUT/ni_btn.xml" 2> /dev/null | head -1)
-  [ -n "$BNODE" ] || return 1
-  local BNUMS=$(echo "$BNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-  local BX1=$(echo "$BNUMS" | sed -n 1p); local BY1=$(echo "$BNUMS" | sed -n 2p)
-  local BX2=$(echo "$BNUMS" | sed -n 3p); local BY2=$(echo "$BNUMS" | sed -n 4p)
-  [ -n "$BX1" ] && [ -n "$BY2" ] || return 1
-  adb shell input swipe $(( (BX1 + BX2) / 2 )) $(( (BY1 + BY2) / 2 )) $(( (BX1 + BX2) / 2 )) $(( (BY1 + BY2) / 2 )) 150 > /dev/null 2>&1 || true
-  return 0
-}
-
-# 聚焦胶囊 -> 输词（补空格让 LatinIME 组合上屏，同第 15 段注）-> 点提交
-ni_type_submit() {
-  # v0.68.99（R-1）：胶囊位置随 IME 升降而变（底部锚定：弹起时随窗口压缩
-  # 上移、收起时落回底部）——每次输字前按 testTag 重新定位再点，不复用
-  # ni_locate_capsule 的缓存坐标（旧版胶囊在流内、位置恒定才可复用；
-  # R-1 首轮实测：补参时点空、文字没进框，fill 两项连坐）。
-  adb shell uiautomator dump /sdcard/ni_tap.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/ni_tap.xml "$OUT/ni_tap.xml" > /dev/null 2>&1 || true
-  if ! tap_rid "$OUT/ni_tap.xml" "intent_input"; then
-    adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 > /dev/null 2>&1 || true
-  fi
-  sleep 2
-  adb shell input text "$1" > /dev/null 2>&1 || true
-  sleep 1
-  adb shell input text "%s" > /dev/null 2>&1 || true
-  sleep 1
-  ni_tap_submit
-}
-
-# 轮询等 dump 里出现某串（最多约 12 秒，慢腿余量）；最后一份 dump 留在 ni_poll.xml
-ni_wait_text() {
-  for i in $(seq 1 12); do
-    sleep 1
-    adb shell uiautomator dump /sdcard/ni_poll.xml > /dev/null 2>&1 || true
-    adb pull /sdcard/ni_poll.xml "$OUT/ni_poll.xml" > /dev/null 2>&1 || true
-    if grep -q "$1" "$OUT/ni_poll.xml" 2> /dev/null; then return 0; fi
-  done
-  return 1
-}
+# --- 17. 缺参追问态 + 能力动态绑定已删除（2026-11-10）：意图协调器已随 477 删除，
+# mock LLM 追问流（needsinput-question / hints-excludes-unavailable /
+# fill-without-provider-honest / planner-pack-injected / needsinput-fill-executes）
+# 的断言对象已不存在；能力绑定口径由 LlmRouter 单测覆盖。
+# ni_build_stub 保留在下（第 20 段数据新鲜度与第 28 段 keystore 共用腾讯地图桩）。
 
 # 腾讯地图桩：用 runner 的 build-tools 现场拼装（javac -> d8 -> aapt2 link ->
 # zip 塞 dex -> zipalign -> apksigner 自签），成功置 STUB_APK 并返回 0
@@ -1838,186 +1265,10 @@ ni_build_stub() {
   return 0
 }
 
-if [ "$MOCK_UP" = "1" ]; then
-  # 设备侧 127.0.0.1:$MOCK_PORT -> runner 本机 mock（回环转发，段末撤销）
-  adb reverse "tcp:$MOCK_PORT" "tcp:$MOCK_PORT" > /dev/null 2>&1 || true
-  log "reverse list: $(adb reverse --list 2> /dev/null | tr '\n' ' ')"
-  adb shell am force-stop "$PKG" || true
-  printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
-    '    <string name="api_key">sk-mock</string>' \
-    "    <string name=\"base_url\">http://127.0.0.1:$MOCK_PORT</string>" \
-    '    <string name="model">mock-model</string>' "</map>" > "$OUT/llm.xml"
-  adb push "$OUT/llm.xml" /data/local/tmp/llm.xml > /dev/null 2>&1 || true
-  adb shell "run-as $PKG cp /data/local/tmp/llm.xml shared_prefs/llm.xml" || true
-  adb shell "run-as $PKG chmod 660 shared_prefs/llm.xml" || true
-  if adb shell "run-as $PKG cat shared_prefs/llm.xml" 2> /dev/null | grep -q '127.0.0.1'; then
-    adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-    sleep 5
-    adb shell input keyevent KEYCODE_HOME || true
-    sleep 2
-    if ni_locate_capsule; then
-      # ===== 阶段 A：没装任何地图（如实失败 + hints 不许诺）=====
-      REQ_A0=$(wc -l < "$MOCK_LOG" 2> /dev/null || echo 0)
-      if ni_type_submit "daohang"; then
-        if ni_wait_text "去哪儿"; then
-          ok "needsinput-question"
-        else
-          ng "needsinput-question"
-        fi
-        shot "intent-needsinput"
-        # 诊断（mock 通路排障）：把 LlmPlan 的网络异常原文打进冒烟日志并存档
-        adb logcat -d 2> /dev/null | grep "LlmPlan" | tail -4 | while IFS= read -r line; do log "llm: $line"; done
-        adb logcat -d 2> /dev/null | grep "LlmPlan" > "$OUT/ni_logcat.txt" || true
-        # hints 过滤取证：A 段请求含上下文包、但不得含未装应用的能力行
-        A_LOG=$(tail -n +$((REQ_A0 + 1)) "$MOCK_LOG" 2> /dev/null)
-        if ! echo "$A_LOG" | grep -q "wechat: " && ! echo "$A_LOG" | grep -q "doubao: " && echo "$A_LOG" | grep -q "【现在】"; then
-          ok "hints-excludes-unavailable"
-        else
-          ng "hints-excludes-unavailable"
-        fi
-        # 补参 -> 执行：无提供方 + 无 geo 处理者 -> 如实报错且离开追问态
-        if ni_type_submit "jichang"; then
-          ni_wait_text "本机没有安装支持" || true
-          cp "$OUT/ni_poll.xml" "$OUT/ni_a.xml" 2> /dev/null || true
-          shot "intent-needsinput-answered"
-          if grep -q "本机没有安装支持" "$OUT/ni_a.xml" 2> /dev/null && ! grep -q "去哪儿" "$OUT/ni_a.xml" 2> /dev/null; then
-            ok "fill-without-provider-honest"
-          else
-            ng "fill-without-provider-honest"
-          fi
-        else
-          ng "fill-without-provider-honest"
-        fi
-      else
-        ng "needsinput-question"
-        ng "hints-excludes-unavailable"
-        ng "fill-without-provider-honest"
-      fi
-      # ===== 阶段 B：只装腾讯地图（桩）时，导航应绑腾讯 =====
-      if ni_build_stub && adb install -r "$STUB_APK" > /dev/null 2>&1; then
-        log "tencent stub installed"
-        # 重启应用进程：清掉阶段 A 的错误态与旧缓存，从干净状态重走一遍
-        adb shell am force-stop "$PKG" || true
-        sleep 1
-        adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-        sleep 5
-        adb shell input keyevent KEYCODE_HOME || true
-        sleep 2
-        REQ_B0=$(wc -l < "$MOCK_LOG" 2> /dev/null || echo 0)
-        if ni_locate_capsule && ni_type_submit "daohang"; then
-          ni_wait_text "去哪儿" || true
-          # 绑定取证：这次请求里 daohang 必须带着参数说明回到 hints
-          B_LOG=$(tail -n +$((REQ_B0 + 1)) "$MOCK_LOG" 2> /dev/null)
-          if echo "$B_LOG" | grep -q "必填 to=目的地" && echo "$B_LOG" | grep -q "【现在】"; then
-            ok "planner-pack-injected"
-          else
-            ng "planner-pack-injected"
-          fi
-          if ni_type_submit "jichang"; then
-            # 前台切换在慢腿上可能晚于单次 sleep：轮询最多约 15s（api29 首跑单探落空）
-            FG_B=""
-            for _try in 1 2 3 4 5; do
-              sleep 3
-              FG_B=$(adb shell dumpsys activity activities 2> /dev/null | grep -m1 -E "topResumedActivity|ResumedActivity" || true)
-              if echo "$FG_B" | grep -q "com.tencent.map"; then break; fi
-            done
-            shot "intent-tencent-bound"
-            log "phaseB foreground: $FG_B"
-            if echo "$FG_B" | grep -q "com.tencent.map"; then
-              ok "needsinput-fill-executes"
-            else
-              ng "needsinput-fill-executes"
-            fi
-          else
-            ng "needsinput-fill-executes"
-          fi
-        else
-          ng "planner-pack-injected"
-          ng "needsinput-fill-executes"
-        fi
-        adb shell pm uninstall com.tencent.map > /dev/null 2>&1 || true
-      else
-        log "tencent stub build/install failed - phase B counted as fail"
-        ng "planner-pack-injected"
-        ng "needsinput-fill-executes"
-      fi
-    else
-      ng "needsinput-question"
-      ng "hints-excludes-unavailable"
-      ng "fill-without-provider-honest"
-      ng "planner-pack-injected"
-      ng "needsinput-fill-executes"
-    fi
-    # 清理：删 llm prefs + force-stop 掉 SP 缓存，恢复无 Key 基线
-    adb shell "run-as $PKG rm -f shared_prefs/llm.xml" || true
-    adb reverse --remove "tcp:$MOCK_PORT" > /dev/null 2>&1 || true
-    adb shell am force-stop "$PKG" || true
-  else
-    log "llm prefs seed failed - needsinput segment skipped (not counted)"
-  fi
-else
-  log "mock llm unavailable - needsinput segment skipped (not counted)"
-fi
-if [ -n "$MOCK_PID" ]; then kill "$MOCK_PID" 2> /dev/null || true; fi
 
-# --- 18. 意图焦点点外部取消（v0.68.93 布局与交互 Loop 一批①：Bob 真机点名 bug）---
-# 根因：Compose 无点外部自动清焦，releaseInputFocus 只从 IntentEntry 内部调，
-# 点页面其他地方焦点不释放、键盘不收，用户被困编辑态。修复后：聚焦输字 ->
-# press 点七仔（意图区外）-> dump 无 focused="true" 节点且已输文本仍在（不吞字）。
-# v0.68.99（主页重构 R-1）：进输入态改走 Dock 七仔格；点外部（讲述者七仔）
-# 现在连输入态一并退出（胶囊卸载、Dock 回位），文本改由宿主持有——断言
-# 升级：post dump 无聚焦节点 + dock_panel 回位，再重进输入态验文本仍在。
-# IME 可见性用 dumpsys input_method 的 mInputShown 做辅助日志（CI 读法不稳，
-# 不作断言本体；断言 = 焦点状态，键盘收起由截图人工确认，报告如实标注）。
-adb shell am force-stop "$PKG" || true
-sleep 1
-adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-sleep 4
-adb shell input keyevent KEYCODE_HOME || true
-sleep 2
-# v0.68.99：点七仔格进输入态（进态即聚焦），直接输字
-enter_input_mode "$OUT/focus_dump0.xml" || true
-sleep 1
-adb shell input text "daohang" || true
-sleep 1
-# 补空格让 LatinIME composing 上屏（同第 15 段法，与真实输入流程对齐）
-adb shell input text "%s" || true
-sleep 1
-adb shell uiautomator dump /sdcard/focus_pre.xml > /dev/null 2>&1 || true
-adb pull /sdcard/focus_pre.xml "$OUT/focus_pre.xml" > /dev/null 2>&1 || true
-redump_if_empty focus_pre
-if [ -f "$OUT/focus_pre.xml" ] && grep -q 'focused="true"' "$OUT/focus_pre.xml" && grep -q 'daohang' "$OUT/focus_pre.xml"; then
-  # 前提成立（确实聚焦且文本在框内）才验取消；点简报区（cover_hero，
-  # 意图区外）——v0.68.101 单宠物后输入态 pet_qizai 是胶囊旁伴随体
-  # （意图区内，点它不退出），静态讲述者已撤，本段改点 hero 本体中心
-  PTX=$(SX 540); PTY=$(SY 300)
-  CTR=$(center_rid "$OUT/focus_pre.xml" "cover_hero")
-  if [ -n "$CTR" ]; then PTX=$(echo "$CTR" | cut -d' ' -f1); PTY=$(echo "$CTR" | cut -d' ' -f2); log "focus-cancel hero by tag at ($PTX,$PTY)"; fi
-  adb shell input swipe "$PTX" "$PTY" "$PTX" "$PTY" 150 || true
-  sleep 2
-  shot "intent-focus-outside"
-  IMESHOWN=$(adb shell dumpsys input_method 2>/dev/null | grep -m1 "mInputShown" | tr -d ' ' || true)
-  log "focus-cancel ime after outside tap: ${IMESHOWN:-unavailable} (auxiliary only)"
-  adb shell uiautomator dump /sdcard/focus_post.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/focus_post.xml "$OUT/focus_post.xml" > /dev/null 2>&1 || true
-  redump_if_empty focus_post
-  # v0.68.99：退出证据 = 无聚焦节点 + Dock 面板回位（胶囊已卸载，文本不在
-  # 本 dump 里——保留性由紧随的重进检查证明）
-  if [ -f "$OUT/focus_post.xml" ] && ! grep -q 'focused="true"' "$OUT/focus_post.xml" && grep -q 'resource-id="dock_panel"' "$OUT/focus_post.xml"; then
-    enter_input_mode "$OUT/focus_re.xml" || true
-    if [ -f "$OUT/focus_re.xml" ] && grep -q 'daohang' "$OUT/focus_re.xml"; then
-      ok "focus-cancel-outside"
-    else
-      log "focus-cancel: text NOT preserved across exit/re-entry"
-      ng "focus-cancel-outside"
-    fi
-  else
-    ng "focus-cancel-outside"
-  fi
-else
-  log "focus-cancel precondition missing (capsule not focused or text absent) - counted as fail"
-  ng "focus-cancel-outside"
-fi
+
+# --- 18. 意图焦点点外部取消已删除（2026-11-10）：首页输入态已随 477 删除，
+# 点外部清焦的口径随 IntentEntry 一并退役。
 
 # --- 19. 玻璃试点批：三背景取证（照片壁纸全开强玻璃 / 蓝天远山 / 纯纸面轻霜）---
 # v0.68.96 起三张壁纸（sky 排首位，离第 14 段种子事件最近）：每张全景 +
@@ -2038,17 +1289,20 @@ adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 shot "glass-default"
 glass_home_alive() {
+  # 477 后首页无胶囊、无常驻宠物：只验「进程存活 + 首页可达」——
+  # pidof 在场，且首页 dump 里 cover_hero 或 dock_panel 任一在场。
   adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1 || true
   sleep 1
   adb shell input keyevent KEYCODE_HOME > /dev/null 2>&1 || true
   sleep 2
   adb shell uiautomator dump /sdcard/glass_alive.xml > /dev/null 2>&1 || true
   adb pull /sdcard/glass_alive.xml "$OUT/glass_alive.xml" > /dev/null 2>&1 || true
-  [ -f "$OUT/glass_alive.xml" ] && { grep -q "intent_input" "$OUT/glass_alive.xml" || grep -q "pet_qizai" "$OUT/glass_alive.xml"; }
+  [ -f "$OUT/glass_alive.xml" ] && { grep -q 'resource-id="cover_hero"' "$OUT/glass_alive.xml" || grep -q 'resource-id="dock_panel"' "$OUT/glass_alive.xml"; }
 }
 glass_bubble_shot() {
-  # 长按七仔：首按指引说话（「长按我是抚摸哦」）触发气泡；调用前已删 guide_prefs 复位。
-  # 按住 4 秒，约 1.2 秒与 2.4 秒各抓一张（气泡全显窗口约说后 0.3-2.9 秒）。
+  # 长按七仔取气泡（477 后宠物已移除：无 pet_qizai 节点时直接返回、不长按；
+  # 调用前已删 guide_prefs 复位）。按住 4 秒，约 1.2 秒与 2.4 秒各抓一张
+  # （气泡全显窗口约说后 0.3-2.9 秒）。
   adb shell uiautomator dump /sdcard/glass_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/glass_dump.xml "$OUT/glass_dump.xml" > /dev/null 2>&1 || true
   local ctr gx gy
@@ -2056,7 +1310,8 @@ glass_bubble_shot() {
   if [ -n "$ctr" ]; then
     gx=$(echo "$ctr" | cut -d' ' -f1); gy=$(echo "$ctr" | cut -d' ' -f2)
   else
-    gx=$(SX 880); gy=$(SY 683)
+    log "glass: no pet on home - bubble shot skipped (pet removed in 477)"
+    return 0
   fi
   log "glass: bubble long-press at ($gx,$gy)"
   adb shell input swipe "$gx" "$gy" "$gx" "$gy" 5000 > /dev/null 2>&1 &
@@ -2113,19 +1368,15 @@ glass_root_swap_wallpaper() {
 glass_nextup_shot() {
   # $1=截图名。简报会行取证（v0.68.99 起 NextUp 紧凑条退役、会行长进简报，
   # testTag today_nextup 迁移至简报会行；其玻璃语境即简报本体、无独立玻璃面）：
-  # 第 14 段种子事件窗口（+20~+80 分钟）仍覆盖本段时，点七仔格进输入态→
-  # BACK 收键盘，建议面与简报同屏入图（同 §14 dedupe 流）；事件不在场只记
-  # 日志不判负（玻璃证据以全景图为准，无事件时简报会行不渲染）。
+  # 477 后首页无输入态：只做静态取证——第 14 段种子事件窗口（+20~+80 分钟）
+  # 仍覆盖本段时 today_nextup 在场即截图；事件不在场只记日志不判负
+  # （玻璃证据以全景图为准，无事件时简报会行不渲染）。
   local name="$1"
-  enter_input_mode "$OUT/glass_nu_dump.xml" || true
+  adb shell uiautomator dump /sdcard/glass_nu_dump.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/glass_nu_dump.xml "$OUT/glass_nu_dump.xml" > /dev/null 2>&1 || true
   if [ -f "$OUT/glass_nu_dump.xml" ] && grep -q 'resource-id="today_nextup"' "$OUT/glass_nu_dump.xml"; then
-    adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1 || true
-    sleep 1
     shot "$name"
     log "glass: brief-meeting shot taken ($name)"
-    # 恢复静态基线（下一拍长按七仔截气泡在静态下进行）：再 BACK 退出输入态
-    adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1 || true
-    sleep 1
   else
     log "glass: brief meeting row absent for $name (seeded event window passed or not seeded)"
     shot "$name"
@@ -2435,8 +1686,8 @@ sleep 1
 # --- 21. 布局几何断言（v0.68.97 布局普查批）：关键元素两两不相交 + 完整在屏内 ---
 # 量各段已产出的 tpl_*.xml / fan_dump.xml 与本段新拉的 layout_home / layout_ac /
 # layout_settings（scripts/layout_check.py，testTag 定位：cover_hero /
-# intent_input / intent_submit / today_nextup / pet_qizai / dock_panel，
-# dock_panel 缺失退化为 dock_item 并集）。聚焦态不查 Dock（IME 升起时
+# today_nextup / dock_panel；477 后无胶囊/宠物，intent_input / intent_submit /
+# pet_qizai 已从元素表移除。dock_panel 缺失退化为 dock_item 并集）。聚焦态不查 Dock（IME 升起时
 # dump 中的 Dock bounds 是被键盘覆盖的不可见几何）。
 log "layout: segment start"
 # NextUp 几何要有「即将开始」的事件在场才查得到：第 14 段种的事件到本段
@@ -2540,318 +1791,14 @@ echo "$LAYOUT_OUT" | while IFS= read -r line; do log "$line"; done
 LAYOUT_FAILS=$(echo "$LAYOUT_OUT" | grep -c "LAYOUT FAIL" || true)
 if [ "$LAYOUT_FAILS" -gt 0 ]; then ng "layout-geometry($LAYOUT_FAILS)"; else ok "layout-geometry"; fi
 
-# --- 22. Planning 取消（v0.68.98 布局与交互 Loop 二批-C：F-06 状态出口）---
-# 手段同第 17 段（mock LLM + 预写 llm prefs），差别在 mock 对含标记词
-# manmanxiang 的请求延迟 13 秒回包（v0.68.99 由 10 秒加长：R-1 入口路径
-# 变长后 10 秒余量被进入+轮询吃光，出现回包与点取消同秒竞态；仍 < 协调器
-# 15 秒超时）——把协调器稳定停在 Planning 态：
-# ①思考条「七仔想想中…」+「取消」钮在场（planning-strip）；
-# ②点「取消」后思考条消失、回 Idle（planning-cancel-dismisses）；
-# ③等过迟到回包的落地窗口，dump 里不得出现追问句「去哪儿」——mock 恒回
-#   daohang 空参，没被真取消的话迟到结果必进 NeedsInput 追问态，出现即
-#   取消没作废（planning-cancel-drops-late）。
-# 宿主 Job 被 cancel 后 HTTP 可能先断、迟到结果到不了客户端——本段验端到端
-# UI 行为；「结果已算出、正落状态」那一瞬的竞态由协调器代际守卫 + 单测覆盖
-# （IntentCoordinatorTest 15/16/17）。mock 起不来或 prefs 预写失败时整段跳过
-# 不计 FAIL（同第 17 段口径）；段末清 llm prefs + force-stop，不污染后续段落。
-PC_PORT=18742
-PC_LOG="$OUT/mock_slow_requests.log"
-PC_PID=""
-PC_UP=0
-if command -v python3 > /dev/null 2>&1; then
-  rm -f "$PC_LOG"
-  python3 scripts/mock_llm.py "$PC_PORT" "$PC_LOG" &
-  PC_PID=$!
-  for i in $(seq 1 20); do
-    if curl -s "http://127.0.0.1:$PC_PORT/health" 2> /dev/null | grep -q ok; then
-      PC_UP=1; break
-    fi
-    sleep 0.5
-  done
-fi
-if [ "$PC_UP" = "1" ]; then
-  adb reverse "tcp:$PC_PORT" "tcp:$PC_PORT" > /dev/null 2>&1 || true
-  adb shell am force-stop "$PKG" || true
-  printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
-    '    <string name="api_key">sk-mock</string>' \
-    "    <string name=\"base_url\">http://127.0.0.1:$PC_PORT</string>" \
-    '    <string name="model">mock-model</string>' "</map>" > "$OUT/llm_slow.xml"
-  adb push "$OUT/llm_slow.xml" /data/local/tmp/llm_slow.xml > /dev/null 2>&1 || true
-  adb shell "run-as $PKG cp /data/local/tmp/llm_slow.xml shared_prefs/llm.xml" || true
-  adb shell "run-as $PKG chmod 660 shared_prefs/llm.xml" || true
-  if adb shell "run-as $PKG cat shared_prefs/llm.xml" 2> /dev/null | grep -q '127.0.0.1'; then
-    adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-    sleep 5
-    adb shell input keyevent KEYCODE_HOME || true
-    sleep 2
-    if ni_locate_capsule; then
-      # 聚焦胶囊 -> 输标记词（补空格让 LatinIME 组合上屏，同第 15/17 段法）
-      adb shell input swipe "$CGX" "$CGY" "$CGX" "$CGY" 150 > /dev/null 2>&1 || true
-      sleep 2
-      adb shell input text "manmanxiang" > /dev/null 2>&1 || true
-      sleep 1
-      adb shell input text "%s" > /dev/null 2>&1 || true
-      sleep 1
-      # 提交 + 等思考条合并成一轮轮询：每轮 dump 先找思考条；没找到且提交钮
-      # 在场就点一次（只点一次）。不用 ni_type_submit 的单次 dump 定音——
-      # dark 腿首跑实测：单次 dump 落空导致 ni_tap_submit 找不到提交钮、三条
-      # 断言连坐；轮询重试可自愈这类偶发空/旧帧。思考条在提交后立即出现、
-      # 停留到慢响应回包（10 秒）为止，8 轮足够覆盖慢腿。
-      PC_STRIP=0
-      PC_TAPPED=0
-      for i in $(seq 1 8); do
-        adb shell uiautomator dump /sdcard/pc_poll.xml > /dev/null 2>&1 || true
-        adb pull /sdcard/pc_poll.xml "$OUT/pc_poll.xml" > /dev/null 2>&1 || true
-        if grep -q "七仔想想中" "$OUT/pc_poll.xml" 2> /dev/null && grep -q 'text="取消"' "$OUT/pc_poll.xml" 2> /dev/null; then PC_STRIP=1; break; fi
-        if [ "$PC_TAPPED" = "0" ] && tap_rid "$OUT/pc_poll.xml" "intent_submit"; then
-          PC_TAPPED=1
-        fi
-        sleep 1
-      done
-      if [ "$PC_STRIP" = "1" ]; then
-          ok "planning-strip"
-          shot "intent-planning"
-          # 点「取消」：优先 testTag planning_cancel，未命中退回 text=取消 的节点中心
-          if ! tap_rid "$OUT/pc_poll.xml" "planning_cancel"; then
-            CNODE=$(grep -o '<node[^>]*text="取消"[^>]*>' "$OUT/pc_poll.xml" | head -1)
-            CNUMS=$(echo "$CNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
-            CX1=$(echo "$CNUMS" | sed -n 1p); CY1=$(echo "$CNUMS" | sed -n 2p)
-            CX2=$(echo "$CNUMS" | sed -n 3p); CY2=$(echo "$CNUMS" | sed -n 4p)
-            if [ -n "$CX1" ] && [ -n "$CY2" ]; then
-              adb shell input swipe $(( (CX1 + CX2) / 2 )) $(( (CY1 + CY2) / 2 )) $(( (CX1 + CX2) / 2 )) $(( (CY1 + CY2) / 2 )) 150 > /dev/null 2>&1 || true
-            fi
-          fi
-          sleep 2
-          adb shell uiautomator dump /sdcard/pc_after.xml > /dev/null 2>&1 || true
-          adb pull /sdcard/pc_after.xml "$OUT/pc_after.xml" > /dev/null 2>&1 || true
-          if [ -f "$OUT/pc_after.xml" ] && ! grep -q "七仔想想中" "$OUT/pc_after.xml" 2> /dev/null; then
-            ok "planning-cancel-dismisses"
-          else
-            ng "planning-cancel-dismisses"
-          fi
-          # 等迟到回包的落地窗口整个过去（点取消后累计已过约 15 秒 > 13 秒延迟，再等 10 秒确认不上屏）
-          sleep 10
-          adb shell uiautomator dump /sdcard/pc_late.xml > /dev/null 2>&1 || true
-          adb pull /sdcard/pc_late.xml "$OUT/pc_late.xml" > /dev/null 2>&1 || true
-          shot "intent-planning-cancelled"
-          if [ -f "$OUT/pc_late.xml" ] && ! grep -q "去哪儿" "$OUT/pc_late.xml" 2> /dev/null && ! grep -q "七仔想想中" "$OUT/pc_late.xml" 2> /dev/null; then
-            ok "planning-cancel-drops-late"
-          else
-            ng "planning-cancel-drops-late"
-          fi
-      else
-        log "planning-cancel: planning strip never appeared after submit retries - segment counted as fail"
-        ng "planning-strip"
-        ng "planning-cancel-dismisses"
-        ng "planning-cancel-drops-late"
-      fi
-    else
-      log "planning-cancel: capsule not located - segment skipped (not counted)"
-    fi
-    # 清理：删 llm prefs + force-stop 掉 SP 缓存，恢复无 Key 基线（同第 17 段）
-    adb shell "run-as $PKG rm -f shared_prefs/llm.xml" || true
-    adb reverse --remove "tcp:$PC_PORT" > /dev/null 2>&1 || true
-    adb shell am force-stop "$PKG" || true
-  else
-    log "planning-cancel: llm prefs seed failed - segment skipped (not counted)"
-  fi
-else
-  log "mock llm unavailable - planning-cancel segment skipped (not counted)"
-fi
-if [ -n "$PC_PID" ]; then kill "$PC_PID" 2> /dev/null || true; fi
+# --- 22. Planning 取消已删除（2026-11-10）：意图协调器已随 477 删除，
+# 「七仔想想中」思考条与 planning_cancel 均不存在；取消语义由单测覆盖。
 
-# --- 25. 甲板点选填充（F 批新契约：素行 + 点选整句填入 + 自由文本发送）---
-# R-2 槽位契约（模板填入/槽位芯片/选择面板/未填拦截）已随 F 批整体退役，
-# 本段按新契约重写；旧断言 slot-template-open / slot-free-fill /
-# slot-panel-reopen / slot-clear / slot-unfilled-blocked / slot-send-composed
-# 随被测功能一并删除（理由：槽位 UX 不复存在，断言对象消失）。
-# 手段同第 17/22 段（独立 mock 实例 + 预写 llm prefs，端口 18743）：
-# ①进输入态 → 一体化面板 intent_panel 在场、示例素行 deck_example_nav
-#   在场，全 dump 无 slot_panel / slot_chip 节点（deck-examples）；
-#   该 dump 兼作几何网的 deck_focus.xml（面板几何断言，横屏腿同口径）；
-# ②点示例「导航去机场」→ intent_input 文本 == 整句「导航去机场」、
-#   无 slot_chip/slot_panel、甲板已让位（deck_example 消失）
-#   （deck-fill-text），几何经 layout_check 的 deck-focus 行验收
-#   （deck-layout-geometry，v4 紧凑行口径：可见高比/同带/间隙/次序）；
-# ③点发送 → mock 收到自由文本整句（含「导航去机场」，请求日志取证
-#   deck-send-free-text），mock 恒回 daohang 空参 → 落 .87 NeedsInput
-#   追问条「去哪儿」（deck-send-executes：缺参由追问兜底的活证据）。
-# mock 起不来或 prefs 预写失败时整段跳过不计 FAIL（同第 17 段口径）；
-# 放大字体腿（SMOKE_FONT_SCALE）示例行按降级规则收起、本段前提不成立，
-# 同样整段跳过不计；段末清 llm prefs + force-stop，不污染其他段。
-sd_dump() {
-  adb shell uiautomator dump /sdcard/sd_poll.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/sd_poll.xml "$1" > /dev/null 2>&1 || true
-}
-# 取 intent_input 节点的 text 属性（属性序不定，先圈节点再取 text）
-sd_input_text() {
-  grep -o '<node[^>]*resource-id="intent_input"[^>]*>' "$1" 2> /dev/null | head -1 \
-    | sed -n 's/.* text="\([^"]*\)".*/\1/p'
-}
-SD_PORT=18743
-SD_LOG="$OUT/mock_deck_requests.log"
-SD_PID=""
-SD_UP=0
-if command -v python3 > /dev/null 2>&1; then
-  rm -f "$SD_LOG"
-  python3 scripts/mock_llm.py "$SD_PORT" "$SD_LOG" &
-  SD_PID=$!
-  for i in $(seq 1 20); do
-    if curl -s "http://127.0.0.1:$SD_PORT/health" 2> /dev/null | grep -q ok; then
-      SD_UP=1; break
-    fi
-    sleep 0.5
-  done
-fi
-if [ "$SD_UP" = "1" ]; then
-  adb reverse "tcp:$SD_PORT" "tcp:$SD_PORT" > /dev/null 2>&1 || true
-  adb shell am force-stop "$PKG" || true
-  printf '%s\n' "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>" "<map>" \
-    '    <string name="api_key">sk-mock</string>' \
-    "    <string name=\"base_url\">http://127.0.0.1:$SD_PORT</string>" \
-    '    <string name="model">mock-model</string>' "</map>" > "$OUT/llm_deck.xml"
-  adb push "$OUT/llm_deck.xml" /data/local/tmp/llm_deck.xml > /dev/null 2>&1 || true
-  adb shell "run-as $PKG cp /data/local/tmp/llm_deck.xml shared_prefs/llm.xml" || true
-  adb shell "run-as $PKG chmod 660 shared_prefs/llm.xml" || true
-  if adb shell "run-as $PKG cat shared_prefs/llm.xml" 2> /dev/null | grep -q '127.0.0.1'; then
-    adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-    sleep 5
-    adb shell input keyevent KEYCODE_HOME || true
-    sleep 2
-    if enter_input_mode "$OUT/sd_open.xml"; then
-      sd_dump "$OUT/sd_deck.xml"
-      cp "$OUT/sd_deck.xml" "$OUT/deck_focus.xml" 2> /dev/null || true
-      # 示例行在放大字体腿（SMOKE_FONT_SCALE，如 1.3）按降级规则收起——
-      # 本段的前提（示例素行在场）在该腿按设计不成立，整段跳过不计
-      # （同第 17 段环境门控口径）；非降级腿缺示例才是真失败。
-      SD_SKIP25=0
-      if [ -f "$OUT/sd_deck.xml" ] && grep -q 'resource-id="deck_example_nav"' "$OUT/sd_deck.xml" \
-          && grep -q 'resource-id="intent_panel"' "$OUT/sd_deck.xml" \
-          && ! grep -q 'resource-id="slot_panel"' "$OUT/sd_deck.xml" \
-          && ! grep -q 'resource-id="slot_chip' "$OUT/sd_deck.xml"; then
-        ok "deck-examples"
-      elif [ -n "$SMOKE_FONT_SCALE" ]; then
-        SD_SKIP25=1
-        log "deck-fill: example row degraded away on font-scale leg - segment skipped (not counted)"
-      else
-        ng "deck-examples"
-      fi
-      shot "deck-panel"
-      if [ "$SD_SKIP25" = "1" ]; then
-        log "deck-fill: segment skipped on this leg (see above)"
-      elif tap_rid "$OUT/sd_deck.xml" "deck_example_nav"; then
-        sleep 2
-        sd_dump "$OUT/sd_filled.xml"
-        SD_FILLED_TEXT=$(sd_input_text "$OUT/sd_filled.xml")
-        if [ "$SD_FILLED_TEXT" = "导航去机场" ] \
-            && ! grep -q 'resource-id="slot_chip' "$OUT/sd_filled.xml" \
-            && ! grep -q 'resource-id="slot_panel"' "$OUT/sd_filled.xml" \
-            && ! grep -q 'resource-id="deck_example_nav"' "$OUT/sd_filled.xml"; then
-          ok "deck-fill-text"
-        else
-          log "deck-fill: intent_input text after tap = [$SD_FILLED_TEXT] (expected 导航去机场)"
-          ng "deck-fill-text"
-        fi
-        shot "deck-filled"
-        # 输入态几何：布局网的 deck-focus 行（面板/紧凑行/同面包含断言）
-        SD_LAYOUT=$(python3 scripts/layout_check.py "$OUT" "$SCR_W" "$SCR_H" 2>&1 | grep "deck-focus" || true)
-        echo "$SD_LAYOUT" | while IFS= read -r line; do [ -n "$line" ] && log "$line"; done
-        if echo "$SD_LAYOUT" | grep -q "LAYOUT FAIL"; then
-          ng "deck-layout-geometry"
-        else
-          ok "deck-layout-geometry"
-        fi
-        # ③ 发送：自由文本整句直达协调器 → 追问兜底 + 请求日志取证
-        if tap_rid "$OUT/sd_filled.xml" "intent_submit"; then
-          SD_EXEC=0
-          for i in $(seq 1 10); do
-            sleep 1
-            sd_dump "$OUT/sd_exec.xml"
-            if [ -f "$OUT/sd_exec.xml" ] && grep -q "去哪儿" "$OUT/sd_exec.xml"; then
-              SD_EXEC=1; break
-            fi
-          done
-          if [ "$SD_EXEC" = "1" ]; then
-            ok "deck-send-executes"
-          else
-            ng "deck-send-executes"
-          fi
-          shot "deck-sent"
-          if grep -q "导航去" "$SD_LOG" && grep -q "机场" "$SD_LOG"; then
-            ok "deck-send-free-text"
-          else
-            ng "deck-send-free-text"
-          fi
-        else
-          log "deck-fill: submit not located after fill - tail skipped"
-          ng "deck-send-executes"
-          ng "deck-send-free-text"
-        fi
-      else
-        log "deck-fill: example row not tappable - segment counted as fail"
-        ng "deck-fill-text"
-        ng "deck-layout-geometry"
-        ng "deck-send-executes"
-        ng "deck-send-free-text"
-      fi
-    else
-      log "deck-fill: capsule not located - segment skipped (not counted)"
-    fi
-    # 清理：删 llm prefs + force-stop 掉 SP 缓存，恢复无 Key 基线（同第 22 段）
-    adb shell "run-as $PKG rm -f shared_prefs/llm.xml" || true
-    adb reverse --remove "tcp:$SD_PORT" > /dev/null 2>&1 || true
-    adb shell am force-stop "$PKG" || true
-  else
-    log "deck-fill: llm prefs seed failed - segment skipped (not counted)"
-  fi
-else
-  log "mock llm unavailable - deck-fill segment skipped (not counted)"
-fi
-if [ -n "$SD_PID" ]; then kill "$SD_PID" 2> /dev/null || true; fi
+# --- 25. 甲板点选填充已删除（2026-11-10）：意图面板/甲板已随 477 删除；
+# layout_check.py 的 deck-focus 行同步删除（deck_focus.xml 不再产出）。
 
-# --- 26. 输入态不误退（v0.68.101·D-2 验收）：进输入 → 打字 → 空转超旧
-# 4 秒兜底窗口并间歇补字 → 删到空 → 再打字，全程不退出、不收键盘 ---
-# 真机两幕（切 IME 符号面板后、删字删到空后退出）的 CI 覆盖口径：符号
-# 面板切换在模拟器 LatinIME 上无法以 uiautomator 驱动，本段以「跨越旧
-# 兜底时窗的持续会话 + 删空 + 再输入」锁住同一失效类别（计时/失焦推断
-# 误退）；面板切换本身归真机验收。断言：末态仍聚焦、文本在框、键盘在场
-# （mInputShown 仅辅助日志，个别镜像读不到不判负）。
-log "input-stay: segment start"
-adb shell am force-stop "$PKG" || true
-sleep 1
-adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-sleep 4
-adb shell input keyevent KEYCODE_HOME || true
-sleep 2
-enter_input_mode "$OUT/stay_dump0.xml" || true
-sleep 1
-adb shell input text "daohang" || true
-sleep 1
-adb shell input text "%s" || true
-sleep 1
-# 跨过旧 4 秒兜底窗口：静置 3 秒 + 补一个字 + 再静置 3 秒（会话持续约 8 秒）
-sleep 3
-adb shell input text "2" || true
-sleep 3
-# 删到空（文本 "daohang 2" 共 9 字，DEL 12 次保底，多按无副作用）
-for _i in 1 2 3 4 5 6 7 8 9 10 11 12; do adb shell input keyevent KEYCODE_DEL || true; done
-sleep 1
-adb shell input text "dache" || true
-sleep 2
-adb shell uiautomator dump /sdcard/stay_post.xml > /dev/null 2>&1 || true
-adb pull /sdcard/stay_post.xml "$OUT/stay_post.xml" > /dev/null 2>&1 || true
-redump_if_empty stay_post
-shot "input-stay"
-IMESHOWN_STAY=$(adb shell dumpsys input_method 2>/dev/null | grep -m1 "mInputShown" | tr -d ' ' || true)
-log "input-stay ime: ${IMESHOWN_STAY:-unavailable} (auxiliary only)"
-if [ -f "$OUT/stay_post.xml" ] && grep -q 'focused="true"' "$OUT/stay_post.xml" && grep -q 'dache' "$OUT/stay_post.xml"; then
-  ok "input-no-auto-exit"
-else
-  log "input-stay: session did not survive typing/idle/delete cycle (see stay_post.xml)"
-  ng "input-no-auto-exit"
-fi
-adb shell input keyevent KEYCODE_HOME || true
-sleep 1
+# --- 26. 输入态不误退（D-2）已删除（2026-11-10）：首页输入态已随 477 删除；
+# 跨越兜底时窗不误退的口径由 IntentCoordinator 相关单测覆盖（协调器本身已删，见 477 收据）。
 
 # --- 27. 点「加入」只发一次意图 + 不回弹（v0.68.101·D-5）：种子会议（带
 # Zoom 链接）→ 点加入一次 → 数 logcat 中该链接的 START 派发次数（恰 1）
@@ -2918,14 +1865,10 @@ fi
 # 几何按 SCR/DENSITY 实测换算；横屏观察者挂其根容器、让 Rail 57dp）。
 log "band-tap: segment start"
 band_open_d3() {
-  adb shell am force-stop "$PKG" > /dev/null 2>&1 || true
-  sleep 1
-  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-  sleep 4
-  adb shell input keyevent KEYCODE_HOME || true
-  sleep 2
-  adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
-  sleep 3
+  # 到达验证走第 9 段前的 ac_open_d3（与第 31 段 dock-drag 同款口径）：
+  # force-stop + 启动 + HOME + 上滑，最多重试 3 次、settings 在场才算进。
+  # 返回 0=已进，1=未进；调用方按返回决定整段跳过还是继续。
+  ac_open_d3 ac_band_open
 }
 band_dump() {
   adb shell uiautomator dump "/sdcard/$1.xml" > /dev/null 2>&1 || true
@@ -2957,27 +1900,70 @@ band_fg_opened() {
   log "band-tap: foreground still ours after tap: $FG"
   return 1
 }
+band_tap_row() {
+  # $1=dump 文件（绝对路径）$2=行 label $3/$4=点按坐标：点按后轮询前台，
+  # 一次没打开就重拉 dump、重定位同一 label 再点一次、再轮询。
+  # 返回 0=前台离开本包（应用已打开），1=两次都没打开。
+  local DUMP="$1" LBL="$2" CX="$3" CY="$4"
+  adb shell input swipe "$CX" "$CY" "$CX" "$CY" 150 || true
+  if band_fg_opened; then return 0; fi
+  log "band-tap: first tap did not open '$LBL', re-locating and retrying once"
+  adb shell uiautomator dump /sdcard/ac_band_retry.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/ac_band_retry.xml "$OUT/ac_band_retry.xml" > /dev/null 2>&1 || true
+  local B2
+  B2=$(band_label_bounds "$OUT/ac_band_retry.xml" "$LBL" || true)
+  if [ -n "$B2" ]; then
+    local CX2 CY2
+    CX2=$(echo "$B2" | cut -d' ' -f1); CY2=$(echo "$B2" | cut -d' ' -f2)
+    log "band-tap: retry tap '$LBL' at ($CX2,$CY2)"
+    adb shell input swipe "$CX2" "$CY2" "$CX2" "$CY2" 150 || true
+    if band_fg_opened; then return 0; fi
+  else
+    log "band-tap: retry could not re-locate '$LBL' in fresh dump"
+  fi
+  return 1
+}
+band_tap_segment() {
 BAND_PX=$(( 88 * DENSITY / 160 ))
 BAND_TOP=$(( SCR_H - BAND_PX ))
 MID_LO=$(( SCR_H * 38 / 100 ))
 MID_HI=$(( SCR_H * 62 / 100 ))
 log "band-tap: screen ${SCR_W}x${SCR_H} density=$DENSITY band=[${BAND_TOP},${SCR_H}] mid=[${MID_LO},${MID_HI}]"
-band_open_d3
 # A：底部带内第一个应用（带内无行时逐次上滑列表找行）
 A_LBL=""; A_CX=0; A_CY=0
+BAND_REOPENED=0
 for TRY in 1 2 3 4 5; do
   band_dump ac_band
   if [ -f "$OUT/ac_band.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band.xml"; then
+    # 底部导航栏（3 键导航约 48dp）会吃掉带内最底部的点按：只认导航栏顶边
+    # 以上的行（run 42746521326：Settings 行中心 y=2373 落在导航栏区内，
+    # 两次点按均被系统吃掉）。NAV_TOP 从 dump 的导航栏背景节点取，缺省 SCR_H。
+    NAV_TOP=$SCR_H
+    NAVNODE=$(grep -o '<node[^>]*resource-id="android:id/navigationBarBackground"[^>]*>' "$OUT/ac_band.xml" | head -1)
+    if [ -n "$NAVNODE" ]; then
+      NAVNUMS=$(echo "$NAVNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+      NAVY1=$(echo "$NAVNUMS" | sed -n 2p)
+      [ -n "$NAVY1" ] && NAV_TOP="$NAVY1"
+    fi
     for LBL in Clock Calendar Camera Contacts Phone Settings Messaging Gallery Files Search; do
       B=$(band_label_bounds "$OUT/ac_band.xml" "$LBL" || true)
       [ -n "$B" ] || continue
       CY=$(echo "$B" | cut -d' ' -f2)
-      if [ "$CY" -ge "$BAND_TOP" ] && [ "$CY" -lt "$SCR_H" ]; then
+      if [ "$CY" -ge "$BAND_TOP" ] && [ "$CY" -lt "$NAV_TOP" ]; then
         A_LBL="$LBL"; A_CX=$(echo "$B" | cut -d' ' -f1); A_CY="$CY"
         break
       fi
     done
     [ -n "$A_LBL" ] && break
+  fi
+  if [ ! -f "$OUT/ac_band.xml" ] || ! grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band.xml" 2>/dev/null; then
+    # 上滑被首页引导卡吃掉时 dump 仍是首页：重进一次再找行（只重进一次）
+    if [ "$BAND_REOPENED" = "0" ]; then
+      BAND_REOPENED=1
+      log "band-tap: not in App Center on try $TRY, re-opening once"
+      band_open_d3 || true
+    fi
+    continue
   fi
   adb shell input swipe "$(SX 540)" "$(SY 1300)" "$(SX 540)" "$(SY 800)" 300 || true
   sleep 1
@@ -2986,8 +1972,7 @@ A_OK=0
 if [ -n "$A_LBL" ]; then
   log "band-tap: A band tap '$A_LBL' at ($A_CX,$A_CY) (band top=$BAND_TOP)"
   shot "appcenter-band"
-  adb shell input swipe "$A_CX" "$A_CY" "$A_CX" "$A_CY" 150 || true
-  if band_fg_opened; then ok "appcenter-band-row-tap"; A_OK=1; else ng "appcenter-band-row-tap"; fi
+  if band_tap_row "$OUT/ac_band.xml" "$A_LBL" "$A_CX" "$A_CY"; then ok "appcenter-band-row-tap"; A_OK=1; else ng "appcenter-band-row-tap"; fi
   shot "appcenter-band-after"
   band_dump ac_band_after
   # 带区节点全量打印（文档序）：覆盖层/展开卡/弹窗类节点的留档指认
@@ -3012,9 +1997,12 @@ else
 fi
 # B：同一应用滚到中屏再点（A 已打开时先回 D3 基线）
 if [ -n "$A_LBL" ]; then
-  if [ "$A_OK" = "1" ]; then band_open_d3; fi
+  if [ "$A_OK" = "1" ]; then band_open_d3 || true; fi
   B_HIT=""
-  for TRY in 1 2 3 4 5 6; do
+  # 滚步实测约 170px/次（非 500px 名义值），中屏区 576px 高，6 次不够把
+  # 底部行带进中屏（run 42746521326：第 6 次后 Settings 中心 y=1519，
+  # 距中屏底边 1488 仅差 31px）；放宽到 10 次。
+  for TRY in 1 2 3 4 5 6 7 8 9 10; do
     band_dump ac_band_b
     if [ -f "$OUT/ac_band_b.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band_b.xml"; then
       B=$(band_label_bounds "$OUT/ac_band_b.xml" "$A_LBL" || true)
@@ -3029,12 +2017,18 @@ if [ -n "$A_LBL" ]; then
   if [ -n "$B_HIT" ]; then
     BX=$(echo "$B_HIT" | cut -d' ' -f1); BY=$(echo "$B_HIT" | cut -d' ' -f2)
     log "band-tap: B mid tap same app '$A_LBL' at ($BX,$BY)"
-    adb shell input swipe "$BX" "$BY" "$BX" "$BY" 150 || true
-    if band_fg_opened; then ok "appcenter-band-sameapp-mid"; else ng "appcenter-band-sameapp-mid"; fi
+    if band_tap_row "$OUT/ac_band_b.xml" "$A_LBL" "$BX" "$BY"; then ok "appcenter-band-sameapp-mid"; else ng "appcenter-band-sameapp-mid"; fi
   else
     log "band-tap: same app '$A_LBL' never reached mid zone"
     ng "appcenter-band-sameapp-mid"
   fi
+fi
+}
+# 入口走 ac_open_d3 验证（与第 31 段 dock-drag 同款口径）；未进则整段跳过不计 FAIL。
+if band_open_d3; then
+  band_tap_segment
+else
+  log "band-tap: could not enter App Center after retries - segment skipped (not counted)"
 fi
 adb shell input keyevent KEYCODE_HOME || true
 sleep 1
@@ -3300,18 +2294,93 @@ ks_open_settings_expand() { # 前置：本 App 主页在前台；成功后 ks_se
   fi
   sleep 3
   ks_dump ks_set
-  grep -q "让七仔更聪明" "$OUT/ks_set.xml" 2> /dev/null || return 1
-  ks_tap_text ks_set "让七仔更聪明" || return 1
+  # 旧版 v0.68.100 设置页用旧文案「让七仔更聪明」，当前版用「让助手更聪明」；两串都接受。
+  if ! grep -q "让助手更聪明" "$OUT/ks_set.xml" 2> /dev/null && ! grep -q "让七仔更聪明" "$OUT/ks_set.xml" 2> /dev/null; then
+    return 1
+  fi
+  if ! ks_tap_text ks_set "让助手更聪明"; then
+    ks_tap_text ks_set "让七仔更聪明" || return 1
+  fi
   sleep 2
   ks_dump ks_set
   return 0
 }
+ks_build_old_apk() {
+  # 旧版包来源（2026-11-10）：v0.x release 已删完，下载链接 404；改为从 tag
+  # v0.68.100 现场构建旧版 APK（该 tag 仍在，写旧版 alpha06 格式 keystore）。
+  # 取源两路：git fetch tag，失败时回退 GitHub tag tarball（curl）。
+  # 任一步失败返回 1（调用方整段跳过、不计 FAIL）。耗时约 5-15 分钟（冷缓存
+  # 下 Gradle 分发 + 依赖下载），上限 25 分钟。
+  local TAG="v0.68.100" SRC="$OUT/old-v0.68.100" JAVA17="" GOT_SRC=0
+  if git rev-parse --verify "refs/tags/$TAG" > /dev/null 2>&1; then
+    GOT_SRC=1
+  else
+    log "keystore-fixture: fetching tag $TAG"
+    if git fetch --depth 1 origin "tag" "$TAG" > "$OUT/ks_git_fetch.log" 2>&1        && git rev-parse --verify "refs/tags/$TAG" > /dev/null 2>&1; then
+      GOT_SRC=1
+    else
+      log "keystore-fixture: git fetch tag failed (tail in log)"
+      tail -5 "$OUT/ks_git_fetch.log" 2>/dev/null | while IFS= read -r l; do log "ks_git_fetch: $l"; done
+    fi
+  fi
+  rm -rf "$SRC"; mkdir -p "$SRC"
+  if [ "$GOT_SRC" = "1" ]; then
+    if ! git archive "$TAG" 2> "$OUT/ks_git_archive.log" | tar -x -C "$SRC"; then
+      log "keystore-fixture: git archive failed (tail in log)"
+      tail -5 "$OUT/ks_git_archive.log" 2>/dev/null | while IFS= read -r l; do log "ks_git_archive: $l"; done
+      GOT_SRC=0
+      rm -rf "$SRC"; mkdir -p "$SRC"
+    fi
+  fi
+  if [ "$GOT_SRC" = "0" ]; then
+    # 回退：GitHub tag tarball（公开仓库可直接 curl；私有仓库会 404，届时仍跳过）
+    local TGZ="$OUT/old-v0.68.100.tar.gz"
+    log "keystore-fixture: trying tag tarball fallback"
+    if curl -sL --max-time 120 -o "$TGZ" "https://github.com/0xbobot/ai-launcher/archive/refs/tags/$TAG.tar.gz" \
+       && tar -tzf "$TGZ" > /dev/null 2>&1; then
+      tar -xzf "$TGZ" -C "$SRC" --strip-components=1 2> "$OUT/ks_tar.log" || { log "keystore-fixture: tarball extract failed"; return 1; }
+      GOT_SRC=1
+    else
+      log "keystore-fixture: tag tarball download failed"
+      return 1
+    fi
+  fi
+  [ -x "$SRC/gradlew" ] || { log "keystore-fixture: no gradlew in old tree"; return 1; }
+  # JDK 17（旧版 AGP/Gradle 工具链）：先认 runner 的 17 变量，再扫 /usr/lib/jvm。
+  for CAND in "${JAVA_HOME_17_X64:-}" /usr/lib/jvm/temurin-17-jdk-amd64 /usr/lib/jvm/java-17-openjdk-amd64; do
+    if [ -n "$CAND" ] && [ -x "$CAND/bin/java" ] && "$CAND/bin/java" -version 2>&1 | grep -q 'version "17\.'; then
+      JAVA17="$CAND"; break
+    fi
+  done
+  if [ -z "$JAVA17" ]; then
+    for CAND in /usr/lib/jvm/*17*; do
+      if [ -x "$CAND/bin/java" ] && "$CAND/bin/java" -version 2>&1 | grep -q 'version "17\.'; then
+        JAVA17="$CAND"; break
+      fi
+    done
+  fi
+  [ -n "$JAVA17" ] || { log "keystore-fixture: no JDK 17 found for old-tag build"; return 1; }
+  log "keystore-fixture: building old $TAG with JDK 17 at $JAVA17"
+  [ -n "$ANDROID_HOME" ] || { log "keystore-fixture: ANDROID_HOME unset"; return 1; }
+  (cd "$SRC" && JAVA_HOME="$JAVA17" ANDROID_HOME="$ANDROID_HOME" timeout 1500 ./gradlew :app:assembleDebug --no-daemon -x lint > "$OUT/ks_old_build.log" 2>&1) || {
+    log "keystore-fixture: old-tag build failed (see ks_old_build.log tail)"
+    tail -20 "$OUT/ks_old_build.log" 2>/dev/null | while IFS= read -r l; do log "ks_old_build: $l"; done
+    return 1
+  }
+  local BUILT_APK="$SRC/app/build/outputs/apk/debug/app-debug.apk"
+  [ -f "$BUILT_APK" ] || return 1
+  python3 - "$BUILT_APK" <<'PYEOF' || return 1
+import sys, zipfile
+sys.exit(0 if zipfile.is_zipfile(sys.argv[1]) else 1)
+PYEOF
+  cp "$BUILT_APK" "$KS_OLD_APK" || return 1
+  log "keystore-fixture: old $TAG built from tag ($(stat -c%s "$KS_OLD_APK" 2>/dev/null || echo ?) bytes)"
+  return 0
+}
 if [ "$KS_SKIP" = "1" ]; then
   log "keystore-fixture: skipped on form-factor leg (not counted)"
-elif ! curl -sL --max-time 120 -o "$KS_OLD_APK" \
-    "https://github.com/0xbobot/ai-launcher/releases/download/v0.68.100/ai-launcher-v0.68.100.apk" \
-    || [ ! -s "$KS_OLD_APK" ]; then
-  log "keystore-fixture: old apk download failed - segment skipped (not counted)"
+elif ! ks_build_old_apk; then
+  log "keystore-fixture: old apk unavailable (tag build failed) - segment skipped (not counted)"
 else
   KS_OK=1
   if adb install -r -d -g "$KS_OLD_APK" > /dev/null 2>&1; then
@@ -3455,73 +2524,8 @@ else
   fi
 fi
 
-# --- 29. 胶囊有效查询派生（并行线 D 合入，列车统一编号：原线 D 第 26 段）：存活性守卫 ---
-# 程序化置文没有 composing 过程：派生口径本体（无已上屏汉字用全文、
-# 含 composing 中的拼音字母；有汉字上屏只按已上屏内容、未上屏拼音
-# 不拼入）由 LocalSearchGateTest 单测锁死，composing 排除只能靠真机
-# 拼音输入法验证（如实登记为真机项）。本段是 CI 可观测层的守卫：
-# 拉丁串出本地结果 -> 末尾追加汉字串、回读 dump 确认汉字真进了字段
-# （adb input text 对汉字的支持随镜像而异，注不进则后半段跳过不计）
-# -> 结果应随已上屏查询（"clo微信"，无应用命中）消退 -> 清空重输
-# 拉丁串，结果应恢复（证落定链在汉字插曲后仍活着、没被闩死）。
-adb shell am force-stop "$PKG" || true
-sleep 1
-adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-sleep 4
-adb shell input keyevent KEYCODE_HOME || true
-sleep 2
-enter_input_mode "$OUT/pinyin_dump0.xml" || true
-pg_has_result() {
-  grep -q 'resource-id="result_item"' "$1" || grep -q 'text="Clock"' "$1" || \
-    grep -q 'content-desc="Clock"' "$1"
-}
-PG_CAPSULE=$(center_rid "$OUT/pinyin_dump0.xml" "intent_input")
-if [ -n "$PG_CAPSULE" ]; then
-  adb shell input swipe $(echo "$PG_CAPSULE" | cut -d' ' -f1) $(echo "$PG_CAPSULE" | cut -d' ' -f2) \
-    $(echo "$PG_CAPSULE" | cut -d' ' -f1) $(echo "$PG_CAPSULE" | cut -d' ' -f2) 150 || true
-  sleep 2
-  adb shell input text "clo" || true
-  sleep 2
-  adb shell uiautomator dump /sdcard/pinyin_lat.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/pinyin_lat.xml "$OUT/pinyin_lat.xml" > /dev/null 2>&1 || true
-  redump_if_empty pinyin_lat
-  if pg_has_result "$OUT/pinyin_lat.xml"; then
-    ok "pinyin-latin-responds"
-    # 末尾追加汉字（光标在文本末尾）：已上屏内容变为 "clo微信"
-    adb shell input text "微信" || true
-    sleep 2
-    adb shell uiautomator dump /sdcard/pinyin_han.xml > /dev/null 2>&1 || true
-    adb pull /sdcard/pinyin_han.xml "$OUT/pinyin_han.xml" > /dev/null 2>&1 || true
-    redump_if_empty pinyin_han
-    if grep -q '微' "$OUT/pinyin_han.xml"; then
-      if pg_has_result "$OUT/pinyin_han.xml"; then
-        ng "pinyin-han-committed"
-      else
-        ok "pinyin-han-committed"
-      fi
-      # 清空重输：连按 DEL 足量清空（空文本上多按无副作用，67 = KEYCODE_DEL）
-      for i in 1 2 3 4 5 6 7 8; do adb shell input keyevent 67 > /dev/null 2>&1 || true; done
-      sleep 1
-      adb shell input text "clo" || true
-      sleep 2
-      adb shell uiautomator dump /sdcard/pinyin_rec.xml > /dev/null 2>&1 || true
-      adb pull /sdcard/pinyin_rec.xml "$OUT/pinyin_rec.xml" > /dev/null 2>&1 || true
-      redump_if_empty pinyin_rec
-      if pg_has_result "$OUT/pinyin_rec.xml"; then
-        ok "pinyin-recovers-after-han"
-      else
-        ng "pinyin-recovers-after-han"
-      fi
-    else
-      log "pinyin-gate: Han text injection unsupported on this image - han segments skipped (not counted)"
-    fi
-  else
-    ng "pinyin-latin-responds"
-    log "pinyin-gate: latin baseline missing - han segments skipped (not counted)"
-  fi
-else
-  log "pinyin-gate: capsule not located - segment skipped (not counted)"
-fi
+# --- 29. 胶囊有效查询派生（并行线 D）已删除（2026-11-10）：首页胶囊已随 477 删除；
+# 派生口径本体由 LocalSearchGateTest 单测锁死，composing 排除归真机项。
 
 
 
