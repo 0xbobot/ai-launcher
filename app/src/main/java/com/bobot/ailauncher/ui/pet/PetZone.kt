@@ -43,7 +43,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.data.CalendarRepository
 import com.bobot.ailauncher.data.SmartCardRepository
-import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.ui.glass.GlassPolicy
 import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
 import com.bobot.ailauncher.ui.home.BriefMeetingRow
@@ -155,9 +154,10 @@ fun PetZone(
         }
     }
     val context = LocalContext.current
-    // 智能卡片（447）：日历连接器开关——关掉后简报会行（日历来源的卡片面）
-    // 立即停用；PetZone 的 resumeTick 会在回桌面时重组，本处随之重读。
-    val calendarEnabled = UiPrefs.isConnectorEnabled(context, UiPrefs.CONNECTOR_CALENDAR)
+    // 智能卡片（第十三批，Bob 2026-11-10 定：双重关全改掉）：简报会行不再查
+    // 日历连接器开关——会行跟着权限走（数据加载在 TodaySection 里只认
+    // READ_CALENDAR），与数据加载一致。旧口径（447）在这里留了一道开关门，
+    // 导致简报内部本身不一致：计数认权限、会行认开关。
     // v0.67.6：删除 15 分钟日程轮询（省电原则）
     // 改为一次性任务：TodaySection 数据管线的会议提醒调度（开会前 30/15 分钟
     // 各一次）；日历数据变化时重算，边界刷新天然兜底（防任务被杀）
@@ -172,23 +172,20 @@ fun PetZone(
     var coverNextEvent by remember { mutableStateOf<CalEvent?>(null) }
     // 意图改进一批：下一会议同步到共享 holder——首页意图入口的零打字建议面要读
     // （会议数据原本只活在本 Composable 的状态里，IntentEntry 够不着）；
-    // PetZone 离场时清空，避免建议面读到陈旧会议。TODAY 数据流本身不改。
-    // 智能卡片（447）：日历连接器关掉后，建议面也不应再报这场会——与会行同门。
-    LaunchedEffect(coverNextEvent, calendarEnabled) {
-        TodayEventsHolder.update(if (calendarEnabled) coverNextEvent else null)
+    // PetZone 离场时清空，避免建议面读到陈旧会议。
+    LaunchedEffect(coverNextEvent) {
+        TodayEventsHolder.update(coverNextEvent)
     }
     // v0.68.93（布局与交互 Loop 一批④）：会议呈现状态与数据同源上报——呈现点
     // 的渲染条件就是 coverNextEvent != null（.99 起为简报会行 BriefMeetingRow，
     // 原 NextUpStrip），呈现的事件 id 与 coverNextEvent.eventId 同拍写入/清空，
     // 供建议面按 id 去重（去重契约随呈现点迁移不变）。
-    // 智能卡片（447）：日历连接器关掉后会行不呈现，建议面也不应再报这场会——
-    // 呈现 id 与会行同门（calendarEnabled），且会行出现即算日历来源用过一次
-    // （设置连接器列表的“最后使用时间”用）。
-    LaunchedEffect(coverNextEvent, calendarEnabled) {
+    // 会行出现即算日历来源用过一次（设置连接器列表的“最后使用时间”用）。
+    LaunchedEffect(coverNextEvent) {
         TodayEventsHolder.updatePresentedNextEventId(
-            if (calendarEnabled) coverNextEvent?.eventId else null
+            coverNextEvent?.eventId
         )
-        if (coverNextEvent != null && calendarEnabled) {
+        if (coverNextEvent != null) {
             SmartCardRepository.recordCalendarUsed(context)
         }
     }
@@ -386,8 +383,9 @@ fun PetZone(
                 )
             ) else androidx.compose.animation.ExitTransition.None
         ) {
-            // 智能卡片（447）：日历连接器关掉后会行不呈现（断开后卡片立即停用该来源）。
-            if (coverNextEvent != null && calendarEnabled) {
+            // 简报会行（第十三批：不再查日历连接器开关，跟着权限走——
+            // 数据加载在 TodaySection 里只认 READ_CALENDAR）。
+            if (coverNextEvent != null) {
                 // 418（Bob）：简报与日程之间留白——16dp 时分隔线贴着简报
                 // 正文、两段读成一块；提到 32dp（大于简报内部 24dp 的段间
                 // 距，8dp 网格），日程作为独立一段站得住。

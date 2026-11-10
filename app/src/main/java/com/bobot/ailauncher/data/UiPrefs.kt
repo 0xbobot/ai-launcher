@@ -16,9 +16,11 @@ object UiPrefs {
     private const val KEY_FOLD_EXPANDED = "fold_expanded"
     // idea 灯泡（422）：上次看过说明页时的智能尾巴（逗号拼包名）；null 表从未建立基线
     private const val KEY_INSIGHT_SEEN_TAIL = "dock_insight_seen_tail"
-    // 智能卡片连接器（447）：五个本机来源各自的开关（默认全开；关掉后该来源
-    // 的卡片立即停用，权限本身不动——断开≠撤权限，重接不用再跑系统设置）
-    private const val KEY_CONNECTOR_PREFIX = "smart_connector_"
+    // 智能卡片连接器（447 起）：五个本机来源的键。第十三批删了各来源的开关
+    // （smart_connector_* 启用标志，连同 KEY_CONNECTOR_PREFIX 一起删）：
+    // 开关不再是一道关，卡片跟着权限走，UiPrefs 不再存启用标志——删了 API，
+    // 编译器就能证明没有开关门残留。连接器键仍作标识用（引导卡、行序、
+    // 等级计数共用同一套 key）。
 
     /** 连接器键（与 SmartCardRepository.buildConnectorStates 的五项一致） */
     const val CONNECTOR_NOTIFICATION = "notification"
@@ -26,17 +28,6 @@ object UiPrefs {
     const val CONNECTOR_MESSAGE = "message"
     const val CONNECTOR_PHONE = "phone"
     const val CONNECTOR_CONTACTS = "contacts"
-
-    /** 智能卡片连接器是否开启（默认 true；权限未开时开关本身不产生内容） */
-    fun isConnectorEnabled(context: Context, key: String): Boolean {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_CONNECTOR_PREFIX + key, true)
-    }
-
-    fun setConnectorEnabled(context: Context, key: String, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_CONNECTOR_PREFIX + key, enabled).apply()
-    }
 
     /** Dock 数据变化通知：置顶增删/排序后 bump，Dock 侧重算 */
     val dockTick = MutableStateFlow(0)

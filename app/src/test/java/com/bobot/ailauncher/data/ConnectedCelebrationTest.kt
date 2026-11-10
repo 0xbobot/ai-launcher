@@ -17,25 +17,24 @@ import org.junit.Test
  */
 class ConnectedCelebrationTest {
 
-    private fun state(key: String, granted: Boolean, enabled: Boolean) =
+    private fun state(key: String, granted: Boolean) =
         ConnectorState(
             key = key, name = key, desc = "", granted = granted,
-            enabled = enabled, lastUsedLabel = "今天用过"
+            lastUsedLabel = "今天用过"
         )
 
     /** 五个源的状态：消息/通知/日历/联系人各一对，电话拨号器随通知。 */
     private fun states(
-        message: Pair<Boolean, Boolean> = false to false,
-        notification: Pair<Boolean, Boolean> = false to false,
-        calendar: Pair<Boolean, Boolean> = false to false,
-        phoneEnabled: Boolean = false,
-        contacts: Pair<Boolean, Boolean> = false to false
+        message: Boolean = false,
+        notification: Boolean = false,
+        calendar: Boolean = false,
+        contacts: Boolean = false
     ) = listOf(
-        state(UiPrefs.CONNECTOR_MESSAGE, message.first, message.second),
-        state(UiPrefs.CONNECTOR_NOTIFICATION, notification.first, notification.second),
-        state(UiPrefs.CONNECTOR_CALENDAR, calendar.first, calendar.second),
-        state(UiPrefs.CONNECTOR_PHONE, notification.first, phoneEnabled),
-        state(UiPrefs.CONNECTOR_CONTACTS, contacts.first, contacts.second)
+        state(UiPrefs.CONNECTOR_MESSAGE, message),
+        state(UiPrefs.CONNECTOR_NOTIFICATION, notification),
+        state(UiPrefs.CONNECTOR_CALENDAR, calendar),
+        state(UiPrefs.CONNECTOR_PHONE, notification),
+        state(UiPrefs.CONNECTOR_CONTACTS, contacts)
     )
 
     private fun messageCard() = guideCards().first { it.id == "guide|message" }
@@ -58,7 +57,7 @@ class ConnectedCelebrationTest {
     fun feedback_levelEqualsRealConnectedCount() {
         // 等级数复用 connectedSourceCount，不另写一套：接上消息后
         // 真实已接源是 1（消息），反馈里的等级就必须是 1。
-        val after = states(message = true to true)
+        val after = states(message = true)
         val level = connectedSourceCount(after)
         assertEquals(1, level)
         val feedback = connectedFeedback(messageCard(), level, previousLevel = 0)
@@ -68,10 +67,11 @@ class ConnectedCelebrationTest {
 
     @Test
     fun feedback_levelDeltaIsTwoWhenNotificationAlsoCountsPhone() {
-        // 接通知时电话拨号器开关已开：通知＋电话拨号器一次涨 2，
-        // 增量如实算，不写死 +1。
-        val before = states(phoneEnabled = true)
-        val after = states(notification = true to true, phoneEnabled = true)
+        // 接通知时电话拨号器跟着算一个：通知＋电话一次涨 2，
+        // 增量如实算，不写死 +1（第十三批：电话拨号器没有自己的开关了，
+        // 接通知一定涨 2，不再是“开关已开时才涨 2”）。
+        val before = states()
+        val after = states(notification = true)
         assertEquals(0, connectedSourceCount(before))
         assertEquals(2, connectedSourceCount(after))
         val card = guideCards().first { it.id == "guide|notification" }
