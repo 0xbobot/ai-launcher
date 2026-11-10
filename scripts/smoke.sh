@@ -614,7 +614,10 @@ PYEOF
 else
 ACX=$(SX 540); ACY=$(SY 330)
 if [ -f "$OUT/ac_dump.xml" ]; then
-  if grep -q 'text="想做什么？"' "$OUT/ac_dump.xml"; then
+  # 占位文案会滚动（无输入时约 3 秒一换能力关键词），dump 时常抓到关键词
+  # 而非默认「想做什么？」（run 42746521326：抓到「查我明天的日程」）；
+  # 胶囊在场以 testTag intent_input 为准，与横屏分支同口径。
+  if grep -q 'text="想做什么？"' "$OUT/ac_dump.xml" || grep -q 'resource-id="intent_input"' "$OUT/ac_dump.xml"; then
     ok "appcenter-capsule"
   else
     ng "appcenter-capsule"
@@ -1058,12 +1061,39 @@ nextup_dedupe_flow() {
     ng "nextup-dedupe-home"
     return
   fi
-  # 标题出现次数：简报会行标题一处（纯标题文本节点；行自身的
-  # content-desc 是另一属性不计入）；477 后首页再无第二处复刻源
-  # （意图面板已删），第二处同名文本只可能来自其他复刻源。
+  # 标题出现次数限定在简报会行（today_nextup）bounds 内：477 后意图面板
+  # 已删，但首页另有智能卡片（482 日历卡）同场显示同一会议，整屏计数
+  # ==1 不再成立（run 42746521326：会行标题 + 日历卡标题各一处）；去重
+  # 不变量仍为「简报会行内标题只出现一次」，简报与卡片并存是否去重归
+  # 智能卡片线定（此处不判）。行自身的 content-desc 是另一属性，不计入。
   local CNT
-  CNT=$(grep -o "text=\"[^\"]*${TITLE}[^\"]*\"" "$OUT/dedupe_dump0.xml" | wc -l | tr -d ' ')
-  log "nextup-dedupe: title occurrences=$CNT (expect 1, brief meeting row only)"
+  CNT=$(python3 - "$OUT/dedupe_dump0.xml" "$TITLE" <<'PYEOF'
+import re, sys
+x = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+title = sys.argv[2]
+nodes = re.findall(r"<node[^>]*>", x)
+tb = None
+for n in nodes:
+    if 'resource-id="today_nextup"' in n:
+        b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+        if b:
+            tb = tuple(int(v) for v in b.groups())
+        break
+if tb is None:
+    print(-1)
+    sys.exit(0)
+c = 0
+for n in nodes:
+    t = re.search(r'text="([^"]*)"', n)
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if t and b and title in t.group(1):
+        x1, y1, x2, y2 = (int(v) for v in b.groups())
+        if x1 >= tb[0] and y1 >= tb[1] and x2 <= tb[2] and y2 <= tb[3]:
+            c += 1
+print(c)
+PYEOF
+)
+  log "nextup-dedupe: title occurrences inside brief row=$CNT (expect 1)"
   if [ "$LANDSCAPE" = "1" ]; then
     # 横屏静态下简报列高度饱和，会行可能被挤出合成（节点缺席而非复刻）——
     # 去重的核心不变量是「绝不出现第二处」：横屏验 CNT<=1；会行在场的 ==1
@@ -1905,11 +1935,21 @@ BAND_REOPENED=0
 for TRY in 1 2 3 4 5; do
   band_dump ac_band
   if [ -f "$OUT/ac_band.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band.xml"; then
+    # 底部导航栏（3 键导航约 48dp）会吃掉带内最底部的点按：只认导航栏顶边
+    # 以上的行（run 42746521326：Settings 行中心 y=2373 落在导航栏区内，
+    # 两次点按均被系统吃掉）。NAV_TOP 从 dump 的导航栏背景节点取，缺省 SCR_H。
+    NAV_TOP=$SCR_H
+    NAVNODE=$(grep -o '<node[^>]*resource-id="android:id/navigationBarBackground"[^>]*>' "$OUT/ac_band.xml" | head -1)
+    if [ -n "$NAVNODE" ]; then
+      NAVNUMS=$(echo "$NAVNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+      NAVY1=$(echo "$NAVNUMS" | sed -n 2p)
+      [ -n "$NAVY1" ] && NAV_TOP="$NAVY1"
+    fi
     for LBL in Clock Calendar Camera Contacts Phone Settings Messaging Gallery Files Search; do
       B=$(band_label_bounds "$OUT/ac_band.xml" "$LBL" || true)
       [ -n "$B" ] || continue
       CY=$(echo "$B" | cut -d' ' -f2)
-      if [ "$CY" -ge "$BAND_TOP" ] && [ "$CY" -lt "$SCR_H" ]; then
+      if [ "$CY" -ge "$BAND_TOP" ] && [ "$CY" -lt "$NAV_TOP" ]; then
         A_LBL="$LBL"; A_CX=$(echo "$B" | cut -d' ' -f1); A_CY="$CY"
         break
       fi
@@ -1959,7 +1999,10 @@ fi
 if [ -n "$A_LBL" ]; then
   if [ "$A_OK" = "1" ]; then band_open_d3 || true; fi
   B_HIT=""
-  for TRY in 1 2 3 4 5 6; do
+  # 滚步实测约 170px/次（非 500px 名义值），中屏区 576px 高，6 次不够把
+  # 底部行带进中屏（run 42746521326：第 6 次后 Settings 中心 y=1519，
+  # 距中屏底边 1488 仅差 31px）；放宽到 10 次。
+  for TRY in 1 2 3 4 5 6 7 8 9 10; do
     band_dump ac_band_b
     if [ -f "$OUT/ac_band_b.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band_b.xml"; then
       B=$(band_label_bounds "$OUT/ac_band_b.xml" "$A_LBL" || true)
@@ -2265,17 +2308,44 @@ ks_open_settings_expand() { # 前置：本 App 主页在前台；成功后 ks_se
 ks_build_old_apk() {
   # 旧版包来源（2026-11-10）：v0.x release 已删完，下载链接 404；改为从 tag
   # v0.68.100 现场构建旧版 APK（该 tag 仍在，写旧版 alpha06 格式 keystore）。
+  # 取源两路：git fetch tag，失败时回退 GitHub tag tarball（curl）。
   # 任一步失败返回 1（调用方整段跳过、不计 FAIL）。耗时约 5-15 分钟（冷缓存
   # 下 Gradle 分发 + 依赖下载），上限 25 分钟。
-  local TAG="v0.68.100" SRC="$OUT/old-v0.68.100" JAVA17=""
-  if ! git rev-parse --verify "refs/tags/$TAG" > /dev/null 2>&1; then
+  local TAG="v0.68.100" SRC="$OUT/old-v0.68.100" JAVA17="" GOT_SRC=0
+  if git rev-parse --verify "refs/tags/$TAG" > /dev/null 2>&1; then
+    GOT_SRC=1
+  else
     log "keystore-fixture: fetching tag $TAG"
-    git fetch --depth 1 origin "tag" "$TAG" > /dev/null 2>&1 || return 1
+    if git fetch --depth 1 origin "tag" "$TAG" > "$OUT/ks_git_fetch.log" 2>&1        && git rev-parse --verify "refs/tags/$TAG" > /dev/null 2>&1; then
+      GOT_SRC=1
+    else
+      log "keystore-fixture: git fetch tag failed (tail in log)"
+      tail -5 "$OUT/ks_git_fetch.log" 2>/dev/null | while IFS= read -r l; do log "ks_git_fetch: $l"; done
+    fi
   fi
-  git rev-parse --verify "refs/tags/$TAG" > /dev/null 2>&1 || return 1
   rm -rf "$SRC"; mkdir -p "$SRC"
-  git archive "$TAG" | tar -x -C "$SRC" || return 1
-  [ -x "$SRC/gradlew" ] || return 1
+  if [ "$GOT_SRC" = "1" ]; then
+    if ! git archive "$TAG" 2> "$OUT/ks_git_archive.log" | tar -x -C "$SRC"; then
+      log "keystore-fixture: git archive failed (tail in log)"
+      tail -5 "$OUT/ks_git_archive.log" 2>/dev/null | while IFS= read -r l; do log "ks_git_archive: $l"; done
+      GOT_SRC=0
+      rm -rf "$SRC"; mkdir -p "$SRC"
+    fi
+  fi
+  if [ "$GOT_SRC" = "0" ]; then
+    # 回退：GitHub tag tarball（公开仓库可直接 curl；私有仓库会 404，届时仍跳过）
+    local TGZ="$OUT/old-v0.68.100.tar.gz"
+    log "keystore-fixture: trying tag tarball fallback"
+    if curl -sL --max-time 120 -o "$TGZ" "https://github.com/0xbobot/ai-launcher/archive/refs/tags/$TAG.tar.gz" \
+       && tar -tzf "$TGZ" > /dev/null 2>&1; then
+      tar -xzf "$TGZ" -C "$SRC" --strip-components=1 2> "$OUT/ks_tar.log" || { log "keystore-fixture: tarball extract failed"; return 1; }
+      GOT_SRC=1
+    else
+      log "keystore-fixture: tag tarball download failed"
+      return 1
+    fi
+  fi
+  [ -x "$SRC/gradlew" ] || { log "keystore-fixture: no gradlew in old tree"; return 1; }
   # JDK 17（旧版 AGP/Gradle 工具链）：先认 runner 的 17 变量，再扫 /usr/lib/jvm。
   for CAND in "${JAVA_HOME_17_X64:-}" /usr/lib/jvm/temurin-17-jdk-amd64 /usr/lib/jvm/java-17-openjdk-amd64; do
     if [ -n "$CAND" ] && [ -x "$CAND/bin/java" ] && "$CAND/bin/java" -version 2>&1 | grep -q 'version "17\.'; then
