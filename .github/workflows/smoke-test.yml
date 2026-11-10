@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     # 45 分钟：脚本已长到 31 段，两次连续验证跑在模拟器存活时也跑满 30 分钟
     # 才到第 22 段左右（矩阵腿早已是 45 分钟）；30 分钟已不够整轮跑完。
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout triggering commit
         uses: actions/checkout@v4

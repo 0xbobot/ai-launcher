@@ -5,20 +5,19 @@
 输出行前缀 A11Y OK / A11Y FAIL / A11Y INFO / A11Y FAN-*，smoke.sh 以 FAIL 行判定断言。
 
 硬断言（>=48dp，量可点祖先节点的 bounds）：
-- 提交按钮：intent_dump.xml 中 content-desc="提交"
-- 清空按钮：ac_dump2.xml 中 content-desc="清空"
-- 问七仔行：ac_dump2.xml 中 text 含「问七仔」
-- 本地结果项：local_dump.xml 中 text="Clock" 的可点祖先（探针选 Clock：API 29 镜像无相机）
+- 清空按钮：ac_dump2.xml 中 content-desc="清空"（smoke.sh 第 10 段应用中心搜索面）
+- 过滤结果项：ac_dump2.xml 中 text="Clock" 的可点祖先（探针选 Clock：API 29 镜像无相机）
 横屏（landscape=1）时 ac_dump2 来自横屏 AC 流程：F2 销账（线 C）后横屏已
-并入统一胶囊契约，清空/问七仔控件在场并照常测量；缺失记 INFO 的兜底保留
-（smoke 第 10 段已对两控件在场单独断言，缺失不会从本检查漏检）。
+并入统一胶囊契约，清空控件在场并照常测量；缺失记 INFO 的兜底保留
+（smoke 第 10 段已对控件在场单独断言，缺失不会从本检查漏检）。
 
-意图改进一批追加（suggest_dump.xml，smoke.sh 第 15 段在收键盘后拉取，建议面在场）：
-布局不变量——建议项触控 >=48dp（标题后第一个应用项的可点祖先）；胶囊占位节点
-与建议面标题节点 bounds 不重叠；建议项完整落在屏内；Dock 仍在屏内（底部带内
-存在完整落在屏内的可点节点）。任一不满足输出 A11Y FAIL。
-v0.68.99（R-1）：Dock 在屏内一项改在静态主页 pet_dump.xml 上验（输入态 Dock
-按设计让位，suggest_dump 底部带为空属设计内状态）——属性与判据不变。
+477 后（2026-11-08）：首页意图入口已删——提交按钮（intent_dump.xml）
+与本地结果项（local_dump.xml）不再产出，提交断言与问七仔行断言退役；
+「问七仔」行缺席由 smoke 第 10 段断言 appcenter-no-ask-row 覆盖。
+意图面板/建议面（suggest_dump.xml）已删，deck-example 系列断言一并退役。
+
+Dock 仍在屏内（pet_dump.xml，smoke.sh 第 6 段静态首页帧）：
+底部带（中心 y > 85% 屏高）存在完整落在屏内的可点节点。
 
 只测量不判失败：
 - 扇形段（fan_dump.xml）：扇形是 Canvas 手势面，统计可点节点；无段语义节点时
@@ -89,22 +88,13 @@ def report(name, node, density, pmap, missing_ok=False):
 def main():
     density = float(sys.argv[1])
     out = sys.argv[2]
-
-    root = parse(os.path.join(out, "intent_dump.xml"))
-    if root is not None:
-        pm = parent_map(root)
-        report("submit-btn", find_first(root, lambda n: n.get("content-desc") == "提交"), density, pm)
-
     landscape = len(sys.argv) > 3 and sys.argv[3] == "1"
+
+    # 应用中心搜索面（smoke.sh 第 10 段）：清空按钮与过滤结果项。
     root = parse(os.path.join(out, "ac_dump2.xml"))
     if root is not None:
         pm = parent_map(root)
         report("clear-btn", find_first(root, lambda n: n.get("content-desc") == "清空"), density, pm, missing_ok=landscape)
-        report("ask-row", find_first(root, lambda n: "问七仔" in (n.get("text") or "")), density, pm, missing_ok=landscape)
-
-    root = parse(os.path.join(out, "local_dump.xml"))
-    if root is not None:
-        pm = parent_map(root)
         item = find_first(root, lambda n: n.get("text") == "Clock")
         if item is None:
             # 标签 TextView 偶发未进语义树（R4 实测）：退到图标 View 的 content-desc 节点，
@@ -112,48 +102,14 @@ def main():
             item = find_first(root, lambda n: n.get("class") == "android.view.View" and n.get("content-desc") == "Clock")
         report("result-item", item, density, pm)
 
-    # 2026-10-25 意图卡片统一：建议面（应用推荐行）已删除——本段改验初始态
-    # （suggest_dump.xml，聚焦+空文本+收键盘后拉取）：面板在场为前提；示例
-    # 行（deck_example_*）有行时验首项触控与屏内，示例池滤空时行隐藏是
-    # 设计行为（不判 FAIL）。
-    root = parse(os.path.join(out, "suggest_dump.xml"))
-    if root is not None:
-        pm = parent_map(root)
-        first = find_first(root, lambda n: True)
+    # Dock 仍在屏内：静态首页 dump（pet_dump.xml，第 6 段封面静态帧）底部带
+    # （中心 y > 85% 屏高）存在完整落在屏内的可点节点；带宽与完整落屏内
+    # 的判据不变。pet_dump 缺失时 parse 记 INFO，本项不判（第 6 段已断言
+    # 静态首页在场，缺失不会从本检查漏检）。
+    dock_root = parse(os.path.join(out, "pet_dump.xml"))
+    if dock_root is not None:
+        first = find_first(dock_root, lambda n: True)
         rb = bounds(first) if first is not None else None  # 首节点=根窗口，bounds 即屏面
-        panel = find_first(root, lambda n: (n.get("resource-id") or "").endswith("intent_panel"))
-        if panel is None:
-            print("A11Y FAIL intent-panel: panel node missing in suggest_dump")
-        else:
-            # 示例行首项：resource-id 前缀 deck_example_（文档序≈布局序第一项）
-            item = find_first(root, lambda n: (n.get("resource-id") or "").startswith("deck_example_"))
-            if item is None:
-                print("A11Y INFO deck-example: row hidden (empty executable pool by design)")
-            else:
-                report("deck-example-item", item, density, pm)
-                # 胶囊（占位节点）与示例行不重叠
-                cap = find_first(root, lambda n: n.get("text") == "想做什么？")
-                eb = bounds(item)
-                cb = bounds(cap) if cap is not None else None
-                if eb and cb:
-                    overlap = not (cb[2] <= eb[0] or eb[2] <= cb[0] or
-                                   cb[3] <= eb[1] or eb[3] <= cb[1])
-                    print(f"A11Y {'FAIL' if overlap else 'OK'} deck-example-overlap: "
-                          f"capsule={cb} example={eb}")
-                # 示例项完整落在屏内
-                if rb:
-                    ib = bounds(clickable_ancestor(item, pm))
-                    if ib:
-                        inside = (ib[0] >= rb[0] and ib[1] >= rb[1] and
-                                  ib[2] <= rb[2] and ib[3] <= rb[3])
-                        print(f"A11Y {'OK' if inside else 'FAIL'} deck-example-in-bounds: "
-                              f"item={ib} screen={rb}")
-        # Dock 仍在屏内：底部带（中心 y > 85% 屏高）存在完整落在屏内的可点节点。
-        # v0.68.99（R-1 断言迁移）：输入态下 Dock 按设计让位（胶囊进简报槽），
-        # suggest_dump 的底部带按定义为空——「Dock 在屏内」这一属性改在静态
-        # 主页 dump（pet_dump.xml，第 6 段封面静态帧，Dock 在场）上验，带宽
-        # 与完整落屏内的判据不变；pet_dump 缺失时回退 suggest_dump 旧口径。
-        dock_root = parse(os.path.join(out, "pet_dump.xml")) or root
         if rb:
             dock = None
             for n in dock_root.iter("node"):
