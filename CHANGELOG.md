@@ -10,6 +10,10 @@
 
 ---
 
+## v1.3.32（versionCode 489）— 2026-11-11
+
+智能卡片入会直达应用（Bob 2026-11-11 录屏：日历卡点「加入会议」进了浏览器 vc.feishu.cn，还要登录再唤起飞书应用）：有会议链接时先走会议应用——按域名定包，同一条 https 链接限定到该包，应用声明能接住（resolveActivity 非空）才真正发，接不住落回浏览器；飞书 vc.feishu.cn / meeting.feishu.cn / feishu.cn → 飞书，腾讯会议、VooV、Zoom、Teams、钉钉、Webex 同理。飞书包名 com.ss.android.lark 已核（飞书 APK 列表＋feishu.cn App Links）；vc.feishu.cn 的 intent-filter 公开渠道确认不了，显式意图先校验、接不住落回浏览器，真机为准。JoinGuard（2 秒 join-once）与兜底链照常。单测 647 绿、零 FAILED。
+
 ## v1.3.31（versionCode 488）— 2026-11-11
 
 智能卡片跟进（Bob 2026-11-11 真机 verdict 487）：应用小标从右下角独占行搬到标题行右上角（来源标签仍左上角、小标右对齐同一行；右端再向内收 16dp，留出右上角待办数角标的位置）；卡高 168→192dp，正文区至少 3 行高（算式 192－28－20－48－16＝80dp，3.3 行），超了继续卡内竖翻、底部渐隐；顺带 CoverHero.kt:528 注释改掉（不再引用已退役的 nextup_tap_flow／去重断言）与日历卡「加入会议」加 join-once（同一场会 2 秒内只放行第一次，失败可重试）。玻璃底、呼吸描边、15sp、露边卡只有边没有字、叠层位置、按钮、金色庆祝不动；系统小组件本身不在本批。单测 628 绿、零 FAILED。
