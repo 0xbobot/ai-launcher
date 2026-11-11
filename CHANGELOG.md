@@ -10,6 +10,10 @@
 
 ---
 
+## v1.3.37（versionCode 494）— 2026-11-11
+
+未读行跳转日志（Bob 2026-11-11 21:59 亲令：删质检、加日志、记例外，之后凭日志分析原因和优化）。点未读行时记 tap（包名、contentIntent 有没有、走哪条路、send 结果、回退走哪半），各结果到齐时再记 outcome（取消结果/前台核验耗时、回退发没发/开没开/点按到回退的毫秒数、门闩切后台与否）；结构化 JSONL 存本机 files/unread-jump-log.jsonl（环形 200 条），logcat 镜像 tag UnreadJump；只记结果不记消息内容。设置页“关于”区加一行“未读跳转日志”（只读列表 + 分享）。新 UnreadJumpLogTest 15 项全绿。
+
 ## v1.3.36（versionCode 493）— 2026-11-11
 
 飞书入会改走官方深链（Bob 2026-11-11 13:56 报「还是不行」：489 的显式包名 https 意图在真机上没走通，点「加入会议」还是进了浏览器 vc.feishu.cn）：根因已从飞书 APK v7.70.12 本身证实——飞书 manifest 里根本没声明接 vc.feishu.cn / meeting.feishu.cn 这两个 host，所以显式包名 https 意图的 resolveActivity 为空、落回浏览器；本批改走官方入会深链 feishu://applink.feishu.cn/client/videochat/open?action=join&num=<会议号>（已从 APK 的 manifest＋dex 反汇编核实：RouterActivity 声明 feishu://applink.feishu.cn，VideoChatHandler 把 /client/videochat/open 映射到入会处理，会议号即 vc.feishu.cn/j/ 里的 9 位数字），显式包名＋resolveActivity 校验，接不住落回 489 的显式包名 https 意图再走浏览器；提不到会议号时不编深链、直接走 489 链。JoinGuard（2 秒 join-once）与兜底链照常；其它会议应用与卡片不动。单测 670 绿、零 FAILED。
