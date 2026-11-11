@@ -1,11 +1,15 @@
 package com.bobot.ailauncher.ui.smartcard
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +47,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.SubcomposeLayout
@@ -82,7 +94,9 @@ import com.bobot.ailauncher.data.shouldShowGuideVersion
 import com.bobot.ailauncher.data.visibleGuideCards
 import com.bobot.ailauncher.ui.components.AppBadge
 import com.bobot.ailauncher.ui.components.AppIconImage
+import com.bobot.ailauncher.ui.glass.BackdropKind
 import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
+import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.ui.rememberNowMillis
@@ -104,6 +118,8 @@ import com.bobot.ailauncher.ui.theme.MotionTokens
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * 智能卡片叠层宿主（第一阶段，447/v1.2.0，设计稿 §4）：
@@ -528,6 +544,8 @@ fun SmartCardStackHost() {
 
 /**
  * 卡片叠层：最上面一张完整显示，下面两张露个边（8dp 一层）。
+ * 重设计 §2.5：露边卡只有边、没有字——内容只在顶卡上组合，滑动时
+ * 下一张升上来成为顶卡、内容才画上去；玻璃透出来也不会几张字混在一起。
  * 点动作立即执行（不拖 250ms 动画等开应用）；横滑跳过播离场动画——
  * 用户的事项提醒沉到摞底（第十四批）、应用推的提醒划过就丢。
  * 每张卡两个响应：我知道了（消失、不再出现）与右按钮（卡片定义的下一步意图）。
@@ -546,6 +564,8 @@ fun SmartCardStackHost() {
  * 新实现用 SubcomposeLayout：顶卡先以松约束（maxHeight = Infinity）
  * 量真实高度，摞高＝顶卡真实高＋露边，顶卡再也不受摞高约束；
  * 露边卡按顶卡真实高量（maxHeight = 顶卡高），不裁顶卡。
+ * 重设计起顶卡固定 168dp（SmartCardHeight），量出来就是 168dp，摞高
+ * 确定；松约束的量法不变（仍防内容换卡时按钮被裁）。
  */
 /**
  * 叠层卡片两侧边距（第十批，设计稿 §4.7，2026-11-08 Bob 真机 verdict：
@@ -563,6 +583,12 @@ fun SmartCardStackHost() {
 val SmartCardStackSideMargin = 24.dp
 
 /**
+ * 叠层与 hero 的间距（重设计 §2.7）：16dp——叠层顶缘锚在 hero 底部（讲述句）
+ * 下方 16dp，吃掉 486 拿掉会行腾出的约 56dp。8dp 网格。
+ */
+val SmartCardStackTopGap = 16.dp
+
+/**
  * 露边卡形态（纯函数，单测锁死）：第 index 张露边卡相对顶卡的缩放、
  * 透明度与下移量。露边只露 8dp 一格（8dp 网格），顶卡之下最多露两张。
  * 宽度与顶卡相同——露边卡与顶卡用同一组 constraints 量，不另缩宽度；
@@ -575,6 +601,40 @@ fun peekCardTransform(index: Int): PeekCardTransform = PeekCardTransform(
     alpha = 0.65f - 0.25f * index,
     yOffset = 8.dp * (index + 1)
 )
+
+/**
+ * 卡片固定高度（重设计 §2.6，Bob 2026-11-11 批准）：168dp，不随正文长短变；
+ * 所有卡一样高，摞起来齐整。8dp 网格（168 % 8 == 0）。
+ */
+val SmartCardHeight = 168.dp
+
+/**
+ * 正文区封顶高度（重设计 §2.6）：Body 15sp / 24sp 行高 × 3 行 = 72dp；
+ * 超了在卡内滚动（不是截断，全文都在）。
+ */
+val SmartCardFactMaxHeight = 72.dp
+
+/**
+ * 呼吸描边渐变色（重设计 §2.2）：暖金 #D4A24E → 柔玫 → 冷青 → 暖金闭环。
+ * 金是 Bob 点名的锚点；玫/青低饱和、贴浅暖灰主题；首尾同色，绕一圈不断色。
+ */
+fun smartCardBorderColors(): List<Color> = listOf(
+    Color(0xFFD4A24E),
+    Color(0xFFD9A5A0),
+    Color(0xFF8FB8B5),
+    Color(0xFFD4A24E)
+)
+
+/**
+ * 暖灰半透明衬底的透明度（重设计 §2.1）：下限 0.55；低对比环境回到 0.75 兜底。
+ * 低对比＝壁纸平（GlassPolicy 判 FLAT，低亮度方差／低饱和，衬底与壁纸分不开）
+ * 或玻璃状态没提供（无模糊可读，衬底是唯一可读层），都走安全档 0.75；
+ * 有真实纹理的壁纸（TEXTURED），玻璃模糊已做分隔，衬底只留 0.55。
+ */
+fun smartCardTintAlpha(backdropKind: BackdropKind?): Float = when (backdropKind) {
+    BackdropKind.TEXTURED -> 0.55f
+    else -> 0.75f
+}
 
 @Composable
 fun SmartCardStack(
@@ -605,8 +665,9 @@ fun SmartCardStack(
     // 即没有，不贴模板）。copy 只换 prep，不动 id/动作/排序键。
     val top = cards[0].let { it.copy(prep = prepById[it.id] ?: it.prep) }
     val connectedIds: Set<String> = connectedFeedbacks.keys
-    val peeks = cards.drop(1).take(2)
-        .map { it.copy(prep = prepById[it.id] ?: it.prep) }
+    // 露边卡只有边、没有字（重设计 §2.5）：只留张数与 id 作键，内容不组合；
+    // 升上来成为顶卡时，它的内容才在顶卡位置组合（见 top）。
+    val peekIds = cards.drop(1).take(2).map { it.id }
     // 第十批：卡片按桌面卡片语言收边——两侧各留 SmartCardStackSideMargin，
     // 不贴边、不满宽。收边放在最外层 Column：顶卡、露边卡、角标一起收，
     // 摞高量测（SubcomposeLayout）与手势带（cardStackBandPx 的上下缘）
@@ -616,11 +677,12 @@ fun SmartCardStack(
             .fillMaxWidth()
             .padding(horizontal = SmartCardStackSideMargin)
     ) {
-        // 与简报会行同款段间距（32dp，大于简报内部 24dp 段间距，8dp 网格）：
-        // 卡片作为独立一段站得住。× 不再占这一行（448 的 × 行在卡外、
-        // 悬在壁纸上）；× 进卡内表头（见 SmartCardView），这里两模式
-        // 统一只留段间距。
-        Spacer(modifier = Modifier.height(32.dp))
+        // 叠层与 hero 的间距（重设计 §2.7，Bob 2026-11-11 批准）：16dp——
+        // 叠层顶缘锚在 hero 底部（讲述句）下方 16dp，吃掉 486 拿掉会行腾出的
+        // 约 56dp（32dp 留白＋会行），不再留会行那段空位。× 不再占这一行
+        // （448 的 × 行在卡外、悬在壁纸上）；× 进卡内表头（见 SmartCardView），
+        // 这里两模式统一只留段间距。
+        Spacer(modifier = Modifier.height(SmartCardStackTopGap))
         // 待办数角标（Bob 2026-11-07 晚定）：叠层右上角、压住顶卡角，显示
         // 还剩几张待办卡片；与 Dock/应用中心同一套 AppBadge（红 pill 白字，
         // 1–99 显示数字、≥100 显示 99+，0 张不画）。计数＝当前叠层卡片张数
@@ -650,18 +712,11 @@ fun SmartCardStack(
                     }
                 }.map { it.measure(constraints.copy(maxHeight = Constraints.Infinity)) }
                 val topHeight = topPlaceables.maxOfOrNull { it.height } ?: 0
-                val peekPlaceables = peeks.mapIndexed { index, card ->
+                val peekPlaceables = peekIds.mapIndexed { index, id ->
                     val transform = peekCardTransform(index)
                     subcompose(SmartCardStackSlot.Peek(index)) {
-                        key(card.id) {
-                            SmartCardView(
-                                card = card,
-                                showAction = false,
-                                onActionClick = {},
-                                onIgnoreClick = {},
-                                onCloseClick = null,
-                                hideActionRow = card.id in connectedIds,
-                                celebration = connectedFeedbacks[card.id],
+                        key(id) {
+                            PeekCardFace(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .graphicsLayer {
@@ -674,7 +729,7 @@ fun SmartCardStack(
                         }
                     }.map { it.measure(constraints.copy(maxHeight = topHeight)) }
                 }
-                val stackHeight = topHeight + 8.dp.roundToPx() * peeks.size
+                val stackHeight = topHeight + 8.dp.roundToPx() * peekIds.size
                 layout(constraints.maxWidth, stackHeight) {
                     // 下面几张先放（在后面），露边在顶卡底边下方
                     peekPlaceables.forEachIndexed { index, placeables ->
@@ -731,7 +786,6 @@ private fun TopSmartCard(
 
     SmartCardView(
         card = card,
-        showAction = true,
         onActionClick = { onAction(card) },
         onIgnoreClick = { onIgnore(card) },
         onCloseClick = onClose,
@@ -792,7 +846,8 @@ private fun TopSmartCard(
 }
 
 /**
- * 单张卡片：来源标签＋一句话事实（含截止点）＋（可选）一行准备清单＋
+ * 单张卡片（只画顶卡——露边卡是光面 PeekCardFace，不画字）：
+ * 来源标签＋一句话事实（含截止点）＋（可选）一行准备清单＋
  * 一行两个响应：我知道了（左）与右按钮（右，第十二批 Bob 定：显示下一步
  * 的意图，去还款 / 帮我建提醒 / 看预约 / 回拨 / 查看 / 加入会议 / 看日程 /
  * 连接＋来源名；动作含义由事实文案＋右下方应用小标补充）。
@@ -801,20 +856,21 @@ private fun TopSmartCard(
  * 中文可读性不足、token 规则禁用的下限，取 Bob 给的 11–12sp 的上限），
  * 无底色、无边框，不抢按钮视觉；名字过长截断；只做展示、不可点。
  * 没有标题党、没有解释行。
- * 视觉走启动器同一套玻璃卡片语言（与 Dock 面板、意图面板同款
- * glassSurface STRONG，圆角 20dp；SIMULATED 档/无玻璃环境退化为
- * 半透明暖灰 GlassCard）：448 的纯白 Material 卡片在壁纸上是一块
- * 白底大空卡，与家里其他玻璃面不协调，改掉。
- * 449 实拍 verdict（Bob 2026-11-07 晚）：玻璃太透、山体壁纸与露边卡
- * 的字都透过顶卡，看着乱——字先保证可读，再谈透。本批在 glassSurface
- * 之上加一层实色衬底（GlassCardStrong，0.88 不透明度，同一 20dp 圆角），
- * 盖住玻璃补丁与身后露边卡的文字、落在文字之下；全局 GlassPolicy 不动，
- * 露边卡 alpha（0.65/0.40）也不动——顶卡变实后露边字即被挡住。
+ *
+ * 视觉（重设计，Bob 2026-11-11 批准）：
+ * - 背景：拿掉 449 加的 0.88 实色衬底（GlassCardStrong，当时为盖住露边卡
+ *   的文字），改回玻璃 STRONG 本色＋一层暖灰半透明（0.55；低对比环境
+ *   0.75 兜底，见 smartCardTintAlpha）。露边卡不再画字，玻璃透出来也不混。
+ * - 边缘呼吸：顶卡 2dp 渐变描边（暖金→柔玫→冷青，6 秒一圈，透明度 0.5↔1
+ *   呼吸；减动效时静止）。
+ * - 正文：Body 15sp Medium；不截断（maxLines=3＋Ellipsis 已删），全文在
+ *   卡内滚动；卡高固定 168dp，正文区封顶 3 行高（72dp）。
+ * - 内边距 14dp；圆角 20dp、两侧收边 24dp、按钮、应用小标、金色庆祝不动。
+ * SIMULATED 档／无玻璃环境退回半透明暖灰 GlassCard（glassSurface 自带）。
  */
 @Composable
 private fun SmartCardView(
     card: SmartCard,
-    showAction: Boolean,
     onActionClick: () -> Unit,
     onIgnoreClick: () -> Unit,
     onCloseClick: (() -> Unit)?,
@@ -868,6 +924,24 @@ private fun SmartCardView(
             checkScale.snapTo(1f)
         }
     }
+    // 暖灰半透明衬底（重设计 §2.1）：见 smartCardTintAlpha——有纹理壁纸 0.55，
+    // 低对比环境 0.75 兜底；颜色取主题暖灰底（浅色 #F4F2EE／深色 #1A1815）。
+    val tint = smartCardTint()
+    // 正文滚动：事实＋准备清单＋已建提醒一起在卡内滚动；翻到底渐隐消失。
+    val factScrollState = rememberScrollState()
+    val factFade = if (factScrollState.canScrollForward) {
+        Modifier.drawWithContent {
+            drawContent()
+            drawRect(
+                brush = Brush.verticalGradient(
+                    0f to Color.Black,
+                    0.75f to Color.Black,
+                    1f to Color.Transparent
+                ),
+                blendMode = BlendMode.DstIn
+            )
+        }
+    } else Modifier
     Column(
         modifier = modifier
             .clip(shape)
@@ -882,10 +956,12 @@ private fun SmartCardView(
                 fallbackColor = AILauncherColors.current.GlassCard
             )
             .background(
-                color = AILauncherColors.current.GlassCardStrong,
+                color = tint,
                 shape = shape
             )
-            .padding(16.dp),
+            .then(breathingBorderModifier(reduceMotion))
+            .height(SmartCardHeight)
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // 表头：来源标签＋（引导卡）卡内 ×。× 落在卡片内部（16dp 内边距
@@ -954,46 +1030,59 @@ private fun SmartCardView(
                 )
             }
         }
-        Text(
-            text = card.fact,
-            fontSize = AILauncherType.Headline.fontSize,
-            fontWeight = FontWeight.SemiBold,
-            color = AILauncherColors.current.Title,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            modifier = if (onBodyClick != null) {
-                Modifier.clickable(onClick = onBodyClick)
-            } else Modifier
-        )
-        card.prep?.let { prep ->
-            Text(
-                text = prep,
-                fontSize = AILauncherType.Footnote.fontSize,
-                color = AILauncherColors.current.Body,
-                lineHeight = AILauncherType.Footnote.lineHeight,
-                modifier = if (onBodyClick != null) {
-                    Modifier.clickable(onClick = onBodyClick)
-                } else Modifier
-            )
-        }
-        // “已建提醒”（第十一批）：预约卡建完提醒后的一行小字，告诉用户
-        // 提醒已在系统日历里了、不用重复建；动作已换回看预约。
-        if (card.reminderCreated) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Filled.Check,
-                    contentDescription = null,
-                    tint = AILauncherColors.current.Hint,
-                    modifier = Modifier.size(14.dp)
-                )
+        // 正文区（重设计 §2.6）：事实＋准备清单＋已建提醒一起在卡内滚动；
+        // 封顶 3 行高（72dp），来源行／按钮行／小标固定不动。全文都在，
+        // 不是截断——maxLines=3＋Ellipsis 已删；翻到底渐隐消失（见 factFade）。
+        // 横滑切卡与正文竖翻是两个方向，不冲突；点正文仍是看原文（预约／日历卡）。
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(max = SmartCardFactMaxHeight)
+                .verticalScroll(factScrollState)
+                .then(factFade)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "已建提醒",
-                    fontSize = AILauncherType.Footnote.fontSize,
-                    color = AILauncherColors.current.Hint
+                    text = card.fact,
+                    fontSize = AILauncherType.Body.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = AILauncherType.Body.lineHeight,
+                    color = AILauncherColors.current.Title,
+                    modifier = if (onBodyClick != null) {
+                        Modifier.clickable(onClick = onBodyClick)
+                    } else Modifier
                 )
+                card.prep?.let { prep ->
+                    Text(
+                        text = prep,
+                        fontSize = AILauncherType.Footnote.fontSize,
+                        color = AILauncherColors.current.Body,
+                        lineHeight = AILauncherType.Footnote.lineHeight,
+                        modifier = if (onBodyClick != null) {
+                            Modifier.clickable(onClick = onBodyClick)
+                        } else Modifier
+                    )
+                }
+                // “已建提醒”（第十一批）：预约卡建完提醒后的一行小字，告诉用户
+                // 提醒已在系统日历里了、不用重复建；动作已换回看预约。
+                if (card.reminderCreated) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = AILauncherColors.current.Hint,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "已建提醒",
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Hint
+                        )
+                    }
+                }
             }
         }
         if (!hideActionRow) {
@@ -1002,46 +1091,31 @@ private fun SmartCardView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (showAction) {
-                    // 我知道了：卡片消失、不再出现、不追问（设计稿 §4.2）。
-                    TextButton(
-                        onClick = onIgnoreClick,
-                        modifier = Modifier.heightIn(min = 48.dp)
-                    ) {
-                        Text(
-                            text = SMART_CARD_DISMISS_LABEL,
-                            fontSize = AILauncherType.Callout.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Hint
-                        )
-                    }
-                    // 右按钮（第十二批 Bob 定）：显示下一步的意图（actionLabel：
-                    // 去还款 / 帮我建提醒 / 看预约 / 回拨 / 查看 / 加入会议 /
-                    // 看日程 / 连接＋来源名），不再写“下一步”几个字。
-                    // 金色只留主操作（去 AI 味四条）。
-                    TextButton(
-                        onClick = onActionClick,
-                        modifier = Modifier.heightIn(min = 48.dp)
-                    ) {
-                        Text(
-                            text = card.actionLabel,
-                            fontSize = AILauncherType.Callout.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Accent
-                        )
-                    }
-                } else {
-                    // 露边卡：按钮够不着，只留这张卡下一步的意图作下一张的
-                    // 提示（第十二批：不再写“下一步”，显示它自己的
-                    // actionLabel）。露边只露 8dp，这行基本看不见，不占布局。
+                // 我知道了：卡片消失、不再出现、不追问（设计稿 §4.2）。
+                TextButton(
+                    onClick = onIgnoreClick,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text(
+                        text = SMART_CARD_DISMISS_LABEL,
+                        fontSize = AILauncherType.Callout.fontSize,
+                        fontWeight = FontWeight.Medium,
+                        color = AILauncherColors.current.Hint
+                    )
+                }
+                // 右按钮（第十二批 Bob 定）：显示下一步的意图（actionLabel：
+                // 去还款 / 帮我建提醒 / 看预约 / 回拨 / 查看 / 加入会议 /
+                // 看日程 / 连接＋来源名），不再写“下一步”几个字。
+                // 金色只留主操作（去 AI 味四条）。
+                TextButton(
+                    onClick = onActionClick,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
                     Text(
                         text = card.actionLabel,
                         fontSize = AILauncherType.Callout.fontSize,
                         fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.current.Accent,
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .padding(horizontal = 16.dp)
+                        color = AILauncherColors.current.Accent
                     )
                 }
             }
@@ -1057,6 +1131,98 @@ private fun SmartCardView(
             }
         }
     }
+}
+
+/**
+ * 暖灰半透明衬底（重设计 §2.1）：玻璃之上那一层；低对比环境 0.75 兜底。
+ * 颜色取主题暖灰底（浅色 #F4F2EE／深色 #1A1815），透明度见 smartCardTintAlpha。
+ */
+@Composable
+private fun smartCardTint(): Color {
+    val glassState = LocalGlassBackdrop.current
+    return AILauncherColors.current.Background.copy(
+        alpha = smartCardTintAlpha(glassState?.backdropKind)
+    )
+}
+
+/**
+ * 顶卡 2dp 渐变呼吸描边（重设计 §2.2）：只画顶卡。
+ * 渐变沿卡边 6 秒一圈缓慢移动、描边透明度 0.5↔1 呼吸（呼吸一整圈也是 6 秒）；
+ * 减动效时静止（不播动画）。实现：线性渐变的方向角绕卡旋转——矩形本身不转，
+ * 只有渐变色在走；描边向内收半个线宽，整条 2dp 都落在 20dp 圆角裁剪内。
+ */
+@Composable
+private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
+    val angle = remember { Animatable(0f) }
+    val borderAlpha = remember { Animatable(1f) }
+    LaunchedEffect(reduceMotion) {
+        if (reduceMotion) {
+            angle.snapTo(0f)
+            borderAlpha.snapTo(1f)
+        } else {
+            launch {
+                while (true) {
+                    angle.animateTo(360f, tween(6000, easing = LinearEasing))
+                    angle.snapTo(0f)
+                }
+            }
+            launch {
+                while (true) {
+                    borderAlpha.animateTo(0.5f, tween(3000))
+                    borderAlpha.animateTo(1f, tween(3000))
+                }
+            }
+        }
+    }
+    val density = LocalDensity.current
+    val strokePx = with(density) { 2.dp.toPx() }
+    val radiusPx = with(density) { 19.dp.toPx() }
+    val insetPx = with(density) { 1.dp.toPx() }
+    val colors = smartCardBorderColors()
+    return Modifier.drawWithContent {
+        drawContent()
+        val rad = Math.toRadians(angle.value.toDouble())
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val dx = cos(rad).toFloat() * (size.width / 2f)
+        val dy = sin(rad).toFloat() * (size.height / 2f)
+        drawRoundRect(
+            brush = Brush.linearGradient(
+                colors = colors,
+                start = Offset(cx - dx, cy - dy),
+                end = Offset(cx + dx, cy + dy)
+            ),
+            topLeft = Offset(insetPx, insetPx),
+            size = Size(size.width - 2 * insetPx, size.height - 2 * insetPx),
+            cornerRadius = CornerRadius(radiusPx, radiusPx),
+            style = Stroke(width = strokePx),
+            alpha = borderAlpha.value
+        )
+    }
+}
+
+/**
+ * 露边卡面（重设计 §2.5）：只是一张卡的边——玻璃＋暖灰衬底＋1dp 细线，
+ * 不画任何文字内容。升上来成为顶卡时，它的内容才在顶卡位置组合。
+ * 高度与顶卡同高（SmartCardHeight）；按 peekCardTransform 的位置／缩放／
+ * 透明度放，只露底边 8dp 一格。
+ */
+@Composable
+private fun PeekCardFace(modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(20.dp)
+    Box(
+        modifier = modifier
+            .height(SmartCardHeight)
+            .clip(shape)
+            .glassSurface(
+                kind = GlassSurfaceKind.STRONG,
+                cornerRadius = 20.dp,
+                tintColor = AILauncherColors.current.Card,
+                fallbackColor = AILauncherColors.current.GlassCard
+            )
+            .background(color = smartCardTint(), shape = shape)
+            .border(1.dp, AILauncherColors.current.GlassBorder, shape)
+    )
 }
 
 /**
