@@ -235,7 +235,10 @@ object SmartCardRepository {
     private fun reminderCreatedIds(context: Context, nowMs: Long): Set<String> =
         liveIds(context, KEY_REMINDER_CREATED_PREFIX, nowMs)
 
-    /** 点下一步动作算处理完一张（仓库层立即摘掉，UI 侧先播离场动画再调这里） */
+    /** 点下一步动作算处理完一张（仓库层立即摘掉，UI 侧先播离场动画再调这里）——
+     * 除了第十九批的有时间段提醒（日历/预约）：时间段内点动作不摘卡，
+     * performAction 内按 kind＋deadlineMs 判、不调这里；只有「我知道了」
+     * （宿主 onIgnore 直接调这里）或过了截止点才摘。 */
     fun markDone(context: Context, card: SmartCard) {
         prefs(context).edit()
             .putLong(KEY_DONE_PREFIX + card.id, card.deadlineMs).apply()
@@ -421,13 +424,19 @@ object SmartCardRepository {
         // 体检按禁食截止排：前一天 20:00（开始前 12 小时），比开始时间更早
         val sortMs = if (appt.isCheckup) startMs - 12 * HOUR_MS else startMs
         val kindWord = if (appt.isCheckup) "体检预约" else "预约"
-        val fact = buildString {
-            append("短信里有一条$kindWord，")
-            append(relativeDayLabel(appt.dayStartMs, nowMs))
-            append(" ")
-            append(formatTimeRange(appt.startMin, appt.endMin))
-            if (appt.place != null) append("，${appt.place}")
-        }
+        // 第十九批：开始后、结束前正文前加「进行中 · 」（设计稿 §4.2）；
+        // 构建时按当前时间算，分钟 ticker 的 refresh 里还会再算一次
+        // （短信卡有 5 分钟节流缓存，开始那一刻靠 refresh 翻过来）。
+        val fact = withInProgressPrefix(
+            buildString {
+                append("短信里有一条$kindWord，")
+                append(relativeDayLabel(appt.dayStartMs, nowMs))
+                append(" ")
+                append(formatTimeRange(appt.startMin, appt.endMin))
+                if (appt.place != null) append("，${appt.place}")
+            },
+            startMs, endMs, nowMs
+        )
         val key = "appt|${appt.dayStartMs}|${appt.startMin}|${appt.place?.hashCode() ?: 0}"
         val fallback = SmartCardActions.smsCardAction(context, address, null)
         val created = key in reminderCreated
@@ -457,6 +466,7 @@ object SmartCardRepository {
             action = action,
             sourceKey = key,
             appearFromMs = startMs - APPOINTMENT_APPEAR_HOURS_BEFORE * HOUR_MS,
+            windowStartMs = startMs,
             targetApp = appointmentTargetApp(context, action, fallback),
             reminderCreated = created
         )
@@ -526,13 +536,19 @@ object SmartCardRepository {
         val endMs = appt.dayStartMs + (appt.endMin ?: (appt.startMin + 60)) * 60L * 1000
         val sortMs = if (appt.isCheckup) startMs - 12 * HOUR_MS else startMs
         val kindWord = if (appt.isCheckup) "体检预约" else "预约"
-        val fact = buildString {
-            append("短信里有一条$kindWord，")
-            append(relativeDayLabel(appt.dayStartMs, nowMs))
-            append(" ")
-            append(formatTimeRange(appt.startMin, appt.endMin))
-            if (appt.place != null) append("，${appt.place}")
-        }
+        // 第十九批：开始后、结束前正文前加「进行中 · 」（设计稿 §4.2）；
+        // 构建时按当前时间算，分钟 ticker 的 refresh 里还会再算一次
+        // （短信卡有 5 分钟节流缓存，开始那一刻靠 refresh 翻过来）。
+        val fact = withInProgressPrefix(
+            buildString {
+                append("短信里有一条$kindWord，")
+                append(relativeDayLabel(appt.dayStartMs, nowMs))
+                append(" ")
+                append(formatTimeRange(appt.startMin, appt.endMin))
+                if (appt.place != null) append("，${appt.place}")
+            },
+            startMs, endMs, nowMs
+        )
         val key = "appt|${appt.dayStartMs}|${appt.startMin}|${appt.place?.hashCode() ?: 0}"
         val fallback = SmartCardActions.notificationAction(n)
         val created = key in reminderCreated
@@ -562,6 +578,7 @@ object SmartCardRepository {
             action = action,
             sourceKey = key,
             appearFromMs = startMs - APPOINTMENT_APPEAR_HOURS_BEFORE * HOUR_MS,
+            windowStartMs = startMs,
             targetApp = appointmentTargetApp(context, action, fallback),
             reminderCreated = created
         )
@@ -731,6 +748,9 @@ object SmartCardRepository {
             action = SmartCardAction.CalendarEvent(event.eventId, meetingUrl),
             sourceKey = calendarCardSourceKey(event),
             appearFromMs = appearFromMs,
+            // 第十九批：时间段起点（refresh 里重算「进行中 · 」前缀用，
+            // 日历卡事实每分钟本来就重建、这里再算一次结果相同）。
+            windowStartMs = event.begin,
             targetApp = resolveCalendarApp(context)
         )
     }
@@ -796,7 +816,25 @@ object SmartCardRepository {
         // 升级卡的到来也不开新一轮）。只有点「我知道了」（markDone）或
         // 过了截止点才丢。
         val skippedIds = liveIdList(context, KEY_SKIPPED_PREFIX, nowMs)
-        val visible = visibleSmartCards(candidates, doneIds, skippedIds, nowMs)
+        // 第十九批：日历/预约卡的「进行中 · 」前缀在这里按当前时间重算
+        // 一次（withInProgressPrefix 幂等，先剥再加）。日历卡的事实在
+        // 上面本来就每分钟重建（calendarCardFact 内已算），这里再算
+        // 一次结果相同；短信预约卡的事实存在 5 分钟节流缓存（smsCards）
+        // 里，不在这里重算、开始那一刻最多晚 5 分钟才翻——分钟 ticker
+        // 就是靠这一处保证开始那一刻翻过来。只改正文展示，不改去重键、
+        // 排序、截止点、prepSource。
+        val withPrefix = candidates.map { card ->
+            if (card.kind == SmartCardKind.CALENDAR ||
+                card.kind == SmartCardKind.APPOINTMENT
+            ) {
+                card.copy(
+                    fact = withInProgressPrefix(
+                        card.fact, card.windowStartMs, card.deadlineMs, nowMs
+                    )
+                )
+            } else card
+        }
+        val visible = visibleSmartCards(withPrefix, doneIds, skippedIds, nowMs)
         _cards.value = visible
         recordLastUsed(context, visible, nowMs)
     }

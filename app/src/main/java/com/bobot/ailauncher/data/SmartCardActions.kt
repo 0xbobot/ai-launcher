@@ -8,6 +8,10 @@ import android.net.Uri
 /**
  * 智能卡片的下一步动作执行（第一阶段，447/v1.2.0）：
  * 点动作即算处理完一张——成功打开才 markDone，失败不摘卡、只提示一句。
+ * 例外（第十九批，设计稿 §4.2）：日历卡（CALENDAR）与预约卡
+ * （APPOINTMENT）是有时间段的提醒，点下一步动作成功打开后、在截止点
+ * 之前不算处理完、卡片不摘（见 shouldKeepCardAfterAction）；只有
+ * 「我知道了」（markDone）或过了截止点才摘。
  *
  * 动作落点（设计稿 §3：用量统计决定动作落到用户真正用的那个应用上）：
  * - 去还款：先找本机已装的银行应用（标签含银行简称、按最近使用排），
@@ -217,8 +221,26 @@ object SmartCardActions {
     private val calendarJoinGuard = JoinGuard()
 
     /**
-     * 执行动作并在成功时 markDone。返回 true 表已打开（卡片可摘），
-     * false 表没打开（卡片保留；提示由调用方 UI 做，不在这里弹）。
+     * 时间段内点动作不摘卡（纯函数，单测锁死；第十九批，设计稿 §4.2）：
+     * 日历卡（CALENDAR）与预约卡（APPOINTMENT）是有时间段的提醒——点
+     * 下一步动作（加入会议 / 看日程 / 看预约、点日历卡正文）成功打开后，
+     * 在截止点（deadlineMs）之前不算处理完，卡片留在摞里、状态跟着时间
+     * 更新，右按钮照常可用；只有「我知道了」（onIgnore 的 markDone）或
+     * 过了截止点才摘。其它种类（账单 / 未接来电 / 快递航班）不是时间段
+     * 提醒，点动作照常算处理完、成功即摘（返回 false）。预约卡「帮我建
+     * 提醒」不走这里（CreateReminder 由宿主拦截，本来就不摘），不受影响。
+     * 点正文（viewAppointment 的 fallback 复制）也走同一条判断——复制
+     * 保留 kind 与 deadlineMs，kind 在这里才是判断依据。
+     */
+    fun shouldKeepCardAfterAction(card: SmartCard, nowMs: Long): Boolean =
+        (card.kind == SmartCardKind.CALENDAR || card.kind == SmartCardKind.APPOINTMENT) &&
+            nowMs < card.deadlineMs
+
+    /**
+     * 执行动作并在成功时 markDone（时间段内除外，见
+     * shouldKeepCardAfterAction）。返回 true 表已打开（卡片可摘——时间
+     * 段内则只是“已打开、卡片保留”），false 表没打开（卡片保留；提示
+     * 由调用方 UI 做，不在这里弹）。
      */
     fun performAction(context: Context, card: SmartCard): Boolean {
         val opened = try {
@@ -282,8 +304,9 @@ object SmartCardActions {
                 // （JoinGuard，原只拦简报会行连点，会行已随 486 拿掉；
                 // 保证落在日历卡「加入会议」上）。只查不记、成功发出后
                 // 才记：没发出不记，失败可重试（失败不摘卡）；重复点按
-                // 直接吞掉，返回 true 表已处理（第一次已发出并摘卡），
-                // 不弹“没能打开”。
+                // 直接吞掉，返回 true 表已处理（第一次已发出）。时间段内
+                // 卡片是否摘由下面的 shouldKeepCardAfterAction 另行决定，
+                // 这里不直接断“已摘”。
                 is SmartCardAction.CalendarEvent -> {
                     val key = calendarJoinKey(action.eventId, action.meetingUrl)
                     val nowMs = System.currentTimeMillis()
@@ -301,7 +324,10 @@ object SmartCardActions {
         } catch (_: Exception) {
             false
         }
-        if (opened) {
+        // 成功打开即摘——除了时间段内（第十九批）：日历/预约卡在截止点
+        // 之前点动作不算处理完，卡片留在摞里（shouldKeepCardAfterAction），
+        // 只有「我知道了」或过了截止点才摘。
+        if (opened && !shouldKeepCardAfterAction(card, System.currentTimeMillis())) {
             SmartCardRepository.markDone(context, card)
         }
         return opened

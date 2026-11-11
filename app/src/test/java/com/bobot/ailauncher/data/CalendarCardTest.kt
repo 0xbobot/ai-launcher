@@ -111,6 +111,27 @@ class CalendarCardTest {
     }
 
     @Test
+    fun calendarCardFact_inProgressPrefix() {
+        // 第十九批：开始前无「进行中 · 」前缀，开始那一刻有，结束那一刻去掉。
+        val meeting = event(
+            "项目周会", ms(2026, 11, 6, 10, 0), ms(2026, 11, 6, 11, 0),
+            location = "3楼会议室"
+        )
+        assertEquals(
+            "今天 10:00–11:00 项目周会，3楼会议室",
+            calendarCardFact(meeting, ms(2026, 11, 6, 9, 59))
+        )
+        assertEquals(
+            "进行中 · 今天 10:00–11:00 项目周会，3楼会议室",
+            calendarCardFact(meeting, ms(2026, 11, 6, 10, 0))
+        )
+        assertEquals(
+            "今天 10:00–11:00 项目周会，3楼会议室",
+            calendarCardFact(meeting, ms(2026, 11, 6, 11, 0))
+        )
+    }
+
+    @Test
     fun calendarCardSourceKey_matchesSmsAppointmentKey() {
         // 去重键与短信预约卡同格式：同一件事短信在前、日历在后，
         // 去重后短信版优先（见 dedupe_sameSourceKeyKeepsFirst）。
