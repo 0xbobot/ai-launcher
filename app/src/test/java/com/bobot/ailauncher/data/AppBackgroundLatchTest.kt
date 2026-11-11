@@ -12,7 +12,7 @@ import org.junit.Test
  * 统计权限也要能回退：信号是我们自己点按后有没有切到后台）。
  * 只测纯函数 decideLatchFallback 与门闩对象 AppBackgroundLatch（时间算术，
  * 不调系统时钟）；Handler 延迟检查是系统调用，验收走 Bob 真机（微信行点了
- * 2 秒内应用必须打开；跳转框点取消后不出现第二个框）。
+ * 0.8 秒内应用必须打开；跳转框点取消后不出现第二个框）。
  */
 class AppBackgroundLatchTest {
 
@@ -22,8 +22,8 @@ class AppBackgroundLatchTest {
     }
 
     @Test
-    fun `latch delay is 2 seconds`() {
-        assertEquals(2000L, AppBackgroundLatch.LATCH_FALLBACK_DELAY_MILLIS)
+    fun `latch delay is 800 millis`() {
+        assertEquals(800L, AppBackgroundLatch.LATCH_FALLBACK_DELAY_MILLIS)
     }
 
     @Test

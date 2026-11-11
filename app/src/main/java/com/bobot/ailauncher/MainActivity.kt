@@ -169,7 +169,7 @@ class MainActivity : FragmentActivity() {
         // 门闩回退（Bob 2026-11-11 两例：未读行 contentIntent 静默无动作时，
         // 没权限也能回退——信号是我们自己切没切后台）：记下这次切后台的时间
         // （单调时钟）。应用中心是盖在同一个 Activity 上的浮层，进应用中心
-        // 本身不触发 onPause，不会误触发门闩；判断只在点按后 2 秒那次检查里做。
+        // 本身不触发 onPause，不会误触发门闩；判断只在点按后 0.8 秒那次检查里做。
         com.bobot.ailauncher.data.AppBackgroundLatch.markBackgrounded(
             SystemClock.uptimeMillis()
         )
