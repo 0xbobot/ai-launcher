@@ -17,6 +17,11 @@ import android.net.Uri
  *
  * 会议类判定：现有代码没有“标题含会议词”这类判定，就用“有会议链接即
  * 会议类”（提案口径），不另造宽泛词表。
+ *
+ * 第十七批：有会议链接时先走会议应用（meetingAppPackage，按域名定包，
+ * 同一条 https 链接限定到该包），应用声明能接（resolveActivity 非空）
+ * 才真正发，接不住落回浏览器。Bob 10:29 录屏报：点「加入会议」进了
+ * 浏览器（vc.feishu.cn），还要登录再唤起飞书。
  */
 /**
  * v0.68.101（D-5）：入会防多发守卫（纯逻辑，单测锁死）——同一事件在
@@ -61,6 +66,66 @@ private val MEETING_DOMAINS = listOf(
     "webex.com",
     "dingtalk.com"
 )
+
+/**
+ * 会议链接 → 会议应用包名（纯函数，单测锁死；第十七批）：
+ * 有会议链接时先走会议应用（同一条 https 链接、限定到该包），只在
+ * 应用声明能接这条链接时才真正发（执行层 resolveActivity 校验，
+ * 没装／没声明就落回浏览器）。只含 MEETING_DOMAINS 已有的域名。
+ *
+ * 包名核实状态（详见收据 §飞书核实）：
+ * - 飞书 com.ss.android.lark：已确认——PGYER 飞书 APK 列表（北京飞书
+ *   科技有限公司，v7.31.8）＋ feishu.cn/.well-known/assetlinks.json
+ *   （verified App Link，delegate_permission/common.handle_all_urls）。
+ *   但 vc.feishu.cn 未能从公开渠道确认：vc.feishu.cn 下无
+ *   assetlinks.json（404）、meeting.feishu.cn 取不到（502）、
+ *   vc.feishu.cn 落地页取不到（超时）。vc.feishu.cn 不是 verified
+ *   App Link 宿主；应用是否声明接 vc.feishu.cn 的 intent-filter，
+ *   公开渠道确认不了——显式包名意图由执行层先校验 resolveActivity，
+ *   接不住落回浏览器，Bob 真机为最终判定。
+ * - 腾讯会议 com.tencent.wemeet.app、VooV com.tencent.voov：已确认——
+ *   APKPure 腾讯会议列表包名 com.tencent.wemeet.app（多版本一致，
+ *   腾讯科技深圳公司）＋ Play VooV 列表 id=com.tencent.voov。
+ *   注意：不是 com.tencent.meeting（APKPure 三个版本都写
+ *   com.tencent.wemeet.app）。meeting.tencent.com 走腾讯会议，
+ *   voovmeeting.com 走 VooV（国际版），wemeet 走腾讯会议。
+ * - Zoom us.zoom.videomeetings：已确认——Play 列表
+ *   id=us.zoom.videomeetings（Zoom Workplace / ZOOM Cloud Meetings）。
+ * - Teams com.microsoft.teams：已确认——Play 列表
+ *   id=com.microsoft.teams。
+ * - 钉钉 com.alibaba.android.rimet、Webex com.cisco.webex.meetings：
+ *   本批未逐条再核——沿用两家长期公开的包名。即使包名有变也无害：
+ *   显式意图先校验 resolveActivity，接不住就落回浏览器，不会错开
+ *   别的应用（错包名＋该包又声明接这条链接，实际不可能）。
+ * 不猜自定义 scheme：本批只用同一条 https 链接＋显式包名，不用
+ * lark://、wemeet:// 等未核实的 scheme。
+ */
+fun meetingAppPackage(meetingUrl: String): String? {
+    val host = hostOf(meetingUrl.lowercase()) ?: return null
+    return when {
+        host == "feishu.cn" || host.endsWith(".feishu.cn") -> "com.ss.android.lark"
+        host == "meeting.tencent.com" || host.endsWith(".meeting.tencent.com") ||
+            host.contains("wemeet") -> "com.tencent.wemeet.app"
+        host == "voovmeeting.com" || host.endsWith(".voovmeeting.com") -> "com.tencent.voov"
+        host == "zoom.us" || host.endsWith(".zoom.us") ||
+            host == "zoom.com" || host.endsWith(".zoom.com") -> "us.zoom.videomeetings"
+        host == "teams.microsoft.com" || host.endsWith(".teams.microsoft.com") ||
+            host == "teams.live.com" || host.endsWith(".teams.live.com") -> "com.microsoft.teams"
+        host == "dingtalk.com" || host.endsWith(".dingtalk.com") -> "com.alibaba.android.rimet"
+        host == "webex.com" || host.endsWith(".webex.com") -> "com.cisco.webex.meetings"
+        else -> null
+    }
+}
+
+/** 取 URL 的 host（纯字符串处理，不依赖 android.net.Uri，JVM 可测） */
+private fun hostOf(url: String): String? {
+    val afterScheme = url.substringAfter("://", "")
+    if (afterScheme.isEmpty()) return null
+    val hostPort = afterScheme.substringBefore('/').substringBefore('?').substringBefore('#')
+    val host = hostPort.substringBefore(':').trim().trimEnd('.')
+    return host.ifBlank { null }
+}
+
 private val URL_REGEX = Regex("""https?://[^\s<>"']+""")
 
 /** 从日历事件的 location/description/title 提取在线会议链接；没有返回 null */
@@ -120,13 +185,29 @@ fun calendarCardSourceKey(event: CalEvent): String {
 
 /**
  * 打开日历事件（PetZone.joinCalendarEvent 同一条链，原样照搬）：
- * 1) 有会议链接 → 直开链接（会议 App/浏览器接管）；
+ * 1) 有会议链接 → 先走会议应用（meetingAppPackage 按域名定包，同一条
+ *    https 链接限定到该包，resolveActivity 非空才真正发），接不住落回
+ *    通用浏览器意图直开链接；
  * 2) 无链接 → 打开日历 App；
  * 3) 再兜底按 content://com.android.calendar/events/{eventId} 打开事件详情；
  * 全失败返回 false（调用方提示，不在这里弹）。
  */
 fun openCalendarEvent(context: Context, eventId: Long, meetingUrl: String?): Boolean {
     if (meetingUrl != null) {
+        // 先走会议应用：应用声明能接这条链接才真正发（没装／没声明时
+        // resolveActivity 为 null，直接落回浏览器，不抛、不卡）。
+        val appPackage = meetingAppPackage(meetingUrl)
+        if (appPackage != null) {
+            try {
+                val appIntent = Intent(Intent.ACTION_VIEW, Uri.parse(meetingUrl))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .setPackage(appPackage)
+                if (appIntent.resolveActivity(context.packageManager) != null) {
+                    context.startActivity(appIntent)
+                    return true
+                }
+            } catch (_: Exception) { /* 没接住 → 落浏览器 */ }
+        }
         try {
             context.startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse(meetingUrl))
