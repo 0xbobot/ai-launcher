@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.ui.pet
 
+import com.bobot.ailauncher.data.JoinGuard
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

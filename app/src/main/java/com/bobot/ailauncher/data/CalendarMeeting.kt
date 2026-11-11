@@ -8,13 +8,51 @@ import android.net.Uri
  * 日历事件的会议链接与打开链路（第十二批）：
  * 原在 ui/pet/PetZone.kt 的 extractMeetingUrl / joinCalendarEvent，
  * 下沉到 data 层——日历智能卡片（仓库）与简报会行（PetZone）共用同一条
- * 链路，不另写一套。域名白名单与三级兜底原样照搬，只拆了防多发守卫
- * （JoinGuard 仍留在 PetZone，只拦会行的连点；卡片动作走 performAction
- * 的打开即摘卡，不重复发放）。
+ * 链路，不另写一套。域名白名单与三级兜底原样照搬。防多发守卫
+ * （JoinGuard）第十六批也下沉到本文件：简报会行已随 486 拿掉，加入的
+ * 唯一入口是日历卡「加入会议」（performAction 的 CalendarEvent 分支），
+ * 卡片动作与会行路径（joinCalendarEvent，暂无调用点、定义保留）各用
+ * 一个实例、同一窗口（2 秒）；卡片动作在成功发出后才记（没发出不记，
+ * 失败可重试、失败不摘卡）。
  *
  * 会议类判定：现有代码没有“标题含会议词”这类判定，就用“有会议链接即
  * 会议类”（提案口径），不另造宽泛词表。
  */
+/**
+ * v0.68.101（D-5）：入会防多发守卫（纯逻辑，单测锁死）——同一事件在
+ * 窗口内重复触发（连点/重组竞态）只放行第一次。真机录屏里「加入」后
+ * 浏览器与主页来回闪烁，代码侧先把「本应用多次发放意图」这一路堵死。
+ * 原在 ui/pet/PetZone.kt（只拦简报会行的连点）；486 拿掉会行后，加入
+ * 的唯一入口是日历卡「加入会议」，第十六批移到 data 层。
+ * 只查不记是第十六批的拆分：wasFired 只判断、record 只记录——
+ * performAction 在成功发出后才记（没发出不记，失败可重试、失败不摘卡）；
+ * shouldFire 是一次性查＋记，给会行路径（joinCalendarEvent）用。
+ */
+internal class JoinGuard(private val windowMs: Long = 2_000L) {
+    private var lastKey: String? = null
+    private var lastMs: Long = Long.MIN_VALUE
+
+    /** 窗口内是否已放行过（只查不记；查完不影响后续判断）。 */
+    @Synchronized
+    fun wasFired(key: String, nowMs: Long): Boolean =
+        key == lastKey && nowMs - lastMs < windowMs
+
+    /** 记录一次放行（成功发出后才记；没发出不记，失败可重试）。 */
+    @Synchronized
+    fun record(key: String, nowMs: Long) {
+        lastKey = key
+        lastMs = nowMs
+    }
+
+    /** 查＋记一次（会行路径用）：窗口内重复触发只放行第一次。 */
+    @Synchronized
+    fun shouldFire(key: String, nowMs: Long): Boolean {
+        if (wasFired(key, nowMs)) return false
+        record(key, nowMs)
+        return true
+    }
+}
+
 private val MEETING_DOMAINS = listOf(
     "meeting.tencent.com", "wemeet", "voovmeeting.com",
     "zoom.us", "zoom.com",

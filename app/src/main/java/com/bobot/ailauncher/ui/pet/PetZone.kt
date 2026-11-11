@@ -456,27 +456,9 @@ internal fun ThinkDots(modifier: Modifier = Modifier) {
 private fun extractMeetingUrl(event: CalEvent): String? =
     com.bobot.ailauncher.data.extractMeetingUrl(event)
 
-/**
- * v0.68.101（D-5）：入会防多发守卫（纯逻辑，单测锁死）——同一事件在
- * 窗口内重复触发（连点/重组竞态）只放行第一次。真机录屏里「加入」后
- * 浏览器与主页来回闪烁，代码侧先把「本应用多次发放意图」这一路堵死：
- * joinCalendarEvent 本身是命令式一次性链（无 Effect 重触发、无重试
- * 循环），守卫再兜住手速连点与任何未来的重复调用点。
- */
-internal class JoinGuard(private val windowMs: Long = 2_000L) {
-    private var lastKey: String? = null
-    private var lastMs: Long = Long.MIN_VALUE
-
-    @Synchronized
-    fun shouldFire(key: String, nowMs: Long): Boolean {
-        if (key == lastKey && nowMs - lastMs < windowMs) return false
-        lastKey = key
-        lastMs = nowMs
-        return true
-    }
-}
-
-private val joinGuard = JoinGuard()
+// 入会防多发守卫在 data 层（CalendarMeeting.JoinGuard，第十六批下沉）：
+// 会行路径与日历卡「加入会议」动作各用一个实例、同一窗口（2 秒）。
+private val joinGuard = com.bobot.ailauncher.data.JoinGuard()
 
 /**
  * 点按入会（封面紧凑条与意图入口建议面的会议行共用同一条路径，2026-10-21 抽出）：
