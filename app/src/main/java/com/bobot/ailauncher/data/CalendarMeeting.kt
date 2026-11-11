@@ -213,12 +213,17 @@ fun calendarCardWindow(event: CalEvent): Pair<Long, Long> {
     return (event.begin - leadMs) to event.end
 }
 
-/** 日历卡一句话事实（纯函数）：时间＋标题＋地点（有就写，没有不硬凑） */
+/**
+ * 日历卡一句话事实（纯函数）：时间＋标题＋地点（有就写，没有不硬凑）。
+ * 第十九批：开始后、结束前正文前加「进行中 · 」（设计稿 §4.2，分钟
+ * ticker 每分钟重算，开始那一刻自动翻过来）；前缀只是展示，不改去重键、
+ * 排序、截止点、prepSource。
+ */
 fun calendarCardFact(event: CalEvent, nowMs: Long): String {
     val dayStart = startOfDayMs(event.begin)
     val startMin = ((event.begin - dayStart) / 60_000L).toInt()
     val endMin = ((event.end - dayStart) / 60_000L).toInt()
-    return buildString {
+    val base = buildString {
         append(relativeDayLabel(dayStart, nowMs))
         append(" ")
         append(formatTimeRange(startMin, endMin))
@@ -227,6 +232,7 @@ fun calendarCardFact(event: CalEvent, nowMs: Long): String {
         val place = event.location.trim()
         if (place.isNotEmpty()) append("，$place")
     }
+    return withInProgressPrefix(base, event.begin, event.end, nowMs)
 }
 
 /**

@@ -125,7 +125,9 @@ import kotlin.math.sin
  * 收集卡片流、回桌面与分钟翻页时重算；没有卡时什么都不渲染、不留占位。
  *
  * 叠层交互：多张卡叠成一摞，最上面一张完整显示、下面露个边（最多露两张）；
- * 点下一步动作算处理完一张、卡片消失；横滑跳过播离场动画——用户的事项
+ * 点下一步动作算处理完一张、卡片消失——除了第十九批的有时间段提醒
+ * （日历/预约）：时间段内点动作不摘卡、卡片留在摞里，只有「我知道了」
+ * 或过了截止点才摘；横滑跳过播离场动画——用户的事项
  * 提醒（账单/预约/日历/未接来电/快递航班）沉到摞底，看完其他卡就轮到它，
  * 只有点「我知道了」才丢（第十四批，Bob 2026-11-10 23:43 定，取代 482
  * 「本轮收起来」）；应用推的提醒划过就丢。全部处理完或跳过后区域清空、
@@ -326,8 +328,9 @@ fun SmartCardStackHost() {
                 // 点预约卡正文（除按钮外）看原文：建提醒前是短信会话/
                 // 通知跳转，建完后按钮本身就是看预约、这里同动作。
                 if (card.kind == SmartCardKind.APPOINTMENT) viewAppointment(card)
-                // 点日历卡正文：与右按钮同一动作（加入会议 / 看日程），
-                // 打开即算处理完一张（performAction 内 markDone）。
+                // 点日历卡正文：与右按钮同一动作（加入会议 / 看日程）。
+                // 第十九批：时间段内点动作不算处理完、卡片不摘（performAction
+                // 内按 kind＋deadlineMs 判），只有「我知道了」或过了截止点才摘。
                 if (card.kind == SmartCardKind.CALENDAR) {
                     val opened = SmartCardActions.performAction(context, card)
                     if (!opened) IslandToasts.show("没能打开")

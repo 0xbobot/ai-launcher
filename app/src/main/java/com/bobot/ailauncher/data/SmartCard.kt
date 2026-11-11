@@ -28,7 +28,10 @@ enum class SmartCardKind {
     GUIDE
 }
 
-/** 卡片的下一步动作：点它就算处理完一张。 */
+/** 卡片的下一步动作：点它就算处理完一张——除了第十九批的有时间段提醒
+ * （CALENDAR / APPOINTMENT）：时间段内点动作不摘卡（见
+ * SmartCardActions.shouldKeepCardAfterAction），只有「我知道了」或过了
+ * 截止点才摘。 */
 sealed class SmartCardAction {
     /** 打开短信会话（smsto: 地址） */
     data class SmsThread(val address: String) : SmartCardAction()
@@ -53,7 +56,9 @@ sealed class SmartCardAction {
     /** 加入会议 / 看日程（第十二批，日历卡）：有会议链接直开链接，
      * 无链接打开日历应用（再兜底事件详情）。走
      * performAction 执行（CalendarMeeting.openCalendarEvent 同一条链），
-     * 成功打开即算处理完一张。 */
+     * 成功打开后按第十九批口径：时间段内不算处理完、卡片不摘（见
+     * SmartCardActions.shouldKeepCardAfterAction），只有「我知道了」
+     * 或过了截止点才摘。 */
     data class CalendarEvent(
         val eventId: Long,
         val meetingUrl: String?
@@ -142,6 +147,12 @@ data class SmartCard(
     val contactName: String? = null,
     /** 出现窗口起点：账单＝到期前 2 天，预约＝开始前 24 小时，其他＝来源到达时间 */
     val appearFromMs: Long = 0L,
+    /**
+     * 时间段起点（毫秒；第十九批，设计稿 §4.2）：CALENDAR＝事件开始时间，
+     * APPOINTMENT＝预约开始时间；其余种类没有时间段，填 0。只供「进行中 · 」
+     * 前缀的分段判断用，不改去重键、排序、截止点、prepSource。
+     */
+    val windowStartMs: Long = 0L,
     /** 右下方应用小标的目标应用（第十一批；引导卡与“已连接”反馈卡没有） */
     val targetApp: TargetApp? = null,
     /** 预约卡已建过提醒（第十一批）：卡上显示“已建提醒”，动作已换回
@@ -189,6 +200,34 @@ fun dedupeSmartCards(cards: List<SmartCard>): List<SmartCard> {
 
 /** 是否已过截止点（纯函数）：过了即消失，最迟 1 分钟内摘掉（分钟 ticker 驱动） */
 fun isCardExpired(card: SmartCard, nowMs: Long): Boolean = nowMs > card.deadlineMs
+
+/** 时间段内正文前缀（第十九批，设计稿 §4.2）：开始后、结束前正文前加
+ * 「进行中 · 」，只做展示，不改去重键、排序、截止点、prepSource。 */
+const val SMART_CARD_IN_PROGRESS_PREFIX = "进行中 · "
+
+/**
+ * 是否处于时间段内（纯函数）：开始 ≤ now < 结束。windowStartMs 为 0
+ * 时不是时间段提醒（账单/未接来电/快递航班没有开始时间），永不进行中。
+ */
+fun isInProgress(windowStartMs: Long, deadlineMs: Long, nowMs: Long): Boolean =
+    windowStartMs > 0L && nowMs >= windowStartMs && nowMs < deadlineMs
+
+/**
+ * 给正文加/去「进行中 · 」前缀（纯函数，幂等）：先剥掉已有前缀再按
+ * 时间段决定加不加——同一条事实在构建时与每分钟 refresh 里都可调，
+ * 不会叠两层。开始那一刻由分钟 ticker 的 refresh 翻过来，不另起计时器。
+ */
+fun withInProgressPrefix(
+    fact: String,
+    windowStartMs: Long,
+    deadlineMs: Long,
+    nowMs: Long
+): String {
+    val base = fact.removePrefix(SMART_CARD_IN_PROGRESS_PREFIX)
+    return if (isInProgress(windowStartMs, deadlineMs, nowMs)) {
+        SMART_CARD_IN_PROGRESS_PREFIX + base
+    } else base
+}
 
 /**
  * 用户的事项提醒（设计稿 §4.2，第十四批 Bob 2026-11-10 23:43 定，取代
