@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 
@@ -79,18 +80,36 @@ object AppBackgroundLatch {
     fun scheduleFallbackIfNotBackgrounded(
         targetPkg: String,
         tapUptimeMillis: Long,
-        onNotSeen: () -> Unit
+        tapWallMillis: Long = 0L,
+        appContext: Context? = null,
+        onNotSeen: () -> Boolean
     ) {
         if (!pending.add(targetPkg)) return
         handler.postDelayed(
             {
                 pending.remove(targetPkg)
-                if (decideLatchFallback(backgroundedSince(tapUptimeMillis))) {
-                    try {
+                val backgrounded = backgroundedSince(tapUptimeMillis)
+                val fired = decideLatchFallback(backgrounded)
+                var opened: Boolean? = null
+                var fallbackMs: Long? = null
+                if (fired) {
+                    val fireWallMillis = System.currentTimeMillis()
+                    opened = try {
                         onNotSeen()
                     } catch (_: Exception) {
                         // 回退打开失败不报错（行留着，用户可从字母组/Dock 打开）
+                        false
                     }
+                    fallbackMs = if (tapWallMillis != 0L) fireWallMillis - tapWallMillis else null
+                }
+                if (tapWallMillis != 0L && appContext != null) {
+                    UnreadJumpLog.onFallbackOutcome(
+                        appContext, tapWallMillis, targetPkg,
+                        fired = fired, opened = opened, ms = fallbackMs,
+                        fg = null, fgMs = null,
+                        bg = backgrounded,
+                        bgMs = if (backgrounded) lastBackgroundedAtMillis - tapUptimeMillis else null,
+                    )
                 }
             },
             LATCH_FALLBACK_DELAY_MILLIS

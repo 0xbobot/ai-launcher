@@ -167,6 +167,7 @@ import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.BadgeStickyStore
 import com.bobot.ailauncher.data.AppBackgroundLatch
 import com.bobot.ailauncher.data.ForegroundConfirm
+import com.bobot.ailauncher.data.UnreadJumpLog
 import com.bobot.ailauncher.data.hasUsageStatsPermission
 import com.bobot.ailauncher.data.MarketGuide
 import com.bobot.ailauncher.data.NotificationRepository
@@ -731,13 +732,16 @@ fun AppCenterContent(
         val now = System.currentTimeMillis()
         val last = lastLaunch
         if (last != null && last.first == app.packageName && now - last.second < 500L) return false
+        val tapUptimeMillis = SystemClock.uptimeMillis()
         val contentIntent =
             latestActiveByPackage[app.packageName]?.contentIntent
+        var sendError: String? = null
         if (contentIntent != null) {
             val sent = try {
                 contentIntent.send()
                 true
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                sendError = e.javaClass.simpleName
                 false
             }
             if (sent) {
@@ -757,13 +761,15 @@ fun AppCenterContent(
                 // 2 秒内没见到目标到过前台就回退 launchApp 直接打开。
                 // 没权限时无法核验、不排回退；行靠取消那半的 UNKNOWN
                 // 不取消留着，用户可从字母组/Dock 打开。双框风险见收据。
-                if (hasUsageStatsPermission(context)) {
+                val fallbackPath = if (hasUsageStatsPermission(context)) {
                     ForegroundConfirm.scheduleFallbackIfNotForeground(
                         context.applicationContext,
-                        app.packageName
+                        app.packageName,
+                        tapWallMillis = now
                     ) {
                         launchApp(app)
                     }
+                    "foreground"
                 } else {
                     // 门闩回退（Bob 2026-11-11 10:52 同类第二例：微信
                     // 「和和美美」行点了没打开、行也没了；Bob 10:33 定了
@@ -780,15 +786,41 @@ fun AppCenterContent(
                     // 清，应用自己撤通知后推数也会把行带走）。
                     AppBackgroundLatch.scheduleFallbackIfNotBackgrounded(
                         app.packageName,
-                        SystemClock.uptimeMillis()
+                        tapUptimeMillis,
+                        tapWallMillis = now,
+                        appContext = context.applicationContext
                     ) {
                         launchApp(app)
                     }
+                    "latch"
                 }
+                UnreadJumpLog.recordTap(
+                    context.applicationContext,
+                    tapWallMillis = now,
+                    pkg = app.packageName,
+                    hasContentIntent = true,
+                    path = "content_intent",
+                    sendResult = "ok",
+                    launchOk = null,
+                    fallbackPath = fallbackPath,
+                )
                 return true
             }
         }
-        return launchApp(app)
+        // contentIntent 为空或 send() 抛错：退回 launchApp 直接打开，
+        // 把结果也记下来（sendResult = no_intent / error:<异常类名>）。
+        val opened = launchApp(app)
+        UnreadJumpLog.recordTap(
+            context.applicationContext,
+            tapWallMillis = now,
+            pkg = app.packageName,
+            hasContentIntent = contentIntent != null,
+            path = "launch_app",
+            sendResult = if (contentIntent != null) "error:$sendError" else "no_intent",
+            launchOk = opened,
+            fallbackPath = "none",
+        )
+        return opened
     }
 
     // 未读行点按的“取消”那一半（Bob 2026-11-09 12:20 ②：点未读行有时只清
@@ -804,9 +836,16 @@ fun AppCenterContent(
     // 取消会把延迟取消一起杀掉；ForegroundConfirm 用 applicationContext +
     // 主线程 Handler，活过应用中心 dispose。
     fun scheduleUnreadCancelAfterOpen(app: AppInfo) {
+        // 取消那半也被寄上日志：expectCancel 登记“等取消结果”，返回这次
+        // 点按的墙钟，传给调度器做 outcome 的配对键；判定逻辑本身不动。
+        val tapWallMillis = UnreadJumpLog.expectCancel(
+            context.applicationContext,
+            app.packageName,
+        )
         ForegroundConfirm.scheduleCancelIfForeground(
             context.applicationContext,
-            app.packageName
+            app.packageName,
+            tapWallMillis = tapWallMillis
         ) {
             onClearUnreadNotifications(app.packageName)
         }
