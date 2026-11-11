@@ -165,6 +165,7 @@ import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.BadgeStickyStore
 import com.bobot.ailauncher.data.ForegroundConfirm
+import com.bobot.ailauncher.data.hasUsageStatsPermission
 import com.bobot.ailauncher.data.MarketGuide
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.SmsRepository
@@ -749,6 +750,19 @@ fun AppCenterContent(
                 inactiveTick++
                 BadgeStickyStore.clearForPackage(context, app.packageName)
                 BadgeProbe.clearForPackage(context, app.packageName)
+                // 前台核验回退（Bob 2026-11-11 09:53：Google 健康行点了没
+                // 打开——contentIntent.send() 不抛错也可能静默无动作；
+                // 2 秒内没见到目标到过前台就回退 launchApp 直接打开。
+                // 没权限时无法核验、不排回退；行靠取消那半的 UNKNOWN
+                // 不取消留着，用户可从字母组/Dock 打开。双框风险见收据。
+                if (hasUsageStatsPermission(context)) {
+                    ForegroundConfirm.scheduleFallbackIfNotForeground(
+                        context.applicationContext,
+                        app.packageName
+                    ) {
+                        launchApp(app)
+                    }
+                }
                 return true
             }
         }
@@ -762,7 +776,8 @@ fun AppCenterContent(
     // 线程 Handler 上轮询（200ms 一次、最多 1 秒），窗内任一时刻见到目标
     // 应用到过前台就取消（打开后 1 秒内又切走也算，打开过就是读到了）；1 秒
     // 内没见到就不取消，通知留着、行留在未读组（用户可左滑清）；没拿到用量
-    // 统计权限时退回“调起成功就取消”（老行为）。
+    // 统计权限（UNKNOWN）时也不取消——无法判定就别动通知（2026-11-11 改，
+    // Google 健康行点了没打开、消息却消失的教训）。
     // 注意：不能绑组合作用域——用户点行打开应用后应用中心浮层就没了，作用域
     // 取消会把延迟取消一起杀掉；ForegroundConfirm 用 applicationContext +
     // 主线程 Handler，活过应用中心 dispose。

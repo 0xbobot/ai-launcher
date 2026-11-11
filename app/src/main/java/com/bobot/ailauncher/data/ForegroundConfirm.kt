@@ -16,8 +16,10 @@ import android.os.Process
  *
  * 修法：先打开、确认应用真的到了前台再取消。点按后在主线程 Handler 上
  * 轮询（200ms 一次、最多 1 秒），见到目标应用到过前台就取消；1 秒内没
- * 见到就不取消（通知留着，用户可左滑清）；没拿到用量统计权限时退回
- * “调起成功就取消”（老行为）。
+ * 见到就不取消（通知留着，用户可左滑清）。2026-11-11 改：拿不到用量
+ * 统计权限（UNKNOWN）时也不取消——无法判定就别动通知（Bob 2026-11-11
+ * 09:53 亲报：Google 健康行点了没打开、消息却不见了，就是 UNKNOWN
+ * 立即取消那条退路清掉的）。
  *
  * 前台判定走 UsageStatsManager.queryEvents（应用已为折叠组在用，有权限
  * 基础设施；PACKAGE_USAGE_STATS Manifest 已声明，不新增权限）。
@@ -32,6 +34,10 @@ const val FOREGROUND_POLL_INTERVAL_MILLIS = 200L
 /** 最多轮询次数：5 次，窗口约 1 秒。 */
 const val FOREGROUND_MAX_POLLS = 5
 
+/** 回退核验（scheduleFallbackIfNotForeground）最多轮询次数：10 次，窗口
+ * 约 2 秒——contentIntent 静默无动作时，2 秒内没见到目标到前台才回退。 */
+const val FOREGROUND_FALLBACK_MAX_POLLS = 10
+
 /** 事件回看窗口：每次轮询查最近 10 秒的事件，刚发生、还没被下次轮询
  * 看到的事件不丢（事件上报本身可能滞后几百毫秒）。 */
 const val FOREGROUND_LOOKBACK_MILLIS = 10_000L
@@ -45,13 +51,13 @@ enum class ForegroundConfirmResult {
     CONFIRMED,
     /** 有权限、窗内有事件，但目标应用一次也没到前台：没打开，不取消。 */
     NOT_SEEN,
-    /** 拿不到用量统计权限（或事件查不到）：无法判定，退回老行为（调起成功就取消）。 */
+    /** 拿不到用量统计权限（或事件查不到）：无法判定，不取消、不回退。 */
     UNKNOWN
 }
 
 /**
  * 纯函数：给定窗内全部前台事件，判定目标应用是否到过前台。
- * - 没权限 → UNKNOWN（退回老行为）；
+ * - 没权限 → UNKNOWN（不取消，见 ForegroundConfirmResult.UNKNOWN）；
  * - 有权限、事件里有目标应用的进前台事件 → CONFIRMED；
  * - 有权限、事件里没有目标应用 → NOT_SEEN（事件为空也算 NOT_SEEN——
  *   有权限时查不到事件就是窗内没人切前台）。
@@ -67,6 +73,35 @@ fun decideForegroundConfirm(
         return ForegroundConfirmResult.CONFIRMED
     }
     return ForegroundConfirmResult.NOT_SEEN
+}
+
+/** 一轮前台查询走完后，下一步做什么（纯函数，供取消调度与回退核验共用）。 */
+enum class ForegroundPollStep {
+    /** 目标到过前台：取消调度走 onConfirmed；回退核验什么都不做。 */
+    CONFIRMED,
+    /** 窗内一次也没见到目标：取消调度就此停（不取消）；回退核验走 onNotSeen。 */
+    EXHAUSTED,
+    /** 继续下一轮。 */
+    CONTINUE,
+    /** 无法判定（没权限或查不到事件）：两个调度都就此停，不取消、不回退。 */
+    UNDECIDABLE
+}
+
+/**
+ * 纯函数：给定一轮查询结果与已轮询次数，判定下一步。
+ * - CONFIRMED → CONFIRMED（第几轮见到都算）；
+ * - UNKNOWN → UNDECIDABLE（不取消、不回退）；
+ * - NOT_SEEN 且未到上限 → CONTINUE；已到上限 → EXHAUSTED。
+ */
+fun decidePollStep(
+    result: ForegroundConfirmResult,
+    polls: Int,
+    maxPolls: Int
+): ForegroundPollStep = when (result) {
+    ForegroundConfirmResult.CONFIRMED -> ForegroundPollStep.CONFIRMED
+    ForegroundConfirmResult.UNKNOWN -> ForegroundPollStep.UNDECIDABLE
+    ForegroundConfirmResult.NOT_SEEN ->
+        if (polls >= maxPolls) ForegroundPollStep.EXHAUSTED else ForegroundPollStep.CONTINUE
 }
 
 /** 用量统计权限是否已授（AppOps 现查；未授时 queryEvents 拿不到事件）。 */
@@ -85,7 +120,7 @@ fun hasUsageStatsPermission(context: Context): Boolean {
 
 /**
  * 查一段窗口内的前台事件（只取进/退前台两种事件）。
- * 未授权限或查询失败返回 null（调用方按 UNKNOWN 处理，退回老行为）。
+ * 未授权限或查询失败返回 null（调用方按 UNKNOWN 处理，不取消、不回退）。
  */
 fun queryForegroundEvents(
     context: Context,
@@ -115,17 +150,41 @@ fun queryForegroundEvents(
 }
 
 /**
- * 延迟取消调度器：确认目标应用到了前台才回调 onConfirmed（由调用方取消通知）。
+ * 两个前台轮询调度器（取消 + 回退核验）：确认目标应用到了前台才回调
+ * onConfirmed（由调用方取消通知）或停下。
  *
  * 必须活过应用中心 dispose——用户点行打开应用后应用中心浮层就没了，组合
  * 作用域取消会把延迟取消一起杀掉。所以不用组合作用域，用主线程 Handler +
  * applicationContext（应用单例，持有无泄漏），轮询与取消都不依赖任何组合状态。
- * 同一包同时只排一轮（重复点按不重复排队；取消本身幂等，多排一次也无害）。
- * onConfirmed 抛异常也不杀轮询线程（包住）。
+ * 同一包同一调度同时只排一轮（重复点按不重复排队；取消本身幂等，多排一次也无害）。
+ * 回调抛异常也不杀轮询线程（包住）。
  */
 object ForegroundConfirm {
     private val handler = Handler(Looper.getMainLooper())
     private val pending = mutableSetOf<String>()
+    private val pendingFallback = mutableSetOf<String>()
+
+    /** 一轮前台查询的结果（两个调度器共用）。 */
+    private fun pollResult(
+        appContext: Context,
+        targetPkg: String
+    ): ForegroundConfirmResult {
+        return try {
+            if (!hasUsageStatsPermission(appContext)) {
+                ForegroundConfirmResult.UNKNOWN
+            } else {
+                val now = System.currentTimeMillis()
+                val events = queryForegroundEvents(
+                    appContext,
+                    now - FOREGROUND_LOOKBACK_MILLIS,
+                    now
+                )
+                decideForegroundConfirm(events, targetPkg, true)
+            }
+        } catch (_: Exception) {
+            ForegroundConfirmResult.UNKNOWN
+        }
+    }
 
     fun scheduleCancelIfForeground(
         appContext: Context,
@@ -137,24 +196,8 @@ object ForegroundConfirm {
         val task = object : Runnable {
             override fun run() {
                 polls++
-                val result = try {
-                    if (!hasUsageStatsPermission(appContext)) {
-                        ForegroundConfirmResult.UNKNOWN
-                    } else {
-                        val now = System.currentTimeMillis()
-                        val events = queryForegroundEvents(
-                            appContext,
-                            now - FOREGROUND_LOOKBACK_MILLIS,
-                            now
-                        )
-                        decideForegroundConfirm(events, targetPkg, true)
-                    }
-                } catch (_: Exception) {
-                    ForegroundConfirmResult.UNKNOWN
-                }
-                when (result) {
-                    ForegroundConfirmResult.CONFIRMED,
-                    ForegroundConfirmResult.UNKNOWN -> {
+                when (decidePollStep(pollResult(appContext, targetPkg), polls, FOREGROUND_MAX_POLLS)) {
+                    ForegroundPollStep.CONFIRMED -> {
                         pending.remove(targetPkg)
                         try {
                             onConfirmed()
@@ -162,13 +205,56 @@ object ForegroundConfirm {
                             // 取消失败不报错（角标不动，用户可再滑一次）
                         }
                     }
-                    ForegroundConfirmResult.NOT_SEEN -> {
-                        if (polls >= FOREGROUND_MAX_POLLS) {
-                            pending.remove(targetPkg)
-                        } else {
-                            handler.postDelayed(this, FOREGROUND_POLL_INTERVAL_MILLIS)
+                    ForegroundPollStep.EXHAUSTED,
+                    ForegroundPollStep.UNDECIDABLE -> pending.remove(targetPkg)
+                    ForegroundPollStep.CONTINUE ->
+                        handler.postDelayed(this, FOREGROUND_POLL_INTERVAL_MILLIS)
+                }
+            }
+        }
+        handler.post(task)
+    }
+
+    /**
+     * 回退核验调度器（Bob 2026-11-11 09:53 亲报：Google 健康未读行点了没
+     * 打开、消息却不见了——contentIntent.send() 不抛错也可能静默无动作，
+     * Android 12+ 通知跳板拦截时系统在启动时悄悄拦掉，发送方拿不到异常；
+     * 上面那条是假设，见收据）。
+     *
+     * 在 contentIntent.send() 返回成功后排：2 秒窗内见到目标到过前台就停，
+     * 什么都不做（取消仍由 scheduleCancelIfForeground 那边处理）；2 秒都
+     * 没见到就回调 onNotSeen（调用方回退 launchApp 直接打开）。没权限
+     * （UNKNOWN）时无法核验，就此停、不回退。
+     *
+     * 与取消调度分开排队（各自的 pending 集）：两边同时跑、互不挡——取消
+     * 调度 1 秒窗内确认了就取消通知，回退核验 2 秒窗内确认了就停；都没见
+     * 到时取消不执行、回退在 2 秒后打开应用。不要去探测中兴跳转确认框
+     * （没有可靠 API）：框正弹着、2 秒窗过了时，回退会再发一次 launchApp，
+     * 用户可能看到同一对应用的第二个确认框，列为 Bob 真机验收项。
+     */
+    fun scheduleFallbackIfNotForeground(
+        appContext: Context,
+        targetPkg: String,
+        onNotSeen: () -> Unit
+    ) {
+        if (!pendingFallback.add(targetPkg)) return
+        var polls = 0
+        val task = object : Runnable {
+            override fun run() {
+                polls++
+                when (decidePollStep(pollResult(appContext, targetPkg), polls, FOREGROUND_FALLBACK_MAX_POLLS)) {
+                    ForegroundPollStep.EXHAUSTED -> {
+                        pendingFallback.remove(targetPkg)
+                        try {
+                            onNotSeen()
+                        } catch (_: Exception) {
+                            // 回退打开失败不报错（行留着，用户可从字母组/Dock 打开）
                         }
                     }
+                    ForegroundPollStep.CONFIRMED,
+                    ForegroundPollStep.UNDECIDABLE -> pendingFallback.remove(targetPkg)
+                    ForegroundPollStep.CONTINUE ->
+                        handler.postDelayed(this, FOREGROUND_POLL_INTERVAL_MILLIS)
                 }
             }
         }
