@@ -10,6 +10,10 @@
 
 ---
 
+## v1.3.36（versionCode 493）— 2026-11-11
+
+飞书入会改走官方深链（Bob 2026-11-11 13:56 报「还是不行」：489 的显式包名 https 意图在真机上没走通，点「加入会议」还是进了浏览器 vc.feishu.cn）：根因已从飞书 APK v7.70.12 本身证实——飞书 manifest 里根本没声明接 vc.feishu.cn / meeting.feishu.cn 这两个 host，所以显式包名 https 意图的 resolveActivity 为空、落回浏览器；本批改走官方入会深链 feishu://applink.feishu.cn/client/videochat/open?action=join&num=<会议号>（已从 APK 的 manifest＋dex 反汇编核实：RouterActivity 声明 feishu://applink.feishu.cn，VideoChatHandler 把 /client/videochat/open 映射到入会处理，会议号即 vc.feishu.cn/j/ 里的 9 位数字），显式包名＋resolveActivity 校验，接不住落回 489 的显式包名 https 意图再走浏览器；提不到会议号时不编深链、直接走 489 链。JoinGuard（2 秒 join-once）与兜底链照常；其它会议应用与卡片不动。单测 670 绿、零 FAILED。
+
 ## v1.3.35（versionCode 492）— 2026-11-11
 
 未读行点按无权限回退：门闩（Bob 2026-11-11 10:52 录屏：微信「和和美美」行点了没打开、行没了，同类第二例）。490 的前台核验回退只在用量统计权限已授时做，Bob 定了先不申请权限、那件在他手机上休眠；本批补没权限也能回退的一半：MainActivity.onPause 记最近一次切后台时间，send() 成功后、没权限时约 2 秒检查一次，窗内一次都没切后台就回退 launchApp 直接打开。一次点按只走一条回退路。回退只开应用主界面、落不到目标会话；回退打开后行还留在未读组（取消要权限，左滑可清）。新 AppBackgroundLatchTest 7 项全绿。
