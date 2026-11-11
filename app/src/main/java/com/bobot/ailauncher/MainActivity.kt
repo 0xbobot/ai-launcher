@@ -4,6 +4,7 @@ package com.bobot.ailauncher
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -161,6 +162,17 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // 门闩回退（Bob 2026-11-11 两例：未读行 contentIntent 静默无动作时，
+        // 没权限也能回退——信号是我们自己切没切后台）：记下这次切后台的时间
+        // （单调时钟）。应用中心是盖在同一个 Activity 上的浮层，进应用中心
+        // 本身不触发 onPause，不会误触发门闩；判断只在点按后 2 秒那次检查里做。
+        com.bobot.ailauncher.data.AppBackgroundLatch.markBackgrounded(
+            SystemClock.uptimeMillis()
+        )
     }
 
     // v0.26.6：返回键由 MainScreen 的 BackHandler 处理（D3 返回主页，首页不做事）

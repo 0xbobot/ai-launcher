@@ -3,6 +3,7 @@
 package com.bobot.ailauncher.ui.apps
 
 import android.content.Intent
+import android.os.SystemClock
 import android.provider.Telephony
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.animation.AnimatedVisibility
@@ -164,6 +165,7 @@ import com.bobot.ailauncher.data.LlmConfig
 import com.bobot.ailauncher.data.LlmRouter
 import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.BadgeStickyStore
+import com.bobot.ailauncher.data.AppBackgroundLatch
 import com.bobot.ailauncher.data.ForegroundConfirm
 import com.bobot.ailauncher.data.hasUsageStatsPermission
 import com.bobot.ailauncher.data.MarketGuide
@@ -759,6 +761,26 @@ fun AppCenterContent(
                     ForegroundConfirm.scheduleFallbackIfNotForeground(
                         context.applicationContext,
                         app.packageName
+                    ) {
+                        launchApp(app)
+                    }
+                } else {
+                    // 门闩回退（Bob 2026-11-11 10:52 同类第二例：微信
+                    // 「和和美美」行点了没打开、行也没了；Bob 10:33 定了
+                    // 先不申请权限，上面那件回退在他手机上休眠）：没权限
+                    // 时不查 UsageStats，改看我们自己有没有切到后台——
+                    // 跳成功了我们的 Activity 一定 onPause，静默丢了就
+                    // 还停在前台。点按后约 2 秒检查一次，窗内一次都没切
+                    // 后台就回退 launchApp 直接打开（只打开应用主界面，
+                    // 落不到那条通知的目标会话，那是 contentIntent 才有
+                    // 的精准落点）。一次点按只走一条回退路：有权限走上面
+                    // 那条，没权限走这条，不会双排。
+                    // 取消那半不动：回退只管打开，不管取消（没权限时取消
+                    // 本来就不执行；回退打开后行还留在未读组，用户可左滑
+                    // 清，应用自己撤通知后推数也会把行带走）。
+                    AppBackgroundLatch.scheduleFallbackIfNotBackgrounded(
+                        app.packageName,
+                        SystemClock.uptimeMillis()
                     ) {
                         launchApp(app)
                     }
