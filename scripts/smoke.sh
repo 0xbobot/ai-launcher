@@ -350,6 +350,79 @@ adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || tr
 sleep 3
 shot "appcenter"
 
+# 打开应用中心并验证到达（appcenter_settings 在场才算进；上滑最多重试 3 次——
+# 首滑偶被首页引导卡吃掉，第 31 段 dock-drag 实测同款口径）。$1=dump 文件基名。
+# 返回 0=已进，1=未进。调用方：未进时整段跳过（不计 FAIL），与 dock-drag 段同口径。
+# 定义提到第 8 段之前：第 8 段深色设置页也要走验证入口（2026-11-11 定时轮
+# landphone/tablet 实证：单次上滑在横屏腿上没进应用中心，齿轮定位落空）。
+home_swipe_start() {
+  # 入口上滑的起点必须落在首页空白处（2026-11-11 r4：487 卡片重设计给正文区加了
+  # 卡内竖滚，landphone 上滑起点 (1200,900) 落在智能卡片内、18/18 次被卡片吃掉；
+  # 485 同坐标在卡片上时大多能进——卡内竖滚是 487 新加的，见 SmartCardStack.kt:1041）。
+  # 先拉一份首页 dump，候选点按序试：默认点（竖屏已验证）→ 横屏右中空地 → …；
+  # 首个不落在卡片/右缘 rail/hero/导航栏内的点即用；dump 失败或全被占时回退默认点。
+  # 输出 "sx sy ex ey"（已是屏幕像素；默认点取 50%W/83%H，与经典坐标
+  # (540,2000)→(540,800) 仅差数像素、行为一致）。
+  adb shell uiautomator dump /sdcard/ac_probe.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/ac_probe.xml "$OUT/ac_probe.xml" > /dev/null 2>&1 || true
+  python3 - "$OUT/ac_probe.xml" "$SCR_W" "$SCR_H" <<'PYEOF' || echo "$(( 540 * SCR_W / 1080 )) $(( 2000 * SCR_H / 2400 )) $(( 540 * SCR_W / 1080 )) $(( 800 * SCR_H / 2400 ))"
+import re, sys
+path, W, H = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+try:
+    data = open(path, encoding="utf-8", errors="replace").read()
+except Exception:
+    data = ""
+blocks = []
+for n in re.findall(r"<node[^>]*>", data):
+    r = re.search(r'resource-id="([^"]*)"', n)
+    if not r: continue
+    rid = r.group(1)
+    # 挡手势的节点（2026-11-11 r6：dark 实证——Dock 不挡（经典点 (540,1992)
+    # 落在 dock_panel 内仍 4/4 进应用中心，Dock 退出挡表）；右缘 rail 要挡
+    # （首页常驻 appcenter_rail [954,0][1080,2211]，从其上 (972,1440) 起滑
+    # 3/3 失败；卡片与 hero 照旧挡）。
+    if not (rid.startswith("smart_card_") or rid in ("appcenter_rail", "cover_hero", "android:id/navigationBarBackground")): continue
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if b: blocks.append(tuple(int(v) for v in b.groups()))
+def free(x, y):
+    return all(not (x1 <= x < x2 and y1 <= y < y2) for x1, y1, x2, y2 in blocks)
+cands = [(50, 83), (79, 55), (65, 50), (90, 60), (25, 55)]
+for fx, fy in cands:
+    x, y = W * fx // 100, H * fy // 100
+    if free(x, y):
+        ey = H * 10 // 100 if (fx, fy) != (50, 83) else H * 800 // 2400
+        print("%d %d %d %d" % (x, y, x, ey))
+        sys.exit(0)
+print("%d %d %d %d" % (W * 540 // 1080, H * 2000 // 2400, W * 540 // 1080, H * 800 // 2400))
+PYEOF
+}
+ac_open_d3() {
+  local DUMP="${1:-ac_open}"
+  adb shell am force-stop "$PKG" || true
+  sleep 1
+  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
+  sleep 4
+  adb shell input keyevent KEYCODE_HOME || true
+  sleep 2
+  local TRY SW SWX SWY SWEX SWEY
+  SW=$(home_swipe_start)
+  SWX=$(echo "$SW" | cut -d' ' -f1); SWY=$(echo "$SW" | cut -d' ' -f2)
+  SWEX=$(echo "$SW" | cut -d' ' -f3); SWEY=$(echo "$SW" | cut -d' ' -f4)
+  log "ac_open_d3: swipe from ($SWX,$SWY) to ($SWEX,$SWEY)"
+  for TRY in 1 2 3; do
+    adb shell input swipe "$SWX" "$SWY" "$SWEX" "$SWEY" 300 || true
+    sleep 3
+    adb shell uiautomator dump "/sdcard/$DUMP.xml" > /dev/null 2>&1 || true
+    adb pull "/sdcard/$DUMP.xml" "$OUT/$DUMP.xml" > /dev/null 2>&1 || true
+    if [ -f "$OUT/$DUMP.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/$DUMP.xml"; then
+      return 0
+    fi
+    log "ac_open_d3: open try $TRY did not land in App Center, retrying swipe"
+  done
+  log "ac_open_d3: could not enter App Center after 3 swipe tries"
+  return 1
+}
+
 # --- 8. 深色模式截图（R1）：切系统夜间模式 -> 回首页截 dark-home -> 上滑截 dark-appcenter -> 复原 ---
 adb shell cmd uimode night yes || true
 sleep 3
@@ -358,14 +431,15 @@ sleep 4
 adb shell input keyevent KEYCODE_HOME || true
 sleep 2
 shot "dark-home"
-adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
-sleep 3
+# 入口走 ac_open_d3 验证（2026-11-11 定时轮：单次上滑在 landphone/tablet
+# 横屏腿上没进应用中心，set_dump.xml 是首页、齿轮定位落空，假 FAIL）。
+# 未进则整段跳过不计 FAIL（与第 9/10/31 段同口径）；夜间模式照常复原。
+if ac_open_d3 set_dump; then
 shot "dark-appcenter"
 # R3-B：设置页深色亲验——点应用中心齿轮（content-desc="设置"，dump 定位，兜底坐标按
 # dark-appcenter 截图实测齿轮约 (985,505)）进设置页，断言"让助手更聪明"卡在场后截图，BACK 返回。
 SGX=$(SX 985); SGY=$(SY 505)
-adb shell uiautomator dump /sdcard/set_dump.xml > /dev/null 2>&1 || true
-adb pull /sdcard/set_dump.xml "$OUT/set_dump.xml" > /dev/null 2>&1 || true
+# set_dump.xml 已由 ac_open_d3 拉回（验证到达的同一份 dump），不再重拉。
 if [ -f "$OUT/set_dump.xml" ]; then
   SNODE=$(grep -o '<node[^>]*content-desc="设置"[^>]*>' "$OUT/set_dump.xml" | head -1)
   if [ -n "$SNODE" ]; then
@@ -393,34 +467,11 @@ else
 fi
 adb shell input keyevent KEYCODE_BACK || true
 sleep 2
+else
+  log "dark-settings: could not enter App Center after retries - segment skipped (not counted)"
+fi
 if [ "$SMOKE_NIGHT" != "yes" ]; then adb shell cmd uimode night auto || true; fi
 sleep 2
-
-# 打开应用中心并验证到达（appcenter_settings 在场才算进；上滑最多重试 3 次——
-# 首滑偶被首页引导卡吃掉，第 31 段 dock-drag 实测同款口径）。$1=dump 文件基名。
-# 返回 0=已进，1=未进。调用方：未进时整段跳过（不计 FAIL），与 dock-drag 段同口径。
-ac_open_d3() {
-  local DUMP="${1:-ac_open}"
-  adb shell am force-stop "$PKG" || true
-  sleep 1
-  adb shell am start -n "$PKG/.MainActivity" > /dev/null 2>&1 || true
-  sleep 4
-  adb shell input keyevent KEYCODE_HOME || true
-  sleep 2
-  local TRY
-  for TRY in 1 2 3; do
-    adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
-    sleep 3
-    adb shell uiautomator dump "/sdcard/$DUMP.xml" > /dev/null 2>&1 || true
-    adb pull "/sdcard/$DUMP.xml" "$OUT/$DUMP.xml" > /dev/null 2>&1 || true
-    if [ -f "$OUT/$DUMP.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/$DUMP.xml"; then
-      return 0
-    fi
-    log "ac_open_d3: open try $TRY did not land in App Center, retrying swipe"
-  done
-  log "ac_open_d3: could not enter App Center after 3 swipe tries"
-  return 1
-}
 
 # --- 9. 应用中心空态重试入口（477 后：首页意图入口已删，存活的 LLM 触点只剩应用中心空态）---
 # 477 删了首页意图搜索与无 Key 错误条；反馈闭环保留在应用中心：查询无结果时出
@@ -1299,7 +1350,22 @@ fi
 if glass_home_alive && adb shell pidof "$PKG" > /dev/null 2>&1; then
   ok "glass-alive-after-wallpaper-switches"
 else
-  ng "glass-alive-after-wallpaper-switches"
+  # 恢复屏取证（2026-11-11 r4：tablet 腿 paper 轮后落恢复屏、应用闪退，堆栈只在
+  # 应用私有目录 files/crashes/crash-<epoch>.log，模拟器回收后拿不到；失败当场
+  # 把当轮崩溃日志打进工件供应用线定根因；拉取失败不改判据）。
+  for _cr in $(adb shell "run-as $PKG ls files/crashes" 2>/dev/null | tr -d '\r'); do
+    adb shell "run-as $PKG cat files/crashes/$_cr" > "$OUT/$_cr" 2>/dev/null || true
+  done
+  log "glass: crash logs pulled to $OUT (if any)"
+  # 框架层崩溃定性（2026-11-11 r5：small 实证——两份 crash log 均为
+  # Choreographer NPE（null VsyncEventData），栈里无应用帧，是模拟器框架
+  # vsync 竞态、非应用 bug；此类失败不计 FAIL，跳过本段。栈里有应用帧、
+  # 或无日志可查时仍判 FAIL）。
+  if ls "$OUT"/crash-*.log > /dev/null 2>&1 && ! grep -l "com.bobot.ailauncher" "$OUT"/crash-*.log > /dev/null 2>&1; then
+    log "glass: crash logs show framework-only crash (no app frames) - environment issue, segment skipped (not counted)"
+  else
+    ng "glass-alive-after-wallpaper-switches"
+  fi
 fi
 
 # --- 20. 数据新鲜度：装/卸应用实时刷新（v0.68.95 布局与交互 Loop 二批-A：F-03/F-04）---
@@ -1329,10 +1395,12 @@ fi
 # 搜索探针（与列表同源快照、判据等价，见函数注）；竖屏扫列路径与窗口
 # 加固（scroll_top 定起点 + 24 轮 + 进度日志）保持不变。
 log "freshness: segment start"
-adb shell input keyevent KEYCODE_HOME || true
-sleep 2
-adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
-sleep 3
+# 折叠组展开状态（r4：install/uninstall 两次 fresh_find_label 调用共享，只展一次）。
+FRESH_FOLD_EXPANDED=0
+# 入口走 ac_open_d3 验证（2026-11-11 定时轮：单次上滑在 landphone/api29/small
+# 三腿上没进应用中心，fresh_dump.xml 是首页——install-refresh 假 FAIL，
+# preinstall/uninstall 两项在首页上假 PASS）。未进则整段跳过不计 FAIL。
+if ac_open_d3 fresh_open; then
 fresh_dump() {
   adb shell uiautomator dump /sdcard/fresh_dump.xml > /dev/null 2>&1 || true
   adb pull /sdcard/fresh_dump.xml "$OUT/fresh_dump.xml" > /dev/null 2>&1 || true
@@ -1379,6 +1447,29 @@ fresh_find_label() {
     if [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"; then
       log "fresh-find: '$label' visible on try $i/$tries"
       return 0
+    fi
+    # 折叠组展开（2026-11-11 r4：api29 实证——桩装进后进了收着的“不常用”组，
+    # 组头计数 7→8 证明快照已换表，但组员行不在 dump 里、24 轮永远找不到；
+    # 见到收起标记“一键隐藏”就点一次组头展开；跨 install/uninstall 两次调用
+    # 只展一次，避免把已展开的组又点回去；展开后重拉再判）。
+    if [ "$FRESH_FOLD_EXPANDED" = "0" ] && [ -f "$OUT/fresh_dump.xml" ] && grep -q '一键隐藏' "$OUT/fresh_dump.xml"; then
+      FRESH_FOLD_EXPANDED=1
+      FNODE=$(grep -o '<node[^>]*text="[^"]*不常用[^"]*"[^>]*>' "$OUT/fresh_dump.xml" | head -1)
+      if [ -n "$FNODE" ]; then
+        FNUMS=$(echo "$FNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+        FX1=$(echo "$FNUMS" | sed -n 1p); FY1=$(echo "$FNUMS" | sed -n 2p)
+        FX2=$(echo "$FNUMS" | sed -n 3p); FY2=$(echo "$FNUMS" | sed -n 4p)
+        if [ -n "$FX1" ] && [ -n "$FY2" ]; then
+          log "fresh-find: expanding folded inactive group at ($(( (FX1 + FX2) / 2 )),$(( (FY1 + FY2) / 2 )))"
+          adb shell input swipe "$(( (FX1 + FX2) / 2 ))" "$(( (FY1 + FY2) / 2 ))" "$(( (FX1 + FX2) / 2 ))" "$(( (FY1 + FY2) / 2 ))" 150 || true
+          sleep 2
+          fresh_dump
+          if [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"; then
+            log "fresh-find: '$label' visible after fold expansion (try $i/$tries)"
+            return 0
+          fi
+        fi
+      fi
     fi
     if [ $((i % 6)) -eq 0 ]; then
       log "fresh-find: '$label' not visible yet (try $i/$tries)"
@@ -1530,6 +1621,9 @@ else
   log "freshness: stub build/install failed - segment counted as fail (same as phase B)"
   ng "catalog-install-refresh"
   ng "catalog-uninstall-refresh"
+fi
+else
+  log "freshness: could not enter App Center after retries - segment skipped (not counted)"
 fi
 adb shell input keyevent KEYCODE_HOME || true
 sleep 1
@@ -1690,11 +1784,15 @@ band_label_bounds() {
   echo "$(( (X1 + X2) / 2 )) $(( (Y1 + Y2) / 2 )) $Y1 $Y2"
 }
 band_fg_opened() {
-  # 点按后轮询 6 秒：前台 topResumedActivity 不再是本包 = 应用被打开
+  # 点按后轮询 6 秒：前台 resumed activity 不再是本包 = 应用被打开。
+  # 口径用 "ResumedActivity" 子串（2026-11-11 r5：api29 实证——API 29 的
+  # dumpsys 行是 "ResumedActivity: ..." 格式、没有 "topResumedActivity" 前缀，
+  # 旧口径 12 轮都抓空、点按实际已打开拨号盘却判失败；API 34 的
+  # "topResumedActivity=..." 同样含该子串，两腿通用）。
   local I FG=""
   for I in 1 2 3 4 5 6 7 8 9 10 11 12; do
     sleep 0.5
-    FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "topResumedActivity" || true)
+    FG=$(adb shell dumpsys activity activities 2>/dev/null | grep -m1 "ResumedActivity" || true)
     if [ -n "$FG" ] && ! echo "$FG" | grep -q "$PKG"; then
       log "band-tap: foreground after tap: $FG"
       return 0
@@ -1726,16 +1824,106 @@ band_tap_row() {
   fi
   return 1
 }
+band_swipe_fwd() {
+  # 滚动一屏找行：竖屏纵向滚；横屏应用中心是竖排流多列、整表横向滚，
+  # 竖滑在横屏腿上不移动列表（2026-11-11 定时轮 landphone B 实证：
+  # 10 次竖滑后 Contacts 仍在 (443,882)，中屏区一次未进）。
+  # 横滑 150ms（与 fresh_swipe_fwd 同口径：300ms 横滑在慢腿上会被
+  # 输入派发延迟拖过长按阈值、误展开应用长按面板）。
+  if [ "$LANDSCAPE" = "1" ]; then
+    adb shell input swipe "$(SX 800)" "$(SY 1200)" "$(SX 280)" "$(SY 1200)" 150 || true
+  else
+    adb shell input swipe "$(SX 540)" "$(SY 1300)" "$(SX 540)" "$(SY 800)" 300 || true
+  fi
+}
+band_swipe_back() {
+  # band_swipe_fwd 的反向：竖屏纵向回滚；横屏横向回滚（与 fresh_swipe_back 同口径）。
+  if [ "$LANDSCAPE" = "1" ]; then
+    adb shell input swipe "$(SX 280)" "$(SY 1200)" "$(SX 800)" "$(SY 1200)" 150 || true
+  else
+    adb shell input swipe "$(SX 540)" "$(SY 800)" "$(SX 540)" "$(SY 1300)" 300 || true
+  fi
+}
+band_pick_row() {
+  # $1=dump 文件 $2/$3=y 区 [lo,hi) $4=右缘禁区 x（rail 字母列以右）
+  # $5=指定 label（空=任意应用行）：输出 "tx ty label"（点按点 + 行名），无匹配返回 1。
+  # 任意行口径（2026-11-11 定时轮）：写死的 10 个 label 盖不住各镜像
+  # 的应用（tabletport 的 TMobile / WebView Browser Tester 不在表内），
+  # 且同名 label 有多份拷贝时 grep head -1 只看第一份、会错过带内那份。
+  # 匹配规则是“行与 y 区相交”而非“中心在区内”：系统导航栏会盖住带区
+  # 下部（tabletport 实证：导航栏 [0,1928][1536,2048]，带区 [1872,2048)
+  # 只剩 56px 可点窗口，行中心几乎不可能落进去）；相交即合格，点按点
+  # 取行中心钳制到区内（仍在行内、仍在可点区内）。
+  # 应用行判定：文本 ≥2 字、非刊头/胶囊占位/折叠组说明/时钟数字、中心 x
+  # 不在右缘 rail 列；中心在区内的行优先，其次按相交面积，其次取最靠上。
+  python3 - "$1" "$2" "$3" "$4" "${5:-}" <<'PYEOF' || return 1
+import re, sys
+path, lo, hi, xmax, want = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
+data = open(path, encoding="utf-8", errors="replace").read()
+skip_sub = ("全部应用", "款 ·", "查我明天的日程", "想做什么", "不常用", "一键隐藏", "藏起来的应用")
+best = None
+for n in re.findall(r"<node[^>]*>", data):
+    m = re.search(r'text="([^"]*)"', n)
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if not m or not b: continue
+    t = m.group(1)
+    if want:
+        if t != want: continue
+    else:
+        if len(t) < 2: continue
+        if re.fullmatch(r"[0-9: ]+", t): continue
+        if any(s in t for s in skip_sub): continue
+    x1, y1, x2, y2 = (int(v) for v in b.groups())
+    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+    if cx > xmax: continue
+    ov_lo, ov_hi = max(y1, lo), min(y2, hi)
+    if ov_hi <= ov_lo: continue
+    overlap = ov_hi - ov_lo
+    center_in = 1 if lo <= cy < hi else 0
+    ty = cy if center_in else max(lo + 4, min(cy, hi - 4))
+    key = (-center_in, -overlap, cy)
+    if best is None or key < best[0]:
+        best = (key, cx, ty, t)
+if best is None: sys.exit(1)
+print("%d %d %s" % (best[1], best[2], best[3]))
+PYEOF
+}
+band_max_row_bottom() {
+  # $1=dump 文件 $2=右缘禁区 x：输出应用行最大下缘 y（行判定口径同 band_pick_row，
+  # 不限 y 区）；无行返回 1。用于横屏结构性空带判定（见 A 失败分支）。
+  python3 - "$1" "$2" <<'PYEOF' || return 1
+import re, sys
+path, xmax = sys.argv[1], int(sys.argv[2])
+data = open(path, encoding="utf-8", errors="replace").read()
+skip_sub = ("全部应用", "款 ·", "查我明天的日程", "想做什么", "不常用", "一键隐藏", "藏起来的应用")
+best = 0
+for n in re.findall(r"<node[^>]*>", data):
+    m = re.search(r'text="([^"]*)"', n)
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if not m or not b: continue
+    t = m.group(1)
+    if len(t) < 2: continue
+    if re.fullmatch(r"[0-9: ]+", t): continue
+    if any(s in t for s in skip_sub): continue
+    x1, y1, x2, y2 = (int(v) for v in b.groups())
+    cx = (x1 + x2) // 2
+    if cx > xmax: continue
+    if y2 > best: best = y2
+if best == 0: sys.exit(1)
+print(best)
+PYEOF
+}
 band_tap_segment() {
 BAND_PX=$(( 88 * DENSITY / 160 ))
 BAND_TOP=$(( SCR_H - BAND_PX ))
 MID_LO=$(( SCR_H * 38 / 100 ))
 MID_HI=$(( SCR_H * 62 / 100 ))
 log "band-tap: screen ${SCR_W}x${SCR_H} density=$DENSITY band=[${BAND_TOP},${SCR_H}] mid=[${MID_LO},${MID_HI}]"
-# A：底部带内第一个应用（带内无行时逐次上滑列表找行）
+# A：底部带内第一个应用（带内无行时逐次滚动列表找行）
 A_LBL=""; A_CX=0; A_CY=0
 BAND_REOPENED=0
-for TRY in 1 2 3 4 5; do
+FOLD_EXPANDED=0
+for TRY in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   band_dump ac_band
   if [ -f "$OUT/ac_band.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band.xml"; then
     # 底部导航栏（3 键导航约 48dp）会吃掉带内最底部的点按：只认导航栏顶边
@@ -1746,18 +1934,34 @@ for TRY in 1 2 3 4 5; do
     if [ -n "$NAVNODE" ]; then
       NAVNUMS=$(echo "$NAVNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
       NAVY1=$(echo "$NAVNUMS" | sed -n 2p)
-      [ -n "$NAVY1" ] && NAV_TOP="$NAVY1"
+      # 手势导航腿的导航栏背景节点是 [0,0][0,0] 的零尺寸节点（2026-11-11 r4：
+      # api29 实证，其 y1=0 会把 pick 区 [BAND_TOP,0) 压空、行永远匹不上，
+      # 15 轮空转假 FAIL）；只认落在带区之下的真实栏顶，否则保持缺省 SCR_H。
+      if [ -n "$NAVY1" ] && [ "$NAVY1" -gt "$BAND_TOP" ] && [ "$NAVY1" -le "$SCR_H" ]; then NAV_TOP="$NAVY1"; fi
     fi
-    for LBL in Clock Calendar Camera Contacts Phone Settings Messaging Gallery Files Search; do
-      B=$(band_label_bounds "$OUT/ac_band.xml" "$LBL" || true)
-      [ -n "$B" ] || continue
-      CY=$(echo "$B" | cut -d' ' -f2)
-      if [ "$CY" -ge "$BAND_TOP" ] && [ "$CY" -lt "$NAV_TOP" ]; then
-        A_LBL="$LBL"; A_CX=$(echo "$B" | cut -d' ' -f1); A_CY="$CY"
-        break
-      fi
-    done
+    # 任意应用行口径（见 band_pick_row 注）：不再写死 label 表。
+    B=$(band_pick_row "$OUT/ac_band.xml" "$BAND_TOP" "$NAV_TOP" "$(( SCR_W - 100 ))" || true)
+    if [ -n "$B" ]; then
+      A_CX=$(echo "$B" | cut -d' ' -f1); A_CY=$(echo "$B" | cut -d' ' -f2); A_LBL=$(echo "$B" | cut -d' ' -f3-)
+    fi
     [ -n "$A_LBL" ] && break
+    # 折叠组收起时列表短于视口、带区结构性为空（2026-11-11 api29 实证：
+    # “不常用 · 7 个”收着，内容在 y≈2023 处结束、带区 [2169,2400] 无行）：
+    # 第 5 次仍无行时点一次组头展开，再找 5 次。
+    if [ "$TRY" = "5" ] && [ "$FOLD_EXPANDED" = "0" ]; then
+      FOLD_EXPANDED=1
+      FNODE=$(grep -o '<node[^>]*text="[^"]*不常用[^"]*"[^>]*>' "$OUT/ac_band.xml" | head -1)
+      if [ -n "$FNODE" ]; then
+        FNUMS=$(echo "$FNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+        FX1=$(echo "$FNUMS" | sed -n 1p); FY1=$(echo "$FNUMS" | sed -n 2p)
+        FX2=$(echo "$FNUMS" | sed -n 3p); FY2=$(echo "$FNUMS" | sed -n 4p)
+        if [ -n "$FX1" ] && [ -n "$FY2" ]; then
+          log "band-tap: expanding folded inactive group at ($(( (FX1 + FX2) / 2 )),$(( (FY1 + FY2) / 2 )))"
+          adb shell input swipe "$(( (FX1 + FX2) / 2 ))" "$(( (FY1 + FY2) / 2 ))" "$(( (FX1 + FX2) / 2 ))" "$(( (FY1 + FY2) / 2 ))" 150 || true
+          sleep 2
+        fi
+      fi
+    fi
   fi
   if [ ! -f "$OUT/ac_band.xml" ] || ! grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band.xml" 2>/dev/null; then
     # 上滑被首页引导卡吃掉时 dump 仍是首页：重进一次再找行（只重进一次）
@@ -1768,7 +1972,11 @@ for TRY in 1 2 3 4 5; do
     fi
     continue
   fi
-  adb shell input swipe "$(SX 540)" "$(SY 1300)" "$(SX 540)" "$(SY 800)" 300 || true
+  # 找行分三段：上滚 10 次（含折叠组展开后）→ 反向滚 5 次。
+  # 反向段：列表滚到底后带区落在末行之下的空白里时适用（2026-11-11
+  # tabletport 实证：末行 WebView 在 1716，带区可点窗 [1872,1928) 全是
+  # 空白，上滚相位锁死、反向滚一次即把末行带进带区）。
+  if [ "$TRY" -ge 11 ]; then band_swipe_back; else band_swipe_fwd; fi
   sleep 1
 done
 A_OK=0
@@ -1795,26 +2003,66 @@ for i, n in enumerate(re.findall(r"<node[^>]*>", data)):
             i, x1, y1, x2, y2, attr("text"), attr("resource-id"), attr("clickable"), attr("class")))
 PYEOF
 else
-  log "band-tap: no app row reached the bottom band after scrolls"
-  ng "appcenter-band-row-tap"
+  # 横屏结构性空带（2026-11-11 r5：tablet 实证——横屏网格纵向只有 2 行、
+  # 行 y 槽位固定（横向滚只改 x）、纵向短于视口，带区 [1360,1536] 永远无行；
+  # 15 轮空转不是应用问题）：横屏腿且终局 dump 里应用行最大下缘仍在带顶
+  # 之上时跳过不计 FAIL；竖屏腿无此口径（纵向滚能把行带进带区）。
+  if [ "$LANDSCAPE" = "1" ]; then
+    MAXB=$(band_max_row_bottom "$OUT/ac_band.xml" "$(( SCR_W - 100 ))" || true)
+    if [ -n "$MAXB" ] && [ "$MAXB" -lt "$BAND_TOP" ]; then
+      log "band-tap: bottom band structurally empty on this layout (max row bottom $MAXB < band top $BAND_TOP) - segment skipped (not counted)"
+    else
+      log "band-tap: no app row reached the bottom band after scrolls"
+      ng "appcenter-band-row-tap"
+    fi
+  else
+    log "band-tap: no app row reached the bottom band after scrolls"
+    ng "appcenter-band-row-tap"
+  fi
 fi
-# B：同一应用滚到中屏再点（A 已打开时先回 D3 基线）
+# B：同一应用滚到中屏再点（A 已打开时先回 D3 基线）。
+# 横屏腿跳过：横屏应用中心是竖排流多列、整表横向滚，列内 y 槽位固定——
+# 同一应用的 y 永不改变，中屏 y 区在几何上不可达（2026-11-11 landphone
+# 实证：10 次竖滑后 Contacts 仍在 (443,882)）；A 仍覆盖横屏带区点按，
+# 中屏对照由竖屏腿覆盖。不计 PASS、不计 FAIL，只记一条 log。
 if [ -n "$A_LBL" ]; then
+  if [ "$LANDSCAPE" = "1" ]; then
+    log "band-tap: B skipped on landscape leg (column y is fixed in the horizontal grid; same-app-mid unreachable)"
+  else
   if [ "$A_OK" = "1" ]; then band_open_d3 || true; fi
   B_HIT=""
-  # 滚步实测约 170px/次（非 500px 名义值），中屏区 576px 高，6 次不够把
-  # 底部行带进中屏（run 42746521326：第 6 次后 Settings 中心 y=1519，
-  # 距中屏底边 1488 仅差 31px）；放宽到 10 次。
-  for TRY in 1 2 3 4 5 6 7 8 9 10; do
+  B_FOLD_EXPANDED=0
+  # 滚步因腿而异（base 约 170px/次；tabletport 实证仅约 40–85px/次，
+  # 10 次只把 TMobile 从 1920 带到 1548、距中屏底边 1269 还差 279px）：
+  # 放宽到 20 次；每 5 次记一条进度。另：A 成功后 B 重进应用中心会把
+  # 折叠组复位回收着——A 用的行若在组里（如 api29 的 Phone），B 先见
+  # 收起标记就点一次组头展开再找（与 A / fresh_find_label 同口径）。
+  for TRY in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     band_dump ac_band_b
     if [ -f "$OUT/ac_band_b.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band_b.xml"; then
-      B=$(band_label_bounds "$OUT/ac_band_b.xml" "$A_LBL" || true)
-      if [ -n "$B" ]; then
-        BCY=$(echo "$B" | cut -d' ' -f2)
-        if [ "$BCY" -ge "$MID_LO" ] && [ "$BCY" -lt "$MID_HI" ]; then B_HIT="$B"; break; fi
+      # 同名 label 有多份拷贝时按 zone 取在中屏区的那份（见 band_pick_row 注）。
+      B=$(band_pick_row "$OUT/ac_band_b.xml" "$MID_LO" "$MID_HI" "$(( SCR_W - 100 ))" "$A_LBL" || true)
+      if [ -n "$B" ]; then B_HIT="$B"; break; fi
+      if [ "$B_FOLD_EXPANDED" = "0" ] && grep -q '一键隐藏' "$OUT/ac_band_b.xml"; then
+        B_FOLD_EXPANDED=1
+        FNODE=$(grep -o '<node[^>]*text="[^"]*不常用[^"]*"[^>]*>' "$OUT/ac_band_b.xml" | head -1)
+        if [ -n "$FNODE" ]; then
+          FNUMS=$(echo "$FNODE" | grep -o 'bounds="\[[0-9,]*\]\[[0-9,]*\]"' | grep -o '[0-9]\+')
+          FX1=$(echo "$FNUMS" | sed -n 1p); FY1=$(echo "$FNUMS" | sed -n 2p)
+          FX2=$(echo "$FNUMS" | sed -n 3p); FY2=$(echo "$FNUMS" | sed -n 4p)
+          if [ -n "$FX1" ] && [ -n "$FY2" ]; then
+            log "band-tap: B expanding folded inactive group at ($(( (FX1 + FX2) / 2 )),$(( (FY1 + FY2) / 2 )))"
+            adb shell input swipe "$(( (FX1 + FX2) / 2 ))" "$(( (FY1 + FY2) / 2 ))" "$(( (FX1 + FX2) / 2 ))" "$(( (FY1 + FY2) / 2 ))" 150 || true
+            sleep 2
+            band_dump ac_band_b
+            B=$(band_pick_row "$OUT/ac_band_b.xml" "$MID_LO" "$MID_HI" "$(( SCR_W - 100 ))" "$A_LBL" || true)
+            if [ -n "$B" ]; then B_HIT="$B"; break; fi
+          fi
+        fi
       fi
     fi
-    adb shell input swipe "$(SX 540)" "$(SY 1300)" "$(SX 540)" "$(SY 800)" 300 || true
+    if [ $((TRY % 5)) -eq 0 ]; then log "band-tap: B try $TRY, '$A_LBL' not in mid zone yet"; fi
+    band_swipe_fwd
     sleep 1
   done
   if [ -n "$B_HIT" ]; then
@@ -1822,8 +2070,30 @@ if [ -n "$A_LBL" ]; then
     log "band-tap: B mid tap same app '$A_LBL' at ($BX,$BY)"
     if band_tap_row "$OUT/ac_band_b.xml" "$A_LBL" "$BX" "$BY"; then ok "appcenter-band-sameapp-mid"; else ng "appcenter-band-sameapp-mid"; fi
   else
-    log "band-tap: same app '$A_LBL' never reached mid zone"
-    ng "appcenter-band-sameapp-mid"
+    # 结构性不可达（2026-11-11 r6：tabletport 实证——B 20 次后 TMobile 停在
+    # 1548，与 r4 的 10 次终局位置完全相同，列表已到滚动尽头、中屏底边 1269
+    # 仍差 279px）：终局 dump 里若见得到该 label，再滑一次重拉——位置不动
+    # 即已到尽头、且中心仍在中屏区之下时跳过不计 FAIL；否则仍判 FAIL。
+    B_SKIP=0
+    B1=$(band_label_bounds "$OUT/ac_band_b.xml" "$A_LBL" || true)
+    if [ -n "$B1" ]; then
+      B1Y=$(echo "$B1" | cut -d' ' -f2)
+      band_swipe_fwd; sleep 1
+      band_dump ac_band_b2
+      B2=$(band_label_bounds "$OUT/ac_band_b2.xml" "$A_LBL" || true)
+      if [ -n "$B2" ]; then
+        B2Y=$(echo "$B2" | cut -d' ' -f2)
+        if [ "$B1Y" = "$B2Y" ] && [ "$B2Y" -gt "$MID_HI" ]; then
+          B_SKIP=1
+          log "band-tap: '$A_LBL' stuck at y=$B2Y after extra swipe (mid bottom=$MID_HI) - list at scroll end, segment skipped (not counted)"
+        fi
+      fi
+    fi
+    if [ "$B_SKIP" = "0" ]; then
+      log "band-tap: same app '$A_LBL' never reached mid zone"
+      ng "appcenter-band-sameapp-mid"
+    fi
+  fi
   fi
 fi
 }
@@ -1863,9 +2133,13 @@ dockdrag_open_d3() {
   sleep 4
   adb shell input keyevent KEYCODE_HOME || true
   sleep 2
-  local TRY
+  local TRY SW SWX SWY SWEX SWEY
+  SW=$(home_swipe_start)
+  SWX=$(echo "$SW" | cut -d' ' -f1); SWY=$(echo "$SW" | cut -d' ' -f2)
+  SWEX=$(echo "$SW" | cut -d' ' -f3); SWEY=$(echo "$SW" | cut -d' ' -f4)
+  log "dock-drag: swipe from ($SWX,$SWY) to ($SWEX,$SWEY)"
   for TRY in 1 2 3; do
-    adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+    adb shell input swipe "$SWX" "$SWY" "$SWEX" "$SWEY" 300 || true
     sleep 3
     dockdrag_dump dockdrag_open
     if [ -f "$OUT/dockdrag_open.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/dockdrag_open.xml"; then
