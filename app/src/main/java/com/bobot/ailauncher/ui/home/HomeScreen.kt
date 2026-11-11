@@ -46,10 +46,9 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.service.LauncherNotificationService
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
-import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.pet.PetZone
 import com.bobot.ailauncher.ui.smartcard.SmartCardStackHost
-import com.bobot.ailauncher.util.rebindListener
+import com.bobot.ailauncher.util.ensureListenerBound
 
 /**
  * v0.27.0：重建的极简主页——只留宠物。
@@ -193,16 +192,21 @@ fun HomeScreen(
         blindCtl.dockZonePx = with(density) { blindDockZoneDp.dp.toPx() }
     }
 
-    // 通知监听重绑
+    // 通知监听前台复核（Bob 2026-11-11 10:33：首页 Dock 角标不刷新——
+    // 首页此前只有 ON_RESUME 里 raw flag 复核，且从不重推角标；应用中心
+    // 进组合与回前台都调 ensureListenerBound（三信号活查）+
+    // requestBadgeRecompute。首页照抄同款：进组合与回前台各复核一次。
+    // 已连接时 ensureListenerBound 不做任何事；重绑受 30 秒节流；重推
+    // 是读数重算，不共用节流；未连接时重推无-op。479 的翻 true 补推
+    // watcher 保留（异步重绑落地窗口用）。
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
+        ensureListenerBound(context)
+        LauncherNotificationService.requestBadgeRecompute()
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                if (isNotificationAccessGranted(context) &&
-                    !NotificationRepository.isConnected.value
-                ) {
-                    rebindListener(context)
-                }
+                ensureListenerBound(context)
+                LauncherNotificationService.requestBadgeRecompute()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
