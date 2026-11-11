@@ -189,6 +189,7 @@ object ForegroundConfirm {
     fun scheduleCancelIfForeground(
         appContext: Context,
         targetPkg: String,
+        tapWallMillis: Long = 0L,
         onConfirmed: () -> Unit
     ) {
         if (!pending.add(targetPkg)) return
@@ -196,17 +197,44 @@ object ForegroundConfirm {
         val task = object : Runnable {
             override fun run() {
                 polls++
+                val pollWallMillis = System.currentTimeMillis()
                 when (decidePollStep(pollResult(appContext, targetPkg), polls, FOREGROUND_MAX_POLLS)) {
                     ForegroundPollStep.CONFIRMED -> {
                         pending.remove(targetPkg)
-                        try {
+                        val cancelOutcome = try {
                             onConfirmed()
-                        } catch (_: Exception) {
-                            // 取消失败不报错（角标不动，用户可再滑一次）
+                            "cancelled"
+                        } catch (e: Exception) {
+                            // 取消失败不报错（角标不动，用户可再滑一次），
+                            // 但记进日志——取消失败本身就是一次例外。
+                            "cancel_error:${e.javaClass.simpleName}"
+                        }
+                        if (tapWallMillis != 0L) {
+                            UnreadJumpLog.onCancelOutcome(
+                                appContext, tapWallMillis, targetPkg,
+                                cancel = cancelOutcome, fg = "CONFIRMED",
+                                fgMs = pollWallMillis - tapWallMillis,
+                            )
                         }
                     }
-                    ForegroundPollStep.EXHAUSTED,
-                    ForegroundPollStep.UNDECIDABLE -> pending.remove(targetPkg)
+                    ForegroundPollStep.EXHAUSTED -> {
+                        pending.remove(targetPkg)
+                        if (tapWallMillis != 0L) {
+                            UnreadJumpLog.onCancelOutcome(
+                                appContext, tapWallMillis, targetPkg,
+                                cancel = "kept", fg = "NOT_SEEN", fgMs = null,
+                            )
+                        }
+                    }
+                    ForegroundPollStep.UNDECIDABLE -> {
+                        pending.remove(targetPkg)
+                        if (tapWallMillis != 0L) {
+                            UnreadJumpLog.onCancelOutcome(
+                                appContext, tapWallMillis, targetPkg,
+                                cancel = "kept", fg = "UNKNOWN", fgMs = null,
+                            )
+                        }
+                    }
                     ForegroundPollStep.CONTINUE ->
                         handler.postDelayed(this, FOREGROUND_POLL_INTERVAL_MILLIS)
                 }
@@ -235,24 +263,54 @@ object ForegroundConfirm {
     fun scheduleFallbackIfNotForeground(
         appContext: Context,
         targetPkg: String,
-        onNotSeen: () -> Unit
+        tapWallMillis: Long = 0L,
+        onNotSeen: () -> Boolean
     ) {
         if (!pendingFallback.add(targetPkg)) return
         var polls = 0
         val task = object : Runnable {
             override fun run() {
                 polls++
+                val pollWallMillis = System.currentTimeMillis()
                 when (decidePollStep(pollResult(appContext, targetPkg), polls, FOREGROUND_FALLBACK_MAX_POLLS)) {
                     ForegroundPollStep.EXHAUSTED -> {
                         pendingFallback.remove(targetPkg)
-                        try {
+                        val opened = try {
                             onNotSeen()
                         } catch (_: Exception) {
                             // 回退打开失败不报错（行留着，用户可从字母组/Dock 打开）
+                            false
+                        }
+                        if (tapWallMillis != 0L) {
+                            UnreadJumpLog.onFallbackOutcome(
+                                appContext, tapWallMillis, targetPkg,
+                                fired = true, opened = opened,
+                                ms = pollWallMillis - tapWallMillis,
+                                fg = "NOT_SEEN", fgMs = null, bg = null, bgMs = null,
+                            )
                         }
                     }
-                    ForegroundPollStep.CONFIRMED,
-                    ForegroundPollStep.UNDECIDABLE -> pendingFallback.remove(targetPkg)
+                    ForegroundPollStep.CONFIRMED -> {
+                        pendingFallback.remove(targetPkg)
+                        if (tapWallMillis != 0L) {
+                            UnreadJumpLog.onFallbackOutcome(
+                                appContext, tapWallMillis, targetPkg,
+                                fired = false, opened = null, ms = null,
+                                fg = "CONFIRMED", fgMs = pollWallMillis - tapWallMillis,
+                                bg = null, bgMs = null,
+                            )
+                        }
+                    }
+                    ForegroundPollStep.UNDECIDABLE -> {
+                        pendingFallback.remove(targetPkg)
+                        if (tapWallMillis != 0L) {
+                            UnreadJumpLog.onFallbackOutcome(
+                                appContext, tapWallMillis, targetPkg,
+                                fired = false, opened = null, ms = null,
+                                fg = "UNKNOWN", fgMs = null, bg = null, bgMs = null,
+                            )
+                        }
+                    }
                     ForegroundPollStep.CONTINUE ->
                         handler.postDelayed(this, FOREGROUND_POLL_INTERVAL_MILLIS)
                 }

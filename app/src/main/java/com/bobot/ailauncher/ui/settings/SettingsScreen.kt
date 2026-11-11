@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
@@ -119,7 +120,9 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  * - 文案全部用户视角
  */
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(
+    onOpenJumpLog: () -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var apiKey by remember { mutableStateOf(LlmConfig.getApiKey(context)) }
@@ -789,6 +792,57 @@ fun SettingsScreen() {
         // 分区：关于——落款
         item {
             SettingsSectionTitle("关于")
+        }
+
+        // 未读跳转日志（Bob 2026-11-11 21:59：删质检、加日志）：点开看
+        // 最近点按记录（只读）+ 分享。只加这一行，放在“关于”区——
+        // 助手/版本/智能都是功能区，关于是唯一收杂项的区；474 删掉的
+        // 诊断区不重建；落款词标仍在最末尾。
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .shadow(
+                        8.dp,
+                        RoundedCornerShape(20.dp),
+                        spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f)
+                    ),
+                onClick = {
+                    view.tickHaptic()
+                    onOpenJumpLog()
+                }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "未读跳转日志",
+                            fontSize = AILauncherType.BodyLarge.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Title,
+                            lineHeight = 22.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "点未读行后有没有打开应用、为什么没打开，记在这里",
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Hint,
+                            lineHeight = 18.sp
+                        )
+                    }
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = AILauncherColors.current.Hint,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
         }
 
         // 落款 / 关于：手写体 bobot 词标（Bob 2026-11-07 发来的图，
