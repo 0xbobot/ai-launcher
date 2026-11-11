@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -564,8 +563,8 @@ fun SmartCardStackHost() {
  * 新实现用 SubcomposeLayout：顶卡先以松约束（maxHeight = Infinity）
  * 量真实高度，摞高＝顶卡真实高＋露边，顶卡再也不受摞高约束；
  * 露边卡按顶卡真实高量（maxHeight = 顶卡高），不裁顶卡。
- * 重设计起顶卡固定 168dp（SmartCardHeight），量出来就是 168dp，摞高
- * 确定；松约束的量法不变（仍防内容换卡时按钮被裁）。
+ * 重设计起顶卡固定 192dp（SmartCardHeight，第十六批由 168dp 抬高），量出来
+ * 就是 192dp，摞高确定；松约束的量法不变（仍防内容换卡时按钮被裁）。
  */
 /**
  * 叠层卡片两侧边距（第十批，设计稿 §4.7，2026-11-08 Bob 真机 verdict：
@@ -603,16 +602,52 @@ fun peekCardTransform(index: Int): PeekCardTransform = PeekCardTransform(
 )
 
 /**
- * 卡片固定高度（重设计 §2.6，Bob 2026-11-11 批准）：168dp，不随正文长短变；
- * 所有卡一样高，摞起来齐整。8dp 网格（168 % 8 == 0）。
+ * 卡片固定高度（重设计 §2.6）：192dp，不随正文长短变；所有卡一样高，
+ * 摞起来齐整。8dp 网格（192 % 8 == 0）。487 是 168dp；Bob 2026-11-11
+ * 09:47 真机 verdict“卡太小了”（有小标的卡事实区只剩约 32dp、约 1.3
+ * 行），第十六批抬到 192dp。
  */
-val SmartCardHeight = 168.dp
+val SmartCardHeight = 192.dp
+
+/** 卡片内容内边距（重设计 §2.5）：14dp；正文区算式与布局同源（见下）。 */
+val SmartCardContentPadding = 14.dp
 
 /**
- * 正文区封顶高度（重设计 §2.6）：Body 15sp / 24sp 行高 × 3 行 = 72dp；
- * 超了在卡内滚动（不是截断，全文都在）。
+ * 标题行最小高度（重设计 §2.6 算术）：20dp——来源标签 Caption 12sp／
+ * 18sp 行高与 16dp 小标图标取大者约 18dp，min 20dp 让标题行高确定、
+ * 正文区算式不依赖 token 行高。引导卡的 48dp × 表头不在此口径内。
  */
-val SmartCardFactMaxHeight = 72.dp
+val SmartCardTitleRowHeight = 20.dp
+
+/** 按钮行高度（重设计 §2.6 算术）：两个动作按钮都是 48dp 触控高。 */
+val SmartCardActionRowMinHeight = 48.dp
+
+/** 卡内行距（重设计 §2.5）：标题行／事实区／按钮行之间各 8dp。 */
+val SmartCardRowGap = 8.dp
+
+/**
+ * 应用小标右端内收（重设计 §2.8，Bob 2026-11-11 真机 verdict）：
+ * 小标搬到标题行右上角后，右端再向内收 16dp，留出右上角待办数角标
+ * （AppBadge 20dp 高、贴角偏移 x +4dp／y −4dp；1 位数 pill 宽约 20dp、
+ * 2 位数约 24dp，左缘落在卡右缘内约 16–20dp）的位置，不顶到角标。
+ * 小标右缘最终距卡右缘 14dp 内边距＋16dp 内收＝30dp，2 位数角标留
+ * 约 10dp 空；“99+”（100 张以上）是摞的理论上限，实际不出现。
+ */
+val SmartCardSubtitleEndInset = 16.dp
+
+/**
+ * 正文区可用高度（纯算式，单测锁死）——卡高固定时，正文区＝卡高－上下
+ * 内边距－标题行－按钮行－行距（标题行与事实区之间、事实区与按钮行
+ * 之间两段）。实卡口径：192－28－20－48－16＝80dp（Body 15sp／24sp
+ * 行高，3.3 行）≥72dp（3 行下限）；超了在卡内滚动，不是截断。
+ * 布局上正文区就是 weight(1f) 撑满这段（不另加 min/max 钳制——min
+ * 会顶穿引导卡的 48dp × 表头、max 会把按钮顶离底边留白），算式与
+ * 布局同源（内边距／标题行／按钮行／行距都是布局里用的同一组常量）。
+ * 引导卡表头是 48dp ×，算式不套引导卡（引导卡事实短，2 行多就够）。
+ */
+fun smartCardFactAreaHeight(): Dp =
+    SmartCardHeight - SmartCardContentPadding * 2 - SmartCardTitleRowHeight -
+        SmartCardActionRowMinHeight - SmartCardRowGap * 2
 
 /**
  * 呼吸描边渐变色（重设计 §2.2）：暖金 #D4A24E → 柔玫 → 冷青 → 暖金闭环。
@@ -864,8 +899,10 @@ private fun TopSmartCard(
  * - 边缘呼吸：顶卡 2dp 渐变描边（暖金→柔玫→冷青，6 秒一圈，透明度 0.5↔1
  *   呼吸；减动效时静止）。
  * - 正文：Body 15sp Medium；不截断（maxLines=3＋Ellipsis 已删），全文在
- *   卡内滚动；卡高固定 168dp，正文区封顶 3 行高（72dp）。
- * - 内边距 14dp；圆角 20dp、两侧收边 24dp、按钮、应用小标、金色庆祝不动。
+ *   卡内滚动；卡高固定 192dp（第十六批由 168dp 抬高），正文区至少 3 行高
+ *   （80dp，3.3 行，见 smartCardFactAreaHeight）。
+ * - 内边距 14dp；圆角 20dp、两侧收边 24dp、按钮、金色庆祝不动；应用小标
+ *   不再独占一行，搬到标题行右上角（§2.8）。
  * SIMULATED 档／无玻璃环境退回半透明暖灰 GlassCard（glassSurface 自带）。
  */
 @Composable
@@ -961,14 +998,21 @@ private fun SmartCardView(
             )
             .then(breathingBorderModifier(reduceMotion))
             .height(SmartCardHeight)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(SmartCardContentPadding),
+        verticalArrangement = Arrangement.spacedBy(SmartCardRowGap)
     ) {
-        // 表头：来源标签＋（引导卡）卡内 ×。× 落在卡片内部（16dp 内边距
-        // 内）、48dp 触控；真卡片没有 ×，表头就是一行标签，不增高。
+        // 表头（重设计 §2.8，第十六批）：来源标签在左上角；应用小标
+        // （16dp 图标＋12sp 应用名）搬到右上角、与来源标签同一行——
+        // 小标本身不变（次要色、无底色无边框、只展示不可点、最宽 160dp），
+        // 只是换位置、不丢信息；右端再向内收 SmartCardSubtitleEndInset，
+        // 留出右上角待办数角标的位置。引导卡没有小标（下一步是去连接
+        // 来源、不是打开某个应用），只有卡内 ×；“已连接”反馈卡也不画
+        // （hideActionRow 时不画，见下）。× 落在卡片内部、48dp 触控；
         // 448 的 × 是卡外单独一行、悬在壁纸上（实拍右上角卡外），改掉。
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = SmartCardTitleRowHeight),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -990,6 +1034,13 @@ private fun SmartCardView(
                         contentDescription = "关闭",
                         tint = AILauncherColors.current.Hint,
                         modifier = Modifier.size(20.dp)
+                    )
+                }
+            } else if (!hideActionRow && card.kind != SmartCardKind.GUIDE) {
+                card.targetApp?.let { target ->
+                    AppSubscript(
+                        targetApp = target,
+                        modifier = Modifier.padding(end = SmartCardSubtitleEndInset)
                     )
                 }
             }
@@ -1030,14 +1081,16 @@ private fun SmartCardView(
                 )
             }
         }
-        // 正文区（重设计 §2.6）：事实＋准备清单＋已建提醒一起在卡内滚动；
-        // 封顶 3 行高（72dp），来源行／按钮行／小标固定不动。全文都在，
+        // 正文区（重设计 §2.6，第十六批）：事实＋准备清单＋已建提醒一起在
+        // 卡内滚动；至少 3 行高（80dp，3.3 行，见 smartCardFactAreaHeight），
+        // 来源行／按钮行固定不动（小标已搬到标题行，不再占一行）。全文都在，
         // 不是截断——maxLines=3＋Ellipsis 已删；翻到底渐隐消失（见 factFade）。
+        // 高度就是 weight(1f) 撑满卡高减去其余行（不另加 min/max 钳制——
+        // min 会顶穿引导卡的 48dp × 表头、max 会把按钮顶离底边留白）。
         // 横滑切卡与正文竖翻是两个方向，不冲突；点正文仍是看原文（预约／日历卡）。
         Box(
             modifier = Modifier
                 .weight(1f)
-                .heightIn(max = SmartCardFactMaxHeight)
                 .verticalScroll(factScrollState)
                 .then(factFade)
         ) {
@@ -1094,7 +1147,7 @@ private fun SmartCardView(
                 // 我知道了：卡片消失、不再出现、不追问（设计稿 §4.2）。
                 TextButton(
                     onClick = onIgnoreClick,
-                    modifier = Modifier.heightIn(min = 48.dp)
+                    modifier = Modifier.heightIn(min = SmartCardActionRowMinHeight)
                 ) {
                     Text(
                         text = SMART_CARD_DISMISS_LABEL,
@@ -1109,7 +1162,7 @@ private fun SmartCardView(
                 // 金色只留主操作（去 AI 味四条）。
                 TextButton(
                     onClick = onActionClick,
-                    modifier = Modifier.heightIn(min = 48.dp)
+                    modifier = Modifier.heightIn(min = SmartCardActionRowMinHeight)
                 ) {
                     Text(
                         text = card.actionLabel,
@@ -1117,16 +1170,6 @@ private fun SmartCardView(
                         fontWeight = FontWeight.Medium,
                         color = AILauncherColors.current.Accent
                     )
-                }
-            }
-            // 右下方应用小标（第十一批）：只画在真卡上——引导卡的下一步是
-            // 去连接来源、不是打开某个应用，不画；“已连接”反馈卡没有按钮行
-            // （hideActionRow），也不画。独立一行贴右下角、右对齐：16dp
-            // 应用图标＋应用名（Caption 12sp，次要色），无底色、无边框，
-            // 不抢按钮视觉；名字过长截断；只做展示、不可点。
-            if (card.kind != SmartCardKind.GUIDE) {
-                card.targetApp?.let { target ->
-                    AppSubscript(targetApp = target)
                 }
             }
         }
@@ -1226,14 +1269,21 @@ private fun PeekCardFace(modifier: Modifier = Modifier) {
 }
 
 /**
- * 卡片右下方应用小标（第十一批，Bob 定“要小、要优雅”）：
- * 独立一行贴卡片右下角、右对齐——16dp 应用图标＋应用名（Caption 12sp，
- * 次要色），无底色、无边框，不抢按钮视觉；名字过长截断（最多 160dp）；
- * 只做展示、不可点（没有 clickable，点右按钮才是动作）。
- * 图标按包名取真实应用图标；包被卸了、图标读不到时只显示名字。
+ * 应用小标（第十一批，Bob 定“要小、要优雅”）：只画在真卡上——引导卡的
+ * 下一步是去连接来源、不是打开某个应用，不画；“已连接”反馈卡也不画
+ * （hideActionRow）。16dp 应用图标＋应用名（Caption 12sp，次要色），
+ * 无底色、无边框，只做展示、不可点（没有 clickable，点右按钮才是动作）；
+ * 名字过长截断（最多 160dp）。图标按包名取真实应用图标；包被卸了、
+ * 图标读不到时只显示名字。
+ * 第十六批：从右下角独占行搬到标题行右上角（§2.8）——本函数只包内容、
+ * 不占整行宽，右对齐由标题行的 SpaceBetween 负责，右端内收由调用方
+ * 传 SmartCardSubtitleEndInset。
  */
 @Composable
-private fun AppSubscript(targetApp: com.bobot.ailauncher.data.TargetApp) {
+private fun AppSubscript(
+    targetApp: com.bobot.ailauncher.data.TargetApp,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val drawable = remember(targetApp.packageName) {
         try {
@@ -1243,8 +1293,8 @@ private fun AppSubscript(targetApp: com.bobot.ailauncher.data.TargetApp) {
         }
     }
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (drawable != null) {
@@ -1253,7 +1303,6 @@ private fun AppSubscript(targetApp: com.bobot.ailauncher.data.TargetApp) {
                 contentDescription = null,
                 modifier = Modifier.size(16.dp)
             )
-            Spacer(modifier = Modifier.width(4.dp))
         }
         Text(
             text = targetApp.label,

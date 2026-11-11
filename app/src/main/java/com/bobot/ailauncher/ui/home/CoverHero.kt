@@ -525,8 +525,8 @@ fun CoverHeroLandscape(
  * （起止都显示）。调用方须传入分钟 ticker 时间（PetZone 的 coverNowMillis），
  * 标签随分钟推进自动翻转，不依赖边界 effect。
  *
- * testTag 沿用 today_nextup：冒烟（nextup_tap_flow / 去重断言）与横屏
- * 几何断言的语义等价迁移到本行。
+ * testTag 沿用 today_nextup：横屏几何断言的语义等价迁移到本行；冒烟的
+ * 会行去重现为反向断言 nextup-brief-row-absent（简报里不出现会议行）。
  */
 @Composable
 fun BriefMeetingRow(

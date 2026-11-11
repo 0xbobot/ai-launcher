@@ -3,33 +3,40 @@ package com.bobot.ailauncher.data
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.ui.glass.BackdropKind
-import com.bobot.ailauncher.ui.smartcard.SmartCardFactMaxHeight
+import com.bobot.ailauncher.ui.smartcard.SmartCardActionRowMinHeight
+import com.bobot.ailauncher.ui.smartcard.SmartCardContentPadding
 import com.bobot.ailauncher.ui.smartcard.SmartCardHeight
+import com.bobot.ailauncher.ui.smartcard.SmartCardRowGap
 import com.bobot.ailauncher.ui.smartcard.SmartCardStackTopGap
+import com.bobot.ailauncher.ui.smartcard.SmartCardSubtitleEndInset
+import com.bobot.ailauncher.ui.smartcard.SmartCardTitleRowHeight
 import com.bobot.ailauncher.ui.smartcard.smartCardBorderColors
+import com.bobot.ailauncher.ui.smartcard.smartCardFactAreaHeight
 import com.bobot.ailauncher.ui.smartcard.smartCardTintAlpha
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 智能卡片样式重设计单测（Bob 2026-11-11 批准，设计稿 smart-card-redesign.md）。
+ * 智能卡片样式重设计单测（Bob 2026-11-11 批准，设计稿 smart-card-redesign.md；
+ * 第十六批跟进：卡高 192dp＋正文区至少 3 行＋小标搬到标题行右上角）。
  *
  * 布局本身 JVM 测不到（Compose 排版），锁死的是数值一级：
- * ①卡高固定 168dp（8dp 网格）；②正文区封顶 3 行高（Body 15sp/24sp 行高
- * ×3＝72dp）；③呼吸描边渐变色（暖金→柔玫→冷青→暖金闭环，玫/青低饱和）；
- * ④暖灰衬底透明度（有纹理壁纸 0.55、低对比环境 0.75）；⑤叠层与 hero 的
- * 间距 16dp（8dp 网格）。
- * 正文 15sp Medium、去截断、卡内滚动、露边无字、2dp 呼吸描边本身是
- * Compose 排版／绘制行为，见收据的 diff 复核＋Bob 真机验收。
+ * ①卡高固定 192dp（8dp 网格）；②正文区至少 3 行高（算式 192－28－20－48－16
+ * ＝80dp ≥ 72dp 的 3 行下限）；③小标右端内收 16dp（右缘距卡右缘 30dp，
+ * 让出右上角待办数角标）；④呼吸描边渐变色（暖金→柔玫→冷青→暖金闭环，
+ * 玫/青低饱和）；⑤暖灰衬底透明度（有纹理壁纸 0.55、低对比环境 0.75）；
+ * ⑥叠层与 hero 的间距 16dp（8dp 网格）。
+ * 正文 15sp Medium、去截断、卡内滚动、露边无字、2dp 呼吸描边、小标换位
+ * 本身是 Compose 排版／绘制行为，见收据的 diff 复核＋Bob 真机验收。
  */
 class SmartCardRedesignTest {
 
-    // ---------- 卡高固定 168dp ----------
+    // ---------- 卡高固定 192dp ----------
 
     @Test
-    fun cardHeight_is168dp() {
-        assertEquals(168.dp, SmartCardHeight)
+    fun cardHeight_is192dp() {
+        assertEquals(192.dp, SmartCardHeight)
     }
 
     @Test
@@ -37,12 +44,45 @@ class SmartCardRedesignTest {
         assertEquals(0, SmartCardHeight.value.toInt() % 8)
     }
 
-    // ---------- 正文区封顶 3 行高 ----------
+    // ---------- 正文区至少 3 行高 ----------
 
     @Test
-    fun factMaxHeight_isThreeLinesOfBody() {
-        // Body 15sp／行高 24sp × 3 行＝72dp；超了在卡内滚动，不是截断。
-        assertEquals(72.dp, SmartCardFactMaxHeight)
+    fun factArea_isAtLeastThreeLines() {
+        // 实卡算式：192（卡高）－28（上下内边距 14×2）－20（标题行）
+        // －48（按钮行）－16（行距 8×2）＝80dp；Body 15sp／24sp 行高，
+        // 3 行下限 72dp，80dp 是 3.3 行。
+        assertEquals(80.dp, smartCardFactAreaHeight())
+        assertTrue(smartCardFactAreaHeight() >= 72.dp)
+    }
+
+    @Test
+    fun factArea_constantsMatchLayout() {
+        // 算式与布局同源的常量：内边距 14dp、标题行 20dp、按钮行 48dp、
+        // 行距 8dp——布局里用的就是这组值（改一处就要改算式）。
+        assertEquals(14.dp, SmartCardContentPadding)
+        assertEquals(20.dp, SmartCardTitleRowHeight)
+        assertEquals(48.dp, SmartCardActionRowMinHeight)
+        assertEquals(8.dp, SmartCardRowGap)
+    }
+
+    // ---------- 小标搬到标题行右上角 ----------
+
+    @Test
+    fun subtitleEndInset_is16dp() {
+        // 小标右端再向内收 16dp，留出右上角待办数角标的位置。
+        assertEquals(16.dp, SmartCardSubtitleEndInset)
+    }
+
+    @Test
+    fun subtitleRightEdge_is30dpFromCardEdge() {
+        // 小标右缘距卡右缘＝14dp 内边距＋16dp 内收＝30dp；2 位数角标
+        // 左缘落在卡右缘内约 20dp，留约 10dp 空。
+        assertEquals(30.dp, SmartCardContentPadding + SmartCardSubtitleEndInset)
+    }
+
+    @Test
+    fun subtitleEndInset_isOn8dpGrid() {
+        assertEquals(0, SmartCardSubtitleEndInset.value.toInt() % 8)
     }
 
     // ---------- 呼吸描边渐变色 ----------

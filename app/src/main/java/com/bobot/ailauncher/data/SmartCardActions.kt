@@ -205,6 +205,18 @@ object SmartCardActions {
     }
 
     /**
+     * 日历卡入会防多发键（纯函数，单测锁死）：与 joinCalendarEvent 同一口径
+     * `eventId|meetingUrl`——同一场会的重复点按是同一键，不同场互不影响。
+     */
+    fun calendarJoinKey(eventId: Long, meetingUrl: String?): String =
+        "$eventId|${meetingUrl ?: ""}"
+
+    // 日历卡入会防多发守卫（第十六批）：与会行路径（joinCalendarEvent）
+    // 共用 data 层 JoinGuard 的同一窗口（2 秒），两个入口各一个实例——
+    // 会行已随 486 拿掉（暂无调用点），卡片动作是唯一 live 入口。
+    private val calendarJoinGuard = JoinGuard()
+
+    /**
      * 执行动作并在成功时 markDone。返回 true 表已打开（卡片可摘），
      * false 表没打开（卡片保留；提示由调用方 UI 做，不在这里弹）。
      */
@@ -266,8 +278,25 @@ object SmartCardActions {
                 // 日历卡（第十二批）：有会议链接直开链接，无链接打开日历
                 // 应用（再兜底事件详情），与 PetZone 的
                 // joinCalendarEvent 同一条链（CalendarMeeting）。
-                is SmartCardAction.CalendarEvent ->
-                    openCalendarEvent(context, action.eventId, action.meetingUrl)
+                // 第十六批：入会防多发——同一场会 2 秒内只放行第一次
+                // （JoinGuard，原只拦简报会行连点，会行已随 486 拿掉；
+                // 保证落在日历卡「加入会议」上）。只查不记、成功发出后
+                // 才记：没发出不记，失败可重试（失败不摘卡）；重复点按
+                // 直接吞掉，返回 true 表已处理（第一次已发出并摘卡），
+                // 不弹“没能打开”。
+                is SmartCardAction.CalendarEvent -> {
+                    val key = calendarJoinKey(action.eventId, action.meetingUrl)
+                    val nowMs = System.currentTimeMillis()
+                    if (calendarJoinGuard.wasFired(key, nowMs)) {
+                        true
+                    } else {
+                        val opened = openCalendarEvent(
+                            context, action.eventId, action.meetingUrl
+                        )
+                        if (opened) calendarJoinGuard.record(key, nowMs)
+                        opened
+                    }
+                }
             }
         } catch (_: Exception) {
             false
