@@ -10,6 +10,10 @@
 
 ---
 
+## v1.3.38（versionCode 495）— 2026-11-11
+
+时间段内提醒不消失、开始后正文加「进行中 · 」（Bob 2026-11-11 21:53 定，设计稿 §4.2）：日历卡（CALENDAR）与预约卡（APPOINTMENT）是有时间段的提醒——点下一步动作（「加入会议」「看日程」「看预约」、点日历卡正文）成功打开后，在截止点之前不再 markDone，卡片留在摞里、右按钮照常可用；只有「我知道了」或过了截止点才摘；账单／未接来电／快递航班不是时间段提醒，点动作照常摘；预约卡「帮我建提醒」是 CreateReminder 另一条路，本来就不摘、不动。正文状态更新：开始后（开始 ≤ now < 结束）正文前加「进行中 · 」（SmartCard 新增 windowStartMs 字段；纯函数 isInProgress / withInProgressPrefix，幂等；前缀加在 calendarCardFact、两个预约建卡函数与 refresh() 层——短信卡有 5 分钟节流缓存，refresh 再算一次保证分钟 ticker 开始那一刻翻过来；只改正文展示，不改去重键、排序、截止点、prepSource）。单测 696 绿、零 FAILED。
+
 ## v1.3.37（versionCode 494）— 2026-11-11
 
 未读行跳转日志（Bob 2026-11-11 21:59 亲令：删质检、加日志、记例外，之后凭日志分析原因和优化）。点未读行时记 tap（包名、contentIntent 有没有、走哪条路、send 结果、回退走哪半），各结果到齐时再记 outcome（取消结果/前台核验耗时、回退发没发/开没开/点按到回退的毫秒数、门闩切后台与否）；结构化 JSONL 存本机 files/unread-jump-log.jsonl（环形 200 条），logcat 镜像 tag UnreadJump；只记结果不记消息内容。设置页“关于”区加一行“未读跳转日志”（只读列表 + 分享）。新 UnreadJumpLogTest 15 项全绿。
