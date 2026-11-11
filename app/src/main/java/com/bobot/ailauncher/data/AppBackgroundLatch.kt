@@ -36,8 +36,8 @@ import android.os.Looper
  */
 object AppBackgroundLatch {
 
-    /** 门闩回退的等待时长：点按后约 2 秒检查一次，与有权限回退的 2 秒窗一致。 */
-    const val LATCH_FALLBACK_DELAY_MILLIS = 2000L
+    /** 门闩回退的等待时长：点按后约 0.8 秒检查一次（有权限那条前台核验回退仍是 2 秒窗；2026-11-11 跳转日志 5 次点按 2 秒全是白等，Bob 定改快）。 */
+    const val LATCH_FALLBACK_DELAY_MILLIS = 800L
 
     // 主线程 Handler：lazy——对象在本地单测里只测时间算术，类加载时就建
     // Handler 会在单测 JVM 里炸（Looper.getMainLooper() 为空）；真正排检查
@@ -68,7 +68,7 @@ object AppBackgroundLatch {
      * ForegroundConfirm.scheduleFallbackIfNotForeground 在管，一次点按只走
      * 一条回退路）。
      *
-     * 点按后约 2 秒检查一次：窗内我们的进程到过后台（门闩动过）= 跳成功了，
+     * 点按后约 0.8 秒检查一次：窗内我们的进程到过后台（门闩动过）= 跳成功了，
      * 什么都不做；一次都没到过 = 跳失败了，回调 onNotSeen（调用方回退
      * launchApp 直接打开）。主线程 Handler，活过应用中心 dispose（与
      * ForegroundConfirm 同款；这里不握 Context、不读系统服务，所以不传
