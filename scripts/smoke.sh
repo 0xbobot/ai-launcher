@@ -1397,6 +1397,8 @@ fi
 log "freshness: segment start"
 # 折叠组展开状态（r4：install/uninstall 两次 fresh_find_label 调用共享，只展一次）。
 FRESH_FOLD_EXPANDED=0
+# r7：preinstall 探针面无效时整段跳过（不装桩、不判分）。
+FRESH_SKIP=0
 # 入口走 ac_open_d3 验证（2026-11-11 定时轮：单次上滑在 landphone/api29/small
 # 三腿上没进应用中心，fresh_dump.xml 是首页——install-refresh 假 FAIL，
 # preinstall/uninstall 两项在首页上假 PASS）。未进则整段跳过不计 FAIL。
@@ -1426,6 +1428,34 @@ fresh_swipe_back() {
     adb shell input swipe "$(SX 540)" "$(SY 650)" "$(SX 540)" "$(SY 1600)" 300 || true
   fi
 }
+# 轻量重进应用中心（不 force-stop、不重启进程，活刷新性质不变）：
+# fresh_scroll_top 的下滑动量在短列表腿上会 overscroll 整页退回首页
+# （2026-11-11/11-12 两轮 small 腿 install 截图均停在首页、24 轮全在
+# 首页上空找），此后 fresh_find_label 的 dump 全是首页、标签永远找不
+# 到（install 假 FAIL、uninstall 假 PASS）。重进手势走 home_swipe_start
+# （r4：按 dump 避开智能卡片取空白点，ac_open_d3 同款、small 腿首试即进），
+# 不用 fresh 段的固定坐标（卡片在场时会被吃掉）。返回 0=应用中心在场，
+# 1=三次重进仍不在场（调用方跳过不计分，不许在错误表面上判有/无）。
+# 重进即 UI 状态可能复位，折叠组展开标记随之清零（r4 api29 实证：桩会
+# 进收着的“不常用”组，组头须重展才找得到）。
+fresh_ensure_ac() {
+  local TRY SW SWX SWY SWEX SWEY
+  SW=$(home_swipe_start)
+  SWX=$(echo "$SW" | cut -d' ' -f1); SWY=$(echo "$SW" | cut -d' ' -f2)
+  SWEX=$(echo "$SW" | cut -d' ' -f3); SWEY=$(echo "$SW" | cut -d' ' -f4)
+  for TRY in 1 2 3; do
+    fresh_dump
+    if [ -f "$OUT/fresh_dump.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/fresh_dump.xml"; then
+      return 0
+    fi
+    log "fresh-ensure: not in App Center, re-entering (try $TRY)"
+    FRESH_FOLD_EXPANDED=0
+    adb shell input swipe "$SWX" "$SWY" "$SWEX" "$SWEY" 300 || true
+    sleep 2
+  done
+  fresh_dump
+  [ -f "$OUT/fresh_dump.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/fresh_dump.xml"
+}
 fresh_find_label() {
   local label="$1" tries="$2" i
   for i in $(seq 1 "$tries"); do
@@ -1443,6 +1473,16 @@ fresh_find_label() {
       adb shell input keyevent KEYCODE_BACK || true
       sleep 1
       fresh_dump
+    fi
+    # 面守卫（2026-11-12 small 腿定性）：下滑 overscroll 退回首页后，
+    # 24 轮全在首页 dump 上找标签、install 假 FAIL（uninstall 方向则
+    # 假 PASS）。每轮先验面，不在应用中心就轻量重进；三次重进仍不在场
+    # 返回 2（调用方跳过不计分，不许在错误表面上判有/无）。
+    if [ -f "$OUT/fresh_dump.xml" ] && ! grep -q 'resource-id="appcenter_settings"' "$OUT/fresh_dump.xml"; then
+      if ! fresh_ensure_ac; then
+        log "fresh-find: surface invalid, cannot verify '$label'"
+        return 2
+      fi
     fi
     if [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"; then
       log "fresh-find: '$label' visible on try $i/$tries"
@@ -1478,6 +1518,10 @@ fresh_find_label() {
     sleep 1
   done
   fresh_dump
+  if [ -f "$OUT/fresh_dump.xml" ] && ! grep -q 'resource-id="appcenter_settings"' "$OUT/fresh_dump.xml"; then
+    log "fresh-find: surface invalid at end, cannot verify '$label'"
+    return 2
+  fi
   [ -f "$OUT/fresh_dump.xml" ] && grep -q "$label" "$OUT/fresh_dump.xml"
 }
 fresh_scroll_top() {
@@ -1485,6 +1529,15 @@ fresh_scroll_top() {
   for i in $(seq 1 10); do
     fresh_swipe_back
     sleep 0.5
+    # 每滑一次验面：列表已在顶时下滑 overscroll 会整页退回首页
+    # （2026-11-11/11-12 small 腿实证），退出了就地重进、回到顶即停，
+    # 不再盲滑。
+    fresh_dump
+    if [ ! -f "$OUT/fresh_dump.xml" ] || ! grep -q 'resource-id="appcenter_settings"' "$OUT/fresh_dump.xml"; then
+      log "fresh-scroll-top: left App Center after swipe $i/10, re-entering"
+      fresh_ensure_ac || log "fresh-scroll-top: re-entry failed, search guard will judge"
+      return 0
+    fi
   done
 }
 # 横屏专用探针（F2 线 C 定版）：经 F2 统一后的胶囊搜索面验刷新——点胶囊、
@@ -1565,13 +1618,20 @@ if [ "$LANDSCAPE" = "1" ]; then
     log "freshness: preinstall probe rc=$FRESH_RC (0=label present, 2=probe invalid)"
     ng "catalog-preinstall-absent"
   fi
-elif ! fresh_find_label "$STUB_LABEL" 1; then
-  ok "catalog-preinstall-absent"
 else
-  log "freshness: stub label unexpectedly present before install"
-  ng "catalog-preinstall-absent"
+  fresh_find_label "$STUB_LABEL" 1
+  FRESH_RC=$?
+  if [ "$FRESH_RC" = "1" ]; then
+    ok "catalog-preinstall-absent"
+  elif [ "$FRESH_RC" = "0" ]; then
+    log "freshness: stub label unexpectedly present before install"
+    ng "catalog-preinstall-absent"
+  else
+    log "freshness: preinstall probe surface invalid (rc=$FRESH_RC) - segment skipped (not counted)"
+    FRESH_SKIP=1
+  fi
 fi
-if ni_build_stub && adb install -r "$STUB_APK" > /dev/null 2>&1; then
+if [ "$FRESH_SKIP" != "1" ] && ni_build_stub && adb install -r "$STUB_APK" > /dev/null 2>&1; then
   log "freshness: stub installed while AppCenter open"
   # 广播 -> epoch -> IO 重建 -> 快照换表，给慢腿留足轮询窗口
   sleep 3
@@ -1587,10 +1647,14 @@ if ni_build_stub && adb install -r "$STUB_APK" > /dev/null 2>&1; then
     # 竖屏：扫列表。装桩前列表停在哪不确定（前段导航遗留），先滑回起点
     # 再找；窗口 12 -> 24 轮，逐轮进度日志留证（F2 线 C 加固）
     fresh_scroll_top
-    if fresh_find_label "$STUB_LABEL" 24; then
+    fresh_find_label "$STUB_LABEL" 24
+    FRESH_RC=$?
+    if [ "$FRESH_RC" = "0" ]; then
       ok "catalog-install-refresh"
-    else
+    elif [ "$FRESH_RC" = "1" ]; then
       ng "catalog-install-refresh"
+    else
+      log "freshness: install probe surface invalid (rc=$FRESH_RC) - check skipped (not counted)"
     fi
   fi
   shot "appcenter-fresh-installed"
@@ -1610,17 +1674,25 @@ if ni_build_stub && adb install -r "$STUB_APK" > /dev/null 2>&1; then
     fi
   else
     fresh_scroll_top
-    if ! fresh_find_label "$STUB_LABEL" 12; then
+    fresh_find_label "$STUB_LABEL" 12
+    FRESH_RC=$?
+    if [ "$FRESH_RC" = "1" ]; then
       ok "catalog-uninstall-refresh"
-    else
+    elif [ "$FRESH_RC" = "0" ]; then
       ng "catalog-uninstall-refresh"
+    else
+      log "freshness: uninstall probe surface invalid (rc=$FRESH_RC) - check skipped (not counted)"
     fi
   fi
   shot "appcenter-fresh-uninstalled"
 else
-  log "freshness: stub build/install failed - segment counted as fail (same as phase B)"
-  ng "catalog-install-refresh"
-  ng "catalog-uninstall-refresh"
+  if [ "$FRESH_SKIP" = "1" ]; then
+    log "freshness: preinstall surface invalid - segment skipped (not counted)"
+  else
+    log "freshness: stub build/install failed - segment counted as fail (same as phase B)"
+    ng "catalog-install-refresh"
+    ng "catalog-uninstall-refresh"
+  fi
 fi
 else
   log "freshness: could not enter App Center after retries - segment skipped (not counted)"
