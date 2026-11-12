@@ -10,6 +10,10 @@
 
 ---
 
+## v1.3.41（versionCode 498）— 2026-11-12
+
+钉钉入会深链 dingtalkJoinDeepLink（Bob 2026-11-12 21:19 定：全部会议平台点「加入会议」直接进应用、不要走浏览器；其余 6 家逐家从公开 APK 核实完，结论见 smart-card-join-all-apps.md）。Webex/Zoom/Teams 为 (a)，489 显式包名 https 意图已能直接进应用，不改代码；腾讯会议/VooV 为 (c)，没核实到可用入会方式，浏览器兜底照常，不改代码；钉钉为 (b)，唯一实现的一家：meeting.dingtalk.com 在 manifest 全文 0 命中，深链 dingtalk://dingtalkclient/action/join_conf?roomCode=<入会码>&confid=<会议号> 已从钉钉 APK 8.3.41 核实，接在飞书深链之后、489 链之前（显式包＋resolveActivity，接不住落回 489 链）。只有 confid 时不拼深链（已登录分支不读 confid），两个都没有不编造。飞书 source=widget 深链不动。单测 703 绿、零 FAILED。
+
 ## v1.3.40（versionCode 497）— 2026-11-12
 
 飞书入会深链补 source=widget（Bob 2026-11-12 录屏：点「加入会议」后飞书打开手动「会议 ID」输入页、ID 栏空，链接 https://vc.feishu.cn/j/972810207）。根因已从飞书 APK v7.70.12 的 dex 再查定位：VideoChatHandler（ly6/j）按 source 分支，带号的入会分支 h.S（openJoinMeetingPage "meeting_link_join", num, pwd）只在 source=="widget" 时才到；我们没带 source、落到无号的手动页 h.R（openJoinMeetingPage "join_room"）。493 收据「action=join → h.S」漏了 source 这一闸（详见 smart-card-join-deep-dive.md）。深链改为 feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=<会议号>；其余不动（显式包＋resolveActivity、JoinGuard、兜底链、其它会议应用）。source=calendar 要飞书内部 id、拿不到，不可用。单测 697 绿、零 FAILED。
