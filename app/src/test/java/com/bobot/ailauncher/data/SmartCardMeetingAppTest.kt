@@ -294,4 +294,67 @@ class SmartCardMeetingAppTest {
         assertNull(feishuJoinDeepLink("https://meeting.tencent.com/dm/abc123"))
         assertNull(feishuJoinDeepLink("https://meet.google.com/abc-defg-hij"))
     }
+
+    // ---------- 钉钉（第二十一批） ----------
+
+    @Test
+    fun dingtalkDeepLink_roomCodeAndConfid() {
+        // 两参数都取到就都带（原样透传，顺序 roomCode 在前、confid 在后）。
+        assertEquals(
+            "dingtalk://dingtalkclient/action/join_conf?roomCode=ABC123xyz&confid=12345678901",
+            dingtalkJoinDeepLink(
+                "https://meeting.dingtalk.com?visitorindt&showmenu=false&roomCode=ABC123xyz&confid=12345678901"
+            )
+        )
+    }
+
+    @Test
+    fun dingtalkDeepLink_roomCodeOnly() {
+        // 只有 roomCode → 只带 roomCode（已登录/未登录都能走通，主推形态）。
+        assertEquals(
+            "dingtalk://dingtalkclient/action/join_conf?roomCode=ABC123xyz",
+            dingtalkJoinDeepLink(
+                "https://meeting.dingtalk.com?visitorindt&showmenu=false&roomCode=ABC123xyz"
+            )
+        )
+    }
+
+    @Test
+    fun dingtalkDeepLink_confidOnly_returnsNull() {
+        // 只有 confid → 返回 null：已登录分支完全不读 confid，只拿（空的）
+        // roomCode 走，会落到通用登录/入会流程带不上这场会——不要只传它。
+        assertNull(
+            dingtalkJoinDeepLink("https://meeting.dingtalk.com?confid=12345678901")
+        )
+    }
+
+    @Test
+    fun dingtalkDeepLink_neitherParam_returnsNull() {
+        // 两个都没有 → 返回 null，落回 489 链，不要编造。
+        assertNull(dingtalkJoinDeepLink("https://meeting.dingtalk.com?visitorindt&showmenu=false"))
+        assertNull(dingtalkJoinDeepLink("https://meeting.dingtalk.com"))
+    }
+
+    @Test
+    fun dingtalkDeepLink_nonDingtalk_returnsNull() {
+        // 非钉钉链接 → null（各走自己的链，不误进钉钉深链）。
+        assertNull(dingtalkJoinDeepLink("https://vc.feishu.cn/j/972810207"))
+        assertNull(dingtalkJoinDeepLink("https://meeting.tencent.com/dm/abc123"))
+    }
+
+    @Test
+    fun dingtalkDeepLink_otherApps_returnsNull() {
+        // 其余 5 家各 1 项：dingtalkJoinDeepLink 对它们的链接返回 null，
+        // 锁死它们走 489 链/浏览器兜底，不误进钉钉深链。
+        // 腾讯会议 (c)：meeting.tencent.com，无 roomCode/confid。
+        assertNull(dingtalkJoinDeepLink("https://meeting.tencent.com/dm/abc123"))
+        // VooV (c)：voovmeeting.com。
+        assertNull(dingtalkJoinDeepLink("https://voovmeeting.com/dm/abc123"))
+        // Webex (a)：489 显式包名 https 意图已能直接进应用。
+        assertNull(dingtalkJoinDeepLink("https://example.webex.com/meet/join/123456789"))
+        // Zoom (a)：489 已能直接进 Zoom。
+        assertNull(dingtalkJoinDeepLink("https://zoom.us/j/123456789"))
+        // Teams (a)：489 已能直接进 Teams。
+        assertNull(dingtalkJoinDeepLink("https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc"))
+    }
 }

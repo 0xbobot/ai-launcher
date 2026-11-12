@@ -46,6 +46,14 @@ import android.net.Uri
  * meeting.feishu.cn 声明——489 显式包名 https 意图在真机 resolveActivity
  * 为空的根因已证实（Bob 13:56 报「还是不行」）。其它会议应用与其它
  * 卡片不动；JoinGuard 与兜底链照常。
+ *
+ * 第二十一批：其余 6 家逐家从公开 APK 核实完（结论见 smart-card-join-all-apps.md）——
+ * Webex / Zoom / Teams 为 (a)，489 显式包名 https 意图已能直接进应用，不改代码；
+ * 腾讯会议 / VooV 为 (c)，没核实到可用入会方式，浏览器兜底照常，不改代码；
+ * 钉钉为 (b)，唯一要实现的一家：meeting.dingtalk.com 在 manifest 全文 0 命中（(a) 不成立），
+ * 官方自定义深链 dingtalk://dingtalkclient/action/join_conf?roomCode=<入会码>&confid=<会议号>
+ * 已从钉钉 APK 8.3.41 核实（见 dingtalkJoinDeepLink），接在飞书深链之后、489 链之前。
+ * 飞书的 source=widget 深链不动；其它应用与兜底链不动。
  */
 /**
  * v0.68.101（D-5）：入会防多发守卫（纯逻辑，单测锁死）——同一事件在
@@ -203,6 +211,64 @@ private fun extractFeishuMeetingNumber(meetingUrl: String): String? {
     return digits.ifBlank { null }?.takeIf { it.length >= 6 }
 }
 
+/**
+ * 钉钉会议链接 → 官方入会深链（纯函数，单测锁死；第二十一批）：
+ * `dingtalk://dingtalkclient/action/join_conf?roomCode=<入会码>&confid=<会议号>`。
+ *
+ * 核实依据（钉钉 APK 8.3.41，versionCode 1264，包名 com.alibaba.android.rimet，
+ * 详见 smart-card-dingtalk-join-receipt.md 与 smart-card-join-all-apps.md）：
+ * - manifest：路由 Activity 为 `com.alibaba.android.rimet.biz.BokuiActivity`（exported），
+ *   UNIFY_JUMP filter 含 `/action/join_conf`（manifest.txt:1143）；`meeting.dingtalk.com`
+ *   在 manifest 全文 0 命中——489 的显式包名 https 意图接不住、必落回浏览器，与飞书
+ *   vc.feishu.cn 同构，(a) 不成立。
+ * - dex：`BokuiActivity.m` → `UrlUtils.I`（jumpNativeIfMatch，按 path 精确 equals）→
+ *   `/action/join_conf` → `Lrjr;.e(Activity, Uri)`（classes5.dump:149893）。e() 读 query 参数
+ *   confid / joined / source / prejoin / continuityVendor / continuityUid / roomCode；
+ *   未登录：confid 非空 → `Lrjr;.i` 原生入会，confid 空＋roomCode 非空 → `Lrjr;.k` 按码入会，
+ *   都空 → 手动输码页；已登录：只用 roomCode，云控开关为 true → `Lrjr;.h`（应用内 WebView 开
+ *   meeting.dingtalk.com 链接，不是系统浏览器），为 false → `Lrjr;.g`（原生入会＋延迟重放自拼深链）。
+ *   第二形态佐证：`yvt.getDeepLink()` 自拼 `dingtalk://dingtalkclient/action/join_conf?
+ *   confid=<confId>&prejoin=true&continuityVendor=<Build.BRAND>`。
+ * - 参数从会议链接的 query 里取、原样透传（钉钉侧无数字清洗逻辑；取 query 参数的 raw 值、
+ *   已是百分号编码、原样拼进新 query 即可，纯字符串处理、不用 android.net.Uri、保持 JVM 可测）：
+ *   roomCode（主推）即会议 H5 链接 `https://meeting.dingtalk.com?visitorindt&showmenu=false&
+ *   roomCode=XXX` 里的 roomCode 参数（APK 内唯一一处 meeting.dingtalk.com 字面量，h() 自己就是
+ *   这么拼入会页 URL 的）；confid 即会议号（IConfSession.getConfId() 返回值）。
+ * - 两参数都取到就都带；只有 roomCode → 只带 roomCode（已登录/未登录都能走通）；
+ *   **只有 confid 时返回 null——已登录分支完全不读 confid，只拿（空的）roomCode 走，会落到通用
+ *   登录/入会流程带不上这场会**；两个都没有 → 返回 null、落回 489 链，**不要编造**。
+ *   无密码参数（有密码的会由应用内提示）。
+ * - 只对钉钉会议链接（meetingAppPackage == com.alibaba.android.rimet）构造；
+ *   其它会议应用返回 null（走 489 链，不动）。直接进会还是预填后点一次，须真机定
+ *   （TelConfInterface 的 G5/u0/A1 实现体未读；h() 的应用内 WebView 页上是否还需点一次，
+ *   从 smali 看不到）。
+ */
+fun dingtalkJoinDeepLink(meetingUrl: String): String? {
+    if (meetingAppPackage(meetingUrl) != "com.alibaba.android.rimet") return null
+    val roomCode = queryParamRaw(meetingUrl, "roomCode")?.ifBlank { null } ?: return null
+    val confid = queryParamRaw(meetingUrl, "confid")?.ifBlank { null }
+    return buildString {
+        append("dingtalk://dingtalkclient/action/join_conf?roomCode=$roomCode")
+        if (confid != null) append("&confid=$confid")
+    }
+}
+
+/**
+ * 取 URL query 里指定参数的 raw 值（纯字符串处理，JVM 可测；第二十一批，钉钉用）：
+ * 不解码——值已是百分号编码，原样透传进新 query 即可；无该参数或无 '=' 时返回 null。
+ * 参数名按 APK 侧 `Uri.getQueryParameter` 的口径区分大小写。
+ */
+private fun queryParamRaw(url: String, name: String): String? {
+    val query = url.substringAfter('?', "").substringBefore('#')
+    if (query.isEmpty()) return null
+    for (part in query.split('&')) {
+        val eq = part.indexOf('=')
+        if (eq < 0) continue
+        if (part.substring(0, eq) == name) return part.substring(eq + 1)
+    }
+    return null
+}
+
 private val URL_REGEX = Regex("""https?://[^\s<>"']+""")
 
 /** 从日历事件的 location/description/title 提取在线会议链接；没有返回 null */
@@ -267,11 +333,13 @@ fun calendarCardSourceKey(event: CalEvent): String {
 }
 
 /**
- * 打开链路（第十八批，四级＋兜底）：
+ * 打开链路（第十八批，四级＋兜底；第二十一批加钉钉深链为第二级）：
  * 1) 有会议链接 → 飞书先试官方入会深链（feishuJoinDeepLink，
  *    feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=<会议号>，
- *    显式包名＋resolveActivity 校验，接不住落回下一级）；再走第十七批
- *    的显式包名 https 意图（同一条链接限定到该包，resolveActivity 非空
+ *    显式包名＋resolveActivity 校验，接不住落回下一级）；钉钉再试官方入会深链
+ *    （dingtalkJoinDeepLink，dingtalk://dingtalkclient/action/join_conf?roomCode=<入会码>
+ *    &confid=<会议号>，显式包名＋resolveActivity 校验，接不住落回下一级）；
+ *    再走第十七批的显式包名 https 意图（同一条链接限定到该包，resolveActivity 非空
  *    才真正发），接不住落回通用浏览器意图直开链接；
  * 2) 无链接 → 打开日历 App；
  * 3) 再兜底按 content://com.android.calendar/events/{eventId} 打开事件详情；
@@ -290,6 +358,23 @@ fun openCalendarEvent(context: Context, eventId: Long, meetingUrl: String?): Boo
                     .setPackage("com.ss.android.lark")
                 if (deepIntent.resolveActivity(context.packageManager) != null) {
                     context.startActivity(deepIntent)
+                    return true
+                }
+            } catch (_: Exception) { /* 没接住 → 落 489 链 */ }
+        }
+        // 第二十一批：钉钉再试官方入会深链（已从钉钉 APK 核实，
+        // 见 dingtalkJoinDeepLink）：显式包名＋resolveActivity 校验，
+        // 没装／没声明／没入会码时直接落回 489 链，不抛、不卡。
+        // 只有 confid 时 dingtalkJoinDeepLink 返回 null（已登录分支不读
+        // confid），不拼深链、直接落 489 链。
+        val dingtalkLink = dingtalkJoinDeepLink(meetingUrl)
+        if (dingtalkLink != null) {
+            try {
+                val dingtalkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(dingtalkLink))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .setPackage("com.alibaba.android.rimet")
+                if (dingtalkIntent.resolveActivity(context.packageManager) != null) {
+                    context.startActivity(dingtalkIntent)
                     return true
                 }
             } catch (_: Exception) { /* 没接住 → 落 489 链 */ }
