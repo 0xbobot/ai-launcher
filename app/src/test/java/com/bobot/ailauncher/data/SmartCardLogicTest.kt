@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
@@ -193,6 +194,78 @@ class SmartCardLogicTest {
         assertEquals("95558", maskPhoneNumber("95558"))
         // 带国家码时按全部数字计（首尾各留 2 位），卡片上只作识别用
         assertEquals("86****78", maskPhoneNumber("+86 13812345678"))
+    }
+
+    // 第二十二批：空重建丢卡是否无法解释（refresh 保留＋重试的判定）。
+    @Test
+    fun unexplainedLoss_aliveCard_returnsTrue() {
+        val now = ms(2026, 11, 12, 13, 57)
+        val prev = card(
+            "cal|1|${ms(2026, 11, 12, 14, 0)}", SmartCardKind.CALENDAR,
+            ms(2026, 11, 12, 14, 0), ms(2026, 11, 12, 15, 0),
+            appearFromMs = ms(2026, 11, 12, 13, 30)
+        )
+        assertTrue(hasUnexplainedCardLoss(listOf(prev), emptySet(), now))
+    }
+
+    @Test
+    fun unexplainedLoss_doneCard_returnsFalse() {
+        val now = ms(2026, 11, 12, 13, 57)
+        val prev = card(
+            "cal|1|${ms(2026, 11, 12, 14, 0)}", SmartCardKind.CALENDAR,
+            ms(2026, 11, 12, 14, 0), ms(2026, 11, 12, 15, 0),
+            appearFromMs = ms(2026, 11, 12, 13, 30)
+        )
+        // 点「我知道了」摘卡：消失能解释，不保留、不重试。
+        assertFalse(hasUnexplainedCardLoss(listOf(prev), setOf(prev.id), now))
+    }
+
+    @Test
+    fun unexplainedLoss_expiredCard_returnsFalse() {
+        val now = ms(2026, 11, 12, 15, 30)
+        val prev = card(
+            "cal|1|${ms(2026, 11, 12, 14, 0)}", SmartCardKind.CALENDAR,
+            ms(2026, 11, 12, 14, 0), ms(2026, 11, 12, 15, 0),
+            appearFromMs = ms(2026, 11, 12, 13, 30)
+        )
+        // 过了截止点摘卡：消失能解释，不保留、不重试。
+        assertFalse(hasUnexplainedCardLoss(listOf(prev), emptySet(), now))
+    }
+
+    @Test
+    fun unexplainedLoss_notYetAppeared_returnsFalse() {
+        val now = ms(2026, 11, 12, 13, 0)
+        val prev = card(
+            "cal|1|${ms(2026, 11, 12, 14, 0)}", SmartCardKind.CALENDAR,
+            ms(2026, 11, 12, 14, 0), ms(2026, 11, 12, 15, 0),
+            appearFromMs = ms(2026, 11, 12, 13, 30)
+        )
+        // 还没到出现窗口：不算丢。
+        assertFalse(hasUnexplainedCardLoss(listOf(prev), emptySet(), now))
+    }
+
+    @Test
+    fun unexplainedLoss_mixedDoneAndAlive_returnsTrue() {
+        val now = ms(2026, 11, 12, 13, 57)
+        val done = card(
+            "bill|1", SmartCardKind.BILL,
+            ms(2026, 11, 12, 23, 59), ms(2026, 11, 12, 23, 59)
+        )
+        val alive = card(
+            "cal|1|${ms(2026, 11, 12, 14, 0)}", SmartCardKind.CALENDAR,
+            ms(2026, 11, 12, 14, 0), ms(2026, 11, 12, 15, 0),
+            appearFromMs = ms(2026, 11, 12, 13, 30)
+        )
+        assertTrue(
+            hasUnexplainedCardLoss(listOf(done, alive), setOf(done.id), now)
+        )
+    }
+
+    @Test
+    fun unexplainedLoss_emptyPrev_returnsFalse() {
+        assertFalse(
+            hasUnexplainedCardLoss(emptyList(), emptySet(), ms(2026, 11, 12, 13, 57))
+        )
     }
 
     @Test
