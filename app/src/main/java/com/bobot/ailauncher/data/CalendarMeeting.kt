@@ -29,11 +29,20 @@ import android.net.Uri
  * manifest 里 RouterActivity 声明了自定义 scheme feishu://applink.feishu.cn
  * （无 path 限制，applink 下任意路径都路由到它）与 verified App Link
  * https://applink.feishu.cn；dex 里的 VideoChatHandler（ly6/j）把路径
- * /client/videochat/open 映射到入会处理，读 query 参数 action 与 num：
- * action=join＋num=<会议号> 走「open join meeting page」分支，会议号
- * 经 g() 清洗（只留数字、最多 12 位），空则落回会议列表。会议号即
+ * /client/videochat/open 映射到入会处理，读 query 参数 source、action 与
+ * num 等，按 source 分支——带号的入会分支 ey6/h.S（openJoinMeetingPage
+ * "meeting_link_join", num, pwd）只在 source=="widget" 时才到；无 source
+ * 落到无号的手动页 ey6/h.R（openJoinMeetingPage "join_room"）。会议号经
+ * g() 清洗（只留数字、最多 12 位），空则落回会议列表。会议号即
  * vc.feishu.cn/j/<9 位数字> 里的数字（飞书帮助文档：「会议号是视频
- * 会议链接的最后 9 位数字」）。manifest 全文无 vc.feishu.cn /
+ * 会议链接的最后 9 位数字」）。
+ * 第二十批：493 的「action=join → h.S」漏了 source 这一闸（Bob 2026-11-12
+ * 录屏：点「加入会议」后飞书打开手动「会议 ID」输入页、ID 栏空，链接
+ * https://vc.feishu.cn/j/972810207 的号 972810207 已提出、num 已带，但
+ * 深链无 source、落到 h.R）。深链改为带 source=widget（详见
+ * smart-card-join-deep-dive.md）；source=calendar 要飞书内部 id、拿不到，
+ * 不可用；只有 source=widget＋action=join＋num 这一条是 9 位会议号的
+ * 入会路线。manifest 全文无 vc.feishu.cn /
  * meeting.feishu.cn 声明——489 显式包名 https 意图在真机 resolveActivity
  * 为空的根因已证实（Bob 13:56 报「还是不行」）。其它会议应用与其它
  * 卡片不动；JoinGuard 与兜底链照常。
@@ -142,18 +151,25 @@ private fun hostOf(url: String): String? {
 }
 
 /**
- * 飞书会议链接 → 官方入会深链（纯函数，单测锁死；第十八批）：
- * `feishu://applink.feishu.cn/client/videochat/open?action=join&num=<会议号>`。
+ * 飞书会议链接 → 官方入会深链（纯函数，单测锁死；第十八批建、第二十批补 source）：
+ * `feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=<会议号>`。
  *
- * 核实依据（飞书 APK v7.70.12，详见收据 §核实结论）：
+ * 核实依据（飞书 APK v7.70.12，详见收据 §核实结论与 smart-card-join-deep-dive.md）：
  * - manifest：RouterActivity 声明自定义 scheme `feishu://applink.feishu.cn`
  *  （无 path 限制）与 verified App Link `https://applink.feishu.cn`；这条
  *   自定义 scheme 不依赖 App Link 域名校验，显式限定包 com.ss.android.lark
  *   ＋ resolveActivity 校验后直接发。
  * - dex：路由表把路径 `/client/videochat/open` 映射到 VideoChatHandler
- *   （ly6/j），它读 query 参数 action 与 num；action=join＋num=<会议号>
- *   走「open join meeting page」分支（ey6/h.S），会议号经清洗器 g()
- *   （只留数字、最多 12 位），空则落回会议列表（ey6/h.R）。
+ *   （ly6/j），它按顺序读 query 参数 source、action、id、role、num 等，
+ *   按 source 分支——带号的入会分支 ey6/h.S（openJoinMeetingPage
+ *   "meeting_link_join", num, pwd）只在 source=="widget" 时才到；无 source
+ *   落到无号的手动页 ey6/h.R（openJoinMeetingPage "join_room"）。第二十批
+ *   纠正 493 的「action=join → h.S」（漏了 source 这一闸）：Bob 2026-11-12
+ *   录屏证实，无 source 的深链即使带了 num 也只打开手动「会议 ID」输入页、
+ *   ID 栏空（链接 https://vc.feishu.cn/j/972810207，号 972810207 已提出）。
+ *   source=calendar 要飞书内部 id（vc 链接与日历事件里没有），拿不到、不可用；
+ *   只有 source=widget＋action=join＋num 这一条是用 9 位会议号的入会路线。
+ *   会议号经清洗器 g()（只留数字、最多 12 位），空则落回会议列表（ey6/h.R）。
  * - 会议号即 vc.feishu.cn/j/<9 位数字> 里的数字（飞书帮助文档：「会议号
  *   是视频会议链接的最后 9 位数字」）。
  *
@@ -166,7 +182,7 @@ private fun hostOf(url: String): String? {
 fun feishuJoinDeepLink(meetingUrl: String): String? {
     if (meetingAppPackage(meetingUrl) != "com.ss.android.lark") return null
     val number = extractFeishuMeetingNumber(meetingUrl) ?: return null
-    return "feishu://applink.feishu.cn/client/videochat/open?action=join&num=$number"
+    return "feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=$number"
 }
 
 /** 从飞书会议链接里提取会议号（纯字符串处理，JVM 可测；第十八批） */
@@ -253,7 +269,7 @@ fun calendarCardSourceKey(event: CalEvent): String {
 /**
  * 打开链路（第十八批，四级＋兜底）：
  * 1) 有会议链接 → 飞书先试官方入会深链（feishuJoinDeepLink，
- *    feishu://applink.feishu.cn/client/videochat/open?action=join&num=<会议号>，
+ *    feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=<会议号>，
  *    显式包名＋resolveActivity 校验，接不住落回下一级）；再走第十七批
  *    的显式包名 https 意图（同一条链接限定到该包，resolveActivity 非空
  *    才真正发），接不住落回通用浏览器意图直开链接；
