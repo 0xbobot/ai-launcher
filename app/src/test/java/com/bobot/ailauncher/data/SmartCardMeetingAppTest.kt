@@ -2,6 +2,7 @@ package com.bobot.ailauncher.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -13,9 +14,14 @@ import org.junit.Test
  * 飞书未装时仍走浏览器。
  *
  * 第十八批：feishuJoinDeepLink 单测（下半部分）——飞书先试官方入会
- * 深链 feishu://applink.feishu.cn/client/videochat/open?action=join&num=<会议号>，
+ * 深链 feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=<会议号>，
  * 会议号即 vc.feishu.cn/j/<9 位数字> 里的数字（已从飞书 APK v7.70.12
  * 的 manifest＋dex 反汇编核实）；提不到会议号时返回 null 落回 489 链。
+ *
+ * 第二十批：深链必须带 source=widget——飞书 VideoChatHandler 按 source
+ * 分支，带号的入会分支 h.S 只在 source=="widget" 时才到；无 source 时
+ * 落到无号的手动页 h.R（Bob 2026-11-12 录屏：ID 栏空）。旧格式
+ * （无 source、只有 action+num）不再出现。
  */
 class SmartCardMeetingAppTest {
 
@@ -189,17 +195,33 @@ class SmartCardMeetingAppTest {
     @Test
     fun feishuDeepLink_vcUrl() {
         //  canonical 形态：vc.feishu.cn/j/<9 位会议号> →
-        // feishu://applink.feishu.cn/client/videochat/open?action=join&num=<会议号>。
+        // feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=<会议号>。
         assertEquals(
-            "feishu://applink.feishu.cn/client/videochat/open?action=join&num=483456789",
+            "feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=483456789",
             feishuJoinDeepLink("https://vc.feishu.cn/j/483456789")
         )
     }
 
     @Test
+    fun feishuDeepLink_hasSourceWidget() {
+        // 第二十批：深链必须带 source=widget——飞书 VideoChatHandler
+        // 按 source 分支，带号的入会分支 h.S 只在 source=="widget" 时才到；
+        // 无 source 时落到无号的手动页 h.R（Bob 2026-11-12 录屏：点
+        // 「加入会议」后飞书打开手动「会议 ID」输入页、ID 栏空，链接
+        // https://vc.feishu.cn/j/972810207）。用 Bob 那场会的真号验。
+        val link = feishuJoinDeepLink("https://vc.feishu.cn/j/972810207")
+        assertEquals(
+            "feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=972810207",
+            link
+        )
+        // 无 source 的旧格式（query 以 action=join 开头）不再出现。
+        assertTrue(link!!.startsWith("feishu://applink.feishu.cn/client/videochat/open?source=widget&"))
+    }
+
+    @Test
     fun feishuDeepLink_caseInsensitive() {
         assertEquals(
-            "feishu://applink.feishu.cn/client/videochat/open?action=join&num=483456789",
+            "feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=483456789",
             feishuJoinDeepLink("https://VC.FEISHU.CN/J/483456789")
         )
     }
@@ -208,7 +230,7 @@ class SmartCardMeetingAppTest {
     fun feishuDeepLink_withQueryAndFragment() {
         // query/fragment 不进会议号。
         assertEquals(
-            "feishu://applink.feishu.cn/client/videochat/open?action=join&num=483456789",
+            "feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=483456789",
             feishuJoinDeepLink("https://vc.feishu.cn/j/483456789?x=1#frag")
         )
     }
@@ -217,7 +239,7 @@ class SmartCardMeetingAppTest {
     fun feishuDeepLink_dashedNumber() {
         // 数字段里夹非数字字符时只留数字（与应用侧 g() 同口径）。
         assertEquals(
-            "feishu://applink.feishu.cn/client/videochat/open?action=join&num=483456789",
+            "feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=483456789",
             feishuJoinDeepLink("https://vc.feishu.cn/j/48345-6789")
         )
     }
@@ -226,7 +248,7 @@ class SmartCardMeetingAppTest {
     fun feishuDeepLink_longNumberTruncated() {
         // 超过 12 位截到 12 位（与应用侧 g() 同口径）。
         assertEquals(
-            "feishu://applink.feishu.cn/client/videochat/open?action=join&num=123456789012",
+            "feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=123456789012",
             feishuJoinDeepLink("https://vc.feishu.cn/j/12345678901234")
         )
     }
@@ -235,7 +257,7 @@ class SmartCardMeetingAppTest {
     fun feishuDeepLink_lastSegmentFallback() {
         // 没有 /j/ 时取最后一段（meeting.feishu.cn 等其它形态的兜底）。
         assertEquals(
-            "feishu://applink.feishu.cn/client/videochat/open?action=join&num=483456789",
+            "feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=483456789",
             feishuJoinDeepLink("https://meeting.feishu.cn/483456789")
         )
     }
@@ -244,7 +266,7 @@ class SmartCardMeetingAppTest {
     fun feishuDeepLink_trailingDotHost() {
         // FQDN 末尾的点不影响判定。
         assertEquals(
-            "feishu://applink.feishu.cn/client/videochat/open?action=join&num=483456789",
+            "feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=483456789",
             feishuJoinDeepLink("https://vc.feishu.cn./j/483456789")
         )
     }
