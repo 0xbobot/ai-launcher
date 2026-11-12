@@ -7,10 +7,12 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 智能卡片仓库（第一阶段，447/v1.2.0，设计稿 §2–§4）：
@@ -35,6 +37,11 @@ import kotlinx.coroutines.launch
  *   日历＝READ_CALENDAR；联系人只做未接来电的名字解析、只认 READ_CONTACTS，
  *   不卡卡片；电话拨号器无独立权限、跟通知监听走），不再另设开关。UiPrefs 的 smart_connector_* 启用
  *   标志已删除——删了 API，编译器就能证明没有开关门残留。
+ * - 空重建不直接清栈（第二十二批，Bob 2026-11-12 23:18 批）：一轮
+ *   重建结果为空、但上一轮非空、且丢的卡无法用「已处理/已过期」解释
+ *   时，先保留上一轮、300ms 后重试一次日历查询，重试仍空才真正清空；
+ *   每轮 refresh 最多重试一次、不循环、不阻塞主线程。点「我知道了」
+ *   摘卡与过期摘卡的语义不动。
  */
 object SmartCardRepository {
     private const val TAG = "SmartCardRepository"
@@ -81,6 +88,10 @@ object SmartCardRepository {
     private val prepRequested = mutableSetOf<String>()
     private val prepScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** 空重建保留后重试进行中标志（第二十二批）：每轮 refresh 最多一次
+     * 重试，不叠加；重试本身不再保留（allowRetry=false），不循环。 */
+    private val retryInFlight = AtomicBoolean(false)
+
     /** 顶卡划走动画复位代次（第十二批）：skip() 时加一，UI 层把
      * TopSmartCard 的组合键挂上它——同一张卡以新代次重新呈现时动画
      * 状态（offsetX/alpha）重建，不会再出现“数着卡、看不见卡”。
@@ -91,6 +102,9 @@ object SmartCardRepository {
 
     /** 短信重读节流：5 分钟内不重复查短信库（查询本身便宜，但没必要每分钟查） */
     private const val SMS_REFRESH_MIN_INTERVAL_MS = 5L * 60 * 1000
+    /** 空重建保留后重试一次的等待（第二十二批）：300ms，走 prepScope
+     * 的 IO 调度器 delay，不阻塞主线程。 */
+    private const val RETRY_DELAY_MS = 300L
     private const val DAY_MS = 24L * 60 * 60 * 1000
     private const val HOUR_MS = 60L * 60 * 1000
 
@@ -761,9 +775,16 @@ object SmartCardRepository {
      * 按此顺序先中先得；短信候选在前，日历候选次之，去重后短信版优先。
      * 划走的事项卡沉在摞底（跳过集合），看完其他卡就轮到它，不靠新卡
      * “放回来”（第十四批：新一轮机制已删）。
+     * 第二十二批：allowRetry=false 时不走保留＋重试（重试本身用）。
      */
-    fun refresh(context: Context, notifications: List<SimpleNotification>, nowMs: Long) {
+    fun refresh(
+        context: Context,
+        notifications: List<SimpleNotification>,
+        nowMs: Long,
+        allowRetry: Boolean = true
+    ) {
         lastNotifications = notifications
+        val prevCards = _cards.value
         // 第十三批：卡片跟着权限走——每个来源的门就是它自己的系统权限，
         // 开关不再进卡片构建路径（UiPrefs 的启用标志已删，编译不过即有残留）。
         // 通知的权限要显式判：监听断开时 onListenerDisconnected 不清
@@ -775,17 +796,24 @@ object SmartCardRepository {
         // 的——权限刚撤掉、缓存还没重建时，这里再按实时权限校验一次，
         // 撤权限后卡片最迟 1 分钟随分钟 ticker 的 refresh 摘掉，
         // 不等下次重建（通知/日历两条路每分钟都重读实时权限，短信不能例外）。
-        if (SmsRepository.hasSmsPermission(context)) candidates += smsCards
-        if (CalendarRepository.hasCalendarPermission(context)) {
-            candidates += CalendarRepository.loadTodayEvents(context)
-                .mapNotNull { calendarCard(it, context, nowMs) }
-        }
+        // 第二十二批：分来源计数（只记数量，不记内容），空重建时进日志。
+        val smsPerm = SmsRepository.hasSmsPermission(context)
+        val smsCount = if (smsPerm) smsCards.size else 0
+        if (smsPerm) candidates += smsCards
+        val calPerm = CalendarRepository.hasCalendarPermission(context)
+        val calEvents = if (calPerm) {
+            CalendarRepository.loadTodayEvents(context)
+        } else emptyList()
+        val calCount = calEvents.mapNotNull { calendarCard(it, context, nowMs) }
+            .also { candidates += it }.size
+        var notifCount = 0
         for (n in notifications) {
             if (n.packageName == context.packageName) continue
             // 未接来电：电话拨号器无独立权限，跟着通知监听走（461 的
             // “通知＋电话拨号器两个都开”随开关一起作废）。
             if (notifGranted && n.phoneNumber.isNotBlank()) {
                 candidates += missedCallCard(n, context)
+                notifCount += 1
                 continue
             }
             // 通知兜底的账单/预约：数据来自通知监听，门是通知监听权限，
@@ -795,6 +823,7 @@ object SmartCardRepository {
                 val bill = parseBillSms(combined, n.appName, nowMs)
                 if (bill != null) {
                     candidates += notificationBillCard(bill, n, context)
+                    notifCount += 1
                     continue
                 }
                 val appt = parseAppointmentSms(combined, nowMs)
@@ -802,11 +831,13 @@ object SmartCardRepository {
                     candidates += notificationAppointmentCard(
                         appt, n, combined, nowMs, context, created
                     )
+                    notifCount += 1
                     continue
                 }
             }
             if (notifGranted && isDeliveryOrTravelNotification(n.title, n.text)) {
                 candidates += deliveryCard(n, context)
+                notifCount += 1
             }
         }
         val doneIds = liveIds(context, KEY_DONE_PREFIX, nowMs)
@@ -835,6 +866,40 @@ object SmartCardRepository {
             } else card
         }
         val visible = visibleSmartCards(withPrefix, doneIds, skippedIds, nowMs)
+        if (visible.isEmpty() && prevCards.isNotEmpty()) {
+            // 第二十二批：空重建只记数量与哪一步空，不记内容。
+            val unexplained = hasUnexplainedCardLoss(prevCards, doneIds, nowMs)
+            Log.d(TAG, "refresh: empty rebuild prev=${prevCards.size} " +
+                "candidates=${candidates.size} sms=$smsCount(smsPerm=$smsPerm) " +
+                "calEvents=${calEvents.size} calCards=$calCount(calPerm=$calPerm) " +
+                "notif=$notifCount(notifGranted=$notifGranted) " +
+                "unexplained=$unexplained allowRetry=$allowRetry")
+            if (unexplained && allowRetry) {
+                // 丢的卡解释不通（不是已处理、不是已过期）：先保留上一轮、
+                // 不清空；300ms 后重试一次日历查询（走 prepScope 的 IO
+                // 调度器，不阻塞主线程；只重试一次，不循环）。
+                if (retryInFlight.compareAndSet(false, true)) {
+                    val appContext = context.applicationContext
+                    prepScope.launch {
+                        try {
+                            delay(RETRY_DELAY_MS)
+                            refresh(
+                                appContext, lastNotifications,
+                                System.currentTimeMillis(), allowRetry = false
+                            )
+                            Log.d(TAG, "refresh: retry done, " +
+                                "visible=${_cards.value.size}")
+                        } finally {
+                            retryInFlight.set(false)
+                        }
+                    }
+                }
+                recordLastUsed(context, prevCards, nowMs)
+                return
+            }
+            // 解释得通的空（都已处理/已过期），或重试本身仍空：真正清空。
+            Log.d(TAG, "refresh: clearing stack, prev=${prevCards.size}")
+        }
         _cards.value = visible
         recordLastUsed(context, visible, nowMs)
     }

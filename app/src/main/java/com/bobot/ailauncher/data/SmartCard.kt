@@ -276,3 +276,22 @@ fun visibleSmartCards(
         skippedIds.mapNotNull { id -> sunk.find { it.id == id } }
     return sortSmartCards(fresh) + sunkInSkipOrder
 }
+
+/**
+ * 空重建是否丢了不该丢的卡（纯函数，第二十二批，卡片瞬间消失修法）：
+ * 上一轮有卡、本轮可见 0 张时用——上一轮的卡里只要还有一张既没被用户
+ * 处理掉（不在 doneIds 里）、也没过截止点（isCardExpired 为假）、且
+ * 出现窗口已到（nowMs >= appearFromMs），它的消失就无法用正常语义
+ * （点「我知道了」摘卡、过期摘卡）解释，一定是某个来源这轮没产出
+ * （查询异常被吞、权限瞬间失效等），仓库应先保留上一轮、重试一次，
+ * 而不是直接清栈。只看 id 与时间，不看内容。
+ */
+fun hasUnexplainedCardLoss(
+    prevCards: List<SmartCard>,
+    doneIds: Set<String>,
+    nowMs: Long
+): Boolean = prevCards.any { prev ->
+    prev.id !in doneIds &&
+        nowMs >= prev.appearFromMs &&
+        !isCardExpired(prev, nowMs)
+}
