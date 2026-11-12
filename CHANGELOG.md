@@ -10,6 +10,10 @@
 
 ---
 
+## v1.3.40（versionCode 497）— 2026-11-12
+
+飞书入会深链补 source=widget（Bob 2026-11-12 录屏：点「加入会议」后飞书打开手动「会议 ID」输入页、ID 栏空，链接 https://vc.feishu.cn/j/972810207）。根因已从飞书 APK v7.70.12 的 dex 再查定位：VideoChatHandler（ly6/j）按 source 分支，带号的入会分支 h.S（openJoinMeetingPage "meeting_link_join", num, pwd）只在 source=="widget" 时才到；我们没带 source、落到无号的手动页 h.R（openJoinMeetingPage "join_room"）。493 收据「action=join → h.S」漏了 source 这一闸（详见 smart-card-join-deep-dive.md）。深链改为 feishu://applink.feishu.cn/client/videochat/open?source=widget&action=join&num=<会议号>；其余不动（显式包＋resolveActivity、JoinGuard、兜底链、其它会议应用）。source=calendar 要飞书内部 id、拿不到，不可用。单测 697 绿、零 FAILED。
+
 ## v1.3.39（versionCode 496）— 2026-11-11
 
 门闩回退 2 秒改 0.8 秒（Bob 2026-11-11 23:35 亲令「还是发 0.8 秒」，已知晓冷启动可能闪一下主界面，仍发）。跳转日志 5 次 contentIntent 点按（ChatGPT×2、Photos×2、Aura×1）send() 都 ok 但 2 秒内都没切后台、门闩每次都触发，2 秒全是白等；LATCH_FALLBACK_DELAY_MILLIS 2000L → 800L，注释与单测同步。Bob 23:22 通知栏对比视频：应用中心点 ChatGPT 行约 3.2 秒才出现、落点是通知目标的功能页（不是主界面），send() 送到了、只是冷启动慢，门闩 2 秒是误判；通知栏点同一条通知不到半秒打开（热启动）、落点同一页。0.8 秒对冷启动可能造成主界面先闪一下再落功能页。前台核验仍是 2 秒窗，判定逻辑/取消/角标/日志一律不动。
