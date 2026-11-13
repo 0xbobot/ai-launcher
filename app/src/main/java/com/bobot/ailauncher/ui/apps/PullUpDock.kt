@@ -321,6 +321,14 @@ fun PullUpDock(
         // v0.68.99：输入态已随意图清理（Bob 2026-11-08 23:38）删除——卡片只按
         // Dock 状态显隐，不再为意图胶囊让位。
         val cardVisible = (state == DockState.D1 || state == DockState.D2)
+        // 冷启动闪修（Bob 2026-11-14 00:03 实拍）：清单快照未到时 Dock 不画——
+        // 首帧空玻璃 + 图标晚到补上就是“闪一下然后撑大”。快照一到才一次画全，
+        // 首次出现只淡入（不走滑入，滑入读作又一次弹出）；此后档位切换仍走原滑入＋淡入。
+        // 快照只在首建时为 null，重建是换值不断流，故门只挡冷启动首帧，不闪重建。
+        var dockEnteredOnce by remember { mutableStateOf(false) }
+        LaunchedEffect(catalog) {
+            if (catalog != null) dockEnteredOnce = true
+        }
         // v0.27.4：删除全屏"点按外部收起"层（Bob：它挡住了主页非 Dock 区上滑，导致 D2→D1）
         // D2→D1 改由面板下滑手势触发
         // 点外关闭层（2026-10-26 入口子项，仅清单打开时存在，与 v0.27.4
@@ -334,7 +342,7 @@ fun PullUpDock(
             modifier = Modifier.fillMaxSize()
         ) {
             AnimatedVisibility(
-                visible = cardVisible,
+                visible = cardVisible && catalog != null,
                 modifier = Modifier
                     .align(
                         if (isLandscapeDock) Alignment.BottomEnd else Alignment.BottomCenter
@@ -345,7 +353,12 @@ fun PullUpDock(
                     .let { if (isLandscapeDock) it.padding(end = 16.dp + cutoutRightDp) else it },
                 // 意图清理（Bob 2026-11-08 23:38）：聚焦切换的 fade-only 分支
                 // 已随意图输入态删除——进出场一律按方向走原滑动＋淡入淡出。
-                enter = if (isLandscapeDock) {
+                enter = if (!dockEnteredOnce) {
+                    // 冷启动首次出现：只淡入，不滑入。
+                    fadeIn(
+                        tween(PetMotion.FadeHandoff, easing = MotionTokens.Easing)
+                    )
+                } else if (isLandscapeDock) {
                     // v0.68.82（第 3 项）：横屏从右下角斜向滑入
                     // 家族规格（值不动、仅具名）：滑入 DockEnter、淡入 FadeHandoff。
                     slideIn(
