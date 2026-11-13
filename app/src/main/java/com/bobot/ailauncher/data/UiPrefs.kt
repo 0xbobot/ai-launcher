@@ -163,4 +163,30 @@ object UiPrefs {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_INSIGHT_SEEN_TAIL, tail.joinToString(",")).apply()
     }
+
+    // 智能区来源卡收起态（2026-11-14 Bob 定：4 个源全接上时默认收起，只留
+    // 一行摘要；没接满保持展开，方便接上剩下的）
+    private const val KEY_SOURCES_CARD_COLLAPSED = "sources_card_collapsed"
+
+    /** 来源卡用户点过的收起态；null 表从未点过（4/4 首次接满默认收起） */
+    fun getSourcesCardCollapsed(context: Context): Boolean? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return if (prefs.contains(KEY_SOURCES_CARD_COLLAPSED)) {
+            prefs.getBoolean(KEY_SOURCES_CARD_COLLAPSED, false)
+        } else {
+            null
+        }
+    }
+
+    fun setSourcesCardCollapsed(context: Context, collapsed: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_SOURCES_CARD_COLLAPSED, collapsed).apply()
+    }
+
+    /**
+     * 来源卡是否收起（纯函数）：全接上才看用户点过的状态（没点过默认收起）；
+     * 没接满一律展开。
+     */
+    fun effectiveSourcesCardCollapsed(allConnected: Boolean, storedCollapsed: Boolean?): Boolean =
+        if (allConnected) (storedCollapsed ?: true) else false
 }

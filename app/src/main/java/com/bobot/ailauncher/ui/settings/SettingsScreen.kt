@@ -132,6 +132,9 @@ fun SettingsScreen(
     var keyStatus by remember { mutableStateOf(LlmConfig.keyStorageStatus(context)) }
     var testing by remember { mutableStateOf(false) }
     var llmExpanded by remember { mutableStateOf(false) }
+    // 智能区来源卡用户点过的收起态（2026-11-14 Bob 定：4/4 默认收起）；
+    // null 表从未点过——首次接满 4/4 时默认收起。进设置页重读 prefs。
+    var sourcesCollapsedOverride by remember { mutableStateOf(UiPrefs.getSourcesCardCollapsed(context)) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val hideOnBlur = Modifier.onFocusChanged { if (!it.isFocused) keyboardController?.hide() }
     val focusManager = LocalFocusManager.current
@@ -453,8 +456,9 @@ fun SettingsScreen(
         // 分区：智能——智能卡片的四个本机连接器就是智能的源（447 起，设计稿 §2/§5）
         // 各自单独接、有明确理由、随时可断；数据只在手机上处理，不发到别处。
         // 2026-11-08 Bob 定：分区改名“智能”（不再叫“提醒来源”），区顶显示
-        // 智能等级（已接 N/4 个源），行序按源对智能的提升比例（消息>通知>
-        // 日历>电话拨号器）；默认桌面不是源，挪出本区、单独放一张卡。
+        // 智能等级（已经接上了 N/4 个来源），行序按源对智能的提升比例（消息>通知>
+        // 日历>电话拨号器）；默认桌面不是源，不在本区（Bob 2026-11-14 07:33：
+        // 独立成区，放在智能之后、关于之前）。
         // 联系人已取消（第十四批，2026-11-10 Bob 定：不是必须的，不申请
         // READ_CONTACTS）——没有联系人行，等级按四个源算。
         // 448 合并：旧“权限”分区并入本分区——日历、通知只出现一次（原两处重叠）。
@@ -469,7 +473,6 @@ fun SettingsScreen(
             val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
             val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
             val smsGranted = rememberPermissionState { isSmsGranted(context) }
-            val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
             val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
             val openSms = rememberSmsPermissionOpener(smsGranted)
             // 应用运行中去设置里开通知读取权限时系统不回调，在这里重绑监听
@@ -511,9 +514,16 @@ fun SettingsScreen(
             fun onConnectorToggle(state: ConnectorState, turnOn: Boolean) {
                 if (turnOn) connect(state.key) else openConnectorSettings(state.key)
             }
-            // 智能等级（设计稿 §2，2026-11-08 Bob 定）：已接 N/4 个源，数字随
-            // 接上/断开实时变（connectorStates 本就随权限状态重算；第十三批起只认权限）。
+            // 智能等级（设计稿 §2，2026-11-08 Bob 定）：已经接上了 N/4 个来源，
+            // 数字随接上/断开实时变（connectorStates 本就随权限状态重算；第十三批起只认权限）。
+            // 2026-11-14 Bob 定：4 个源全接上时这块默认收起，只留一行摘要；
+            // 没接满时保持展开，方便接上剩下的。收起/展开记下来，下次进
+            // 设置页还按上次的来；4/4 首次接满（从未点过）默认收起。
             val connectedCount = connectedSourceCount(connectorStates)
+            val allSourcesConnected = connectedCount == SMART_SOURCE_ORDER.size
+            val sourcesCollapsed = UiPrefs.effectiveSourcesCardCollapsed(
+                allSourcesConnected, sourcesCollapsedOverride
+            )
             Column {
                 Card(
                     shape = RoundedCornerShape(20.dp),
@@ -522,78 +532,84 @@ fun SettingsScreen(
                     modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "已接 $connectedCount/${SMART_SOURCE_ORDER.size} 个源",
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { connectedCount / SMART_SOURCE_ORDER.size.toFloat() },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "智能来自这些源。每接一个，智能加一。各自单独接、随时能断。只在手机上处理，不发到别处。",
-                            fontSize = AILauncherType.Footnote.fontSize,
-                            color = AILauncherColors.current.Hint,
-                            lineHeight = 18.sp
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        byKey[UiPrefs.CONNECTOR_MESSAGE]?.let { state ->
-                            SettingsConnectorRow(
-                                state = state,
-                                onToggle = { onConnectorToggle(state, it) }
+                        // 展开/收起只认标题行（与「让助手更聪明」卡同一口径 F-08）；
+                        // 4/4 时标题行可点（带 tick），没接满时不可点、保持展开。
+                        Row(
+                            modifier = if (allSourcesConnected) {
+                                Modifier.fillMaxWidth().clickable {
+                                    view.tickHaptic()
+                                    val next = !sourcesCollapsed
+                                    sourcesCollapsedOverride = next
+                                    UiPrefs.setSourcesCardCollapsed(context, next)
+                                }
+                            } else {
+                                Modifier.fillMaxWidth()
+                            },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "已经接上了 $connectedCount/${SMART_SOURCE_ORDER.size} 个来源",
+                                fontSize = AILauncherType.BodyLarge.fontSize,
+                                fontWeight = FontWeight.Medium,
+                                color = AILauncherColors.current.Title,
+                                modifier = Modifier.weight(1f)
                             )
+                            if (allSourcesConnected) {
+                                Icon(
+                                    if (sourcesCollapsed) Icons.Filled.KeyboardArrowDown
+                                    else Icons.Filled.KeyboardArrowUp,
+                                    contentDescription = if (sourcesCollapsed) "展开" else "收起",
+                                    tint = AILauncherColors.current.Hint
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { state ->
-                            SettingsConnectorRow(
-                                state = state,
-                                onToggle = { onConnectorToggle(state, it) }
+                        if (!sourcesCollapsed) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                progress = { connectedCount / SMART_SOURCE_ORDER.size.toFloat() },
+                                modifier = Modifier.fillMaxWidth()
                             )
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        byKey[UiPrefs.CONNECTOR_CALENDAR]?.let { state ->
-                            SettingsConnectorRow(
-                                state = state,
-                                onToggle = { onConnectorToggle(state, it) }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "智能就来自下面这几处。每多接一处，智能就强一点。每个都能单独接、随时断开。数据只在这台手机上处理，不会发到别处。",
+                                fontSize = AILauncherType.Footnote.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                lineHeight = 18.sp
                             )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            byKey[UiPrefs.CONNECTOR_MESSAGE]?.let { state ->
+                                SettingsConnectorRow(
+                                    state = state,
+                                    onToggle = { onConnectorToggle(state, it) }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { state ->
+                                SettingsConnectorRow(
+                                    state = state,
+                                    onToggle = { onConnectorToggle(state, it) }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            byKey[UiPrefs.CONNECTOR_CALENDAR]?.let { state ->
+                                SettingsConnectorRow(
+                                    state = state,
+                                    onToggle = { onConnectorToggle(state, it) }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            byKey[UiPrefs.CONNECTOR_PHONE]?.let { state ->
+                                // 电话拨号器开关跟着通知走（设计稿 §2，2026-11-08 Bob 定；
+                                // 第十三批改为跟着通知的权限走）：它的 granted 本就是
+                                // 从通知推导的，直接按 state 渲染；通知没接上时行变灰
+                                // 点不动（isDialerRowEnabled），不能单独开。
+                                SettingsConnectorRow(
+                                    state = state,
+                                    enabled = isDialerRowEnabled(connectorStates),
+                                    onToggle = { onConnectorToggle(state, it) }
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        byKey[UiPrefs.CONNECTOR_PHONE]?.let { state ->
-                            // 电话拨号器开关跟着通知走（设计稿 §2，2026-11-08 Bob 定；
-                            // 第十三批改为跟着通知的权限走）：它的 granted 本就是
-                            // 从通知推导的，直接按 state 渲染；通知没接上时行变灰
-                            // 点不动（isDialerRowEnabled），不能单独开。
-                            SettingsConnectorRow(
-                                state = state,
-                                enabled = isDialerRowEnabled(connectorStates),
-                                onToggle = { onConnectorToggle(state, it) }
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                // 默认桌面不是智能的源（设计稿 §2，2026-11-08 Bob 定）：不计入等级，
-                // 挪出智能区、单独放一张卡；行本身不动（无开关，只有状态＋去设置）。
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        SettingsPermissionRow(
-                            title = "默认桌面",
-                            desc = "按 Home 键回到 AI 桌面",
-                            granted = defaultGranted.value,
-                            doneText = "已设为默认",
-                            todoText = "尚未设为默认",
-                            actionText = "去设置",
-                            onOpen = { openHomeSettings(context) }
-                        )
                     }
                 }
             }
@@ -806,6 +822,34 @@ fun SettingsScreen(
             }
         }
 
+        // 分区：默认桌面（Bob 2026-11-14 07:33）：从智能分区搬出来独立成区，
+        // 只放这一行，放在智能之后、关于之前。行本身不动（无开关，只有状态＋去设置）。
+        item {
+            SettingsSectionTitle("默认桌面")
+        }
+
+        item {
+            val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    SettingsPermissionRow(
+                        title = "默认桌面",
+                        desc = "按 Home 键回到 AI 桌面",
+                        granted = defaultGranted.value,
+                        doneText = "已设为默认",
+                        todoText = "尚未设为默认",
+                        actionText = "去设置",
+                        onOpen = { openHomeSettings(context) }
+                    )
+                }
+            }
+        }
+
         // 分区：关于——落款
         item {
             SettingsSectionTitle("关于")
@@ -813,7 +857,7 @@ fun SettingsScreen(
 
         // 未读跳转日志（Bob 2026-11-11 21:59：删质检、加日志）：点开看
         // 最近点按记录（只读）+ 分享。只加这一行，放在“关于”区——
-        // 版本/智能都是功能区，关于是唯一收杂项的区；474 删掉的
+        // 版本/智能/默认桌面都是功能区，关于是唯一收杂项的区；474 删掉的
         // 诊断区不重建；落款词标仍在最末尾。
         item {
             Card(
@@ -986,7 +1030,7 @@ private fun SettingsSectionTitle(text: String) {
 
 /**
  * 设置页默认桌面行（448 自旧“权限”分区并入提醒来源卡；2026-11-08 Bob 定：
- * 默认桌面不是智能的源，挪出智能区、单独放一张卡，行本身不动）：
+ * 默认桌面不是智能的源；2026-11-14 Bob 定：独立成区（智能之后、关于之前），行本身不动）：
  * 标题＋好处＋状态行＋去开启（已开启时只显示状态，不再给无意义的按钮；
  * 触控走 TextButton，热区 ≥48dp）。
  */
