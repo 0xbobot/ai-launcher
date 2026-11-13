@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.util.Log
+import com.bobot.ailauncher.ui.settings.isDefaultLauncher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,6 +78,21 @@ object SmartCardRepository {
     /** 预约卡已建过提醒（第十一批）：按卡片 id 记，带截止点、过期自清。
      * 建完提醒后卡片动作换回看预约（防重复建），卡上显示“已建提醒”。 */
     private const val KEY_REMINDER_CREATED_PREFIX = "reminder_created_"
+
+    /** 设默认桌面卡已问过（Bob 2026-11-14 07:33 亲令）：问一次、答完即关，
+     * 不反复追问。点「取消」/点「去设置」（Intent 成功发出）/横滑，任一
+     * 响应都记下，永不再出现；Intent 发不出去不记，卡片留着（可重试或
+     * 取消）。布尔标记（无截止点——问过就是问过，不像 done_ 那样过期自清）。 */
+    private const val KEY_DEFAULT_LAUNCHER_ASKED = "default_launcher_asked"
+
+    /** 设默认桌面卡是否已问过（没记过＝没问过）。 */
+    fun isDefaultLauncherAsked(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_DEFAULT_LAUNCHER_ASKED, false)
+
+    /** 记下设默认桌面卡已问过（永不再出现）。 */
+    fun markDefaultLauncherAsked(context: Context) {
+        prefs(context).edit().putBoolean(KEY_DEFAULT_LAUNCHER_ASKED, true).apply()
+    }
 
     /** 准备清单异步结果（第十二批）：按卡片 id 缓存的大模型返回，
      * UI 层订阅后覆盖卡片构建时的 prep（构建时为 null）。失败不写，
@@ -252,8 +268,15 @@ object SmartCardRepository {
     /** 点下一步动作算处理完一张（仓库层立即摘掉，UI 侧先播离场动画再调这里）——
      * 除了第十九批的有时间段提醒（日历/预约）：时间段内点动作不摘卡，
      * performAction 内按 kind＋deadlineMs 判、不调这里；只有「我知道了」
-     * （宿主 onIgnore 直接调这里）或过了截止点才摘。 */
+     * （宿主 onIgnore 直接调这里）或过了截止点才摘。
+     * 设默认卡（Bob 2026-11-14 07:33 亲令）：点「取消」走这里（宿主
+     * onIgnore），点「去设置」成功发出后 performAction 也调这里——两种
+     * 响应都记已问过，永不再出现；done_ 记 Long.MAX_VALUE（卡本身无
+     * 截止点），与已问标记双保险（空重建的“无法解释丢失”判定认 done_）。 */
     fun markDone(context: Context, card: SmartCard) {
+        if (card.kind == SmartCardKind.DEFAULT_LAUNCHER) {
+            markDefaultLauncherAsked(context)
+        }
         prefs(context).edit()
             .putLong(KEY_DONE_PREFIX + card.id, card.deadlineMs).apply()
         refresh(context, lastNotifications, System.currentTimeMillis())
@@ -266,8 +289,13 @@ object SmartCardRepository {
      * 轮到它，带截止点、过期自清；应用推的提醒（引导卡，以及还没落地的
      * 小贴士/升级卡）划过就丢——记进处理完集合，不再出现。
      * 只有点第一个按钮「我知道了」才丢用户的事项提醒（那是 markDone）。
+     * 设默认卡是应用推的（isUserMatterCard 为假）：划过就丢，记进处理
+     * 完集合，同时记已问过，永不再出现。
      */
     fun skip(context: Context, card: SmartCard) {
+        if (card.kind == SmartCardKind.DEFAULT_LAUNCHER) {
+            markDefaultLauncherAsked(context)
+        }
         val key = if (isUserMatterCard(card.kind)) {
             KEY_SKIPPED_PREFIX + card.id
         } else {
@@ -728,6 +756,41 @@ object SmartCardRepository {
     }
 
     /**
+     * 设默认桌面卡（Bob 2026-11-14 07:33 亲令）：首次安装时问用户要不要
+     * 把 AI桌面设为默认桌面。出现条件（shouldShowDefaultLauncherCard）：
+     * 还没问过（default_launcher_asked 未记）且当前还不是默认桌面。
+     * 已问过、或已是默认，返回 null、不出现。文案一句话（Bob 07:39 纠正：
+     * 不列好处清单，4 条核实好处只作内部依据），按钮「取消 / 去设置」。
+     * 排序：sortMs/deadlineMs 都是 Long.MAX_VALUE——无截止点，归入无
+     * 截止点的应用推卡组（与小贴士/升级卡同组），有时效真卡之后、引导
+     * 卡之前；永不过期（只靠问过/已是默认消失）。小标没有（不是打开某
+     * 个应用）；正文点按无动作（与账单/未接来电/快递航班同款）。
+     * 注意：isDefaultLauncher 是设置页那一行同款判断（PermissionHelpers，
+     * ACTION_MAIN＋CATEGORY_HOME 的 MATCH_DEFAULT_ONLY 解析），复用它，
+     * 不另写一套。
+     */
+    private fun defaultLauncherCard(context: Context): SmartCard? {
+        if (!shouldShowDefaultLauncherCard(
+                isDefaultLauncherAsked(context),
+                isDefaultLauncher(context)
+            )
+        ) return null
+        return SmartCard(
+            id = DEFAULT_LAUNCHER_CARD_ID,
+            kind = SmartCardKind.DEFAULT_LAUNCHER,
+            sourceLabel = DEFAULT_LAUNCHER_SOURCE_LABEL,
+            fact = DEFAULT_LAUNCHER_CARD_FACT,
+            prep = null,
+            actionLabel = DEFAULT_LAUNCHER_ACTION_LABEL,
+            dismissLabel = DEFAULT_LAUNCHER_DISMISS_LABEL,
+            sortMs = Long.MAX_VALUE,
+            deadlineMs = Long.MAX_VALUE,
+            action = SmartCardAction.OpenHomeSettings,
+            sourceKey = DEFAULT_LAUNCHER_CARD_ID
+        )
+    }
+
+    /**
      * 日历卡（第十二批）：本机日历里的日程/会议。出现窗口：会议类开始前
      * 30 分钟、非会议日程开始前 2 小时（calendarCardWindow）；过了结束
      * 时间消失。全天事件不进卡（没有可排的开始时间）；标题空白、起止
@@ -840,6 +903,10 @@ object SmartCardRepository {
                 notifCount += 1
             }
         }
+        // 设默认桌面卡（Bob 2026-11-14 07:33 亲令）：首次运行且还不是默认
+        // 桌面时出现，问一次。无截止点（sortMs/deadlineMs 都是 Long.MAX_VALUE，
+        // 有时效真卡之后、引导卡之前）；不认任何来源权限（它问的是桌面本身）。
+        defaultLauncherCard(context)?.let { candidates += it }
         val doneIds = liveIds(context, KEY_DONE_PREFIX, nowMs)
         // 跳过集合就是沉底顺序（liveIdList 按卡片截止点排，与正常排序
         // 同一方向）：划走的事项卡一直在可见列表里、排后面，不再靠
@@ -919,7 +986,9 @@ object SmartCardRepository {
                 SmartCardKind.NOTIFICATION -> used += UiPrefs.CONNECTOR_NOTIFICATION
                 // 引导卡不是一件真事项，不计入任何来源的“最后使用时间”
                 // （且引导卡根本不进仓库的候选表，这里只是穷尽分支）。
-                SmartCardKind.GUIDE -> Unit
+                // 设默认卡也不是某个来源的事项，同样不计入。
+                SmartCardKind.GUIDE,
+                SmartCardKind.DEFAULT_LAUNCHER -> Unit
             }
         }
         if (used.isEmpty()) return

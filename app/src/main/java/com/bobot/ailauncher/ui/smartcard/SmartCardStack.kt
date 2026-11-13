@@ -75,7 +75,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.CONNECTED_FEEDBACK_MS
 import com.bobot.ailauncher.data.ConnectedFeedback
 import com.bobot.ailauncher.data.GUIDE_VERSION
-import com.bobot.ailauncher.data.SMART_CARD_DISMISS_LABEL
 import com.bobot.ailauncher.data.SmartCardKind
 import com.bobot.ailauncher.data.buildConnectorStates
 import com.bobot.ailauncher.data.celebrationLevelText
@@ -1238,12 +1237,14 @@ private fun SmartCardView(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // 我知道了：卡片消失、不再出现、不追问（设计稿 §4.2）。
+                // 左按钮文案按卡种：默认「我知道了」，设默认卡是「取消」
+                // （card.dismissLabel，Bob 2026-11-14 07:33 亲令）。
                 TextButton(
                     onClick = onIgnoreClick,
                     modifier = Modifier.heightIn(min = SmartCardActionRowMinHeight)
                 ) {
                     Text(
-                        text = SMART_CARD_DISMISS_LABEL,
+                        text = card.dismissLabel,
                         fontSize = AILauncherType.Callout.fontSize,
                         fontWeight = FontWeight.Medium,
                         color = AILauncherColors.current.Hint

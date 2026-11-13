@@ -25,7 +25,12 @@ enum class SmartCardKind {
     /** 快递/外卖/航班等有时效的通知 */
     NOTIFICATION,
     /** 首次加载的引导卡（设计稿 §4.7）：介绍场景、引导接来源，不是一件真事项 */
-    GUIDE
+    GUIDE,
+    /** 首次安装设默认桌面（Bob 2026-11-14 07:33 亲令）：一次性提示，
+     * 应用推的；只在首次运行且还不是默认桌面时出现，问一次、答完即关。
+     * 无截止点（deadlineMs = Long.MAX_VALUE，永不过期）；排序垫底
+     * （sortMs = Long.MAX_VALUE，有时效真卡之后、引导卡之前）。 */
+    DEFAULT_LAUNCHER
 }
 
 /** 卡片的下一步动作：点它就算处理完一张——除了第十九批的有时间段提醒
@@ -93,6 +98,14 @@ sealed class SmartCardAction {
         /** 退回动作（看预约） */
         val fallback: SmartCardAction
     ) : SmartCardAction()
+
+    /** 打开系统默认桌面设置（首次安装设默认卡用，Bob 2026-11-14 07:33
+     * 亲令）：与设置页「默认桌面」行同一套动作（openHomeSettings，
+     * Settings.ACTION_HOME_SETTINGS），不在这里另发明入口。
+     * performAction 里执行：成功发出才 markDone（问过即关，成功与否
+     * 都关——退出来没设也关，见 SmartCardRepository）；发不出去
+     * （异常）返回 false、不摘卡，卡片留着（可重试或取消）。 */
+    object OpenHomeSettings : SmartCardAction()
 }
 
 /** 卡片两个响应的按钮文案（设计稿 §4.2；第十二批 Bob 2026-11-09 定）：
@@ -101,6 +114,24 @@ sealed class SmartCardAction {
  * 看预约 / 回拨 / 查看 / 加入会议 / 看日程 / 连接＋来源名）。
  * 单测逐字锁死（SmartCardButtonCopyTest）。 */
 const val SMART_CARD_DISMISS_LABEL = "我知道了"
+
+/**
+ * 首次安装设默认桌面卡（Bob 2026-11-14 07:33 亲令，07:39 纠正文案方向）：
+ * 文案只写一句话、不列好处清单（Bob 07:39：“不要写长、不要把 4 条好处
+ * 都列出来。只要一句话、简洁一点，让用户知道设了默认桌面体验会更好
+ * 就行，还要有对话的感觉”）。那 4 条核实到的好处（快捷操作更多／按
+ * Home 键回到这个桌面／未读消息／智能卡片和 Dock 智能排序）只作内部
+ * 依据、不上卡片；应用间跳转确认弹窗未验证，绝不写成好处。
+ * 文案三原则逐字锁死（SmartCardDefaultLauncherTest）：讲清楚（设默认
+ * 是什么：按 Home 键回到这里）、不造新词（“默认桌面”“Home 键”都是
+ * 系统与设置页已有的说法）、有对话感（“吧”“以后”“用起来更顺手”）。
+ * 左按钮是「取消」（不是通用的「我知道了」），右按钮是「去设置」。
+ */
+const val DEFAULT_LAUNCHER_CARD_ID = "default_launcher"
+const val DEFAULT_LAUNCHER_SOURCE_LABEL = "AI桌面"
+const val DEFAULT_LAUNCHER_CARD_FACT = "把 AI桌面设为默认桌面吧，以后按 Home 键就回到这里，用起来更顺手。"
+const val DEFAULT_LAUNCHER_ACTION_LABEL = "去设置"
+const val DEFAULT_LAUNCHER_DISMISS_LABEL = "取消"
 
 /**
  * 卡片右下方应用小标的目标应用（第十一批，Bob 定“要小、要优雅”）：
@@ -136,6 +167,9 @@ data class SmartCard(
      * 预约卡没建过提醒时是“帮我建提醒”，建完提醒后变回“看预约”。
      */
     val actionLabel: String,
+    /** 左按钮文案（默认「我知道了」；设默认卡是「取消」，见
+     * DEFAULT_LAUNCHER_DISMISS_LABEL——UI 层按本字段画左按钮）。 */
+    val dismissLabel: String = SMART_CARD_DISMISS_LABEL,
     /** 排序键：最早截止的在最上面（体检按禁食截止 20:00 排，比开始时间更早） */
     val sortMs: Long,
     /** 过了这个点卡片即消失（账单＝到期日 23:59；预约＝结束时间；未接来电＝通知后 24 小时） */
@@ -174,7 +208,8 @@ internal fun kindRank(kind: SmartCardKind): Int = when (kind) {
     SmartCardKind.CALENDAR -> 2
     SmartCardKind.MISSED_CALL -> 3
     SmartCardKind.NOTIFICATION -> 4
-    SmartCardKind.GUIDE -> 5
+    SmartCardKind.DEFAULT_LAUNCHER -> 5
+    SmartCardKind.GUIDE -> 6
 }
 
 /**
@@ -234,9 +269,9 @@ fun withInProgressPrefix(
  * 482「本轮收起来」）：账单 BILL、预约 APPOINTMENT、日历 CALENDAR、
  * 未接来电 MISSED_CALL、快递/航班 NOTIFICATION——划过只排后面（沉到
  * 摞底），不丢。
- * 应用推的提醒（引导卡 GUIDE，以及还没落地的 TIP 小贴士 / UPDATE
- * 升级卡）不在这里——划过就丢，不沉底。新种默认走“应用推的”分支，
- * 除非明确列进这里。
+ * 应用推的提醒（引导卡 GUIDE、设默认卡 DEFAULT_LAUNCHER，以及还没
+ * 落地的 TIP 小贴士 / UPDATE 升级卡）不在这里——划过就丢，不沉底。
+ * 新种默认走“应用推的”分支，除非明确列进这里。
  */
 fun isUserMatterCard(kind: SmartCardKind): Boolean = when (kind) {
     SmartCardKind.BILL,
@@ -244,8 +279,18 @@ fun isUserMatterCard(kind: SmartCardKind): Boolean = when (kind) {
     SmartCardKind.CALENDAR,
     SmartCardKind.MISSED_CALL,
     SmartCardKind.NOTIFICATION -> true
-    SmartCardKind.GUIDE -> false
+    SmartCardKind.GUIDE,
+    SmartCardKind.DEFAULT_LAUNCHER -> false
 }
+
+/**
+ * 设默认卡是否该出现（纯函数，Bob 2026-11-14 07:33 亲令）：只在首次
+ * 运行（还没问过，[asked] 为假）且当前还不是默认桌面（[isDefault]
+ * 为假）时出现；问过一次、或已是默认，就不再出现。仓库层把
+ * SharedPreferences 里的已问标记与 isDefaultLauncher 的结果喂进来。
+ */
+fun shouldShowDefaultLauncherCard(asked: Boolean, isDefault: Boolean): Boolean =
+    !asked && !isDefault
 
 /**
  * 可见卡片（纯函数）：去重 → 掐掉未到出现窗口、已处理与已过期的 →
