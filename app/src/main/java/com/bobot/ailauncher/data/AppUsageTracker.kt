@@ -312,6 +312,113 @@ object AppUsageTracker {
     }
 
     /**
+     * 日类型小时格子批量读（大模型建议快照用）：一次扫 prefs，按
+     * "weekday-<hour>" / "saturday-<hour>" / "sunday-<hour>" 聚合非零格。
+     * 键形 hw_<dow1-7>_<hour0-23>_<pkg>；dow 1–5 → 工作日，6 → 周六，
+     * 7 → 周日。包名本身可能含下划线，解析时按 pkg 相等校验，不按 "_" 切分。
+     */
+    fun hwDayTypeGrid(context: Context, packageName: String): Map<String, Int> {
+        return try {
+            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val out = mutableMapOf<String, Int>()
+            for ((k, v) in p.all) {
+                if (v !is Int || v == 0 || !k.startsWith(KEY_HW_PREFIX)) continue
+                val rest = k.removePrefix(KEY_HW_PREFIX)
+                if (rest.length < 4) continue
+                val dow = rest.substring(0, 1).toIntOrNull() ?: continue
+                val afterDow = rest.substring(2)
+                val hourEnd = afterDow.indexOf('_')
+                if (hourEnd <= 0) continue
+                val hour = afterDow.substring(0, hourEnd).toIntOrNull() ?: continue
+                val pkg = afterDow.substring(hourEnd + 1)
+                if (pkg != packageName) continue
+                val dayType = when (dow) {
+                    6 -> "saturday"
+                    7 -> "sunday"
+                    in 1..5 -> "weekday"
+                    else -> continue
+                }
+                out["$dayType-$hour"] = v
+            }
+            out
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    /**
+     * 流入转移（大模型建议快照用）：tr_<prev>_<pkg> 按次数降序取前 limit 个。
+     * 后缀匹配，不按 "_" 切分包名。
+     */
+    fun transfersIn(
+        context: Context,
+        packageName: String,
+        limit: Int = 5
+    ): List<Pair<String, Int>> {
+        return try {
+            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val suffix = "_$packageName"
+            p.all.mapNotNull { (k, v) ->
+                if (v !is Int || v == 0 || !k.startsWith(KEY_TR_PREFIX)) return@mapNotNull null
+                if (!k.endsWith(suffix)) return@mapNotNull null
+                val prev = k.removePrefix(KEY_TR_PREFIX).removeSuffix(suffix)
+                if (prev.isEmpty()) null else prev to v
+            }.sortedByDescending { it.second }.take(limit)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * 流出转移（大模型建议快照用）：tr_<pkg>_* 的总次数与去向数。
+     * 前缀匹配，包名本身含下划线也不误判（目标包名取前缀后剩余整段）。
+     */
+    fun transfersOut(context: Context, packageName: String): Pair<Int, Int> {
+        return try {
+            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val prefix = KEY_TR_PREFIX + packageName + "_"
+            var total = 0
+            var targets = 0
+            for ((k, v) in p.all) {
+                if (v !is Int || v == 0 || !k.startsWith(prefix)) continue
+                total += v
+                targets++
+            }
+            total to targets
+        } catch (_: Exception) {
+            0 to 0
+        }
+    }
+
+    /**
+     * 近 7 天次数批量读（大模型建议快照选候选）：一次扫 day_ 键，
+     * 返回每包近 7 天窗口内的启动次数（只含 >0 的包）。
+     */
+    fun bulkRecent7(context: Context): Map<String, Int> {
+        return try {
+            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val today = todayYmd()
+            val byPkg = mutableMapOf<String, MutableMap<String, Int>>()
+            for ((k, v) in p.all) {
+                if (v !is Int || v == 0 || !k.startsWith(KEY_DAY_PREFIX)) continue
+                if (k.length <= KEY_DAY_PREFIX.length + 8) continue
+                val date = k.substring(KEY_DAY_PREFIX.length, KEY_DAY_PREFIX.length + 8)
+                val rest = k.substring(KEY_DAY_PREFIX.length + 8)
+                if (!rest.startsWith("_")) continue
+                val pkg = rest.substring(1)
+                if (pkg.isEmpty()) continue
+                (byPkg.getOrPut(pkg) { mutableMapOf() })[date] = v
+            }
+            byPkg.mapNotNull { (pkg, dayCounts) ->
+                val n = recentCount(dayCounts, today, RECENT_WINDOW_DAYS)
+                if (n > 0) pkg to n else null
+            }.toMap()
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    /**
      * 单个应用的智能排序分（总频次 + 3×当前时段亲和度 - 30 分钟内刚用过的
      * 重复惩罚 2 分）。注意：智能 v3 后搜索不再调用本函数（改用
      * [usageScoreForSearch]，不含 -2 惩罚）；Dock 新公式内联实现 -2 惩罚，
