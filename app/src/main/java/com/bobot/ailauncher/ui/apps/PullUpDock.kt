@@ -226,9 +226,10 @@ fun PullUpDock(
         }
     }
     // 可见条件：seenTail 已存在，且 tail 里有 seenTail 没有的包，且该包有
-    // 数据理由（复用说明页的理由判定：时段聚合 ≥3，或转移 ≥2（沿用说明页的
-    // prevRecent 门，避免点开却是 fallback），或总量 >0；全是 fallback
-    // “暂无你的使用记录”的不算洞察）。
+    // 数据理由（复用说明页的理由判定：时段聚合 ≥3，或转移占主导
+    // （[transferDominant]：≥2 且占比 ≥0.5，沿用说明页的 prevRecent 门，
+    // 避免点开却是 fallback），或近 30 天窗口计数 >0；全是 fallback
+    // “暂无你的使用记录”或“最近没怎么开”的不算洞察）。
     val insightVisible = remember(insightTail, insightSeenTail) {
         val seen = insightSeenTail
         if (seen == null) {
@@ -242,8 +243,11 @@ fun PullUpDock(
             insightTail.any { pkg ->
                 pkg !in seenSet && (
                     AppUsageTracker.hwDayTypeCount(context, pkg, dow, hour) >= 3 ||
-                    (prevRecent && AppUsageTracker.transferCount(context, prevPkg, pkg) >= 2) ||
-                    AppUsageTracker.totalCount(context, pkg) > 0
+                    (prevRecent && AppUsageTracker.transferDominant(
+                        AppUsageTracker.transferCount(context, prevPkg, pkg),
+                        AppUsageTracker.totalCount(context, pkg)
+                    )) ||
+                    AppUsageTracker.recentCount(context, pkg) > 0
                 )
             }
         }
@@ -703,7 +707,8 @@ fun PullUpDock(
                             transfer = AppUsageTracker.transferCount(
                                 context, sheetPrevPkg, app.packageName
                             ),
-                            total = AppUsageTracker.totalCount(context, app.packageName)
+                            total = AppUsageTracker.totalCount(context, app.packageName),
+                            recent = AppUsageTracker.recentCount(context, app.packageName)
                         )
                         Row(
                             modifier = Modifier

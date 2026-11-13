@@ -28,6 +28,14 @@ object AppUsageTracker {
     // 折叠组（419）：不活跃判定——首次见到 first_<pkg>（毫秒）；90 天阈值
     private const val KEY_FIRST_PREFIX = "first_"
     private const val NINETY_DAYS_MS = 90L * 24 * 60 * 60 * 1000
+    // 修法二（Bob 2026-11-13 21:33：“近期是多久直接写清楚”）：近 30 天
+    // 窗口计数 day_<yyyyMMdd>_<pkg>，与月度衰减的 count_/hw_/tr_ 键分开——
+    // 窗口计数是真实时间窗口，不参与衰减；30 天外的旧天由 lastDayCleanup
+    // 每天清一次，读数本身只加窗口内日期。
+    private const val KEY_DAY_PREFIX = "day_"
+    private const val KEY_LAST_DAY_CLEANUP = "lastDayCleanup"
+    /** “近期”的窗口天数（判断值，写死 30 天，显示就写“近 30 天”）。 */
+    const val RECENT_WINDOW_DAYS = 30
 
     /** Dock 兜底优先级：国民应用（仅取本机已安装的） */
     private val fallbackPriority = listOf(
@@ -102,6 +110,22 @@ object AppUsageTracker {
             editor.putLong(KEY_LAST_PREFIX + packageName, now)
             editor.putInt(KEY_SLOT_PREFIX + slot + "_" + packageName, curInt(KEY_SLOT_PREFIX + slot + "_" + packageName) + 1)
             editor.putInt(hwKey, curInt(hwKey) + 1)
+            // 近 30 天窗口计数（修法二）：当天 day 键 +1；30 天外旧天每天清
+            // 一次（读数只加窗口内日期，清不清理不影响正确性，只防键攒着）。
+            // day 键不在月度衰减的键前缀里，不参与衰减。
+            val today = todayYmd()
+            val dayKey = KEY_DAY_PREFIX + today + "_" + packageName
+            editor.putInt(dayKey, curInt(dayKey) + 1)
+            if (p.getString(KEY_LAST_DAY_CLEANUP, "") != today) {
+                val cutoff = shiftYmd(today, -(RECENT_WINDOW_DAYS - 1))
+                for ((k, _) in p.all) {
+                    if (k.startsWith(KEY_DAY_PREFIX)) {
+                        val date = k.removePrefix(KEY_DAY_PREFIX).take(8)
+                        if (date.length == 8 && date < cutoff) editor.remove(k)
+                    }
+                }
+                editor.putString(KEY_LAST_DAY_CLEANUP, today)
+            }
             editor.putString(KEY_PREV_PKG, packageName)
             editor.putLong(KEY_PREV_TIME, now)
             editor.apply()
@@ -219,7 +243,8 @@ object AppUsageTracker {
         }
     }
 
-    /** 衰减后总启动次数。供 Dock 说明页“常开 · 近期 X 次”与灯泡判定用。 */
+    /** 衰减后总启动次数。供 Dock 排序分、转移占比的分母、说明页“最近没怎么开”
+     * 判定用；“常开”分支的显示改用近 30 天窗口计数 [recentCount]。 */
     fun totalCount(context: Context, packageName: String): Int {
         return try {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -327,9 +352,104 @@ object AppUsageTracker {
     }
 
     /**
+     * 转移是否“占主导”（纯函数）：转移计数 ≥2 且占该应用衰减后总次数一半以上
+     * （transfer * 2 >= total，整数算，无浮点）。枢纽应用（Muse）带出来的
+     * 转移计数再高、占比低也不算——“接着开”只在真是习惯时才出现。0.5 是
+     * 判断值（Bob 2026-11-13 21:33：全是 Muse 之后打开，失去意义）。
+     * 转移与总量同按月度衰减，衰减不改变占比。
+     */
+    fun transferDominant(transfer: Int, total: Int): Boolean {
+        return transfer >= 2 && total > 0 && transfer * 2 >= total
+    }
+
+    /** yyyyMMdd 格式化（纯函数，month 取 1-12），不用 String.format 避 locale。 */
+    fun formatYmd(year: Int, month: Int, day: Int): String {
+        val m = month.toString().padStart(2, '0')
+        val d = day.toString().padStart(2, '0')
+        return "$year$m$d"
+    }
+
+    /** 当天 yyyyMMdd（本地时区），与 [currentDowHour] 同一 Calendar 口径。 */
+    fun todayYmd(): String {
+        val cal = Calendar.getInstance()
+        return formatYmd(
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH) + 1,
+            cal.get(Calendar.DAY_OF_MONTH)
+        )
+    }
+
+    /** yyyyMMdd 按天平移（纯函数，跨月/跨年由 Calendar 算；解析失败原样返回）。 */
+    fun shiftYmd(ymd: String, deltaDays: Int): String {
+        return try {
+            val cal = Calendar.getInstance()
+            cal.set(
+                ymd.substring(0, 4).toInt(),
+                ymd.substring(4, 6).toInt() - 1,
+                ymd.substring(6, 8).toInt()
+            )
+            cal.add(Calendar.DAY_OF_YEAR, deltaDays)
+            formatYmd(
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.DAY_OF_MONTH)
+            )
+        } catch (_: Exception) {
+            ymd
+        }
+    }
+
+    /**
+     * 近 N 天窗口计数（纯函数）：dayCounts 为日期 yyyyMMdd → 当天启动次数，
+     * 只加 [todayYmd] 往前数 days 天（含今天）的日期；窗口外与脏键（非 8 位
+     * 数字日期）不计。days <= 0 返回 0。
+     */
+    fun recentCount(
+        dayCounts: Map<String, Int>,
+        todayYmd: String,
+        days: Int = RECENT_WINDOW_DAYS
+    ): Int {
+        if (days <= 0) return 0
+        val start = shiftYmd(todayYmd, -(days - 1))
+        var sum = 0
+        for ((date, c) in dayCounts) {
+            if (date.length == 8 && date.all { it.isDigit() } && date in start..todayYmd) {
+                sum += c
+            }
+        }
+        return sum
+    }
+
+    /** 近 N 天窗口启动次数（默认 30 天）。读 day_<yyyyMMdd>_<pkg> 键，只加窗口内日期。 */
+    fun recentCount(
+        context: Context,
+        packageName: String,
+        days: Int = RECENT_WINDOW_DAYS
+    ): Int {
+        return try {
+            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val dayCounts = mutableMapOf<String, Int>()
+            val prefixLen = KEY_DAY_PREFIX.length
+            for ((k, v) in p.all) {
+                if (v is Int && k.startsWith(KEY_DAY_PREFIX) && k.length > prefixLen + 8) {
+                    val date = k.substring(prefixLen, prefixLen + 8)
+                    val rest = k.substring(prefixLen + 8)
+                    if (rest == "_$packageName") dayCounts[date] = v
+                }
+            }
+            recentCount(dayCounts, todayYmd(), days)
+        } catch (_: Exception) {
+            0
+        }
+    }
+
+    /**
      * Dock 排序分（纯函数）：时段聚合 ≥3 时 ×10000 主导 + 衰减后总次数
-     * + 10 分钟内转移 ≥2 时 +500 − 30 分钟内刚用过 −2；并列按最近（调用方）。
+     * + 10 分钟内转移占主导（[transferDominant]：≥2 且占比 ≥0.5）时 +500
+     * − 30 分钟内刚用过 −2；并列按最近（调用方）。
      * 与说明页理由同源——[dockReason] 用同一阈值。
+     * 排序分仍用衰减后总次数：窗口计数刚换过去头几天数字偏小（要从新数据
+     * 攒），排序不能跟着跳——过渡期见收据。
      */
     fun dockScore(
         hwDayType: Int,
@@ -340,15 +460,18 @@ object AppUsageTracker {
         nowMs: Long,
     ): Double {
         val hwPart = if (hwDayType >= 3) hwDayType else 0
-        val trPart = if (prevRecent && transfer >= 2) 500.0 else 0.0
+        val trPart = if (prevRecent && transferDominant(transfer, total)) 500.0 else 0.0
         val recentPenalty =
             if (lastUsedMs != 0L && nowMs - lastUsedMs < 30 * 60 * 1000) 2.0 else 0.0
         return hwPart * 10000.0 + total + trPart - recentPenalty
     }
 
     /**
-     * Dock 说明页理由（纯函数）：与排序同源——时段聚合 ≥3、转移 ≥2、总量 >0。
-     * “经常用”带上次数，措辞用“近期”不用“累计”（月度衰减后不是真累计）。
+     * Dock 说明页理由（纯函数）：与排序同源——时段聚合 ≥3、转移占主导
+     * （≥2 且占比 ≥0.5）、近 30 天窗口计数 >0。
+     * “常开”分支的触发与显示都用窗口计数 [recent]，不再用衰减后总量：
+     * recent > 0 →“常开 · 近 30 天 X 次”；总量 >0 但 30 天内没开过 →
+     * “最近没怎么开”，绝不显示“近 30 天 0 次”。
      */
     fun dockReason(
         pinned: Boolean,
@@ -359,6 +482,7 @@ object AppUsageTracker {
         prevRecent: Boolean,
         transfer: Int,
         total: Int,
+        recent: Int,
     ): String {
         return when {
             pinned -> "你固定在 Dock 上"
@@ -377,8 +501,9 @@ object AppUsageTracker {
                 }
                 "$weekday$period $hour 点常开"
             }
-            prevRecent && prevLabel != null && transfer >= 2 -> "打开 $prevLabel 后常接着开"
-            total > 0 -> "常开 · 近期 $total 次"
+            prevRecent && prevLabel != null && transferDominant(transfer, total) -> "打开 $prevLabel 后常接着开"
+            recent > 0 -> "常开 · 近 30 天 $recent 次"
+            total > 0 -> "最近没怎么开"
             else -> "热门应用（暂无你的使用记录）"
         }
     }
