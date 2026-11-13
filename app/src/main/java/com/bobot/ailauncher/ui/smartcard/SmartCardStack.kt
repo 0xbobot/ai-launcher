@@ -10,7 +10,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,7 +56,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -801,7 +805,23 @@ private enum class SmartCardStackSlot {
     }
 }
 
-/** 顶卡：横滑跳过（过 120dp 阈值离场、沉到摞底，不够回弹）；点动作立即执行 */
+/**
+ * 横滑切卡判定（纯函数，第二十三批单测锁死）：
+ * 位移或速度任一过线就切卡。位移阈值 96dp（由 120dp 放宽，慢拖也好切）；
+ * 速度阈值 1000dp/s（快速轻扫即使位移不到阈值也切）。
+ * 输入用 dp（与密度无关），调用处把 px / density 换算进来。
+ */
+internal fun shouldSkipCard(
+    offsetXDp: Float,
+    velocityXDps: Float,
+    displacementThresholdDp: Float = 96f,
+    flingThresholdDps: Float = 1000f
+): Boolean {
+    return abs(offsetXDp) > displacementThresholdDp ||
+        abs(velocityXDps) > flingThresholdDps
+}
+
+/** 顶卡：横滑跳过（位移或速度过线离场、沉到摞底，不够回弹）；点动作立即执行 */
 @Composable
 private fun TopSmartCard(
     card: SmartCard,
@@ -820,7 +840,6 @@ private fun TopSmartCard(
     val offsetX = remember { Animatable(0f) }
     val alpha = remember { Animatable(1f) }
     var skipping by remember { mutableStateOf(false) }
-    val thresholdPx = with(density) { 120.dp.toPx() }
 
     SmartCardView(
         card = card,
@@ -836,48 +855,115 @@ private fun TopSmartCard(
                 this.alpha = alpha.value
             }
             .pointerInput(card.id, skipping) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        if (skipping) return@detectHorizontalDragGestures
-                        val x = offsetX.value
-                        if (abs(x) > thresholdPx) {
-                            skipping = true
-                            val dir = if (x > 0) 1f else -1f
-                            if (reduceMotion) {
-                                onSkip(card)
-                            } else {
-                                scope.launch {
-                                    launch {
-                                        offsetX.animateTo(
-                                            dir * 1200f,
-                                            tween(MotionTokens.Medium)
-                                        )
-                                    }
-                                    launch {
-                                        alpha.animateTo(
-                                            0f, tween(MotionTokens.Medium)
-                                        )
-                                    }
-                                    onSkip(card)
+                // 决定性横滑（第二十三批，Bob 2026-11-13 横滑切卡 bug 的根因修法）：
+                // 旧实现 detectHorizontalDragGestures 是协作式检测器——它的
+                // drag 循环见到一条已被别的检测器消费过的 move 就取消
+                // （onDragCancel → 弹回原位）。正文区的 verticalScroll（竖向
+                // DragGestureNode）在同一条命中路径上更内层、每条 move 先过它；
+                // 手指斜着划时竖向漂移一过 slop 它就消费那条 move，卡片的横滑
+                // 就中途被取消——卡跟手拖很远（f_021 136dp、f_029 近乎出屏）
+                // 又在 0.12 秒内弹回，同一张卡仍在顶、角标仍 2，4–5 次都这样。
+                // 根因不是父级盲操（449 仲裁已把卡片区排除、录屏里扇形／应用
+                // 中心一个没弹），不是 onDragEnd 读到小位移（f_029 渲染值就是
+                // offsetX），不是 onSkip 没顶上下一张（onSkip 根本没被调到，
+                // 卡没有飞出淡出）。SmartCardView 里「横滑切卡与正文竖翻是
+                // 两个方向，不冲突」的注释是错的假设——Compose 的消费是按
+                // change 计的单一位，竖向检测器消费一条 move 就能取消横向拖拽。
+                // 修法：卡片自己做轴向仲裁——横向占优且过 slop 就认领整条手势
+                // （每条 move 都 consume，叠层自己吃掉横向滑动；读
+                // positionChangeIgnoreConsumed，不怕被别的检测器先消费）；
+                // 竖向占优就让路（不消费、不动卡），正文照常竖翻。位移同步
+                // 累计在 totalX 里（松手判定用它，不读可能滞后的 offsetX.value）；
+                // 视觉跟手仍走 scope.launch 异步 snapTo（awaitEachGesture 是
+                // 受限作用域，不能直接调挂起的 snapTo）。松手加速度判断
+                // （快速轻扫即使位移不到阈值也切，见 shouldSkipCard）。
+                // 划走语义不动：onSkip 仍接 skip()，用户的事项卡沉底、
+                // 应用推的提醒丢、引导卡走轮换推。
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val velocityTracker = VelocityTracker()
+                    velocityTracker.addPosition(down.uptimeMillis, down.position)
+                    var totalX = 0f
+                    var totalY = 0f
+                    var claimed = false
+                    var pointerGone = false
+                    val touchSlop = viewConfiguration.touchSlop
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change == null) {
+                            // 指针从事件里消失（系统取消，见 awaitDragOrUp 的
+                            // null 分支）：不按位移切卡，弹回原位。
+                            pointerGone = true
+                            break
+                        }
+                        if (change.changedToUpIgnoreConsumed()) break
+                        val delta = change.positionChangeIgnoreConsumed()
+                        totalX += delta.x
+                        totalY += delta.y
+                        velocityTracker.addPosition(
+                            change.uptimeMillis, change.position
+                        )
+                        if (!claimed) {
+                            when {
+                                abs(totalX) > touchSlop && abs(totalX) >= abs(totalY) -> {
+                                    claimed = true
                                 }
+                                abs(totalY) > touchSlop && abs(totalY) > abs(totalX) -> {
+                                    // 竖向占优：让路给正文竖翻，卡片不动、不消费。
+                                    break
+                                }
+                                else -> continue
                             }
+                        }
+                        // 已认领：吃掉这条 move（父级盲操见了已消费就退出）。
+                        // 位移同步跟手：awaitEachGesture 是受限作用域，不能
+                        // 直接调 Animatable.snapTo（挂起函数），改走 scope.launch
+                        // 异步跟手（与旧实现同款）；松手判定用同步累计的 totalX，
+                        // 不是可能滞后的 offsetX.value。
+                        change.consume()
+                        val x = totalX
+                        scope.launch { offsetX.snapTo(x) }
+                    }
+                    if (!claimed || skipping) return@awaitEachGesture
+                    if (pointerGone) {
+                        scope.launch {
+                            offsetX.animateTo(0f, tween(MotionTokens.Fast))
+                        }
+                        return@awaitEachGesture
+                    }
+                    val velocity = velocityTracker.calculateVelocity().x
+                    val densityScale = density.density
+                    val skip = shouldSkipCard(
+                        offsetXDp = totalX / densityScale,
+                        velocityXDps = velocity / densityScale
+                    )
+                    if (skip) {
+                        skipping = true
+                        val dir = if (totalX >= 0) 1f else -1f
+                        if (reduceMotion) {
+                            onSkip(card)
                         } else {
                             scope.launch {
-                                offsetX.animateTo(0f, tween(MotionTokens.Fast))
+                                launch {
+                                    offsetX.animateTo(
+                                        dir * 1200f,
+                                        tween(MotionTokens.Medium)
+                                    )
+                                }
+                                launch {
+                                    alpha.animateTo(
+                                        0f, tween(MotionTokens.Medium)
+                                    )
+                                }
+                                onSkip(card)
                             }
                         }
-                    },
-                    onDragCancel = {
-                        if (!skipping) {
-                            scope.launch {
-                                offsetX.animateTo(0f, tween(MotionTokens.Fast))
-                            }
+                    } else {
+                        scope.launch {
+                            offsetX.animateTo(0f, tween(MotionTokens.Fast))
                         }
                     }
-                ) { _, dragAmount ->
-                    if (skipping) return@detectHorizontalDragGestures
-                    // detectHorizontalDragGestures 的 dragAmount 本身就是横向位移（Float）
-                    scope.launch { offsetX.snapTo(offsetX.value + dragAmount) }
                 }
             }
     )
@@ -1090,7 +1176,11 @@ private fun SmartCardView(
         // 不是截断——maxLines=3＋Ellipsis 已删；翻到底渐隐消失（见 factFade）。
         // 高度就是 weight(1f) 撑满卡高减去其余行（不另加 min/max 钳制——
         // min 会顶穿引导卡的 48dp × 表头、max 会把按钮顶离底边留白）。
-        // 横滑切卡与正文竖翻是两个方向，不冲突；点正文仍是看原文（预约／日历卡）。
+        // 横滑切卡与正文竖翻靠轴向仲裁共存（第二十三批）：TopSmartCard
+        // 的横滑处理横向占优认领、竖向占优让路——不是「两个方向，不冲突」
+        // （旧注释是错的假设：消费按 change 计单一位，竖向检测器消费一条
+        // move 就能取消横向拖拽，2026-11-13 横滑切卡 bug 的根因）；点正文
+        // 仍是看原文（预约／日历卡）。
         Box(
             modifier = Modifier
                 .weight(1f)
