@@ -7,7 +7,8 @@ import org.junit.Test
  * Dock 智能改造纯函数单测（Bob 2026-11-13 08:14：用了这么久 Dock 只有
  * 固定/经常用两种理由——时段桶 168 格太细、转移门槛太高，全掉到“经常用”；
  * Bob 2026-11-13 21:33：转移全是 Muse 之后打开、失去意义，且“近期”没写
- * 清楚是多久——转移改算占比、窗口计数定死 30 天）。
+ * 清楚是多久——转移改算占比、窗口计数定死 7 天（Bob 2026-11-13 22:24：
+ * 30 天太长，Dock 按周走，改成 7 天）。
  * 只测纯函数 dayTypeHwSum / transferDominant / shiftYmd / recentCount /
  * dockScore / dockReason；SharedPreferences 读数与重组走分支 CI + Bob 真机验收。
  */
@@ -96,23 +97,25 @@ class AppUsageTrackerTest {
     // ---- recentCount（纯函数）：窗口内才加 ----
 
     @Test
-    fun `recent count sums only the last 30 days`() {
+    fun `recent count sums only the last 7 days`() {
         val dayCounts = mapOf(
             "20261113" to 3, // 今天
-            "20261015" to 2, // 今天往前 29 天，窗口内
-            "20261014" to 9, // 今天往前 30 天，窗口外
-            "20261001" to 7, // 更早，窗口外
+            "20261107" to 2, // 今天往前 6 天，窗口内（第 7 天，计入）
+            "20261106" to 9, // 今天往前 7 天，窗口外（第 8 天，不计）
+            "20261101" to 7, // 更早，窗口外
             "garbage" to 100, // 脏键不计
             "2026111" to 100 // 位数不对的脏键不计
         )
-        assertEquals(5, AppUsageTracker.recentCount(dayCounts, "20261113", 30))
-        assertEquals(0, AppUsageTracker.recentCount(emptyMap(), "20261113", 30))
+        assertEquals(5, AppUsageTracker.recentCount(dayCounts, "20261113", 7))
+        assertEquals(0, AppUsageTracker.recentCount(emptyMap(), "20261113", 7))
         assertEquals(0, AppUsageTracker.recentCount(dayCounts, "20261113", 0))
         // 窗口 1 天只算今天
         assertEquals(3, AppUsageTracker.recentCount(dayCounts, "20261113", 1))
+        // 默认窗口就是 7 天（RECENT_WINDOW_DAYS）
+        assertEquals(5, AppUsageTracker.recentCount(dayCounts, "20261113"))
     }
 
-    // ---- dockReason：与排序同源，经常用带 30 天次数 ----
+    // ---- dockReason：与排序同源，经常用带 7 天次数 ----
 
     @Test
     fun `pinned reason wins`() {
@@ -147,34 +150,34 @@ class AppUsageTrackerTest {
         )
         // 转移 5 / 总量 17 → 占比 0.29，枢纽噪音，被占比拦下后落到“常开”
         assertEquals(
-            "常开 · 近 30 天 17 次",
+            "常开 · 近 7 天 17 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 5, 17, 17)
         )
         assertEquals(
-            "常开 · 近 30 天 10 次",
+            "常开 · 近 7 天 10 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, "微信", false, 5, 10, 10)
         )
         assertEquals(
-            "常开 · 近 30 天 10 次",
+            "常开 · 近 7 天 10 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 1, 10, 10)
         )
         assertEquals(
-            "常开 · 近 30 天 10 次",
+            "常开 · 近 7 天 10 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, null, true, 5, 10, 10)
         )
     }
 
     @Test
-    fun `frequent reason carries the 30 day count`() {
+    fun `frequent reason carries the 7 day count`() {
         assertEquals(
-            "常开 · 近 30 天 42 次",
+            "常开 · 近 7 天 42 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 42)
         )
     }
 
     @Test
     fun `stale app says not opened recently never zero times`() {
-        // 总量 >0 但 30 天内一次没开：不说“近 30 天 0 次”，说“最近没怎么开”
+        // 总量 >0 但 7 天内一次没开：不说“近 7 天 0 次”，说“最近没怎么开”
         val reason = AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 0)
         assertEquals("最近没怎么开", reason)
         assertEquals(false, reason.contains("0 次"))

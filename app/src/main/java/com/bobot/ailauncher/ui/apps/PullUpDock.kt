@@ -228,7 +228,7 @@ fun PullUpDock(
     // 可见条件：seenTail 已存在，且 tail 里有 seenTail 没有的包，且该包有
     // 数据理由（复用说明页的理由判定：时段聚合 ≥3，或转移占主导
     // （[transferDominant]：≥2 且占比 ≥0.5，沿用说明页的 prevRecent 门，
-    // 避免点开却是 fallback），或近 30 天窗口计数 >0；全是 fallback
+    // 避免点开却是 fallback），或近 7 天窗口计数 >0；全是 fallback
     // “暂无你的使用记录”或“最近没怎么开”的不算洞察）。
     val insightVisible = remember(insightTail, insightSeenTail) {
         val seen = insightSeenTail

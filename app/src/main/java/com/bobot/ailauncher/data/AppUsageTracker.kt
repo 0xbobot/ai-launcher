@@ -28,14 +28,14 @@ object AppUsageTracker {
     // 折叠组（419）：不活跃判定——首次见到 first_<pkg>（毫秒）；90 天阈值
     private const val KEY_FIRST_PREFIX = "first_"
     private const val NINETY_DAYS_MS = 90L * 24 * 60 * 60 * 1000
-    // 修法二（Bob 2026-11-13 21:33：“近期是多久直接写清楚”）：近 30 天
+    // 修法三（Bob 2026-11-13 22:24：30 天太长，改成 7 天）：近 7 天
     // 窗口计数 day_<yyyyMMdd>_<pkg>，与月度衰减的 count_/hw_/tr_ 键分开——
-    // 窗口计数是真实时间窗口，不参与衰减；30 天外的旧天由 lastDayCleanup
+    // 窗口计数是真实时间窗口，不参与衰减；7 天外的旧天由 lastDayCleanup
     // 每天清一次，读数本身只加窗口内日期。
     private const val KEY_DAY_PREFIX = "day_"
     private const val KEY_LAST_DAY_CLEANUP = "lastDayCleanup"
-    /** “近期”的窗口天数（判断值，写死 30 天，显示就写“近 30 天”）。 */
-    const val RECENT_WINDOW_DAYS = 30
+    /** “近期”的窗口天数（判断值，写死 7 天，显示就写“近 7 天”）。 */
+    const val RECENT_WINDOW_DAYS = 7
 
     /** Dock 兜底优先级：国民应用（仅取本机已安装的） */
     private val fallbackPriority = listOf(
@@ -110,7 +110,7 @@ object AppUsageTracker {
             editor.putLong(KEY_LAST_PREFIX + packageName, now)
             editor.putInt(KEY_SLOT_PREFIX + slot + "_" + packageName, curInt(KEY_SLOT_PREFIX + slot + "_" + packageName) + 1)
             editor.putInt(hwKey, curInt(hwKey) + 1)
-            // 近 30 天窗口计数（修法二）：当天 day 键 +1；30 天外旧天每天清
+            // 近 7 天窗口计数（修法二）：当天 day 键 +1；7 天外旧天每天清
             // 一次（读数只加窗口内日期，清不清理不影响正确性，只防键攒着）。
             // day 键不在月度衰减的键前缀里，不参与衰减。
             val today = todayYmd()
@@ -244,7 +244,7 @@ object AppUsageTracker {
     }
 
     /** 衰减后总启动次数。供 Dock 排序分、转移占比的分母、说明页“最近没怎么开”
-     * 判定用；“常开”分支的显示改用近 30 天窗口计数 [recentCount]。 */
+     * 判定用；“常开”分支的显示改用近 7 天窗口计数 [recentCount]。 */
     fun totalCount(context: Context, packageName: String): Int {
         return try {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -420,7 +420,7 @@ object AppUsageTracker {
         return sum
     }
 
-    /** 近 N 天窗口启动次数（默认 30 天）。读 day_<yyyyMMdd>_<pkg> 键，只加窗口内日期。 */
+    /** 近 N 天窗口启动次数（默认 7 天）。读 day_<yyyyMMdd>_<pkg> 键，只加窗口内日期。 */
     fun recentCount(
         context: Context,
         packageName: String,
@@ -468,10 +468,10 @@ object AppUsageTracker {
 
     /**
      * Dock 说明页理由（纯函数）：与排序同源——时段聚合 ≥3、转移占主导
-     * （≥2 且占比 ≥0.5）、近 30 天窗口计数 >0。
+     * （≥2 且占比 ≥0.5）、近 7 天窗口计数 >0。
      * “常开”分支的触发与显示都用窗口计数 [recent]，不再用衰减后总量：
-     * recent > 0 →“常开 · 近 30 天 X 次”；总量 >0 但 30 天内没开过 →
-     * “最近没怎么开”，绝不显示“近 30 天 0 次”。
+     * recent > 0 →“常开 · 近 7 天 X 次”；总量 >0 但 7 天内没开过 →
+     * “最近没怎么开”，绝不显示“近 7 天 0 次”。
      */
     fun dockReason(
         pinned: Boolean,
@@ -502,7 +502,7 @@ object AppUsageTracker {
                 "$weekday$period $hour 点常开"
             }
             prevRecent && prevLabel != null && transferDominant(transfer, total) -> "打开 $prevLabel 后常接着开"
-            recent > 0 -> "常开 · 近 30 天 $recent 次"
+            recent > 0 -> "常开 · 近 ${RECENT_WINDOW_DAYS} 天 $recent 次"
             total > 0 -> "最近没怎么开"
             else -> "热门应用（暂无你的使用记录）"
         }
