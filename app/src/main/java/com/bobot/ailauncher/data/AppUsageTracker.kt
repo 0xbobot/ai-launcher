@@ -219,7 +219,7 @@ object AppUsageTracker {
         }
     }
 
-    /** 衰减后总启动次数。供 Dock 说明页“经常用”判断用。 */
+    /** 衰减后总启动次数。供 Dock 说明页“常开 · 近期 X 次”与灯泡判定用。 */
     fun totalCount(context: Context, packageName: String): Int {
         return try {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -229,11 +229,37 @@ object AppUsageTracker {
         }
     }
 
-    /** 衰减后小时×星期桶值。供 Dock 排序与说明页用。 */
+    /** 衰减后小时×星期桶值（单个星期几×小时）。Dock 现走按日类型加总的
+     *  [hwDayTypeCount]，本函数保留供单格查询用。 */
     fun hwCount(context: Context, packageName: String, dow: Int, hour: Int): Int {
         return try {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getInt(KEY_HW_PREFIX + dow + "_" + hour + "_" + packageName, 0)
+        } catch (_: Exception) {
+            0
+        }
+    }
+
+    /**
+     * 日类型时段桶加总（纯函数）：工作日（周一–周五）同一小时求和；周六/
+     * 周日单算。hwByDow 为星期几（1–7）→ 该小时的衰减后桶值；缺失按 0 计。
+     * 168 格/应用太细攒不到 3 次，改按日类型加总后理由与排序主导才够得着。
+     */
+    fun dayTypeHwSum(hwByDow: Map<Int, Int>, dow: Int): Int {
+        return if (dow in 1..5) (1..5).sumOf { hwByDow[it] ?: 0 } else hwByDow[dow] ?: 0
+    }
+
+    /**
+     * 衰减后小时桶按日类型加总。供 Dock 排序、说明页、灯泡共用同一口径——
+     * 理由与排序同源。只改读数时加总，不新增存储键，历史数据立即生效。
+     */
+    fun hwDayTypeCount(context: Context, packageName: String, dow: Int, hour: Int): Int {
+        return try {
+            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val hwByDow = (1..7).associateWith { d ->
+                p.getInt(KEY_HW_PREFIX + d + "_" + hour + "_" + packageName, 0)
+            }
+            dayTypeHwSum(hwByDow, dow)
         } catch (_: Exception) {
             0
         }
@@ -301,9 +327,66 @@ object AppUsageTracker {
     }
 
     /**
+     * Dock 排序分（纯函数）：时段聚合 ≥3 时 ×10000 主导 + 衰减后总次数
+     * + 10 分钟内转移 ≥2 时 +500 − 30 分钟内刚用过 −2；并列按最近（调用方）。
+     * 与说明页理由同源——[dockReason] 用同一阈值。
+     */
+    fun dockScore(
+        hwDayType: Int,
+        total: Int,
+        transfer: Int,
+        prevRecent: Boolean,
+        lastUsedMs: Long,
+        nowMs: Long,
+    ): Double {
+        val hwPart = if (hwDayType >= 3) hwDayType else 0
+        val trPart = if (prevRecent && transfer >= 2) 500.0 else 0.0
+        val recentPenalty =
+            if (lastUsedMs != 0L && nowMs - lastUsedMs < 30 * 60 * 1000) 2.0 else 0.0
+        return hwPart * 10000.0 + total + trPart - recentPenalty
+    }
+
+    /**
+     * Dock 说明页理由（纯函数）：与排序同源——时段聚合 ≥3、转移 ≥2、总量 >0。
+     * “经常用”带上次数，措辞用“近期”不用“累计”（月度衰减后不是真累计）。
+     */
+    fun dockReason(
+        pinned: Boolean,
+        hwDayType: Int,
+        dow: Int,
+        hour: Int,
+        prevLabel: String?,
+        prevRecent: Boolean,
+        transfer: Int,
+        total: Int,
+    ): String {
+        return when {
+            pinned -> "你固定在 Dock 上"
+            hwDayType >= 3 -> {
+                val weekday = when (dow) {
+                    6 -> "周六"
+                    7 -> "周日"
+                    else -> "工作日"
+                }
+                val period = when (hour) {
+                    in 0..5 -> "夜里"
+                    in 6..11 -> "早上"
+                    in 12..13 -> "中午"
+                    in 14..17 -> "下午"
+                    else -> "晚上"
+                }
+                "$weekday$period $hour 点常开"
+            }
+            prevRecent && prevLabel != null && transfer >= 2 -> "打开 $prevLabel 后常接着开"
+            total > 0 -> "常开 · 近期 $total 次"
+            else -> "热门应用（暂无你的使用记录）"
+        }
+    }
+
+    /**
      * 取 [count] 个最常用应用。
-     * @param smartSort true=智能排序（智能 v3：当前 dow+hour 的衰减后小时桶
-     *   ≥3 时 ×10000 主导 + 衰减后总次数 + 10 分钟内转移 ≥3 时 +500
+     * @param smartSort true=智能排序（智能 v3：当前小时的日类型聚合桶
+     *   ≥3 时 ×10000 主导 + 衰减后总次数 + 10 分钟内转移 ≥2 时 +500
      *   - 30 分钟内刚用过 -2；并列按最近）；false=按名称排列。
      * 不足时用国民应用优先级补齐（只取本机已安装的），排除桌面自身。
      */
@@ -325,8 +408,9 @@ object AppUsageTracker {
             null
         }
         // 智能 v3 排序分（Dock 与助手常用 5 名共用同一口径）：
-        // 当前 dow+hour 桶 ≥3 才参与主导（×10000），否则按 0 计——稀疏格子
-        // 不靠一两次偶然上位；转移只看 10 分钟内且 ≥3 次；-2 惩罚保留（防单调）。
+        // 当前小时的日类型聚合桶 ≥3 才参与主导（×10000），否则按 0 计——
+        // 稀疏格子不靠一两次偶然上位；转移只看 10 分钟内且 ≥2 次；-2 惩罚
+        // 保留（防单调）。分值与理由同源，走 [dockScore] 纯函数。
         val now = System.currentTimeMillis()
         val (dow, hour) = currentDowHour()
         val (prevPkg, prevTime) = if (p == null) "" to 0L else
@@ -337,15 +421,9 @@ object AppUsageTracker {
             val pkg = app.packageName
             val last = p?.getLong(KEY_LAST_PREFIX + pkg, 0L) ?: 0L
             val total = p?.getInt(KEY_COUNT_PREFIX + pkg, 0) ?: 0
-            val hw = p?.getInt(KEY_HW_PREFIX + dow + "_" + hour + "_" + pkg, 0) ?: 0
-            val hwPart = if (hw >= 3) hw else 0
-            val tr = if (prevRecent) {
-                p?.getInt(KEY_TR_PREFIX + prevPkg + "_" + pkg, 0) ?: 0
-            } else 0
-            val trPart = if (tr >= 3) 500.0 else 0.0
-            val recentPenalty =
-                if (last != 0L && now - last < 30 * 60 * 1000) 2.0 else 0.0
-            Scored(app, hwPart * 10000.0 + total + trPart - recentPenalty, last)
+            val hw = hwDayTypeCount(context, pkg, dow, hour)
+            val tr = p?.getInt(KEY_TR_PREFIX + prevPkg + "_" + pkg, 0) ?: 0
+            Scored(app, dockScore(hw, total, tr, prevRecent, last, now), last)
         }
         val byUsage = scored.filter { it.score > 0 }
             .sortedWith(compareByDescending<Scored> { it.score }.thenByDescending { it.last })

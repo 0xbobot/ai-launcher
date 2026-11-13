@@ -226,7 +226,7 @@ fun PullUpDock(
         }
     }
     // 可见条件：seenTail 已存在，且 tail 里有 seenTail 没有的包，且该包有
-    // 数据理由（复用说明页的理由判定：时段桶 ≥3，或转移 ≥3（沿用说明页的
+    // 数据理由（复用说明页的理由判定：时段聚合 ≥3，或转移 ≥2（沿用说明页的
     // prevRecent 门，避免点开却是 fallback），或总量 >0；全是 fallback
     // “暂无你的使用记录”的不算洞察）。
     val insightVisible = remember(insightTail, insightSeenTail) {
@@ -241,8 +241,8 @@ fun PullUpDock(
                 System.currentTimeMillis() - prevTime <= 10 * 60 * 1000
             insightTail.any { pkg ->
                 pkg !in seenSet && (
-                    AppUsageTracker.hwCount(context, pkg, dow, hour) >= 3 ||
-                    (prevRecent && AppUsageTracker.transferCount(context, prevPkg, pkg) >= 3) ||
+                    AppUsageTracker.hwDayTypeCount(context, pkg, dow, hour) >= 3 ||
+                    (prevRecent && AppUsageTracker.transferCount(context, prevPkg, pkg) >= 2) ||
                     AppUsageTracker.totalCount(context, pkg) > 0
                 )
             }
@@ -691,29 +691,20 @@ fun PullUpDock(
                         modifier = Modifier.padding(vertical = 16.dp)
                     )
                     top10.forEach { app ->
-                        val reason = when {
-                            app.packageName in pinnedPkgs -> "你固定在 Dock 上"
-                            AppUsageTracker.hwCount(context, app.packageName, sheetDow, sheetHour) >= 3 -> {
-                                val weekday = when (sheetDow) {
-                                    6 -> "周六"
-                                    7 -> "周日"
-                                    else -> "工作日"
-                                }
-                                val period = when (sheetHour) {
-                                    in 0..5 -> "夜里"
-                                    in 6..11 -> "早上"
-                                    in 12..13 -> "中午"
-                                    in 14..17 -> "下午"
-                                    else -> "晚上"
-                                }
-                                "$weekday$period $sheetHour 点常开"
-                            }
-                            sheetPrevLabel != null &&
-                                AppUsageTracker.transferCount(context, sheetPrevPkg, app.packageName) >= 3 ->
-                                "打开 $sheetPrevLabel 后常接着开"
-                            AppUsageTracker.totalCount(context, app.packageName) > 0 -> "经常用"
-                            else -> "热门应用（暂无你的使用记录）"
-                        }
+                        val reason = AppUsageTracker.dockReason(
+                            pinned = app.packageName in pinnedPkgs,
+                            hwDayType = AppUsageTracker.hwDayTypeCount(
+                                context, app.packageName, sheetDow, sheetHour
+                            ),
+                            dow = sheetDow,
+                            hour = sheetHour,
+                            prevLabel = sheetPrevLabel,
+                            prevRecent = sheetPrevRecent,
+                            transfer = AppUsageTracker.transferCount(
+                                context, sheetPrevPkg, app.packageName
+                            ),
+                            total = AppUsageTracker.totalCount(context, app.packageName)
+                        )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
