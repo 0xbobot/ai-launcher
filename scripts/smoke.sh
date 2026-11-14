@@ -437,7 +437,10 @@ shot "dark-home"
 if ac_open_d3 set_dump; then
 shot "dark-appcenter"
 # R3-B：设置页深色亲验——点应用中心齿轮（content-desc="设置"，dump 定位，兜底坐标按
-# dark-appcenter 截图实测齿轮约 (985,505)）进设置页，断言"让助手更聪明"卡在场后截图，BACK 返回。
+# dark-appcenter 截图实测齿轮约 (985,505)）进设置页；506 把大模型卡从「助手」分区搬到
+# 「智能」分区末尾（2026-11-14），首屏 dump 到不了卡片——向下滚动设置列表、每滚一次重
+# dump，直到卡标题在场再断言并截图（509 收起标题：未填 Key「让助手更聪明」、已填 Key
+# 「大模型已经配好了」；最多滚 6 次）。BACK 返回。
 SGX=$(SX 985); SGY=$(SY 505)
 # set_dump.xml 已由 ac_open_d3 拉回（验证到达的同一份 dump），不再重拉。
 if [ -f "$OUT/set_dump.xml" ]; then
@@ -457,10 +460,24 @@ CTR=$(center_rid "$OUT/set_dump.xml" "appcenter_settings")
 if [ -n "$CTR" ]; then SGX=$(echo "$CTR" | cut -d' ' -f1); SGY=$(echo "$CTR" | cut -d' ' -f2); log "settings gear by tag at ($SGX,$SGY)"; fi
 adb shell input swipe "$SGX" "$SGY" "$SGX" "$SGY" 150 || true
 sleep 3
-shot "dark-settings"
-adb shell uiautomator dump /sdcard/set_dump2.xml > /dev/null 2>&1 || true
-adb pull /sdcard/set_dump2.xml "$OUT/set_dump2.xml" > /dev/null 2>&1 || true
-if [ -f "$OUT/set_dump2.xml" ] && grep -q "让助手更聪明" "$OUT/set_dump2.xml"; then
+# 大模型卡在首屏之下时滚到它再断言：每滚一次重 dump，标题在场即停；
+# 滚 6 次仍未出现才判 FAIL（滚动用 §9/§31 同款上滑）。
+DARK_FOUND=0
+for DARK_TRY in 1 2 3 4 5 6 7; do
+  adb shell uiautomator dump /sdcard/set_dump2.xml > /dev/null 2>&1 || true
+  adb pull /sdcard/set_dump2.xml "$OUT/set_dump2.xml" > /dev/null 2>&1 || true
+  if [ -f "$OUT/set_dump2.xml" ] && { grep -q "让助手更聪明" "$OUT/set_dump2.xml" || grep -q "大模型已经配好了" "$OUT/set_dump2.xml"; }; then
+    DARK_FOUND=1
+    log "dark-settings: LLM card found after $((DARK_TRY - 1)) scrolls"
+    break
+  fi
+  if [ "$DARK_TRY" -lt 7 ]; then
+    adb shell input swipe "$(SX 540)" "$(SY 2000)" "$(SX 540)" "$(SY 800)" 300 || true
+    sleep 2
+  fi
+done
+if [ "$DARK_FOUND" -eq 1 ]; then
+  shot "dark-settings"
   ok "dark-settings"
 else
   ng "dark-settings"
