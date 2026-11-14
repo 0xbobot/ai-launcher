@@ -123,6 +123,7 @@ import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -763,6 +764,11 @@ fun SmartCardStack(
     // 松手弹回时动画回 0），露边内容在 graphicsLayer 里读它（只重绘
     // 图层，不触发整卡重组）。
     val revealAnim = remember(top.id) { Animatable(0f) }
+    // 划卡诊断行（第二十八批，临时）：上一次划卡的判定结果，划完就显示、
+    // 常驻到下一次划卡。Bob 不用接电脑抓 logcat，划完读这行再告诉我。
+    // 顶卡换了不清空——上一条判定仍有效，直到下一次划卡。定性后下一批
+    // 拆掉，不进设计稿、不做设置项。
+    var swipeDiag by remember { mutableStateOf<String?>(null) }
     // 露边卡只有边、没有字（重设计 §2.5）：只留张数与 id 作键，内容不组合；
     // 升上来成为顶卡时，它的内容才在顶卡位置组合（见 top）。
     // 第二十六批补一句：下一张卡的内容在拖动揭示时提前组合在露边槽里
@@ -799,6 +805,7 @@ fun SmartCardStack(
                         hideActionRow = top.id in connectedIds,
                         celebration = connectedFeedbacks[top.id],
                         revealAnim = revealAnim,
+                        onSwipeDiagnosed = { swipeDiag = it },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("smart_card_top")
@@ -886,6 +893,18 @@ fun SmartCardStack(
                 nextContentPlaceables.forEach { it.place(0, 0) }
                 topPlaceables.forEach { it.place(0, 0) }
             }
+        }
+        // 划卡诊断行（第二十八批，临时）：贴着叠层下方、一行小字，不挡
+        // 卡片内容。没划过卡时不画；划完常驻到下一次划卡。
+        swipeDiag?.let { diag ->
+            Text(
+                text = diag,
+                fontSize = AILauncherType.Caption.fontSize,
+                color = AILauncherColors.current.Hint,
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .testTag("smart_card_swipe_diag")
+            )
         }
     }
 }
@@ -975,6 +994,35 @@ internal fun resolveSwipeRelease(
     ) SwipeRelease.Skip else SwipeRelease.SnapBack
 }
 
+/**
+ * 划卡诊断行文案（纯函数，第二十八批单测锁死）：把松手判定那一行的数值
+ * 拼成一行给 Bob 看的字——与 logcat 里 "swipe release" 那行同值，屏上
+ * 与日志永远对得上。判定三种：切卡／弹回／忽略；onSkip 只在切卡分支调
+ * （Skip 分支内必调，减动效直调、否则动画里调），其余两档未调。
+ * 临时诊断出口（Bob 2026-11-14：adb 抓日志太复杂）：定性后下一批拆掉，
+ * 不进设计稿、不做设置项。
+ */
+internal fun formatSwipeDiagnosis(
+    release: SwipeRelease,
+    claimed: Boolean,
+    netDp: Float,
+    peakDp: Float,
+    renderedDp: Float,
+    velocityDps: Float,
+    exitReason: String,
+    moveCount: Int
+): String {
+    val verdict = when (release) {
+        SwipeRelease.Skip -> "切卡"
+        SwipeRelease.SnapBack -> "弹回"
+        SwipeRelease.Ignore -> "忽略"
+    }
+    val onSkip = if (release == SwipeRelease.Skip) "已调" else "未调"
+    return "划卡诊断：$verdict｜认领=$claimed 峰值=${peakDp.roundToInt()}dp " +
+        "净=${netDp.roundToInt()}dp 渲染=${renderedDp.roundToInt()}dp " +
+        "速度=${velocityDps.roundToInt()}dp/s 退出=$exitReason 步数=$moveCount onSkip=$onSkip"
+}
+
 /** 顶卡：横滑跳过（位移或速度过线离场、沉到摞底，不够回弹）；点动作立即执行 */
 @Composable
 private fun TopSmartCard(
@@ -988,7 +1036,11 @@ private fun TopSmartCard(
     hideActionRow: Boolean = false,
     celebration: ConnectedFeedback? = null,
     // 下一张卡的揭示进度（第二十六批）：手势里跟手写，露边内容读它渐显。
-    revealAnim: Animatable<Float, AnimationVector1D>
+    revealAnim: Animatable<Float, AnimationVector1D>,
+    // 划卡诊断出口（第二十八批，临时）：松手判定后把同一行数值拼成字
+    // 交给上层显示——Bob 划完直接读屏，不用接电脑抓 logcat。只读判定
+    // 输入，不改判定逻辑。定性后下一批拆掉。
+    onSwipeDiagnosed: (String) -> Unit = {}
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -1127,6 +1179,20 @@ private fun TopSmartCard(
                             "rendered=${renderedDp}dp " +
                             "velocity=${velocity / densityScale}dp/s " +
                             "exit=$exitReason moves=$moveCount -> $release"
+                    )
+                    // 诊断行上屏（第二十八批，临时）：与上面那行日志同值——
+                    // 屏上与 logcat 永远对得上。常驻到下一次划卡。
+                    onSwipeDiagnosed(
+                        formatSwipeDiagnosis(
+                            release = release,
+                            claimed = claimed,
+                            netDp = netDp,
+                            peakDp = peakDp,
+                            renderedDp = renderedDp,
+                            velocityDps = velocity / densityScale,
+                            exitReason = exitReason,
+                            moveCount = moveCount
+                        )
                     )
                     when (release) {
                         SwipeRelease.Ignore -> return@awaitEachGesture
