@@ -660,7 +660,7 @@ object SmartCardRepository {
     }
 
     /**
-     * 日历应用（第十一批，预约卡小标＝建提醒的目标；第二十五批：改走
+     * 日历应用（第十一批，预约卡小标＝建提醒的目标；第二十四批：改走
      * resolveLaunchableCalendarPackage——只认真正能拉起的日历应用，
      * 中兴上旧的泛解析会落到系统包、画出一个打不开的「Android 系统」小标）。
      * 拿不到就不画小标。
@@ -702,12 +702,31 @@ object SmartCardRepository {
     }
 
     /**
+     * 日历卡小标（纯函数，第二十五批单测锁死，问题 3）：
+     * 小标＝事件所在的日历账户名（如“豆包日历”），不是用来打开的日历
+     * 应用——小标告诉用户这场日程来自哪个日历，打开目标是另一回事。
+     * 账户名取不到时退到解析出的日历应用（只认真正能拉起的日历应用，
+     * 见 resolveLaunchableCalendarPackage 的事件详情校验，谷歌 APP
+     * 这类非日历应用进不来）；都拿不到就不画小标（不画一个打不开的来源）。
+     * 账户名没有包名可取图标，TargetApp.packageName 为 null，UI 只画文字。
+     */
+    internal fun calendarCardTargetApp(
+        event: CalEvent,
+        resolvedApp: TargetApp?
+    ): TargetApp? {
+        val name = event.calendarName.trim()
+        if (name.isNotBlank()) return TargetApp(packageName = null, label = name)
+        return resolvedApp
+    }
+
+    /**
      * 日历卡（第十二批）：本机日历里的日程/会议。出现窗口：会议类开始前
      * 30 分钟、非会议日程开始前 2 小时（calendarCardWindow）；过了结束
      * 时间消失。全天事件不进卡（没有可排的开始时间）；标题空白、起止
      * 倒挂的也不要。去重键与短信预约卡同格式，同一件事短信在前、日历
      * 在后，去重后短信版优先。准备清单走大模型（prepSource 是脱敏后的
-     * 标题＋地点＋描述）。小标＝日历应用。
+     * 标题＋地点＋描述）。小标＝事件所在的日历账户名（第二十五批，问题 3：
+     * 如“豆包日历”；取不到退到解析出的日历应用，再拿不到不画）。
      * 已知局限：loadTodayEvents 只查当日窗口，跨日的日程本批不处理。
      */
     private fun calendarCard(
@@ -739,7 +758,7 @@ object SmartCardRepository {
             // 第十九批：时间段起点（refresh 里重算「进行中 · 」前缀用，
             // 日历卡事实每分钟本来就重建、这里再算一次结果相同）。
             windowStartMs = event.begin,
-            targetApp = resolveCalendarApp(context)
+            targetApp = calendarCardTargetApp(event, resolveCalendarApp(context))
         )
     }
 

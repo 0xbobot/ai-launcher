@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.CONNECTED_FEEDBACK_MS
 import com.bobot.ailauncher.data.ConnectedFeedback
 import com.bobot.ailauncher.data.GUIDE_VERSION
@@ -168,6 +169,18 @@ fun SmartCardStackHost() {
     val skipEpoch by SmartCardRepository.skipEpoch.collectAsState()
     val notifications by NotificationRepository.notifications.collectAsState()
     val nowMillis by rememberNowMillis()
+    // 冷启动就绪门（第二十五批，问题 1）：卡片叠层不在空桌面上单独先蹦——
+    // 与 505 的 Dock 门同一信号（AppCatalog 快照到位才算首页首帧就绪）。
+    // 505 的 Dock 只在 catalog != null 时画；卡片比时钟还早（1.75 秒先蹦、
+    // 时钟 2.0 秒、Dock 2.75 秒才齐），就是因为叠层没有任何就绪门、仓库
+    // 第一次 refresh 回来就直接蹦出来。门只挡冷启动首帧：快照只在首建时
+    // 为 null，重建是换值不断流，到位后不再回落，门开后不再关。
+    // 白闪（1.25 秒）与空壁纸（1.5 秒）那两段是启动窗口过渡：主题已是
+    // 透明 windowBackground＋windowShowWallpaper（v0.37.2 刻意让系统壁纸
+    // 直接透出），白闪是系统在透明窗口后补的启动窗口底色，应用侧改不了
+    // 主题、不动它；门解决的是“卡片在空桌面上单独先蹦”这一段。
+    val catalog by AppCatalog.snapshot.collectAsState()
+    val homeReady = catalog != null
     val lifecycleOwner = LocalLifecycleOwner.current
     var resumeTick by remember { mutableIntStateOf(0) }
     DisposableEffect(lifecycleOwner) {
@@ -305,42 +318,47 @@ fun SmartCardStackHost() {
         )
     }
     if (cards.isNotEmpty()) {
-        SmartCardStack(
-            cards = cards,
-            prepById = prepById,
-            skipEpoch = skipEpoch,
-            onAction = { card ->
-                if (card.action is SmartCardAction.CreateReminder) {
-                    // 预约卡“帮我建提醒”：已授权直接建；没授权先说明（显著披露）
-                    // 再弹系统框；拒绝退回看预约（onResult 里做）。
-                    if (writeCalendarGranted.value) {
-                        createReminderFor(card)
+        // 就绪门（第二十五批，问题 1）：首帧没齐之前不画叠层——有真卡也
+        // 先等着，不在空桌面上单独先蹦；门开后（catalog 到位）与 Dock
+        // 一起出现。return 照常：真卡在场时不落到引导卡分支。
+        if (homeReady) {
+            SmartCardStack(
+                cards = cards,
+                prepById = prepById,
+                skipEpoch = skipEpoch,
+                onAction = { card ->
+                    if (card.action is SmartCardAction.CreateReminder) {
+                        // 预约卡“帮我建提醒”：已授权直接建；没授权先说明（显著披露）
+                        // 再弹系统框；拒绝退回看预约（onResult 里做）。
+                        if (writeCalendarGranted.value) {
+                            createReminderFor(card)
+                        } else {
+                            pendingReminderCard = card
+                            reminderDisclosureCard = card
+                        }
+                        true
                     } else {
-                        pendingReminderCard = card
-                        reminderDisclosureCard = card
+                        val opened = SmartCardActions.performAction(context, card)
+                        if (!opened) IslandToasts.show("没能打开")
+                        opened
                     }
-                    true
-                } else {
-                    val opened = SmartCardActions.performAction(context, card)
-                    if (!opened) IslandToasts.show("没能打开")
-                    opened
+                },
+                onSkip = { card -> SmartCardRepository.skip(context, card) },
+                onIgnore = { card -> SmartCardRepository.markDone(context, card) },
+                onBodyClick = { card ->
+                    // 点预约卡正文（除按钮外）看原文：建提醒前是短信会话/
+                    // 通知跳转，建完后按钮本身就是看预约、这里同动作。
+                    if (card.kind == SmartCardKind.APPOINTMENT) viewAppointment(card)
+                    // 点日历卡正文：与右按钮同一动作（加入会议 / 看日程）。
+                    // 第十九批：时间段内点动作不算处理完、卡片不摘（performAction
+                    // 内按 kind＋deadlineMs 判），只有「我知道了」或过了截止点才摘。
+                    if (card.kind == SmartCardKind.CALENDAR) {
+                        val opened = SmartCardActions.performAction(context, card)
+                        if (!opened) IslandToasts.show("没能打开")
+                    }
                 }
-            },
-            onSkip = { card -> SmartCardRepository.skip(context, card) },
-            onIgnore = { card -> SmartCardRepository.markDone(context, card) },
-            onBodyClick = { card ->
-                // 点预约卡正文（除按钮外）看原文：建提醒前是短信会话/
-                // 通知跳转，建完后按钮本身就是看预约、这里同动作。
-                if (card.kind == SmartCardKind.APPOINTMENT) viewAppointment(card)
-                // 点日历卡正文：与右按钮同一动作（加入会议 / 看日程）。
-                // 第十九批：时间段内点动作不算处理完、卡片不摘（performAction
-                // 内按 kind＋deadlineMs 判），只有「我知道了」或过了截止点才摘。
-                if (card.kind == SmartCardKind.CALENDAR) {
-                    val opened = SmartCardActions.performAction(context, card)
-                    if (!opened) IslandToasts.show("没能打开")
-                }
-            }
-        )
+            )
+        }
         return
     }
     // 真卡片为空时才轮到引导卡片（而不是空着）。
@@ -446,53 +464,57 @@ fun SmartCardStackHost() {
         }
     }
     if (guideSeen || displayed.isEmpty()) return
-    SmartCardStack(
-        cards = displayed,
-        skipEpoch = skipEpoch,
-        connectedFeedbacks = connectedFeedbacks,
-        onAction = { card ->
-            val key = (card.action as? SmartCardAction.Connect)?.connectorKey
-                ?: return@SmartCardStack true
-            pendingConnectIds += card.id
-            // 点右按钮这一刻的真实等级：接上后拿它算增量（见上）。
-            pendingConnectLevels +=
-                card.id to connectedSourceCount(buildConnectorStates(context))
-            when (key) {
-                UiPrefs.CONNECTOR_MESSAGE ->
-                    disclosureConnector = UiPrefs.CONNECTOR_MESSAGE
-                UiPrefs.CONNECTOR_CALENDAR -> openCalendar()
-                UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
-                    openNotificationSettings(context)
-                else -> Unit
-            }
-            true
-        },
-        onSkip = { card ->
-            if (card.id in connectedIds) {
-                // 滑走“已连接”反馈卡＝直接记永久忽略，不再出现
-                SmartCardRepository.dismissGuideCard(context, card)
-                dismissedGuideIds += card.id
-                connectedFeedbacks -= card.id
-                pendingConnectLevels -= card.id
-            } else {
-                // 横滑一张引导卡＝被拒一次：放队尾（第十四批轮换推），
-                // 其他来源推完后再回来一次，再拒就本版不再推。
+    // 就绪门（第二十五批，问题 1）：引导卡也一样——首帧没齐之前不画，
+    // 不在空桌面上单独先蹦；门开后与 Dock 一起出现。
+    if (homeReady) {
+        SmartCardStack(
+            cards = displayed,
+            skipEpoch = skipEpoch,
+            connectedFeedbacks = connectedFeedbacks,
+            onAction = { card ->
+                val key = (card.action as? SmartCardAction.Connect)?.connectorKey
+                    ?: return@SmartCardStack true
+                pendingConnectIds += card.id
+                // 点右按钮这一刻的真实等级：接上后拿它算增量（见上）。
+                pendingConnectLevels +=
+                    card.id to connectedSourceCount(buildConnectorStates(context))
+                when (key) {
+                    UiPrefs.CONNECTOR_MESSAGE ->
+                        disclosureConnector = UiPrefs.CONNECTOR_MESSAGE
+                    UiPrefs.CONNECTOR_CALENDAR -> openCalendar()
+                    UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
+                        openNotificationSettings(context)
+                    else -> Unit
+                }
+                true
+            },
+            onSkip = { card ->
+                if (card.id in connectedIds) {
+                    // 滑走“已连接”反馈卡＝直接记永久忽略，不再出现
+                    SmartCardRepository.dismissGuideCard(context, card)
+                    dismissedGuideIds += card.id
+                    connectedFeedbacks -= card.id
+                    pendingConnectLevels -= card.id
+                } else {
+                    // 横滑一张引导卡＝被拒一次：放队尾（第十四批轮换推），
+                    // 其他来源推完后再回来一次，再拒就本版不再推。
+                    SmartCardRepository.rejectGuideCard(context, card)
+                    guideTick++
+                }
+            },
+            onIgnore = { card ->
+                // 点「我知道了」＝被拒一次（第十四批轮换推）：放队尾，不是
+                // 永久记下——旧口径“这张不用了、不再出现”作废一半（不追问是
+                // 对的，但不是永久不出现）。
                 SmartCardRepository.rejectGuideCard(context, card)
                 guideTick++
+            },
+            onClose = {
+                SmartCardRepository.markGuideSeen(context)
+                seenGuideVersion = GUIDE_VERSION
             }
-        },
-        onIgnore = { card ->
-            // 点「我知道了」＝被拒一次（第十四批轮换推）：放队尾，不是
-            // 永久记下——旧口径“这张不用了、不再出现”作废一半（不追问是
-            // 对的，但不是永久不出现）。
-            SmartCardRepository.rejectGuideCard(context, card)
-            guideTick++
-        },
-        onClose = {
-            SmartCardRepository.markGuideSeen(context)
-            seenGuideVersion = GUIDE_VERSION
-        }
-    )
+        )
+    }
     // 显著披露（§5.4，同设置页原文）：先讲清要什么、为什么，用户点
     // “同意”后再弹系统框；不要另起一套。点“取消”或划掉＝这次不连，
     // 对应卡片留在叠层里（pending 清掉，不给“已连接”反馈）。
@@ -821,6 +843,37 @@ internal fun shouldSkipCard(
         abs(velocityXDps) > flingThresholdDps
 }
 
+/**
+ * 横滑松手后的统一判定（纯函数，第二十五批单测锁死）：
+ * 手势怎么结束（正常抬起 / 指针从事件里消失）不影响判定——只看
+ * 认领与位移/速度。501 的 pointerGone 分支无条件弹回是错的：
+ * Bob 2026-11-14 录屏里顶卡向右拖到近乎出屏（实测峰值位移约 889px
+ * ≈ 300dp，远超 96dp 阈值）却两次都弹回——手指拖到屏边被系统
+ * 取消（指针消失）时，已拖够的位移是用户明确的划走意图，不该被
+ * 取消否决；小位移被取消时 shouldSkipCard 本来就返回 false，照常弹回。
+ * 方向不进判定（abs）：左划右划都是“划走这张看下一张”，不是
+ * 上一张/下一张翻页器（双向划走，Bob 2026-11-14 定）。
+ */
+internal enum class SwipeRelease {
+    /** 没认领或已在离场：本次手势什么都不做。 */
+    Ignore,
+    /** 位移或速度过线：离场、划走顶卡。 */
+    Skip,
+    /** 没过线：弹回原位。 */
+    SnapBack
+}
+
+internal fun resolveSwipeRelease(
+    claimed: Boolean,
+    skipping: Boolean,
+    offsetXDp: Float,
+    velocityXDps: Float
+): SwipeRelease {
+    if (!claimed || skipping) return SwipeRelease.Ignore
+    return if (shouldSkipCard(offsetXDp, velocityXDps)) SwipeRelease.Skip
+    else SwipeRelease.SnapBack
+}
+
 /** 顶卡：横滑跳过（位移或速度过线离场、沉到摞底，不够回弹）；点动作立即执行 */
 @Composable
 private fun TopSmartCard(
@@ -886,15 +939,14 @@ private fun TopSmartCard(
                     var totalX = 0f
                     var totalY = 0f
                     var claimed = false
-                    var pointerGone = false
                     val touchSlop = viewConfiguration.touchSlop
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id }
                         if (change == null) {
                             // 指针从事件里消失（系统取消，见 awaitDragOrUp 的
-                            // null 分支）：不按位移切卡，弹回原位。
-                            pointerGone = true
+                            // null 分支）：手势到此结束，但已累计的位移仍参与
+                            // 下面的松手判定（第二十五批：不再无条件弹回）。
                             break
                         }
                         if (change.changedToUpIgnoreConsumed()) break
@@ -925,43 +977,46 @@ private fun TopSmartCard(
                         val x = totalX
                         scope.launch { offsetX.snapTo(x) }
                     }
-                    if (!claimed || skipping) return@awaitEachGesture
-                    if (pointerGone) {
-                        scope.launch {
-                            offsetX.animateTo(0f, tween(MotionTokens.Fast))
-                        }
-                        return@awaitEachGesture
-                    }
+                    // 松手判定（第二十五批，问题 2）：正常抬起与指针消失
+                    // （系统取消）走同一判定——resolveSwipeRelease 只看
+                    // 认领与位移/速度。拖够阈值就切卡，不过线才弹回。
                     val velocity = velocityTracker.calculateVelocity().x
                     val densityScale = density.density
-                    val skip = shouldSkipCard(
-                        offsetXDp = totalX / densityScale,
-                        velocityXDps = velocity / densityScale
-                    )
-                    if (skip) {
-                        skipping = true
-                        val dir = if (totalX >= 0) 1f else -1f
-                        if (reduceMotion) {
-                            onSkip(card)
-                        } else {
+                    when (
+                        resolveSwipeRelease(
+                            claimed = claimed,
+                            skipping = skipping,
+                            offsetXDp = totalX / densityScale,
+                            velocityXDps = velocity / densityScale
+                        )
+                    ) {
+                        SwipeRelease.Ignore -> return@awaitEachGesture
+                        SwipeRelease.SnapBack -> {
                             scope.launch {
-                                launch {
-                                    offsetX.animateTo(
-                                        dir * 1200f,
-                                        tween(MotionTokens.Medium)
-                                    )
-                                }
-                                launch {
-                                    alpha.animateTo(
-                                        0f, tween(MotionTokens.Medium)
-                                    )
-                                }
-                                onSkip(card)
+                                offsetX.animateTo(0f, tween(MotionTokens.Fast))
                             }
                         }
-                    } else {
-                        scope.launch {
-                            offsetX.animateTo(0f, tween(MotionTokens.Fast))
+                        SwipeRelease.Skip -> {
+                            skipping = true
+                            val dir = if (totalX >= 0) 1f else -1f
+                            if (reduceMotion) {
+                                onSkip(card)
+                            } else {
+                                scope.launch {
+                                    launch {
+                                        offsetX.animateTo(
+                                            dir * 1200f,
+                                            tween(MotionTokens.Medium)
+                                        )
+                                    }
+                                    launch {
+                                        alpha.animateTo(
+                                            0f, tween(MotionTokens.Medium)
+                                        )
+                                    }
+                                    onSkip(card)
+                                }
+                            }
                         }
                     }
                 }
@@ -1378,9 +1433,13 @@ private fun AppSubscript(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // 小标可以没有应用（第二十五批，问题 3：日历卡小标是事件所在的日历
+    // 账户名，如“豆包日历”，不是用来打开的日历应用——没有包名可取图标，
+    // 只画文字）。packageName 为 null 时不取图标，只画 label。
     val drawable = remember(targetApp.packageName) {
+        val pkg = targetApp.packageName ?: return@remember null
         try {
-            context.packageManager.getApplicationIcon(targetApp.packageName)
+            context.packageManager.getApplicationIcon(pkg)
         } catch (_: Exception) {
             null
         }
