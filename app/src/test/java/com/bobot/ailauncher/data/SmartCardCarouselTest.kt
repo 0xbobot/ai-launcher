@@ -118,9 +118,9 @@ class SmartCardCarouselTest {
 
     @Test
     fun waitMs_manualPausePending_waitsUntilResume() {
-        // 手动切完 2 秒（恢复时刻在 6 秒后），等 8 秒（不是 5 秒一档）。
+        // 手动切完 2 秒（恢复时刻在 6 秒后），等 6 秒（不是 5 秒一档、也不是满 8 秒）。
         assertEquals(
-            SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS,
+            6_000L,
             carouselWaitMs(
                 SMART_CARD_CAROUSEL_INTERVAL_MS,
                 10_000L + SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS,
