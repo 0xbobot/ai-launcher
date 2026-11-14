@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.MarkEmailRead
+import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,8 +52,16 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * - 中央图标（“已读”：信封 + 对勾）只是视觉指示，不可点；清理只走“松手过阈值”这一条路。
  *   点图标/点蒙层空白处 → 原有浮层行为（松手后弹簧收起），不触发清理。
  * - enabled=false（该应用无在用通知可取消，如短信库口径、飞书无通知）时，
- *   手势关闭、蒙层不画，行只剩点按/长按；用户去应用里读完自然清。
- * - 右滑不启用（只清通知，不做别的）。
+ *   左滑手势关闭、蒙层不画，行只剩点按/长按；用户去应用里读完自然清。
+ * - 右滑（StartToEnd，Bob 2026-11-14 09:55 亲定）→ 松手时若超过阈值，
+ *   onDisableNotifications（打开该应用的系统通知设置页，由用户拨开关
+ *   停用通知权限——第三方关不掉别的 App 的通知权限，只能跳系统页）。
+ *   与左滑同款阈值（56dp 现形、120dp 触发、160dp 最大位移），行同样弹回
+ *   原位、不消失；右滑对所有未读行都启用（关权限对任何应用都有意义，
+ *   不像左滑只在有在用通知时启用）。蒙层与左滑同一套视觉语言（整行覆盖、
+ *   Card 色 80% 透明、20dp 圆角、内容弱化到 30%），图标换成线性铃铛加
+ *   斜杠（NotificationsOff 轮廓风），与左滑的「已读」区分开；无红色底、
+ *   无「清除」文字。
  * - 修正诊断（Bob 2026-11-08 23:20 澄清）：第②点不是点图标——Bob 点的是未读
  *   组里的行（打开应用），打开后消息没被清除。行点按原来只走普通开应用路径
  *   （getLaunchIntentForPackage + startActivity），不取消通知：通知仍在栏里，
@@ -82,7 +91,8 @@ import com.bobot.ailauncher.ui.theme.AILauncherColors
  * 手势隔离：行内 AppRow 的滑动浮层（★/眼睛）由调用方传 swipeActionsEnabled=false
  * 关掉，避免两套横滑抢事件；竖屏列表竖滑与右侧 rail 不受影响（横滑只消费横向拖动）。
  * 横屏注意：列是横向滚动的 LazyRow，左滑与列横滚同向——从未读行起手左滑会先触发
- * 清理（行内手势优先），要横滚列请从其他行或空白处起手（见收据）。
+ * 清理（行内手势优先），要横滚列请从其他行或空白处起手（见收据）；右滑同款，
+ * 从未读行起手右滑先触发关闭通知。
  */
 
 /** 左滑现形阈值（dp）：拖到这里蒙层完全现形、内容弱化到 30%（与 AppRow 同款 56dp）。 */
@@ -110,17 +120,34 @@ fun swipeClearProgress(offsetPx: Float, thresholdPx: Float): Float =
 fun shouldClearOnRelease(offsetPx: Float, thresholdPx: Float): Boolean =
     offsetPx < -thresholdPx
 
+/** 右滑位移钳制（纯函数）：只许向右（>=0），不超过最大位移。 */
+fun coerceRightSwipeOffset(offsetPx: Float, maxSwipePx: Float): Float =
+    offsetPx.coerceIn(0f, maxSwipePx)
+
+/** 右滑进度（纯函数）：0=没滑，1=达到阈值；与左滑同款（现形阈值 56dp）。 */
+fun swipeDisableProgress(offsetPx: Float, thresholdPx: Float): Float =
+    (offsetPx / thresholdPx).coerceIn(0f, 1f) + 0f
+
+/** 松手时是否触发关闭通知（纯函数）：右滑超过阈值。 */
+fun shouldDisableOnRelease(offsetPx: Float, thresholdPx: Float): Boolean =
+    offsetPx > thresholdPx
+
 @Composable
 internal fun ClearableUnreadRow(
     enabled: Boolean,
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
+    // 右滑「关闭通知」（Bob 2026-11-14 09:55 亲定右滑）：null 时右滑不启用；
+    // 非 null 时所有未读行都可右滑（不像左滑只在有在用通知时启用）。
+    onDisableNotifications: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     val density = LocalDensity.current
     val revealPx = with(density) { UNREAD_SWIPE_REVEAL_DP.dp.toPx() }
     val thresholdPx = with(density) { UNREAD_SWIPE_CLEAR_THRESHOLD_DP.dp.toPx() }
     val maxSwipePx = with(density) { UNREAD_SWIPE_MAX_DP.dp.toPx() }
+    // 任一方向的手势可用时才接管横滑：左滑看 enabled，右滑看回调非空。
+    val swipeEnabled = enabled || onDisableNotifications != null
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
     // 拖动时 snap 跟手（1:1），松手 spring 弹回原位。
@@ -132,15 +159,16 @@ internal fun ClearableUnreadRow(
         ),
         label = "unreadSwipeOffset"
     )
-    // 关掉手势时复位（行离开未读组/失去通知时不留残影）。
-    LaunchedEffect(enabled) {
-        if (!enabled) dragOffset = 0f
+    // 两方向手势都关掉时复位（行离开未读组/失去通知时不留残影）。
+    LaunchedEffect(swipeEnabled) {
+        if (!swipeEnabled) dragOffset = 0f
     }
-    // 弱化进度：56dp 现形；内容最低 30%（与 AppRow 同款）。
-    val dimProgress = swipeClearProgress(animatedOffset, revealPx)
+    // 弱化进度：56dp 现形；内容最低 30%（与 AppRow 同款）。左右方向都按
+    // 位移幅值算（左滑原函数只认负位移，取幅值再取负喂给它）。
+    val dimProgress = swipeClearProgress(-kotlin.math.abs(animatedOffset), revealPx)
     val contentAlpha = 1f - dimProgress * 0.7f
-    // 武装：拖过 120dp，图标脉冲（与 AppRow 主按钮脉冲同款）。
-    val armed = isDragging && -dragOffset > thresholdPx
+    // 武装：任一方向拖过 120dp，图标脉冲（与 AppRow 主按钮脉冲同款）。
+    val armed = isDragging && kotlin.math.abs(dragOffset) > thresholdPx
     val pulseTransition = rememberInfiniteTransition(label = "unreadClearPulse")
     val pulseScale by pulseTransition.animateFloat(
         initialValue = 1f,
@@ -158,13 +186,16 @@ internal fun ClearableUnreadRow(
         Box(
             modifier = Modifier
                 .graphicsLayer { alpha = contentAlpha }
-                .pointerInput(enabled) {
-                    if (!enabled) return@pointerInput
+                .pointerInput(swipeEnabled) {
+                    if (!swipeEnabled) return@pointerInput
                     detectHorizontalDragGestures(
                         onDragStart = { isDragging = true },
                         onDragEnd = {
                             isDragging = false
-                            if (shouldClearOnRelease(dragOffset, thresholdPx)) onClear()
+                            when {
+                                enabled && shouldClearOnRelease(dragOffset, thresholdPx) -> onClear()
+                                onDisableNotifications != null && shouldDisableOnRelease(dragOffset, thresholdPx) -> onDisableNotifications()
+                            }
                             dragOffset = 0f
                         },
                         onDragCancel = {
@@ -172,18 +203,28 @@ internal fun ClearableUnreadRow(
                             dragOffset = 0f
                         }
                     ) { _, dragAmount ->
-                        dragOffset = coerceSwipeOffset(dragOffset + dragAmount, maxSwipePx)
+                        // 左滑为负、右滑为正，各走各的钳制（同款 160dp 上限）。
+                        val next = dragOffset + dragAmount
+                        dragOffset = if (next < 0f) coerceSwipeOffset(next, maxSwipePx)
+                        else coerceRightSwipeOffset(next, maxSwipePx)
                     }
                 }
         ) {
             content()
         }
         // 蒙层：整行覆盖、Card 色 80% 透明、20dp 圆角（与 AppRow 同款）；
-        // 中央一个“已读”线条图标（信封 + 对勾，视觉指示，不可点），无红色底、无“清除”文字。
-        // 清理只走“松手过阈值”这一条路；点图标/点空白按原有浮层行为收起，
-        // 不触发清理。点按落到行点按（打开应用）是未读行本来的行为，打开 +
+        // 中央一个线条图标（视觉指示，不可点），无红色底、无“清除”文字。
+        // 方向定图标：左滑「已读」（信封 + 对勾）、右滑铃铛加斜杠
+        // （NotificationsOff，与「已读」区分开）。清理 / 关闭只走“松手过
+        // 阈值”这一条路；点图标/点空白按原有浮层行为收起，不触发动作。
+        // 点按落到行点按（打开应用）是未读行本来的行为，打开 +
         // 清除见 AppCenter 未读段（竖屏）与横屏未读行。
-        if (enabled && dimProgress > 0.01f) {
+        if (swipeEnabled && dimProgress > 0.01f) {
+            // 松手回弹动画中位移近 0，方向按回弹前的符号定（位移仍带符号）。
+            val isLeftSwipe = animatedOffset < 0f
+            val overlayIcon = if (isLeftSwipe) Icons.Outlined.MarkEmailRead
+            else Icons.Outlined.NotificationsOff
+            val overlayDescription = if (isLeftSwipe) "清除通知" else "关闭通知"
             Box(
                 modifier = Modifier
                     .matchParentSize()
@@ -204,7 +245,7 @@ internal fun ClearableUnreadRow(
                     // 图标形投影：深色副本下移 2dp（与 AppRow 同款）。
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Outlined.MarkEmailRead,
+                            imageVector = overlayIcon,
                             contentDescription = null,
                             tint = Color.Black.copy(alpha = 0.16f),
                             modifier = Modifier
@@ -213,8 +254,8 @@ internal fun ClearableUnreadRow(
                                 .semantics { invisibleToUser() }
                         )
                         Icon(
-                            imageVector = Icons.Outlined.MarkEmailRead,
-                            contentDescription = "清除通知",
+                            imageVector = overlayIcon,
+                            contentDescription = overlayDescription,
                             tint = Color(0xFF5A6C7D),
                             modifier = Modifier.size(26.dp)
                         )

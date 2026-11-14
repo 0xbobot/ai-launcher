@@ -71,3 +71,39 @@ internal fun openAppDetailsPage(context: Context, packageName: String) {
         IslandToasts.show("无法打开应用信息")
     }
 }
+
+/**
+ * 系统通知设置页的打开目标（纯数据，单测锁死在 UnreadSwipeTest）：
+ * action 与 extra key 都是 Settings 的编译期常量。
+ */
+internal data class AppNotificationSettingsTarget(
+    val action: String,
+    val packageExtraKey: String,
+    val packageName: String
+)
+
+/** 未读组右滑「关闭通知」的打开目标：该应用的系统通知设置页。 */
+internal fun notificationSettingsTarget(packageName: String): AppNotificationSettingsTarget =
+    AppNotificationSettingsTarget(
+        action = android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+        packageExtraKey = android.provider.Settings.EXTRA_APP_PACKAGE,
+        packageName = packageName
+    )
+
+/**
+ * 打开系统通知设置页（未读组右滑「关闭通知」用，Bob 2026-11-14 09:55 亲定右滑）：
+ * 第三方应用关不掉别的 App 的通知权限，只能跳到系统页由用户拨开关。
+ * 打不开时退到应用详情页（与 openAppDetailsPage 同款兜底）。
+ */
+internal fun openAppNotificationSettings(context: Context, packageName: String) {
+    try {
+        val target = notificationSettingsTarget(packageName)
+        val intent = Intent(target.action).apply {
+            putExtra(target.packageExtraKey, target.packageName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (_: Exception) {
+        openAppDetailsPage(context, packageName)
+    }
+}

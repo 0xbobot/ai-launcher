@@ -790,14 +790,18 @@ fun LazyListScope.AppCenterDockSection(
             ) {
                 // v0.55.3（Bob）：幽灵常驻（alpha=0 占位），避免 index 变化时子项增减
                 // 导致拖动手柄的 pointerInput 重建、手势取消、顺序没保存
+                // 2026-11-14（Bob 长按微信 bug）：幽灵 ★ 锚到行上（TopStart +
+                // top 12dp：紧凑行 60dp、星 36dp，(60-36)/2=12dp）——此前
+                // CenterStart 是整项 Box 的垂直中点，行下展开快捷面板后项变
+                // 高，★ 就漂到面板旁、没贴着任何行。
                 Icon(
                     imageVector = Icons.Filled.Star,
                     // 体检批D ⑨：幽灵占位（alpha 0/0.14 纯视觉）标装饰语义
                     contentDescription = null,
                     tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) 0.14f else 0f),
                     modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = 24.dp)
+                        .align(Alignment.TopStart)
+                        .padding(start = 24.dp, top = 12.dp)
                         .size(36.dp)
                         .semantics { invisibleToUser() }
                 )
@@ -861,13 +865,17 @@ fun LazyListScope.AppCenterDockSection(
                 }
                 // v0.41.34（Bob）：拖动手柄——简洁三横线，Hint 色 18dp，无背景；
                 // 按住上下拖动排序，松手保存（不再去设置里调）
+                // 2026-11-14（Bob 长按微信 bug）：手柄锚到行上（TopEnd + top
+                // 21dp：紧凑行 60dp、手柄 18dp，(60-18)/2=21dp）——与幽灵 ★
+                // 同一毛病：此前 CenterEnd 是整项 Box 的垂直中点，行下展开快
+                // 捷面板后项变高，手柄就漂到面板旁。
                 Icon(
                     imageVector = Icons.Filled.DragHandle,
                     contentDescription = "拖动排序",
                     tint = AILauncherColors.current.Hint,
                     modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 88.dp)
+                        .align(Alignment.TopEnd)
+                        .padding(end = 88.dp, top = 21.dp)
                         .size(18.dp)
                         .pointerInput(app.packageName) {
                             // 463 拆分回归：段函数接的是 dockDragOffsetY 快照
@@ -944,6 +952,9 @@ fun LazyListScope.AppCenterUnreadSection(
     unreadDisplayNames: Map<String, String> = emptyMap(),
     activeNotifPkgs: Set<String>,
     onClearUnreadNotifications: (String) -> Unit,
+    // 未读组右滑关通知（Bob 2026-11-14 09:55 亲定右滑）：跳系统通知设置页；
+    // 默认空操作（调用点传入，与 onClearUnreadNotifications 同款）。
+    onDisableAppNotifications: (String) -> Unit = {},
     unreadVisible: Boolean,
     stuckUnread: Boolean,
     actions: AppCenterRowActions,
@@ -993,7 +1004,8 @@ fun LazyListScope.AppCenterUnreadSection(
                 ) {
                     ClearableUnreadRow(
                         enabled = app.packageName in activeNotifPkgs,
-                        onClear = { onClearUnreadNotifications(app.packageName) }
+                        onClear = { onClearUnreadNotifications(app.packageName) },
+                        onDisableNotifications = { onDisableAppNotifications(app.packageName) }
                     ) {
                         AppRow(
                             app = app,

@@ -77,4 +77,84 @@ class UnreadSwipeTest {
         assertFalse(shouldClearOnRelease(-10f, 120f))
         assertFalse(shouldClearOnRelease(0f, 120f))
     }
+
+    // ---------- 右滑关闭通知（Bob 2026-11-14 09:55 亲定右滑） ----------
+    // 与左滑同款阈值：56dp 现形、120dp 触发、160dp 最大位移。
+
+    @Test
+    fun `coerceRightSwipeOffset - rightward drag stays`() {
+        assertEquals(50f, coerceRightSwipeOffset(50f, 160f))
+    }
+
+    @Test
+    fun `coerceRightSwipeOffset - leftward drag is clamped to zero`() {
+        assertEquals(0f, coerceRightSwipeOffset(-30f, 160f))
+        assertEquals(0f, coerceRightSwipeOffset(0f, 160f))
+    }
+
+    @Test
+    fun `coerceRightSwipeOffset - beyond max swipe is clamped`() {
+        assertEquals(160f, coerceRightSwipeOffset(200f, 160f))
+        assertEquals(160f, coerceRightSwipeOffset(160f, 160f))
+    }
+
+    @Test
+    fun `swipeDisableProgress - zero at rest, one at threshold`() {
+        assertEquals(0f, swipeDisableProgress(0f, 56f))
+        assertEquals(0.5f, swipeDisableProgress(28f, 56f))
+        assertEquals(1f, swipeDisableProgress(56f, 56f))
+    }
+
+    @Test
+    fun `swipeDisableProgress - beyond threshold stays at one`() {
+        assertEquals(1f, swipeDisableProgress(200f, 56f))
+    }
+
+    @Test
+    fun `swipeDisableProgress - leftward offset stays at zero`() {
+        assertEquals(0f, swipeDisableProgress(-20f, 56f))
+    }
+
+    @Test
+    fun `shouldDisableOnRelease - past threshold disables`() {
+        assertTrue(shouldDisableOnRelease(121f, 120f))
+        assertTrue(shouldDisableOnRelease(200f, 120f))
+    }
+
+    @Test
+    fun `shouldDisableOnRelease - at or before threshold does not disable`() {
+        assertFalse(shouldDisableOnRelease(120f, 120f))
+        assertFalse(shouldDisableOnRelease(10f, 120f))
+        assertFalse(shouldDisableOnRelease(0f, 120f))
+        assertFalse(shouldDisableOnRelease(-200f, 120f))
+    }
+
+    // ---------- 系统通知设置页打开目标 ----------
+    // action 与 extra key 是 Settings 的编译期常量（纯字符串，JVM 单测可直接读）。
+
+    @Test
+    fun `notificationSettingsTarget - action is app notification settings`() {
+        val target = notificationSettingsTarget("com.tencent.mm")
+        assertEquals(
+            android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+            target.action
+        )
+    }
+
+    @Test
+    fun `notificationSettingsTarget - extra key is app package key`() {
+        val target = notificationSettingsTarget("com.tencent.mm")
+        assertEquals(
+            android.provider.Settings.EXTRA_APP_PACKAGE,
+            target.packageExtraKey
+        )
+    }
+
+    @Test
+    fun `notificationSettingsTarget - package passes through`() {
+        assertEquals(
+            "com.tencent.mm",
+            notificationSettingsTarget("com.tencent.mm").packageName
+        )
+    }
 }
