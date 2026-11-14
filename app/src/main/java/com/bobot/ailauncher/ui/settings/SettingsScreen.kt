@@ -114,6 +114,14 @@ import androidx.compose.ui.semantics.semantics
 import com.bobot.ailauncher.ui.island.IslandToasts
 
 /**
+ * 「让助手更聪明」卡收起行文案（纯函数，2026-11-14 Bob 定：与来源卡同一口径，
+ * 收起只留一行 + chevron）：已填 Key 写「大模型已经配好了」，没填写卡名；
+ * 展开态标题恒为卡名。说明文字只在展开态出现，见下面卡片内。
+ */
+fun llmCardTitle(expanded: Boolean, apiKeyBlank: Boolean): String =
+    if (!expanded && !apiKeyBlank) "大模型已经配好了" else "让助手更聪明"
+
+/**
  * 设置页（v0.57.0 重构）：
  * - 只剩三项：让助手更聪明（收起）/ 关于 / 接收测试版更新（v0.68.80）
  * - 电量守护默认开启，不设开关；Dock 显示纯手势；排序默认智能
@@ -657,7 +665,9 @@ fun SettingsScreen(
         // 大模型设置（Bob 2026-11-14 00:11）：从助手分区整块挪到智能分区——
         // Key 输入框 + DeepSeek 链接 + 接口地址 + 模型名 + 测试连接 + Key 存放形态
         // 明示一起搬；助手分区随之取消（只剩这一块）。
-        // 让助手更聪明（收起一层）
+        // 让助手更聪明（收起一层）：2026-11-14 Bob 定，收起样式与来源卡一致——
+        // 收起只留一行状态句 + chevron，说明文字挪进展开块；已填 Key 时收起行写
+        // 「大模型已经配好了」，没填写卡名（llmCardTitle）。
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -670,6 +680,8 @@ fun SettingsScreen(
                     // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
                     // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
                     // F-10：点按补 tick（走 Haptics 两档门面）。
+                    // 收起行与来源卡同一口径：一行状态句 + chevron（llmCardTitle），
+                    // 说明文字不在这里、只在展开块里。
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -679,21 +691,13 @@ fun SettingsScreen(
                             },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "让助手更聪明",
-                                fontSize = AILauncherType.BodyLarge.fontSize,
-                                fontWeight = FontWeight.Medium,
-                                color = AILauncherColors.current.Title
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                lineHeight = 18.sp
-                            )
-                        }
+                        Text(
+                            text = llmCardTitle(llmExpanded, apiKey.isBlank()),
+                            fontSize = AILauncherType.BodyLarge.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Title,
+                            modifier = Modifier.weight(1f)
+                        )
                         Icon(
                             if (llmExpanded) Icons.Filled.KeyboardArrowUp
                             else Icons.Filled.KeyboardArrowDown,
@@ -702,6 +706,13 @@ fun SettingsScreen(
                         )
                     }
                     if (llmExpanded) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Hint,
+                            lineHeight = 18.sp
+                        )
                         Spacer(modifier = Modifier.height(16.dp))
                         OutlinedTextField(
                             value = apiKey,

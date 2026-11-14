@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.ui.settings.llmCardTitle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -155,5 +156,36 @@ class LlmKeyStoreTest {
             LlmKeyStore.StorageMode.EMPTY,
             LlmKeyStore.probeMode(FakeStore(), FakeStore(failRead = true))
         )
+    }
+}
+
+/**
+ * 「让助手更聪明」卡收起行文案（2026-11-14 Bob 定：与来源卡同一口径，收起
+ * 只留一行 + chevron；说明文字只在展开态出现，见 SettingsScreen 卡内
+ * `if (llmExpanded)` 块——Compose 分支无 JVM 测试 harness，此处锁死驱动
+ * 它的纯函数 llmCardTitle）。
+ */
+class LlmCardFoldTest {
+
+    // 收起 + 没填 Key → 卡名
+
+    @Test
+    fun collapsedWithoutKeyShowsCardName() {
+        assertEquals("让助手更聪明", llmCardTitle(expanded = false, apiKeyBlank = true))
+    }
+
+    // 收起 + 已填 Key → 状态句
+
+    @Test
+    fun collapsedWithKeyShowsConfiguredState() {
+        assertEquals("大模型已经配好了", llmCardTitle(expanded = false, apiKeyBlank = false))
+    }
+
+    // 展开态标题恒为卡名（有无 Key 都一样）
+
+    @Test
+    fun expandedAlwaysShowsCardName() {
+        assertEquals("让助手更聪明", llmCardTitle(expanded = true, apiKeyBlank = true))
+        assertEquals("让助手更聪明", llmCardTitle(expanded = true, apiKeyBlank = false))
     }
 }
