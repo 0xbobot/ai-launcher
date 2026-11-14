@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -98,7 +97,6 @@ import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.currentGuideCard
 import com.bobot.ailauncher.data.shouldShowGuideVersion
 import com.bobot.ailauncher.data.visibleGuideCards
-import com.bobot.ailauncher.ui.components.AppBadge
 import com.bobot.ailauncher.ui.components.AppIconImage
 import com.bobot.ailauncher.ui.glass.BackdropKind
 import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
@@ -581,9 +579,8 @@ fun SmartCardStackHost() {
  * 每张卡两个响应：我知道了（消失、不再出现）与右按钮（卡片定义的下一步意图）。
  * onClose 非空时（引导卡片模式）× 在顶卡表头右上角、卡片内部：点一下
  * 整叠消失，不再出现；仍在叠层自己的槽位里，不另开浮层。
- * 待办数角标（本批，Bob 2026-11-07 晚定）：叠层右上角压住顶卡角，
- * 显示还剩几张待办卡片（当前叠层张数），与 Dock/应用中心同一套
- * AppBadge；0 张时区域清空、角标不显示。
+ * 待办数角标已删（第二十七批，Bob 2026-11-14：卡片上不要角标）——
+ * 叠层右上角不再画红 pill 计数；0 张时区域清空（本函数提前返回）。
  *
  * 摞高怎么定（449/v1.2.2，修 448 实拍“按钮贴底被裁”）：
  * 旧实现用 onGloballyPositioned 量顶卡高 → Box 定高 → clipToBounds。
@@ -608,7 +605,7 @@ fun SmartCardStackHost() {
  * 简报 hero/会行是 32dp 文字缩进（不是卡片），Dock 是竖屏满宽底板
  * （28dp 圆角），都不是浮动卡片的边距——不取那两处。
  * 顶卡、露边卡、“已连接”反馈卡都走同一处（同一 SubcomposeLayout
- * 约束下量），角标压在收边后的顶卡角上。
+ * 约束下量）。
  */
 val SmartCardStackSideMargin = 24.dp
 
@@ -658,11 +655,10 @@ val SmartCardRowGap = 8.dp
 
 /**
  * 应用小标右端内收（重设计 §2.8，Bob 2026-11-11 真机 verdict）：
- * 小标搬到标题行右上角后，右端再向内收 16dp，留出右上角待办数角标
- * （AppBadge 20dp 高、贴角偏移 x +4dp／y −4dp；1 位数 pill 宽约 20dp、
- * 2 位数约 24dp，左缘落在卡右缘内约 16–20dp）的位置，不顶到角标。
- * 小标右缘最终距卡右缘 14dp 内边距＋16dp 内收＝30dp，2 位数角标留
- * 约 10dp 空；“99+”（100 张以上）是摞的理论上限，实际不出现。
+ * 小标搬到标题行右上角后，右端再向内收 16dp；小标右缘最终距卡右缘
+ * 14dp 内边距＋16dp 内收＝30dp。
+ * （第二十七批：待办数角标已删，内收不再为留角标位置，只作小标
+ * 右端留白；数值不动，小标位置不动。）
  */
 val SmartCardSubtitleEndInset = 16.dp
 
@@ -740,7 +736,7 @@ fun SmartCardStack(
     // 正在显示“已连接”庆祝反馈的卡（第八批）：不画动作行（没有“连接”可点），
     // 只显示“已连接”＋接下来会发生什么，外加庆祝形态（对勾弹入＋金色等级行
     // ＋整卡轻弹，见 SmartCardView）。反馈卡顶掉的是它自己的引导卡，不多占
-    // 一张待办，角标计数不变（cards.size 本就是替换后的张数）。
+    // 一张待办（cards.size 本就是替换后的张数）。
     connectedFeedbacks: Map<String, ConnectedFeedback> = emptyMap(),
     // 大模型准备清单（第十二批）：按卡片 id 的异步结果，覆盖卡片构建时
     // 的 prep（构建时为 null）。没回来就是没有，不贴模板。
@@ -773,7 +769,7 @@ fun SmartCardStack(
     // （见 next／revealAnim），静止时透明度为 0、仍是不画字的边。
     val peekIds = cards.drop(1).take(2).map { it.id }
     // 第十批：卡片按桌面卡片语言收边——两侧各留 SmartCardStackSideMargin，
-    // 不贴边、不满宽。收边放在最外层 Column：顶卡、露边卡、角标一起收，
+    // 不贴边、不满宽。收边放在最外层 Column：顶卡、露边卡一起收，
     // 摞高量测（SubcomposeLayout）与手势带（cardStackBandPx 的上下缘）
     // 都按收边后的宽度走，不另起一套。
     Column(
@@ -787,126 +783,109 @@ fun SmartCardStack(
         // （448 的 × 行在卡外、悬在壁纸上）；× 进卡内表头（见 SmartCardView），
         // 这里两模式统一只留段间距。
         Spacer(modifier = Modifier.height(SmartCardStackTopGap))
-        // 待办数角标（Bob 2026-11-07 晚定）：叠层右上角、压住顶卡角，显示
-        // 还剩几张待办卡片；与 Dock/应用中心同一套 AppBadge（红 pill 白字，
-        // 1–99 显示数字、≥100 显示 99+，0 张不画）。计数＝当前叠层卡片张数
-        // （真卡或可见引导卡），随处理/跳过/新增实时变；0 张时本函数已提前
-        // 返回、区域清空，角标不显示。纯视觉覆盖层，不消费触摸（× 在卡内
-        // 16dp 处，角标贴角不重叠；即使贴到也不拦点按）。
-        Box(modifier = Modifier.fillMaxWidth()) {
-            SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
-                val topPlaceables = subcompose(SmartCardStackSlot.Top) {
-                    // 组合键挂上 skipEpoch（第十二批）：同一张卡以新代次重新
-                    // 呈现时 TopSmartCard 重建，划走动画的 offsetX/alpha
-                    // 回到 0/1，不会再出现“数着卡、看不见卡”。
-                    key(top.id, skipEpoch) {
-                        TopSmartCard(
-                            card = top,
-                            onAction = onAction,
-                            onSkip = onSkip,
-                            onIgnore = onIgnore,
-                            onClose = onClose,
-                            onBodyClick = onBodyClick,
-                            hideActionRow = top.id in connectedIds,
-                            celebration = connectedFeedbacks[top.id],
-                            revealAnim = revealAnim,
+        SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
+            val topPlaceables = subcompose(SmartCardStackSlot.Top) {
+                // 组合键挂上 skipEpoch（第十二批）：同一张卡以新代次重新
+                // 呈现时 TopSmartCard 重建，划走动画的 offsetX/alpha
+                // 回到 0/1，不会再出现“数着卡、看不见卡”。
+                key(top.id, skipEpoch) {
+                    TopSmartCard(
+                        card = top,
+                        onAction = onAction,
+                        onSkip = onSkip,
+                        onIgnore = onIgnore,
+                        onClose = onClose,
+                        onBodyClick = onBodyClick,
+                        hideActionRow = top.id in connectedIds,
+                        celebration = connectedFeedbacks[top.id],
+                        revealAnim = revealAnim,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("smart_card_top")
+                    )
+                }
+            }.map { it.measure(constraints.copy(maxHeight = Constraints.Infinity)) }
+            val topHeight = topPlaceables.maxOfOrNull { it.height } ?: 0
+            val peekPlaceables = peekIds.mapIndexed { index, id ->
+                val transform = peekCardTransform(index)
+                subcompose(SmartCardStackSlot.Peek(index)) {
+                    key(id) {
+                        PeekCardFace(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("smart_card_top")
+                                .graphicsLayer {
+                                    scaleX = transform.scale
+                                    scaleY = transform.scale
+                                    alpha = transform.alpha
+                                }
+                                .testTag("smart_card_peek")
                         )
                     }
-                }.map { it.measure(constraints.copy(maxHeight = Constraints.Infinity)) }
-                val topHeight = topPlaceables.maxOfOrNull { it.height } ?: 0
-                val peekPlaceables = peekIds.mapIndexed { index, id ->
-                    val transform = peekCardTransform(index)
-                    subcompose(SmartCardStackSlot.Peek(index)) {
-                        key(id) {
-                            PeekCardFace(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .graphicsLayer {
-                                        scaleX = transform.scale
-                                        scaleY = transform.scale
-                                        alpha = transform.alpha
+                }.map { it.measure(constraints.copy(maxHeight = topHeight)) }
+            }
+            // 下一张卡的揭示内容（第二十六批）：只给第一张露边卡（index 0）。
+            // 与顶卡同一张 SmartCardView、同一尺寸——进度到 1 时与顶卡
+            // 位置像素一致（缩放 1.0、上浮 0、透明度 1），松手切过去后
+            // 新顶卡挂载、内容已在位，不跳变。放在 (0, 0)：静止时靠
+            // translationY 下沉 8dp、缩 0.97，与下面的空玻璃面对齐；
+            // 进度上升时上浮到 0、放大到 1.0。内容不可点：外层 pointerInput
+            // 吃掉落点（点按/滑动都归顶卡），避免手指落在已露出的下一张
+            // 卡上时误触它的按钮/正文；呼吸描边不画（光晕只属于顶卡，
+            // 升上来成为顶卡后自带）。
+            val nextContentPlaceables = if (next != null) {
+                subcompose(SmartCardStackSlot.PeekContent) {
+                    key(next.id) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer {
+                                    val p = revealAnim.value
+                                    alpha = p
+                                    scaleX = peekCardTransform(0).scale +
+                                        (1f - peekCardTransform(0).scale) * p
+                                    scaleY = peekCardTransform(0).scale +
+                                        (1f - peekCardTransform(0).scale) * p
+                                    translationY = (1f - p) *
+                                        peekCardTransform(0).yOffset.toPx()
+                                }
+                                .pointerInput(Unit) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown()
+                                        // 只在揭示进行中（下一张内容已露出来）才
+                                        // 吃掉落点；静止时进度为 0、内容全透明，
+                                        // 落点照常落到叠层下层，不改原有行为。
+                                        if (revealAnim.value > 0f) down.consume()
                                     }
-                                    .testTag("smart_card_peek")
+                                }
+                                .testTag("smart_card_peek_content")
+                        ) {
+                            SmartCardView(
+                                card = next,
+                                onActionClick = {},
+                                onIgnoreClick = {},
+                                onCloseClick = null,
+                                onBodyClick = null,
+                                hideActionRow = next.id in connectedIds,
+                                celebration = connectedFeedbacks[next.id],
+                                showBreathingBorder = false,
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
-                    }.map { it.measure(constraints.copy(maxHeight = topHeight)) }
-                }
-                // 下一张卡的揭示内容（第二十六批）：只给第一张露边卡（index 0）。
-                // 与顶卡同一张 SmartCardView、同一尺寸——进度到 1 时与顶卡
-                // 位置像素一致（缩放 1.0、上浮 0、透明度 1），松手切过去后
-                // 新顶卡挂载、内容已在位，不跳变。放在 (0, 0)：静止时靠
-                // translationY 下沉 8dp、缩 0.97，与下面的空玻璃面对齐；
-                // 进度上升时上浮到 0、放大到 1.0。内容不可点：外层 pointerInput
-                // 吃掉落点（点按/滑动都归顶卡），避免手指落在已露出的下一张
-                // 卡上时误触它的按钮/正文；呼吸描边不画（光晕只属于顶卡，
-                // 升上来成为顶卡后自带）。
-                val nextContentPlaceables = if (next != null) {
-                    subcompose(SmartCardStackSlot.PeekContent) {
-                        key(next.id) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .graphicsLayer {
-                                        val p = revealAnim.value
-                                        alpha = p
-                                        scaleX = peekCardTransform(0).scale +
-                                            (1f - peekCardTransform(0).scale) * p
-                                        scaleY = peekCardTransform(0).scale +
-                                            (1f - peekCardTransform(0).scale) * p
-                                        translationY = (1f - p) *
-                                            peekCardTransform(0).yOffset.toPx()
-                                    }
-                                    .pointerInput(Unit) {
-                                        awaitEachGesture {
-                                            val down = awaitFirstDown()
-                                            // 只在揭示进行中（下一张内容已露出来）才
-                                            // 吃掉落点；静止时进度为 0、内容全透明，
-                                            // 落点照常落到叠层下层，不改原有行为。
-                                            if (revealAnim.value > 0f) down.consume()
-                                        }
-                                    }
-                                    .testTag("smart_card_peek_content")
-                            ) {
-                                SmartCardView(
-                                    card = next,
-                                    onActionClick = {},
-                                    onIgnoreClick = {},
-                                    onCloseClick = null,
-                                    onBodyClick = null,
-                                    hideActionRow = next.id in connectedIds,
-                                    celebration = connectedFeedbacks[next.id],
-                                    showBreathingBorder = false,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
-                    }.map { it.measure(constraints.copy(maxHeight = topHeight)) }
-                } else emptyList()
-                val stackHeight = topHeight + 8.dp.roundToPx() * peekIds.size
-                layout(constraints.maxWidth, stackHeight) {
-                    // 下面几张先放（在后面），露边在顶卡底边下方
-                    peekPlaceables.forEachIndexed { index, placeables ->
-                        placeables.forEach {
-                            it.place(0, peekCardTransform(index).yOffset.roundToPx())
-                        }
                     }
-                    // 揭示内容盖在第一张露边卡的空玻璃面上、顶卡之下。
-                    nextContentPlaceables.forEach { it.place(0, 0) }
-                    topPlaceables.forEach { it.place(0, 0) }
+                }.map { it.measure(constraints.copy(maxHeight = topHeight)) }
+            } else emptyList()
+            val stackHeight = topHeight + 8.dp.roundToPx() * peekIds.size
+            layout(constraints.maxWidth, stackHeight) {
+                // 下面几张先放（在后面），露边在顶卡底边下方
+                peekPlaceables.forEachIndexed { index, placeables ->
+                    placeables.forEach {
+                        it.place(0, peekCardTransform(index).yOffset.roundToPx())
+                    }
                 }
+                // 揭示内容盖在第一张露边卡的空玻璃面上、顶卡之下。
+                nextContentPlaceables.forEach { it.place(0, 0) }
+                topPlaceables.forEach { it.place(0, 0) }
             }
-            // 待办数角标：与 Dock 图标角标同款贴法（右上角、微微压住角），
-            // 高度 20dp（与 D1 同档）。AppBadge 自身在 count<=0 时不画。
-            AppBadge(
-                count = cards.size,
-                height = 20.dp,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = 4.dp, y = (-4).dp)
-            )
         }
     }
 }
@@ -1067,6 +1046,11 @@ private fun TopSmartCard(
                     // 但峰值才是用户的划走意图，松手判定看它（见 resolveSwipeRelease）。
                     var peakX = 0f
                     var claimed = false
+                    // 手势退出原因（第二十七批诊断日志）：up＝正常抬起、
+                    // pointerGone＝指针从事件里消失（系统取消）、
+                    // vertical＝竖向占优让路。moveCount＝收到的 move 条数。
+                    var exitReason = "up"
+                    var moveCount = 0
                     val touchSlop = viewConfiguration.touchSlop
                     val revealThresholdPx =
                         with(density) { SMART_CARD_SWIPE_DISPLACEMENT_DP.dp.toPx() }
@@ -1077,13 +1061,19 @@ private fun TopSmartCard(
                             // 指针从事件里消失（系统取消，见 awaitDragOrUp 的
                             // null 分支）：手势到此结束，但已累计的位移仍参与
                             // 下面的松手判定（第二十五批：不再无条件弹回）。
+                            exitReason = "pointerGone"
                             break
                         }
                         if (change.changedToUpIgnoreConsumed()) break
-                        val delta = change.positionChangeIgnoreConsumed()
-                        totalX += delta.x
-                        totalY += delta.y
+                        // 位移用绝对位置算（第二十七批）：当前位置减落点，
+                        // 不再逐条累加 positionChange 的增量。增量累加在
+                        // 事件被漏/合并时会少算（全收齐时两者恒等，望远镜
+                        // 求和）；绝对位移只凭落点与当前位置，哪怕中间只
+                        // 收到一条 move 也能算对拖出去多远。
+                        totalX = change.position.x - down.position.x
+                        totalY = change.position.y - down.position.y
                         peakX = peakX.coerceAtLeast(abs(totalX))
+                        moveCount++
                         velocityTracker.addPosition(
                             change.uptimeMillis, change.position
                         )
@@ -1094,6 +1084,7 @@ private fun TopSmartCard(
                                 }
                                 abs(totalY) > touchSlop && abs(totalY) > abs(totalX) -> {
                                     // 竖向占优：让路给正文竖翻，卡片不动、不消费。
+                                    exitReason = "vertical"
                                     break
                                 }
                                 else -> continue
@@ -1102,8 +1093,8 @@ private fun TopSmartCard(
                         // 已认领：吃掉这条 move（父级盲操见了已消费就退出）。
                         // 位移同步跟手：awaitEachGesture 是受限作用域，不能
                         // 直接调 Animatable.snapTo（挂起函数），改走 scope.launch
-                        // 异步跟手（与旧实现同款）；松手判定用同步累计的 totalX，
-                        // 不是可能滞后的 offsetX.value。
+                        // 异步跟手（与旧实现同款）；松手判定用同步算的 totalX
+                        // （绝对位移），不是可能滞后的 offsetX.value。
                         change.consume()
                         val x = totalX
                         scope.launch { offsetX.snapTo(x) }
@@ -1134,7 +1125,8 @@ private fun TopSmartCard(
                         "swipe release: card=${card.id} claimed=$claimed " +
                             "skipping=$skipping net=${netDp}dp peak=${peakDp}dp " +
                             "rendered=${renderedDp}dp " +
-                            "velocity=${velocity / densityScale}dp/s -> $release"
+                            "velocity=${velocity / densityScale}dp/s " +
+                            "exit=$exitReason moves=$moveCount -> $release"
                     )
                     when (release) {
                         SwipeRelease.Ignore -> return@awaitEachGesture
@@ -1150,6 +1142,11 @@ private fun TopSmartCard(
                         SwipeRelease.Skip -> {
                             skipping = true
                             val dir = if (totalX >= 0) 1f else -1f
+                            // 诊断日志（第二十七批）：onSkip 有没有被调到，
+                            // 与上面那行 swipe release 对上——release=Skip
+                            // 却没这行，就是 Skip 分支没走到；有这行而顶卡
+                            // 没换，看仓库那行 skip 日志。
+                            Log.d(TAG, "swipe skip: onSkip card=${card.id} dir=$dir")
                             if (reduceMotion) {
                                 onSkip(card)
                             } else {
@@ -1305,9 +1302,9 @@ private fun SmartCardView(
         // 表头（重设计 §2.8，第十六批）：来源标签在左上角；应用小标
         // （16dp 图标＋12sp 应用名）搬到右上角、与来源标签同一行——
         // 小标本身不变（次要色、无底色无边框、只展示不可点、最宽 160dp），
-        // 只是换位置、不丢信息；右端再向内收 SmartCardSubtitleEndInset，
-        // 留出右上角待办数角标的位置。引导卡没有小标（下一步是去连接
-        // 来源、不是打开某个应用），只有卡内 ×；“已连接”反馈卡也不画
+        // 只是换位置、不丢信息；右端再向内收 SmartCardSubtitleEndInset
+        // （第二十七批：角标已删，内收只作右端留白）。引导卡没有小标
+        // （下一步是去连接来源、不是打开某个应用），只有卡内 ×；“已连接”反馈卡也不画
         // （hideActionRow 时不画，见下）。× 落在卡片内部、48dp 触控；
         // 448 的 × 是卡外单独一行、悬在壁纸上（实拍右上角卡外），改掉。
         Row(

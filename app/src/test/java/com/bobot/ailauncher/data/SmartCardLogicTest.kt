@@ -98,7 +98,7 @@ class SmartCardLogicTest {
 
     @Test
     fun visible_singleCardSkipped_staysAtBottom() {
-        // 只有一张卡、划走 → 它就是摞底那一张，还在可见列表里、角标照数
+        // 只有一张卡、划走 → 它就是摞底那一张，还在可见列表里
         // （第十四批：划走 ≠ 丢，丢只靠点「我知道了」）。
         val now = ms(2026, 11, 5, 15, 0)
         val only = card("only", SmartCardKind.BILL, 100, ms(2026, 11, 7))
@@ -113,7 +113,7 @@ class SmartCardLogicTest {
     @Test
     fun visible_skippedTop_nextComesUpSkippedSinksToBottom() {
         // 多张卡划走顶卡 → 下一张上顶、划走的那张沉到摞底（还在列表里，
-        // 角标照数 3 张）；看完 b、c 就轮到 a。
+        // 共 3 张）；看完 b、c 就轮到 a。
         val now = ms(2026, 11, 5, 15, 0)
         val a = card("a", SmartCardKind.BILL, 100, ms(2026, 11, 7))
         val b = card("b", SmartCardKind.APPOINTMENT, 200, ms(2026, 11, 7))

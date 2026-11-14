@@ -26,8 +26,8 @@ import org.junit.Test
  *
  * 布局本身 JVM 测不到（Compose 排版），锁死的是数值一级：
  * ①卡高固定 192dp（8dp 网格）；②正文区至少 3 行高（算式 192－28－20－48－16
- * ＝80dp ≥ 72dp 的 3 行下限）；③小标右端内收 16dp（右缘距卡右缘 30dp，
- * 让出右上角待办数角标）；④呼吸描边渐变色（暖金→柔玫→冷青→暖金闭环，
+ * ＝80dp ≥ 72dp 的 3 行下限）；③小标右端内收 16dp（右缘距卡右缘 30dp）；
+ * ④呼吸描边渐变色（暖金→柔玫→冷青→暖金闭环，
  * 玫/青低饱和）；⑤暖灰衬底透明度（有纹理壁纸 0.55、低对比环境 0.75）；
  * ⑥叠层与 hero 的间距 16dp（8dp 网格）。
  * 正文 15sp Medium、去截断、卡内滚动、露边无字、3dp 呼吸描边（第二十六批
@@ -73,14 +73,13 @@ class SmartCardRedesignTest {
 
     @Test
     fun subtitleEndInset_is16dp() {
-        // 小标右端再向内收 16dp，留出右上角待办数角标的位置。
+        // 小标右端再向内收 16dp（第二十七批：角标已删，内收只作右端留白）。
         assertEquals(16.dp, SmartCardSubtitleEndInset)
     }
 
     @Test
     fun subtitleRightEdge_is30dpFromCardEdge() {
-        // 小标右缘距卡右缘＝14dp 内边距＋16dp 内收＝30dp；2 位数角标
-        // 左缘落在卡右缘内约 20dp，留约 10dp 空。
+        // 小标右缘距卡右缘＝14dp 内边距＋16dp 内收＝30dp。
         assertEquals(30.dp, SmartCardContentPadding + SmartCardSubtitleEndInset)
     }
 

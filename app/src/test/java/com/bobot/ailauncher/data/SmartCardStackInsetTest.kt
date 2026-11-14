@@ -16,8 +16,8 @@ import org.junit.Test
  * 智能卡片圆角原本就是 20dp，所以只收边距这一处）；
  * ②露边卡形态（缩放/透明度/下移量）与改前逐字一致——露边方式不变，
  * 只是宽度跟着收边。
- * 角标与按钮的落点、触控尺寸（≥48dp）是 SmartCardView 既有结构
- * （× 48dp、按钮 heightIn(min = 48.dp)、角标压顶卡角），本批一字未动，
+ * 按钮的落点、触控尺寸（≥48dp）是 SmartCardView 既有结构
+ * （× 48dp、按钮 heightIn(min = 48.dp)），本批一字未动，
  * 见收据的 diff 复核＋Bob 真机验收。
  */
 class SmartCardStackInsetTest {

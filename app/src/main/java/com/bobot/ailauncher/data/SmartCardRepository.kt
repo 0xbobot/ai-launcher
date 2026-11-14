@@ -277,6 +277,15 @@ object SmartCardRepository {
             .putLong(key, card.deadlineMs).apply()
         _skipEpoch.value += 1
         refresh(context, lastNotifications, System.currentTimeMillis())
+        // 诊断日志（第二十七批）：skip 有没有真正把顶卡换掉——
+        // refresh 后顶卡 id 还是被划走那张，就是沉底没生效；
+        // 顶卡换了而界面没换，就是 UI 层的问题（只记 id，不记内容）。
+        Log.d(
+            TAG,
+            "skip: card=${card.id} kind=${card.kind} -> " +
+                "top=${_cards.value.firstOrNull()?.id} " +
+                "visible=${_cards.value.size}"
+        )
     }
 
     /**
