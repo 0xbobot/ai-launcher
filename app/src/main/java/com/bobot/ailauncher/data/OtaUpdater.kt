@@ -146,6 +146,87 @@ object OtaUpdater {
         return System.currentTimeMillis() - last > CHECK_INTERVAL_MS
     }
 
+    // 正式版最新版本档案（2026-11-14 测试计划副文用）：网站正式版从
+    // 1.0 起归档在 releases/latest.json，应用之前从来没读过它。
+    // 测试轨道最新版 = update.json 的 versionName；正式轨道最新版 =
+    // 这个文件的 versionName。两个文件是同一站点的两个静态 JSON。
+    private const val FORMAL_MANIFEST_URL =
+        "https://bobot.is-a.dev/ai-launcher/releases/latest.json"
+    private const val KEY_FORMAL_VERSION_CODE = "formal_version_code"
+    private const val KEY_FORMAL_VERSION_NAME = "formal_version_name"
+
+    /**
+     * 正式版档案解析（纯函数，供 JVM 单测覆盖）：只要 versionCode（>0）
+     * 与 versionName（非空）；apkUrl/sha256 只是档案内容，副文不用，
+     * 缺了也不影响。坏 JSON / 缺字段返回 null，调用方走兜底通用句。
+     */
+    internal fun parseFormalLatest(body: String): OtaInfo? {
+        val json = try {
+            JSONObject(body)
+        } catch (e: Exception) {
+            return null
+        }
+        val code = json.optInt("versionCode", 0)
+        val name = json.optString("versionName", "")
+        if (code <= 0 || name.isBlank()) return null
+        return OtaInfo(
+            versionCode = code,
+            versionName = name,
+            apkUrl = json.optString("apkUrl", ""),
+            changelog = "",
+            forceUpdate = false,
+            prerelease = false,
+            sha256 = json.optString("sha256", "")
+        )
+    }
+
+    /**
+     * 读一次正式版档案并存进 ota prefs（离线兜底用；下次打开有网再刷新）。
+     * 全部失败一律吞掉——读不到就用 prefs 里的旧值，再没有就走兜底通用句，
+     * 不打扰用户。网络在 Dispatchers.IO。
+     */
+    suspend fun refreshFormalLatest(context: Context) {
+        withContext(Dispatchers.IO) {
+            try {
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(10, TimeUnit.SECONDS)
+                    .readTimeout(10, TimeUnit.SECONDS)
+                    .build()
+                val req = Request.Builder().url(FORMAL_MANIFEST_URL).get().build()
+                val info = client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext
+                    val body = resp.body?.string() ?: return@withContext
+                    parseFormalLatest(body)
+                } ?: return@withContext
+                prefs(context).edit()
+                    .putInt(KEY_FORMAL_VERSION_CODE, info.versionCode)
+                    .putString(KEY_FORMAL_VERSION_NAME, info.versionName)
+                    .apply()
+            } catch (e: IOException) {
+                // 读不到：留 prefs 旧值，调用方兜底
+            } catch (e: Exception) {
+                // 同上
+            }
+        }
+    }
+
+    /** prefs 里存的上次读到的正式版最新版本（没读到过返回 null） */
+    fun formalLatest(context: Context): OtaInfo? {
+        val p = prefs(context)
+        val code = p.getInt(KEY_FORMAL_VERSION_CODE, 0)
+        val name = p.getString(KEY_FORMAL_VERSION_NAME, "") ?: ""
+        if (code <= 0 || name.isBlank()) return null
+        return OtaInfo(
+            versionCode = code,
+            versionName = name,
+            apkUrl = "",
+            changelog = "",
+            forceUpdate = false,
+            prerelease = false,
+            sha256 = ""
+        )
+    }
+
     /**
      * v0.68.80：是否接收测试版（prerelease）更新，默认 false。
      * 开启后，update.json 里 prerelease=true 的包才会进入更新流程；

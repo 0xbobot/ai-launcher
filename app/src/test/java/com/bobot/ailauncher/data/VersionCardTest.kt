@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.ui.settings.betaPlanHint
 import com.bobot.ailauncher.ui.settings.isVersionUpdateRowClickable
 import com.bobot.ailauncher.ui.settings.versionUpdateHint
 import com.bobot.ailauncher.ui.settings.versionUpdateTitle
@@ -164,5 +165,90 @@ class VersionCardTest {
     @Test
     fun `row clickable when idle`() {
         assertTrue(isVersionUpdateRowClickable(checking = false, downloading = false))
+    }
+
+    // 下行副文（2026-11-14 Bob 定：不要一句写死——随开关状态变，
+    // 告诉用户升级会升到什么版本）。五种情况逐字锁死；比较用
+    // versionCode，versionName 只做展示。
+
+    private fun info(code: Int, name: String) = OtaInfo(
+        versionCode = code, versionName = name,
+        apkUrl = "https://example.com/app.apk", changelog = ""
+    )
+
+    @Test
+    fun `beta on with newer test version names it`() {
+        assertEquals(
+            "开着，下次升级会升到测试版 v1.3.57。",
+            betaPlanHint(
+                betaOptIn = true,
+                latestTestVersion = info(514, "1.3.57"),
+                latestFormalVersion = info(446, "1.1.0"),
+                currentVersionCode = 513
+            )
+        )
+    }
+
+    @Test
+    fun `beta on already latest test version`() {
+        assertEquals(
+            "开着，已经是最新测试版了。",
+            betaPlanHint(
+                betaOptIn = true,
+                latestTestVersion = info(514, "1.3.57"),
+                latestFormalVersion = info(446, "1.1.0"),
+                currentVersionCode = 514
+            )
+        )
+    }
+
+    @Test
+    fun `beta off with newer formal version names it`() {
+        assertEquals(
+            "关着，下次升级只会升到正式版 v1.1.0。",
+            betaPlanHint(
+                betaOptIn = false,
+                latestTestVersion = info(514, "1.3.57"),
+                latestFormalVersion = info(446, "1.1.0"),
+                currentVersionCode = 400
+            )
+        )
+    }
+
+    @Test
+    fun `beta off already latest formal version`() {
+        assertEquals(
+            "关着，已经是最新正式版了。",
+            betaPlanHint(
+                betaOptIn = false,
+                latestTestVersion = info(514, "1.3.57"),
+                latestFormalVersion = info(446, "1.1.0"),
+                currentVersionCode = 513
+            )
+        )
+    }
+
+    @Test
+    fun `unknown version falls back to generic sentence`() {
+        // 开着但测试轨道版本号未知 → 兜底（正式轨道版本号再全也不用）
+        assertEquals(
+            "开着能提前收到测试版本，关掉只收正式版。",
+            betaPlanHint(
+                betaOptIn = true,
+                latestTestVersion = null,
+                latestFormalVersion = info(446, "1.1.0"),
+                currentVersionCode = 513
+            )
+        )
+        // 关着但正式轨道版本号未知 → 兜底（测试轨道版本号再全也不用）
+        assertEquals(
+            "开着能提前收到测试版本，关掉只收正式版。",
+            betaPlanHint(
+                betaOptIn = false,
+                latestTestVersion = info(514, "1.3.57"),
+                latestFormalVersion = null,
+                currentVersionCode = 513
+            )
+        )
     }
 }
