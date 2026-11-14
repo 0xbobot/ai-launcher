@@ -2,6 +2,7 @@ package com.bobot.ailauncher.data
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 
 /**
@@ -318,18 +319,90 @@ fun calendarCardFact(event: CalEvent, nowMs: Long): String {
 }
 
 /**
- * 日历卡去重键（纯函数）：与短信预约卡同一口径（提案：同一件事短信和
- * 日历里都有，只留一张，以短信那条为准）——
- * `appt|<当天 00:00>|<开始分钟>|<地点 hash>`，与 SmartCardRepository 里
- * 短信预约卡的 key 同格式；候选顺序短信在前，去重后短信版优先。
+ * 预约卡去重键（纯函数，第二十五批）：短信版与日历版同一口径——
+ * `appt|<当天 00:00>|<开始分钟>|<结束分钟>|<地点 hash>`。同一件事短信
+ * 和日历里都有，只留一张，以短信那条为准（候选顺序短信在前）。
+ * 结束分钟必须进键：同一天、同一开始、都没地点的两场（如 08:00–09:00
+ * 与 08:00–10:00）旧键完全相同，去重会吞掉后一场。短信没写结束时间时
+ * 调用方传开始＋60（与截止点口径一致：预约无结束时间时按开始后 1 小时）。
  * 地点写法不一致（短信启发式提取 vs 日历地点原文）时键对不上、两张并存，
- * 是已知局限，不硬凑。
+ * 是已知局限，不硬凑；结束时间写法不一致时同理。
  */
+fun appointmentCardSourceKey(
+    dayStartMs: Long,
+    startMin: Int,
+    endMin: Int,
+    place: String?
+): String {
+    val p = place?.trim()?.takeIf { it.isNotBlank() }
+    return "appt|$dayStartMs|$startMin|$endMin|${p?.hashCode() ?: 0}"
+}
+
+/** 日历卡去重键（纯函数）：同一口径，见 appointmentCardSourceKey。 */
 fun calendarCardSourceKey(event: CalEvent): String {
     val dayStart = startOfDayMs(event.begin)
     val startMin = ((event.begin - dayStart) / 60_000L).toInt()
-    val place = event.location.trim().ifBlank { null }
-    return "appt|$dayStart|$startMin|${place?.hashCode() ?: 0}"
+    val endMin = ((event.end - dayStart) / 60_000L).toInt()
+    return appointmentCardSourceKey(dayStart, startMin, endMin, event.location)
+}
+
+/**
+ * 解析一个真正能拉起的日历应用包名（第二十五批，问题 1 根因修法；纯解析，
+ * 不启动）：只认 getLaunchIntentForPackage 非空的包（有主入口才是真应用）。
+ * resolveActivity 在中兴上会落到系统包（无真实日历 Activity），不能只认
+ * 它。候选按优先序：rili 能力已装提供方（按最近使用）→ 能接
+ * CATEGORY_APP_CALENDAR 的应用 → 能接日历内容 URI 的应用。
+ * 拿不到返回 null（调用方返回 false、给我们自己的提示）。
+ */
+fun resolveLaunchableCalendarPackage(context: Context): String? {
+    val pm = context.packageManager
+    val candidates = linkedSetOf<String>()
+    // 1) rili 能力已装提供方（按最近使用排在前）。
+    try {
+        CapabilityRegistry.load(context)
+        val providers = CapabilityRegistry.find("rili")
+            ?.let { CapabilityResolution.effectiveProviders(it) }
+            ?.flatMap { it.packageNames }.orEmpty()
+        val installed = providers.filter { pkg ->
+            try {
+                pm.getApplicationInfo(pkg, 0)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+        val ordered = installed.sortedByDescending {
+            AppUsageTracker.effectiveLastUsed(context, it)
+        }
+        candidates += ordered
+    } catch (_: Exception) { }
+    // 2) 能接 CATEGORY_APP_CALENDAR 的应用（全部匹配，不只 resolveActivity
+    // 偏好的那一个——偏好的可能是系统壳）。
+    try {
+        val calendarIntent = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_APP_CALENDAR)
+        pm.queryIntentActivities(calendarIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            .mapNotNull { it.activityInfo?.packageName }
+            .forEach { candidates += it }
+    } catch (_: Exception) { }
+    // 3) 能接日历内容 URI 的应用。
+    try {
+        val viewIntent = Intent(
+            Intent.ACTION_VIEW,
+            android.provider.CalendarContract.CONTENT_URI
+        )
+        pm.queryIntentActivities(viewIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            .mapNotNull { it.activityInfo?.packageName }
+            .forEach { candidates += it }
+    } catch (_: Exception) { }
+    // 只认有主入口的真应用（系统壳包直接排除）。
+    return candidates.firstOrNull { pkg ->
+        try {
+            pm.getLaunchIntentForPackage(pkg) != null
+        } catch (_: Exception) {
+            false
+        }
+    }
 }
 
 /**
@@ -341,8 +414,10 @@ fun calendarCardSourceKey(event: CalEvent): String {
  *    &confid=<会议号>，显式包名＋resolveActivity 校验，接不住落回下一级）；
  *    再走第十七批的显式包名 https 意图（同一条链接限定到该包，resolveActivity 非空
  *    才真正发），接不住落回通用浏览器意图直开链接；
- * 2) 无链接 → 打开日历 App；
- * 3) 再兜底按 content://com.android.calendar/events/{eventId} 打开事件详情；
+ * 2) 无链接 → 先解析一个真正能拉起的日历应用包名
+ *    （resolveLaunchableCalendarPackage），再按该包名拉起：先试事件详情
+ *    （content://com.android.calendar/events/{eventId} 限定到该包），
+ *    接不住打开该应用主界面；没有能拉起的日历应用时返回 false；
  * 全失败返回 false（调用方提示，不在这里弹）。
  */
 fun openCalendarEvent(context: Context, eventId: Long, meetingUrl: String?): Boolean {
@@ -401,25 +476,37 @@ fun openCalendarEvent(context: Context, eventId: Long, meetingUrl: String?): Boo
             return true
         } catch (_: Exception) { /* 链接打开失败 → 落日历兜底 */ }
     }
-    try {
-        val intent = Intent(Intent.ACTION_MAIN)
-            .addCategory(Intent.CATEGORY_APP_CALENDAR)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (intent.resolveActivity(context.packageManager) != null) {
-            context.startActivity(intent)
-            return true
+    // 第二十五批：无链接时不再只依赖 CATEGORY_APP_CALENDAR 和 content URI
+    // 的泛解析——中兴上泛解析会落到系统包（无真实日历 Activity），直接发
+    // 只会换来系统 toast「未安装该应用」，我们的「没能打开」还不会出现。
+    // 先解析一个真正能拉起的日历应用包名，再按该包名拉起。
+    val calendarPkg = resolveLaunchableCalendarPackage(context)
+    if (calendarPkg != null) {
+        // 先试事件详情（content URI 限定到该包）。
+        if (eventId > 0) {
+            try {
+                val uri = Uri.parse("content://com.android.calendar/events/$eventId")
+                val viewIntent = Intent(Intent.ACTION_VIEW, uri)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .setPackage(calendarPkg)
+                if (viewIntent.resolveActivity(context.packageManager) != null) {
+                    context.startActivity(viewIntent)
+                    return true
+                }
+            } catch (_: Exception) { /* 事件详情接不住 → 打开应用主界面 */ }
         }
-    } catch (_: Exception) { }
-    if (eventId > 0) {
+        // 事件详情接不住 → 打开该应用主界面。
         try {
-            val uri = Uri.parse("content://com.android.calendar/events/$eventId")
-            val viewIntent = Intent(Intent.ACTION_VIEW, uri)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (viewIntent.resolveActivity(context.packageManager) != null) {
-                context.startActivity(viewIntent)
+            val launch = context.packageManager
+                .getLaunchIntentForPackage(calendarPkg)
+                ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (launch != null) {
+                context.startActivity(launch)
                 return true
             }
-        } catch (_: Exception) { }
+        } catch (_: Exception) { /* 主界面也起不来 → 返回 false */ }
     }
+    // 没有能打开的日历应用 → 返回 false，调用方给我们自己的提示
+    // （IslandToasts「没能打开」），不再让系统 toast 成为唯一反馈。
     return false
 }

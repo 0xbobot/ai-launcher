@@ -451,7 +451,13 @@ object SmartCardRepository {
             },
             startMs, endMs, nowMs
         )
-        val key = "appt|${appt.dayStartMs}|${appt.startMin}|${appt.place?.hashCode() ?: 0}"
+        // 第二十五批：去重键加结束分钟（与 calendarCardSourceKey 同格式，
+        // 见 appointmentCardSourceKey）；短信没写结束时间时按开始＋60
+        // （与截止点口径一致：预约无结束时间时按开始后 1 小时），保证
+        // 短信与日历同一场仍能对上。
+        val key = appointmentCardSourceKey(
+            appt.dayStartMs, appt.startMin, appt.endMin ?: (appt.startMin + 60), appt.place
+        )
         val fallback = SmartCardActions.smsCardAction(context, address, null)
         val created = key in reminderCreated
         val action = if (created) {
@@ -563,7 +569,11 @@ object SmartCardRepository {
             },
             startMs, endMs, nowMs
         )
-        val key = "appt|${appt.dayStartMs}|${appt.startMin}|${appt.place?.hashCode() ?: 0}"
+        // 第二十五批：去重键加结束分钟（与 calendarCardSourceKey 同格式，
+        // 见 appointmentCardSourceKey）；短信没写结束时间时按开始＋60。
+        val key = appointmentCardSourceKey(
+            appt.dayStartMs, appt.startMin, appt.endMin ?: (appt.startMin + 60), appt.place
+        )
         val fallback = SmartCardActions.notificationAction(n)
         val created = key in reminderCreated
         val action = if (created) {
@@ -650,52 +660,16 @@ object SmartCardRepository {
     }
 
     /**
-     * 日历应用（第十一批，预约卡小标＝建提醒的目标）：
-     * 意图逻辑 rili 能力的提供方（capabilities.json：Google 日历 /
-     * 系统日历），已装的按最近使用排；都没有时退到系统日历入口
-     * （CATEGORY_APP_CALENDAR）解析；再拿不到就不画小标。
+     * 日历应用（第十一批，预约卡小标＝建提醒的目标；第二十五批：改走
+     * resolveLaunchableCalendarPackage——只认真正能拉起的日历应用，
+     * 中兴上旧的泛解析会落到系统包、画出一个打不开的「Android 系统」小标）。
+     * 拿不到就不画小标。
      */
     private fun resolveCalendarApp(context: Context): TargetApp? {
         return try {
-            CapabilityRegistry.load(context)
-            val cap = CapabilityRegistry.find("rili")
-            val providers = cap?.let { CapabilityResolution.effectiveProviders(it) }
-                ?.flatMap { it.packageNames }.orEmpty()
-            val installed = providers.filter { pkg ->
-                try {
-                    context.packageManager.getApplicationInfo(pkg, 0)
-                    true
-                } catch (_: Exception) {
-                    false
-                }
+            resolveLaunchableCalendarPackage(context)?.let { pkg ->
+                SmartCardActions.appLabel(context, pkg)?.let { TargetApp(pkg, it) }
             }
-            val pkg = SmartCardActions.selectByRecency(installed) {
-                AppUsageTracker.effectiveLastUsed(context, it)
-            } ?: resolveCalendarIntentPackage(context)
-            pkg?.let { p ->
-                SmartCardActions.appLabel(context, p)?.let { TargetApp(p, it) }
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    /** 系统日历入口解析（CATEGORY_APP_CALENDAR 拿不到时再试日历内容 URI） */
-    private fun resolveCalendarIntentPackage(context: Context): String? {
-        return try {
-            val pm = context.packageManager
-            val calendarIntent = Intent(Intent.ACTION_MAIN)
-                .addCategory(Intent.CATEGORY_APP_CALENDAR)
-            pm.resolveActivity(calendarIntent, PackageManager.MATCH_DEFAULT_ONLY)
-                ?.activityInfo?.packageName
-                ?: run {
-                    val viewIntent = Intent(
-                        Intent.ACTION_VIEW,
-                        android.provider.CalendarContract.CONTENT_URI
-                    )
-                    pm.resolveActivity(viewIntent, PackageManager.MATCH_DEFAULT_ONLY)
-                        ?.activityInfo?.packageName
-                }
         } catch (_: Exception) {
             null
         }
