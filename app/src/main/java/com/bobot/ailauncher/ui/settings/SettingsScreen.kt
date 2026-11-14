@@ -138,6 +138,23 @@ fun llmCardCollapsedHint(apiKeyBlank: Boolean): String =
     if (apiKeyBlank) "配好之后，助手能听懂你说话、帮你办事。" else "配好了，助手能听懂你说话、帮你办事。"
 
 /**
+ * 智能区合并卡两行可见态（纯函数状态机，2026-11-14 Bob 定：两行各展开各的）：
+ * 来源行收起与否 = effectiveSourcesCardCollapsed（没接满强制展开）；
+ * 大模型行展开与否 = llmExpanded 原值。一行点按只翻转本行——来源行点按
+ * 改 storedCollapsed，大模型行点按改 llmExpanded，另一行原样不动。
+ */
+data class SmartSectionRowsVisible(val sourcesCollapsed: Boolean, val llmExpanded: Boolean)
+
+fun smartSectionRowsVisible(
+    allConnected: Boolean,
+    sourcesStoredCollapsed: Boolean?,
+    llmExpanded: Boolean,
+): SmartSectionRowsVisible = SmartSectionRowsVisible(
+    sourcesCollapsed = UiPrefs.effectiveSourcesCardCollapsed(allConnected, sourcesStoredCollapsed),
+    llmExpanded = llmExpanded,
+)
+
+/**
  * 版本卡上行（更新行）主文案（纯函数，2026-11-14 Bob 定：检查更新 +
  * 加入测试计划合成一张卡）：检查中 / 下载中 / 下完 / 失败 / 有新版 /
  * 平时六态，与原来检查更新卡逐字一致；合并后行内复用。
@@ -596,16 +613,22 @@ fun SettingsScreen(
             // 设置页还按上次的来；4/4 首次接满（从未点过）默认收起。
             val connectedCount = connectedSourceCount(connectorStates)
             val allSourcesConnected = connectedCount == SMART_SOURCE_ORDER.size
-            val sourcesCollapsed = UiPrefs.effectiveSourcesCardCollapsed(
-                allSourcesConnected, sourcesCollapsedOverride
+            // 合并卡两行可见态走纯函数状态机（smartSectionRowsVisible）：
+            // 来源行收起态与大模型行展开态各算各的，互不干扰。
+            val rowsVisible = smartSectionRowsVisible(
+                allSourcesConnected, sourcesCollapsedOverride, llmExpanded
             )
-            Column {
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-                ) {
+            val sourcesCollapsed = rowsVisible.sourcesCollapsed
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+            ) {
+                Column {
+                    // 上行：来源——内容、文案、持久化、纯函数、没接满不可点
+                    // 全部原样保留，只是从独立卡片收进这张卡的上行；点标题行
+                    // 展开/收起只影响本行（2026-11-14 Bob 定，与版本区同款）。
                     Column(modifier = Modifier.padding(16.dp)) {
                         // 展开/收起只认标题行（与「让助手更聪明」卡同一口径 F-08）；
                         // 4/4 时标题行可点（带 tick），没接满时不可点、保持展开。
@@ -699,6 +722,186 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    // 两行之间的细分隔线（与版本区同款：HorizontalDivider +
+                    // 横向 16.dp + 主题 Divider 色）
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = AILauncherColors.current.Divider
+                    )
+                    // 下行：大模型——内容、文案、纯函数、清焦清键盘行为全部原样
+                    // 保留，只是从独立卡片收进这张卡的下行；点标题行展开/收起
+                    // 只影响本行（2026-11-14 Bob 定，与版本区同款；大模型卡
+                    // 原 2026-11-14 00:11 从助手分区整块挪到智能分区）。
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
+                        // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
+                        // F-10：点按补 tick（走 Haptics 两档门面）。
+                        // 收起行与来源卡同一口径：标题行 + 一行描述 + chevron
+                        // （llmCardTitle + llmCardCollapsedHint），完整说明文字
+                        // 只在展开块里。
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    view.tickHaptic()
+                                    llmExpanded = !llmExpanded
+                                },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = llmCardTitle(llmExpanded, apiKey.isBlank()),
+                                    fontSize = AILauncherType.BodyLarge.fontSize,
+                                    fontWeight = FontWeight.Medium,
+                                    color = AILauncherColors.current.Title
+                                )
+                                if (!llmExpanded) {
+                                    // 2026-11-14 Bob 定：收起加一行描述，告诉用户配好
+                                    // 大模型会起什么作用；一行写完，展开态说明不动。
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = llmCardCollapsedHint(apiKey.isBlank()),
+                                        fontSize = AILauncherType.Footnote.fontSize,
+                                        color = AILauncherColors.current.Hint,
+                                        lineHeight = 18.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            Icon(
+                                if (llmExpanded) Icons.Filled.KeyboardArrowUp
+                                else Icons.Filled.KeyboardArrowDown,
+                                contentDescription = if (llmExpanded) "收起" else "展开",
+                                tint = AILauncherColors.current.Hint
+                            )
+                        }
+                        if (llmExpanded) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
+                                fontSize = AILauncherType.Footnote.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                lineHeight = 18.sp
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            OutlinedTextField(
+                                value = apiKey,
+                                onValueChange = { apiKey = it; persist() },
+                                label = { Text("大模型 API Key") },
+                                placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(
+                                onClick = {
+                                    view.tickHaptic()
+                                    val web = Intent(Intent.ACTION_VIEW).apply {
+                                        data = android.net.Uri.parse("https://platform.deepseek.com/api_keys")
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    runCatching { context.startActivity(web) }
+                                        .onFailure { IslandToasts.show("没有可用的浏览器") }
+                                },
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text(
+                                    text = "去 DeepSeek 开放平台注册 / 查看 Key",
+                                    fontSize = AILauncherType.Caption.fontSize,
+                                    color = AILauncherColors.current.Accent
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = baseUrl,
+                                onValueChange = { baseUrl = it; persist() },
+                                label = { Text("接口地址") },
+                                placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
+                            )
+                            Text(
+                                text = "一般不用改。用别的服务商才需要换",
+                                fontSize = AILauncherType.Caption.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = model,
+                                onValueChange = { model = it; persist() },
+                                label = { Text("用哪个模型") },
+                                placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
+                            )
+                            Text(
+                                text = "填你 API Key 对应的模型名，比如 deepseek-flash",
+                                fontSize = AILauncherType.Caption.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = {
+                                    if (testing) return@Button
+                                    // F-10：主按钮 = confirm 档
+                                    view.confirmHaptic()
+                                    persist()
+                                    if (apiKey.isBlank()) {
+                                        IslandToasts.show("请先填写大模型 API Key")
+                                        return@Button
+                                    }
+                                    testing = true
+                                    scope.launch {
+                                        val err = LlmConnectionTester.testConnection(
+                                            baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
+                                            apiKey,
+                                            model.ifBlank { LlmConfig.DEFAULT_MODEL }
+                                        )
+                                        testing = false
+                                        IslandToasts.show(err ?: "连接成功")
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
+                            ) {
+                                Text(if (testing) "测试中…" else "测试连接")
+                            }
+                            // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
+                            // 明文降级时醒目提示 + 给得出下一步，不再静默回退
+                            when (keyStatus.mode) {
+                                LlmKeyStore.StorageMode.ENCRYPTED -> Text(
+                                    text = "✓ API Key 已加密存储在本机",
+                                    fontSize = AILauncherType.Caption.fontSize,
+                                    color = AILauncherColors.current.Hint,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                                LlmKeyStore.StorageMode.PLAIN_FALLBACK -> Column(
+                                    modifier = Modifier.padding(top = 8.dp)
+                                ) {
+                                    Text(
+                                        text = "加密出了点问题，你的 Key 现在没有加密保存",
+                                        fontSize = AILauncherType.Footnote.fontSize,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    Text(
+                                        text = "重启手机后回到这里，Key 会自动尝试恢复加密；" +
+                                            "仍不行的话，删掉 API Key 重新粘贴保存一次。",
+                                        fontSize = AILauncherType.Caption.fontSize,
+                                        color = AILauncherColors.current.Hint,
+                                        lineHeight = 17.sp,
+                                        modifier = Modifier.padding(top = 8.dp)
+                                    )
+                                }
+                                LlmKeyStore.StorageMode.EMPTY -> Unit
+                            }
+                        }
+
+                    }
                 }
             }
             if (disclosure == "sms") {
@@ -739,193 +942,6 @@ fun SettingsScreen(
                         }
                     }
                 )
-            }
-        }
-
-        // 大模型设置（Bob 2026-11-14 00:11）：从助手分区整块挪到智能分区——
-        // Key 输入框 + DeepSeek 链接 + 接口地址 + 模型名 + 测试连接 + Key 存放形态
-        // 明示一起搬；助手分区随之取消（只剩这一块）。
-        // 让助手更聪明（收起一层）：2026-11-14 Bob 定，收起样式与来源卡一致——
-        // 收起是标题行 + 一行描述 + chevron，完整说明文字挪进展开块；已填 Key
-        // 时收起行写「大模型已经配好了」，没填写卡名（llmCardTitle），描述行
-        // 写配好之后的效果（llmCardCollapsedHint）。
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier
-                    .padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
-                    // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
-                    // F-10：点按补 tick（走 Haptics 两档门面）。
-                    // 收起行与来源卡同一口径：标题行 + 一行描述 + chevron
-                    // （llmCardTitle + llmCardCollapsedHint），完整说明文字
-                    // 只在展开块里。
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                view.tickHaptic()
-                                llmExpanded = !llmExpanded
-                            },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = llmCardTitle(llmExpanded, apiKey.isBlank()),
-                                fontSize = AILauncherType.BodyLarge.fontSize,
-                                fontWeight = FontWeight.Medium,
-                                color = AILauncherColors.current.Title
-                            )
-                            if (!llmExpanded) {
-                                // 2026-11-14 Bob 定：收起加一行描述，告诉用户配好
-                                // 大模型会起什么作用；一行写完，展开态说明不动。
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = llmCardCollapsedHint(apiKey.isBlank()),
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    color = AILauncherColors.current.Hint,
-                                    lineHeight = 18.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        Icon(
-                            if (llmExpanded) Icons.Filled.KeyboardArrowUp
-                            else Icons.Filled.KeyboardArrowDown,
-                            contentDescription = if (llmExpanded) "收起" else "展开",
-                            tint = AILauncherColors.current.Hint
-                        )
-                    }
-                    if (llmExpanded) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
-                            fontSize = AILauncherType.Footnote.fontSize,
-                            color = AILauncherColors.current.Hint,
-                            lineHeight = 18.sp
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        OutlinedTextField(
-                            value = apiKey,
-                            onValueChange = { apiKey = it; persist() },
-                            label = { Text("大模型 API Key") },
-                            placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        TextButton(
-                            onClick = {
-                                view.tickHaptic()
-                                val web = Intent(Intent.ACTION_VIEW).apply {
-                                    data = android.net.Uri.parse("https://platform.deepseek.com/api_keys")
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                runCatching { context.startActivity(web) }
-                                    .onFailure { IslandToasts.show("没有可用的浏览器") }
-                            },
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text(
-                                text = "去 DeepSeek 开放平台注册 / 查看 Key",
-                                fontSize = AILauncherType.Caption.fontSize,
-                                color = AILauncherColors.current.Accent
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = baseUrl,
-                            onValueChange = { baseUrl = it; persist() },
-                            label = { Text("接口地址") },
-                            placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
-                        )
-                        Text(
-                            text = "一般不用改。用别的服务商才需要换",
-                            fontSize = AILauncherType.Caption.fontSize,
-                            color = AILauncherColors.current.Hint,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = model,
-                            onValueChange = { model = it; persist() },
-                            label = { Text("用哪个模型") },
-                            placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
-                        )
-                        Text(
-                            text = "填你 API Key 对应的模型名，比如 deepseek-flash",
-                            fontSize = AILauncherType.Caption.fontSize,
-                            color = AILauncherColors.current.Hint,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = {
-                                if (testing) return@Button
-                                // F-10：主按钮 = confirm 档
-                                view.confirmHaptic()
-                                persist()
-                                if (apiKey.isBlank()) {
-                                    IslandToasts.show("请先填写大模型 API Key")
-                                    return@Button
-                                }
-                                testing = true
-                                scope.launch {
-                                    val err = LlmConnectionTester.testConnection(
-                                        baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
-                                        apiKey,
-                                        model.ifBlank { LlmConfig.DEFAULT_MODEL }
-                                    )
-                                    testing = false
-                                    IslandToasts.show(err ?: "连接成功")
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
-                        ) {
-                            Text(if (testing) "测试中…" else "测试连接")
-                        }
-                        // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
-                        // 明文降级时醒目提示 + 给得出下一步，不再静默回退
-                        when (keyStatus.mode) {
-                            LlmKeyStore.StorageMode.ENCRYPTED -> Text(
-                                text = "✓ API Key 已加密存储在本机",
-                                fontSize = AILauncherType.Caption.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                            LlmKeyStore.StorageMode.PLAIN_FALLBACK -> Column(
-                                modifier = Modifier.padding(top = 8.dp)
-                            ) {
-                                Text(
-                                    text = "加密出了点问题，你的 Key 现在没有加密保存",
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                Text(
-                                    text = "重启手机后回到这里，Key 会自动尝试恢复加密；" +
-                                        "仍不行的话，删掉 API Key 重新粘贴保存一次。",
-                                    fontSize = AILauncherType.Caption.fontSize,
-                                    color = AILauncherColors.current.Hint,
-                                    lineHeight = 17.sp,
-                                    modifier = Modifier.padding(top = 8.dp)
-                                )
-                            }
-                            LlmKeyStore.StorageMode.EMPTY -> Unit
-                        }
-                    }
-                }
             }
         }
 
