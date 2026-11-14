@@ -51,6 +51,10 @@ object SmartCardRepository {
     private const val PREFS = "smart_cards"
     private const val KEY_DONE_PREFIX = "done_"
     private const val KEY_SKIPPED_PREFIX = "skipped_"
+    /** 划走时刻（第二十九批）：沉底顺序按划走先后排——早划的在前、新划的
+     * 沉最后；重划已沉底的卡刷新此时戳，轮转一圈。旧版只有 skipped_=截止
+     * 点的键、没有此时戳，缺省为 0（排最前）。过期时与 skipped_ 一并清。 */
+    private const val KEY_SKIP_AT_PREFIX = "skipAt_"
     private const val KEY_LAST_USED_PREFIX = "last_used_"
     private const val KEY_LAST_SMS_REFRESH = "last_sms_refresh_ms"
     /** 引导卡片只出现一次（设计稿 §4.7）：看完（滑完全部）或点 × 关掉即记下，不再弹 */
@@ -135,23 +139,46 @@ object SmartCardRepository {
         return out
     }
 
+    /** 沉底顺序（纯函数，第二十九批）：按划走时刻升序——早划的在前、
+     * 新划的沉最后；没有划走时刻（旧版键）视为 0、排最前；已过截止点
+     * 的先滤掉。entries 元素 = (id, 截止点 deadlineMs, 划走时刻 skipAtMs)。
+     * 第二十九批之前这里按截止点排：两张卡都划过后，沉底顺序固定为
+     * 截止点早的在前、再划顶卡什么都不变——Bob 2026-11-14 13:07 录屏
+     * 里 8 次划卡后 6 次没反应就是这个机制（顶卡已沉底、重划不轮转）。 */
+    internal fun orderSkippedIds(
+        entries: List<Triple<String, Long, Long>>,
+        nowMs: Long
+    ): List<String> {
+        return entries.filter { it.second > nowMs }
+            .sortedBy { it.third }
+            .map { it.first }
+    }
+
     private fun liveIdList(context: Context, prefix: String, nowMs: Long): List<String> {
         val p = prefs(context)
-        val withDeadline = mutableListOf<Pair<String, Long>>()
+        val entries = mutableListOf<Triple<String, Long, Long>>()
         val editor = p.edit()
         var changed = false
         for ((key, value) in p.all) {
             if (!key.startsWith(prefix) || value !is Long) continue
+            val id = key.removePrefix(prefix)
             if (value > nowMs) {
-                withDeadline += key.removePrefix(prefix) to value
+                // 划走时刻只对 skipped_ 有意义（done_ 不沉底）；缺省 0。
+                val skipAt = if (prefix == KEY_SKIPPED_PREFIX) {
+                    p.getLong(KEY_SKIP_AT_PREFIX + id, 0L)
+                } else {
+                    0L
+                }
+                entries += Triple(id, value, skipAt)
             } else {
                 editor.remove(key)
+                editor.remove(KEY_SKIP_AT_PREFIX + id)
                 changed = true
             }
         }
         if (changed) editor.apply()
-        // 跳过顺序按当时跳过的先后（截止点越早跳得越早）
-        return withDeadline.sortedBy { it.second }.map { it.first }
+        // 跳过顺序按划走先后（skipAt_ 升序），不再按截止点排。
+        return orderSkippedIds(entries, nowMs)
     }
 
     /**
@@ -273,8 +300,15 @@ object SmartCardRepository {
         } else {
             KEY_DONE_PREFIX + card.id
         }
-        prefs(context).edit()
-            .putLong(key, card.deadlineMs).apply()
+        val edit = prefs(context).edit()
+            .putLong(key, card.deadlineMs)
+        // 第二十九批：记划走时刻（只对沉底的用户事项卡有意义——重划已
+        // 沉底的卡刷新此时戳、轮转到摞底；应用推的提醒进 done_、不沉底、
+        // 不读此时戳）。
+        if (isUserMatterCard(card.kind)) {
+            edit.putLong(KEY_SKIP_AT_PREFIX + card.id, System.currentTimeMillis())
+        }
+        edit.apply()
         _skipEpoch.value += 1
         refresh(context, lastNotifications, System.currentTimeMillis())
         // 诊断日志（第二十七批）：skip 有没有真正把顶卡换掉——

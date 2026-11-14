@@ -1023,6 +1023,25 @@ internal fun formatSwipeDiagnosis(
         "速度=${velocityDps.roundToInt()}dp/s 退出=$exitReason 步数=$moveCount onSkip=$onSkip"
 }
 
+/**
+ * 划卡诊断行·仓库结果后缀（第二十九批，临时）：onSkip 调完立刻读仓库
+ * 顶卡——顶换了就是「仓库：顶已换」，还是被划走那张就是「仓库：顶未换」，
+ * 栈空了就是「仓库：已空」。Bob 划完直接读这半句，不再靠猜 onSkip
+ * 有没有生效。定性后与诊断行一起拆掉。
+ */
+internal fun formatSkipRepoSuffix(
+    swipedId: String,
+    topId: String?,
+    visibleCount: Int
+): String {
+    val verdict = when {
+        topId == null -> "仓库：已空"
+        topId == swipedId -> "仓库：顶未换"
+        else -> "仓库：顶已换"
+    }
+    return "｜$verdict 张数=$visibleCount"
+}
+
 /** 顶卡：横滑跳过（位移或速度过线离场、沉到摞底，不够回弹）；点动作立即执行 */
 @Composable
 private fun TopSmartCard(
@@ -1182,18 +1201,17 @@ private fun TopSmartCard(
                     )
                     // 诊断行上屏（第二十八批，临时）：与上面那行日志同值——
                     // 屏上与 logcat 永远对得上。常驻到下一次划卡。
-                    onSwipeDiagnosed(
-                        formatSwipeDiagnosis(
-                            release = release,
-                            claimed = claimed,
-                            netDp = netDp,
-                            peakDp = peakDp,
-                            renderedDp = renderedDp,
-                            velocityDps = velocity / densityScale,
-                            exitReason = exitReason,
-                            moveCount = moveCount
-                        )
+                    val diagnosis = formatSwipeDiagnosis(
+                        release = release,
+                        claimed = claimed,
+                        netDp = netDp,
+                        peakDp = peakDp,
+                        renderedDp = renderedDp,
+                        velocityDps = velocity / densityScale,
+                        exitReason = exitReason,
+                        moveCount = moveCount
                     )
+                    onSwipeDiagnosed(diagnosis)
                     when (release) {
                         SwipeRelease.Ignore -> return@awaitEachGesture
                         SwipeRelease.SnapBack -> {
@@ -1213,9 +1231,27 @@ private fun TopSmartCard(
                             // 却没这行，就是 Skip 分支没走到；有这行而顶卡
                             // 没换，看仓库那行 skip 日志。
                             Log.d(TAG, "swipe skip: onSkip card=${card.id} dir=$dir")
-                            if (reduceMotion) {
-                                onSkip(card)
-                            } else {
+                            // 第二十九批：onSkip 同步直调，不再包进动画协
+                            // 程——skip()→refresh() 立即改 _cards，518 §4
+                            // 的并发竞态到此为止，不再留异步缺口。飞出动画
+                            // 仍走 scope.launch（重组可能截断，属 cosmetic；
+                            // 当前代码里动画本来也跑不过重组，视觉上仍是
+                            // 直接换下一张）。调完立刻读仓库顶卡、把结果
+                            // 追加到诊断行：Bob 划完直接读到「仓库：顶已换
+                            // ／顶未换 张数=n」，不再靠猜 onSkip 有没有生效。
+                            onSkip(card)
+                            val repoCards = SmartCardRepository.cards.value
+                            val repoTop = repoCards.firstOrNull()
+                            val repoSuffix = formatSkipRepoSuffix(
+                                card.id, repoTop?.id, repoCards.size
+                            )
+                            Log.d(
+                                TAG,
+                                "swipe skip repo: $repoSuffix " +
+                                    "top=${repoTop?.id} visible=${repoCards.size}"
+                            )
+                            onSwipeDiagnosed(diagnosis + repoSuffix)
+                            if (!reduceMotion) {
                                 scope.launch {
                                     launch {
                                         offsetX.animateTo(
@@ -1228,7 +1264,6 @@ private fun TopSmartCard(
                                             0f, tween(MotionTokens.Medium)
                                         )
                                     }
-                                    onSkip(card)
                                 }
                             }
                         }
