@@ -926,6 +926,22 @@ internal const val SMART_CARD_SWIPE_DISPLACEMENT_DP = 96f
 internal const val SMART_CARD_SWIPE_FLING_DP = 1000f
 
 /**
+ * 划走飞出时长（毫秒，第三十批）：顶卡沿划的方向飞出屏、下一张再上来。
+ * 300ms——MotionTokens.Medium（250ms）略加长，飞出去看得见、又不拖沓；
+ * 减动效时 120ms（MotionTokens.Short），缩短但不硬切、切换仍可感知。
+ * 纯函数 flyOutDurationMs 选档，单测锁死。
+ */
+internal const val SMART_CARD_FLY_OUT_MS = 300
+internal const val SMART_CARD_FLY_OUT_REDUCED_MS = 120
+
+/** 划走飞出距离（px，第三十批）：卡宽约 350dp，典型密度下 1600px ≈ 600dp，足够整张卡飞出屏；淡出同步走，余量由 alpha 兜底。 */
+internal const val SMART_CARD_FLY_OUT_DISTANCE_PX = 1600f
+
+/** 飞出时长选档（纯函数，单测锁死）：正常 300ms，减动效 120ms。 */
+internal fun flyOutDurationMs(reduceMotion: Boolean): Int =
+    if (reduceMotion) SMART_CARD_FLY_OUT_REDUCED_MS else SMART_CARD_FLY_OUT_MS
+
+/**
  * 横滑切卡判定（纯函数，第二十三批单测锁死）：
  * 位移或速度任一过线就切卡。位移阈值 96dp（由 120dp 放宽，慢拖也好切）；
  * 速度阈值 1000dp/s（快速轻扫即使位移不到阈值也切）。
@@ -1070,10 +1086,14 @@ private fun TopSmartCard(
 
     SmartCardView(
         card = card,
-        onActionClick = { onAction(card) },
-        onIgnoreClick = { onIgnore(card) },
-        onCloseClick = onClose,
-        onBodyClick = { onBodyClick(card) },
+        // 飞出中的卡不再接点按（第三十批）：Skip 分支把换卡推迟到飞出跑完，
+        // 300ms 里旧卡还组合着、按钮仍在屏上——点到正在离开的卡的按钮会
+        // 误触发。skipping 置真后点按一律不响应，新顶卡挂载时 skipping 回
+        // false、点按恢复。
+        onActionClick = { if (!skipping) onAction(card) },
+        onIgnoreClick = { if (!skipping) onIgnore(card) },
+        onCloseClick = onClose?.let { close -> { if (!skipping) close() } },
+        onBodyClick = { if (!skipping) onBodyClick(card) },
         hideActionRow = hideActionRow,
         celebration = celebration,
         modifier = modifier
@@ -1231,39 +1251,59 @@ private fun TopSmartCard(
                             // 却没这行，就是 Skip 分支没走到；有这行而顶卡
                             // 没换，看仓库那行 skip 日志。
                             Log.d(TAG, "swipe skip: onSkip card=${card.id} dir=$dir")
-                            // 第二十九批：onSkip 同步直调，不再包进动画协
-                            // 程——skip()→refresh() 立即改 _cards，518 §4
-                            // 的并发竞态到此为止，不再留异步缺口。飞出动画
-                            // 仍走 scope.launch（重组可能截断，属 cosmetic；
-                            // 当前代码里动画本来也跑不过重组，视觉上仍是
-                            // 直接换下一张）。调完立刻读仓库顶卡、把结果
-                            // 追加到诊断行：Bob 划完直接读到「仓库：顶已换
-                            // ／顶未换 张数=n」，不再靠猜 onSkip 有没有生效。
-                            onSkip(card)
-                            val repoCards = SmartCardRepository.cards.value
-                            val repoTop = repoCards.firstOrNull()
-                            val repoSuffix = formatSkipRepoSuffix(
-                                card.id, repoTop?.id, repoCards.size
-                            )
-                            Log.d(
-                                TAG,
-                                "swipe skip repo: $repoSuffix " +
-                                    "top=${repoTop?.id} visible=${repoCards.size}"
-                            )
-                            onSwipeDiagnosed(diagnosis + repoSuffix)
-                            if (!reduceMotion) {
-                                scope.launch {
-                                    launch {
+                            // 第三十批：飞出先行、换卡在后。之前是先调
+                            // onSkip 再飞——skip()→refresh() 立即改 _cards、
+                            // skipEpoch 加一、重组 dispose 旧 TopSmartCard，
+                            // 飞出动画的 scope.launch 一帧都跑不出来，视觉
+                            // 上就是直接换下一张（Bob 2026-11-14 17:46：
+                            // 切换不明显、感觉不到它被划走）。现在反过来：
+                            // 先在组合 scope 里把飞出跑完（卡沿划的方向飞
+                            // 出屏＋淡出，下一张内容同步揭示到 1），再调
+                            // onSkip 换卡。飞出跑在 onSkip 之前，组合还活
+                            // 着，重组截断不了它。finally 兜底：动画中途被
+                            // 取消（切后台等）也要把卡沉下去，不留一张飞
+                            // 出一半还顶在上面的卡。诊断行的仓库结果在
+                            // onSkip 之后追加（飞出跑完才有），Bob 划完读
+                            // 到「仓库：顶已换／顶未换 张数=n」不变。
+                            val flyOutMs = flyOutDurationMs(reduceMotion)
+                            scope.launch {
+                                try {
+                                    val flyX = launch {
                                         offsetX.animateTo(
-                                            dir * 1200f,
-                                            tween(MotionTokens.Medium)
+                                            dir * SMART_CARD_FLY_OUT_DISTANCE_PX,
+                                            tween(durationMillis = flyOutMs, easing = MotionTokens.Easing)
                                         )
                                     }
-                                    launch {
+                                    val fade = launch {
                                         alpha.animateTo(
-                                            0f, tween(MotionTokens.Medium)
+                                            0f,
+                                            tween(durationMillis = flyOutMs, easing = MotionTokens.Easing)
                                         )
                                     }
+                                    val reveal = launch {
+                                        revealAnim.animateTo(
+                                            1f,
+                                            tween(durationMillis = flyOutMs, easing = MotionTokens.Easing)
+                                        )
+                                    }
+                                    flyX.join()
+                                    fade.join()
+                                    reveal.join()
+                                } finally {
+                                    onSkip(card)
+                                    val repoCards =
+                                        SmartCardRepository.cards.value
+                                    val repoTop = repoCards.firstOrNull()
+                                    val repoSuffix = formatSkipRepoSuffix(
+                                        card.id, repoTop?.id, repoCards.size
+                                    )
+                                    Log.d(
+                                        TAG,
+                                        "swipe skip repo: $repoSuffix " +
+                                            "top=${repoTop?.id} " +
+                                            "visible=${repoCards.size}"
+                                    )
+                                    onSwipeDiagnosed(diagnosis + repoSuffix)
                                 }
                             }
                         }
