@@ -3,6 +3,7 @@ package com.bobot.ailauncher.data
 import com.bobot.ailauncher.ui.smartcard.SwipeRelease
 import com.bobot.ailauncher.ui.smartcard.resolveSwipeRelease
 import com.bobot.ailauncher.ui.smartcard.shouldSkipCard
+import com.bobot.ailauncher.ui.smartcard.swipeRevealProgress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -114,6 +115,11 @@ class SmartCardSwipeTest {
     // Bob 2026-11-14 录屏里顶卡向右拖到近乎出屏（峰值位移约 889px
     // ≈ 300dp）却两次都弹回。手势本身 JVM 测不到，判定函数锁死在这里，
     // 指针消失后仍走判定由代码走查＋Bob 真机验。
+    // 第二十六批改口径：松手判定看峰值位移（整条手势里 |totalX| 的最大
+    // 值），不再看松手瞬间的净位移——慢拖、探一下再往回带的手势，松手时
+    // 净位移会回到阈值内，但峰值才是用户的划走意图；另加第二信号渲染
+    // 位移（offsetX.value，真正在屏上画出来的位置），手势循环累计漏了
+    // 事件时卡片 visibly 已拖过阈值也不能弹回。
 
     @Test
     fun release_largeDisplacement_skips() {
@@ -122,14 +128,16 @@ class SmartCardSwipeTest {
             SwipeRelease.Skip,
             resolveSwipeRelease(
                 claimed = true, skipping = false,
-                offsetXDp = 300f, velocityXDps = 0f
+                peakOffsetXDp = 300f, renderedOffsetXDp = 300f,
+                velocityXDps = 0f
             )
         )
         assertEquals(
             SwipeRelease.Skip,
             resolveSwipeRelease(
                 claimed = true, skipping = false,
-                offsetXDp = 136f, velocityXDps = 0f
+                peakOffsetXDp = 136f, renderedOffsetXDp = 136f,
+                velocityXDps = 0f
             )
         )
     }
@@ -141,14 +149,16 @@ class SmartCardSwipeTest {
             SwipeRelease.Skip,
             resolveSwipeRelease(
                 claimed = true, skipping = false,
-                offsetXDp = -300f, velocityXDps = 0f
+                peakOffsetXDp = -300f, renderedOffsetXDp = -300f,
+                velocityXDps = 0f
             )
         )
         assertEquals(
             SwipeRelease.Skip,
             resolveSwipeRelease(
                 claimed = true, skipping = false,
-                offsetXDp = -97f, velocityXDps = 0f
+                peakOffsetXDp = -97f, renderedOffsetXDp = -97f,
+                velocityXDps = 0f
             )
         )
     }
@@ -159,14 +169,16 @@ class SmartCardSwipeTest {
             SwipeRelease.SnapBack,
             resolveSwipeRelease(
                 claimed = true, skipping = false,
-                offsetXDp = 50f, velocityXDps = 0f
+                peakOffsetXDp = 50f, renderedOffsetXDp = 50f,
+                velocityXDps = 0f
             )
         )
         assertEquals(
             SwipeRelease.SnapBack,
             resolveSwipeRelease(
                 claimed = true, skipping = false,
-                offsetXDp = -50f, velocityXDps = -300f
+                peakOffsetXDp = -50f, renderedOffsetXDp = -50f,
+                velocityXDps = -300f
             )
         )
     }
@@ -177,7 +189,8 @@ class SmartCardSwipeTest {
             SwipeRelease.Skip,
             resolveSwipeRelease(
                 claimed = true, skipping = false,
-                offsetXDp = 20f, velocityXDps = 1500f
+                peakOffsetXDp = 20f, renderedOffsetXDp = 20f,
+                velocityXDps = 1500f
             )
         )
     }
@@ -189,7 +202,8 @@ class SmartCardSwipeTest {
             SwipeRelease.Ignore,
             resolveSwipeRelease(
                 claimed = false, skipping = false,
-                offsetXDp = 300f, velocityXDps = 0f
+                peakOffsetXDp = 300f, renderedOffsetXDp = 300f,
+                velocityXDps = 0f
             )
         )
     }
@@ -200,8 +214,106 @@ class SmartCardSwipeTest {
             SwipeRelease.Ignore,
             resolveSwipeRelease(
                 claimed = true, skipping = true,
-                offsetXDp = 300f, velocityXDps = 0f
+                peakOffsetXDp = 300f, renderedOffsetXDp = 300f,
+                velocityXDps = 0f
             )
         )
+    }
+
+    // ---------- 第二十六批：峰值位移判松手 ----------
+
+    @Test
+    fun release_peakOverThreshold_thenReturned_skips() {
+        // 本批核心：拖出去 300dp、松手前带回只剩 60dp——501／512 判净位移
+        // 会弹回；峰值才是意图，必须切卡。
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                peakOffsetXDp = 300f, renderedOffsetXDp = 60f,
+                velocityXDps = 0f
+            )
+        )
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                peakOffsetXDp = 150f, renderedOffsetXDp = 10f,
+                velocityXDps = 100f
+            )
+        )
+    }
+
+    @Test
+    fun release_peakOverThreshold_negativeReturn_skips() {
+        // 反方向同理：向左拖出去、带回一点再松手，照样切卡。
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                peakOffsetXDp = -300f, renderedOffsetXDp = -40f,
+                velocityXDps = 0f
+            )
+        )
+    }
+
+    @Test
+    fun release_renderedOverThreshold_skips() {
+        // 第二信号：峰值累计万一漏了事件，但卡片 visibly 已拖过阈值
+        // （渲染位移 150dp），也不能弹回。
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                peakOffsetXDp = 50f, renderedOffsetXDp = 150f,
+                velocityXDps = 0f
+            )
+        )
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                peakOffsetXDp = -50f, renderedOffsetXDp = -150f,
+                velocityXDps = 0f
+            )
+        )
+    }
+
+    @Test
+    fun release_peakAtThreshold_doesNotSkip() {
+        // 严格大于阈值才切：峰值与渲染位移恰好 96dp 都不切。
+        assertEquals(
+            SwipeRelease.SnapBack,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                peakOffsetXDp = 96f, renderedOffsetXDp = 96f,
+                velocityXDps = 0f
+            )
+        )
+    }
+
+    // ---------- 第二十六批：拖动揭示进度（swipeRevealProgress） ----------
+
+    @Test
+    fun revealProgress_zeroAtRest() {
+        assertEquals(0f, swipeRevealProgress(0f, 96f), 0.001f)
+    }
+
+    @Test
+    fun revealProgress_halfwayAtHalfThreshold() {
+        assertEquals(0.5f, swipeRevealProgress(48f, 96f), 0.001f)
+        assertEquals(0.5f, swipeRevealProgress(-48f, 96f), 0.001f)
+    }
+
+    @Test
+    fun revealProgress_fullAtThreshold() {
+        assertEquals(1f, swipeRevealProgress(96f, 96f), 0.001f)
+        assertEquals(1f, swipeRevealProgress(300f, 96f), 0.001f)
+        assertEquals(1f, swipeRevealProgress(-300f, 96f), 0.001f)
+    }
+
+    @Test
+    fun revealProgress_zeroThreshold_isZero() {
+        assertEquals(0f, swipeRevealProgress(100f, 0f), 0.001f)
     }
 }

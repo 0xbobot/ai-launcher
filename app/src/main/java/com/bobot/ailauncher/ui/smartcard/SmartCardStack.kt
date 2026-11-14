@@ -1,6 +1,8 @@
 package com.bobot.ailauncher.ui.smartcard
 
+import android.util.Log
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Spring
@@ -681,13 +683,37 @@ fun smartCardFactAreaHeight(): Dp =
 /**
  * 呼吸描边渐变色（重设计 §2.2）：暖金 #D4A24E → 柔玫 → 冷青 → 暖金闭环。
  * 金是 Bob 点名的锚点；玫/青低饱和、贴浅暖灰主题；首尾同色，绕一圈不断色。
+ * 第二十六批（Bob 2026-11-14：光晕太淡感受不到）：玫/青各加深一档
+ * （#D9A5A0→#D99B90、#8FB8B5→#6FA8A0），饱和度仍在 0.35 上限内
+ * （玫 0.336、青 0.339，见 SmartCardRedesignTest），金不动。
  */
 fun smartCardBorderColors(): List<Color> = listOf(
     Color(0xFFD4A24E),
-    Color(0xFFD9A5A0),
-    Color(0xFF8FB8B5),
+    Color(0xFFD99B90),
+    Color(0xFF6FA8A0),
     Color(0xFFD4A24E)
 )
+
+/**
+ * 光晕描边宽度（重设计 §2.2，第二十六批：Bob 2026-11-14 说光晕太淡、
+ * 感受不到——2dp→3dp，只加存在感，不改卡片结构与配色体系）。
+ */
+val SmartCardHaloStroke = 3.dp
+
+/**
+ * 光晕呼吸下限（重设计 §2.2，第二十六批：0.5→0.8——描边不再长时间
+ * 躲在半透明里，呼吸只在 0.8↔1 之间，不做刺眼的跑马灯）。
+ */
+const val SmartCardHaloMinAlpha = 0.8f
+
+/**
+ * 光晕一圈时长（重设计 §2.2，第二十六批：6000ms→4000ms——渐变移动与
+ * 呼吸都略加快，呼吸半程 2000ms；减动效时仍静止）。
+ */
+const val SmartCardHaloPeriodMs = 4000L
+
+/** 横滑切卡的手势日志 tag（第二十六批：松手判定现打一行日志，见 TopSmartCard）。 */
+private const val TAG = "SmartCardStack"
 
 /**
  * 暖灰半透明衬底的透明度（重设计 §2.1）：下限 0.55；低对比环境回到 0.75 兜底。
@@ -729,8 +755,22 @@ fun SmartCardStack(
     // 即没有，不贴模板）。copy 只换 prep，不动 id/动作/排序键。
     val top = cards[0].let { it.copy(prep = prepById[it.id] ?: it.prep) }
     val connectedIds: Set<String> = connectedFeedbacks.keys
+    // 下一张卡（第二十六批，揭示过渡）：拖动顶卡时它的内容要跟着露出来，
+    // 不是等松手切过去后才突然出现。内容组合在露边槽里、盖在空玻璃面
+    // （PeekCardFace）之上，透明度/缩放/上浮都跟揭示进度走（见下）；
+    // 静止时进度为 0、内容全透明，外观与以前的空露边一模一样。
+    val next = cards.getOrNull(1)?.let { it.copy(prep = prepById[it.id] ?: it.prep) }
+    // 揭示进度（第二十六批）：0＝静止（下一张内容全透明）、1＝顶卡已拖过
+    // 切卡阈值（下一张内容完整在位）。以顶卡 id 为键：顶卡换了就重建回 0，
+    // 新的下一张从全透明开始；切卡离场那一刻进度停在 1，新顶卡挂载时
+    // 内容已在位、不跳变。TopSmartCard 在手势里写它（跟手 snapTo，
+    // 松手弹回时动画回 0），露边内容在 graphicsLayer 里读它（只重绘
+    // 图层，不触发整卡重组）。
+    val revealAnim = remember(top.id) { Animatable(0f) }
     // 露边卡只有边、没有字（重设计 §2.5）：只留张数与 id 作键，内容不组合；
     // 升上来成为顶卡时，它的内容才在顶卡位置组合（见 top）。
+    // 第二十六批补一句：下一张卡的内容在拖动揭示时提前组合在露边槽里
+    // （见 next／revealAnim），静止时透明度为 0、仍是不画字的边。
     val peekIds = cards.drop(1).take(2).map { it.id }
     // 第十批：卡片按桌面卡片语言收边——两侧各留 SmartCardStackSideMargin，
     // 不贴边、不满宽。收边放在最外层 Column：顶卡、露边卡、角标一起收，
@@ -769,6 +809,7 @@ fun SmartCardStack(
                             onBodyClick = onBodyClick,
                             hideActionRow = top.id in connectedIds,
                             celebration = connectedFeedbacks[top.id],
+                            revealAnim = revealAnim,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("smart_card_top")
@@ -793,6 +834,57 @@ fun SmartCardStack(
                         }
                     }.map { it.measure(constraints.copy(maxHeight = topHeight)) }
                 }
+                // 下一张卡的揭示内容（第二十六批）：只给第一张露边卡（index 0）。
+                // 与顶卡同一张 SmartCardView、同一尺寸——进度到 1 时与顶卡
+                // 位置像素一致（缩放 1.0、上浮 0、透明度 1），松手切过去后
+                // 新顶卡挂载、内容已在位，不跳变。放在 (0, 0)：静止时靠
+                // translationY 下沉 8dp、缩 0.97，与下面的空玻璃面对齐；
+                // 进度上升时上浮到 0、放大到 1.0。内容不可点：外层 pointerInput
+                // 吃掉落点（点按/滑动都归顶卡），避免手指落在已露出的下一张
+                // 卡上时误触它的按钮/正文；呼吸描边不画（光晕只属于顶卡，
+                // 升上来成为顶卡后自带）。
+                val nextContentPlaceables = if (next != null) {
+                    subcompose(SmartCardStackSlot.PeekContent) {
+                        key(next.id) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer {
+                                        val p = revealAnim.value
+                                        alpha = p
+                                        scaleX = peekCardTransform(0).scale +
+                                            (1f - peekCardTransform(0).scale) * p
+                                        scaleY = peekCardTransform(0).scale +
+                                            (1f - peekCardTransform(0).scale) * p
+                                        translationY = (1f - p) *
+                                            peekCardTransform(0).yOffset.toPx()
+                                    }
+                                    .pointerInput(Unit) {
+                                        awaitEachGesture {
+                                            val down = awaitFirstDown()
+                                            // 只在揭示进行中（下一张内容已露出来）才
+                                            // 吃掉落点；静止时进度为 0、内容全透明，
+                                            // 落点照常落到叠层下层，不改原有行为。
+                                            if (revealAnim.value > 0f) down.consume()
+                                        }
+                                    }
+                                    .testTag("smart_card_peek_content")
+                            ) {
+                                SmartCardView(
+                                    card = next,
+                                    onActionClick = {},
+                                    onIgnoreClick = {},
+                                    onCloseClick = null,
+                                    onBodyClick = null,
+                                    hideActionRow = next.id in connectedIds,
+                                    celebration = connectedFeedbacks[next.id],
+                                    showBreathingBorder = false,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }.map { it.measure(constraints.copy(maxHeight = topHeight)) }
+                } else emptyList()
                 val stackHeight = topHeight + 8.dp.roundToPx() * peekIds.size
                 layout(constraints.maxWidth, stackHeight) {
                     // 下面几张先放（在后面），露边在顶卡底边下方
@@ -801,6 +893,8 @@ fun SmartCardStack(
                             it.place(0, peekCardTransform(index).yOffset.roundToPx())
                         }
                     }
+                    // 揭示内容盖在第一张露边卡的空玻璃面上、顶卡之下。
+                    nextContentPlaceables.forEach { it.place(0, 0) }
                     topPlaceables.forEach { it.place(0, 0) }
                 }
             }
@@ -817,9 +911,9 @@ fun SmartCardStack(
     }
 }
 
-/** SubcomposeLayout 槽位：顶卡一个，露边卡按序号。 */
+/** SubcomposeLayout 槽位：顶卡一个，露边卡按序号，下一张揭示内容一个。 */
 private enum class SmartCardStackSlot {
-    Top, Peek0, Peek1;
+    Top, Peek0, Peek1, PeekContent;
 
     companion object {
         fun Peek(index: Int): SmartCardStackSlot =
@@ -827,30 +921,56 @@ private enum class SmartCardStackSlot {
     }
 }
 
+/** 横滑切卡的位移阈值（dp）：慢拖过线就切卡（第二十三批由 120dp 放宽）。 */
+internal const val SMART_CARD_SWIPE_DISPLACEMENT_DP = 96f
+
+/** 横滑切卡的速度阈值（dp/s）：快速轻扫即使位移不到阈值也切卡。 */
+internal const val SMART_CARD_SWIPE_FLING_DP = 1000f
+
 /**
  * 横滑切卡判定（纯函数，第二十三批单测锁死）：
  * 位移或速度任一过线就切卡。位移阈值 96dp（由 120dp 放宽，慢拖也好切）；
  * 速度阈值 1000dp/s（快速轻扫即使位移不到阈值也切）。
  * 输入用 dp（与密度无关），调用处把 px / density 换算进来。
+ * 第二十六批：这个谓词判的是“某一个位移值”——松手判定（见
+ * resolveSwipeRelease）给它喂的是峰值位移，不是松手瞬间净位移。
  */
 internal fun shouldSkipCard(
     offsetXDp: Float,
     velocityXDps: Float,
-    displacementThresholdDp: Float = 96f,
-    flingThresholdDps: Float = 1000f
+    displacementThresholdDp: Float = SMART_CARD_SWIPE_DISPLACEMENT_DP,
+    flingThresholdDps: Float = SMART_CARD_SWIPE_FLING_DP
 ): Boolean {
     return abs(offsetXDp) > displacementThresholdDp ||
         abs(velocityXDps) > flingThresholdDps
 }
 
 /**
- * 横滑松手后的统一判定（纯函数，第二十五批单测锁死）：
+ * 拖动揭示进度（纯函数，第二十六批单测锁死）：下一张卡内容显现的程度，
+ * 0＝静止（全透明）、1＝顶卡已拖过切卡阈值（内容完整在位）。按拖动位移
+ * 的绝对值占阈值的比例算，方向不进判定（左右拖都揭示）。
+ */
+internal fun swipeRevealProgress(offsetXPx: Float, thresholdPx: Float): Float {
+    if (thresholdPx <= 0f) return 0f
+    return (abs(offsetXPx) / thresholdPx).coerceIn(0f, 1f)
+}
+
+/**
+ * 横滑松手后的统一判定（纯函数，第二十五批单测锁死、第二十六批改口径）：
  * 手势怎么结束（正常抬起 / 指针从事件里消失）不影响判定——只看
  * 认领与位移/速度。501 的 pointerGone 分支无条件弹回是错的：
  * Bob 2026-11-14 录屏里顶卡向右拖到近乎出屏（实测峰值位移约 889px
  * ≈ 300dp，远超 96dp 阈值）却两次都弹回——手指拖到屏边被系统
  * 取消（指针消失）时，已拖够的位移是用户明确的划走意图，不该被
  * 取消否决；小位移被取消时 shouldSkipCard 本来就返回 false，照常弹回。
+ * 第二十六批再改一处（Bob 2026-11-14 10:41 录屏：513 上还是划不动）：
+ * 501／512 判的都是松手瞬间的**净位移**——慢拖、探一下再往回带的手势，
+ * 松手时净位移很容易回到 96dp 以内（峰值明明拖出去 300dp），就被判成
+ * 弹回。松手判定改看**峰值位移**（整条手势里 |totalX| 的最大值）：拖出去
+ * 多远就是用户的意图，松手前带回来一点不算反悔。另加第二信号渲染位移
+ * （offsetX.value，真正在屏上画出来的位置）：手势循环里累计的 totalX
+ * 万一漏了事件、与渲染对不上，卡片 visibly 已拖过阈值时也不能弹回。
+ * 净位移不再单独进判定（峰值恒 ≥ |净位移|，已被峰值包含）。
  * 方向不进判定（abs）：左划右划都是“划走这张看下一张”，不是
  * 上一张/下一张翻页器（双向划走，Bob 2026-11-14 定）。
  */
@@ -866,12 +986,14 @@ internal enum class SwipeRelease {
 internal fun resolveSwipeRelease(
     claimed: Boolean,
     skipping: Boolean,
-    offsetXDp: Float,
+    peakOffsetXDp: Float,
+    renderedOffsetXDp: Float,
     velocityXDps: Float
 ): SwipeRelease {
     if (!claimed || skipping) return SwipeRelease.Ignore
-    return if (shouldSkipCard(offsetXDp, velocityXDps)) SwipeRelease.Skip
-    else SwipeRelease.SnapBack
+    return if (shouldSkipCard(peakOffsetXDp, velocityXDps) ||
+        abs(renderedOffsetXDp) > SMART_CARD_SWIPE_DISPLACEMENT_DP
+    ) SwipeRelease.Skip else SwipeRelease.SnapBack
 }
 
 /** 顶卡：横滑跳过（位移或速度过线离场、沉到摞底，不够回弹）；点动作立即执行 */
@@ -885,7 +1007,9 @@ private fun TopSmartCard(
     modifier: Modifier = Modifier,
     onBodyClick: (SmartCard) -> Unit = {},
     hideActionRow: Boolean = false,
-    celebration: ConnectedFeedback? = null
+    celebration: ConnectedFeedback? = null,
+    // 下一张卡的揭示进度（第二十六批）：手势里跟手写，露边内容读它渐显。
+    revealAnim: Animatable<Float, AnimationVector1D>
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -938,8 +1062,14 @@ private fun TopSmartCard(
                     velocityTracker.addPosition(down.uptimeMillis, down.position)
                     var totalX = 0f
                     var totalY = 0f
+                    // 峰值位移（第二十六批）：整条手势里 |totalX| 的最大值——
+                    // 慢拖、探一下再往回带的手势，松手时净位移会回到阈值内，
+                    // 但峰值才是用户的划走意图，松手判定看它（见 resolveSwipeRelease）。
+                    var peakX = 0f
                     var claimed = false
                     val touchSlop = viewConfiguration.touchSlop
+                    val revealThresholdPx =
+                        with(density) { SMART_CARD_SWIPE_DISPLACEMENT_DP.dp.toPx() }
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id }
@@ -953,6 +1083,7 @@ private fun TopSmartCard(
                         val delta = change.positionChangeIgnoreConsumed()
                         totalX += delta.x
                         totalY += delta.y
+                        peakX = peakX.coerceAtLeast(abs(totalX))
                         velocityTracker.addPosition(
                             change.uptimeMillis, change.position
                         )
@@ -976,24 +1107,44 @@ private fun TopSmartCard(
                         change.consume()
                         val x = totalX
                         scope.launch { offsetX.snapTo(x) }
+                        // 揭示进度跟手写（第二十六批）：下一张卡的内容随拖动
+                        // 渐显，拖过阈值就完整在位；与 offsetX 同款异步 snapTo。
+                        val progress = swipeRevealProgress(x, revealThresholdPx)
+                        scope.launch { revealAnim.snapTo(progress) }
                     }
-                    // 松手判定（第二十五批，问题 2）：正常抬起与指针消失
-                    // （系统取消）走同一判定——resolveSwipeRelease 只看
-                    // 认领与位移/速度。拖够阈值就切卡，不过线才弹回。
+                    // 松手判定（第二十六批）：正常抬起与指针消失（系统取消）
+                    // 走同一判定——resolveSwipeRelease 只看认领、峰值位移、
+                    // 渲染位移与速度。拖够阈值就切卡，不过线才弹回。判定的
+                    // 输入现打一行日志：再有“拖出去还弹回”，logcat 里直接
+                    // 看是哪一项没过线（只记数值，不记卡片内容）。
                     val velocity = velocityTracker.calculateVelocity().x
                     val densityScale = density.density
-                    when (
-                        resolveSwipeRelease(
-                            claimed = claimed,
-                            skipping = skipping,
-                            offsetXDp = totalX / densityScale,
-                            velocityXDps = velocity / densityScale
-                        )
-                    ) {
+                    val netDp = totalX / densityScale
+                    val peakDp = peakX / densityScale
+                    val renderedDp = offsetX.value / densityScale
+                    val release = resolveSwipeRelease(
+                        claimed = claimed,
+                        skipping = skipping,
+                        peakOffsetXDp = peakDp,
+                        renderedOffsetXDp = renderedDp,
+                        velocityXDps = velocity / densityScale
+                    )
+                    Log.d(
+                        TAG,
+                        "swipe release: card=${card.id} claimed=$claimed " +
+                            "skipping=$skipping net=${netDp}dp peak=${peakDp}dp " +
+                            "rendered=${renderedDp}dp " +
+                            "velocity=${velocity / densityScale}dp/s -> $release"
+                    )
+                    when (release) {
                         SwipeRelease.Ignore -> return@awaitEachGesture
                         SwipeRelease.SnapBack -> {
                             scope.launch {
                                 offsetX.animateTo(0f, tween(MotionTokens.Fast))
+                            }
+                            // 揭示内容跟着收回去（与弹回同一节奏）。
+                            scope.launch {
+                                revealAnim.animateTo(0f, tween(MotionTokens.Fast))
                             }
                         }
                         SwipeRelease.Skip -> {
@@ -1040,8 +1191,8 @@ private fun TopSmartCard(
  * - 背景：拿掉 449 加的 0.88 实色衬底（GlassCardStrong，当时为盖住露边卡
  *   的文字），改回玻璃 STRONG 本色＋一层暖灰半透明（0.55；低对比环境
  *   0.75 兜底，见 smartCardTintAlpha）。露边卡不再画字，玻璃透出来也不混。
- * - 边缘呼吸：顶卡 2dp 渐变描边（暖金→柔玫→冷青，6 秒一圈，透明度 0.5↔1
- *   呼吸；减动效时静止）。
+ * - 边缘呼吸：顶卡 3dp 渐变描边（暖金→柔玫→冷青，4 秒一圈，透明度 0.8↔1
+ *   呼吸；减动效时静止）。第二十六批加粗加亮（Bob 2026-11-14：太淡感受不到）。
  * - 正文：Body 15sp Medium；不截断（maxLines=3＋Ellipsis 已删），全文在
  *   卡内滚动；卡高固定 192dp（第十六批由 168dp 抬高），正文区至少 3 行高
  *   （80dp，3.3 行，见 smartCardFactAreaHeight）。
@@ -1066,7 +1217,10 @@ private fun SmartCardView(
     // 颜色只用已有的主操作金 Accent / AccentSoft，不引新色；图标是线性
     // Check，不用 emoji；尺寸走 8dp 网格（40dp 圆、8dp 间距）；减动效时
     // 直接落到终态，不播动画。文案仍按 Bob 的两条写。
-    celebration: ConnectedFeedback? = null
+    celebration: ConnectedFeedback? = null,
+    // 呼吸描边（第二十六批）：只画在顶卡。露边揭示内容传 false——
+    // 升上来成为顶卡后自带光晕，揭示过程中不抢顶卡的光。
+    showBreathingBorder: Boolean = true
 ) {
     val shape = RoundedCornerShape(20.dp)
     // 庆祝动效：整卡从 0.94 轻弹到 1（带回弹的弹簧），对勾从 0 弹入到 1。
@@ -1140,7 +1294,10 @@ private fun SmartCardView(
                 color = tint,
                 shape = shape
             )
-            .then(breathingBorderModifier(reduceMotion))
+            .then(
+                if (showBreathingBorder) breathingBorderModifier(reduceMotion)
+                else Modifier
+            )
             .height(SmartCardHeight)
             .padding(SmartCardContentPadding),
         verticalArrangement = Arrangement.spacedBy(SmartCardRowGap)
@@ -1337,10 +1494,15 @@ private fun smartCardTint(): Color {
 }
 
 /**
- * 顶卡 2dp 渐变呼吸描边（重设计 §2.2）：只画顶卡。
- * 渐变沿卡边 6 秒一圈缓慢移动、描边透明度 0.5↔1 呼吸（呼吸一整圈也是 6 秒）；
- * 减动效时静止（不播动画）。实现：线性渐变的方向角绕卡旋转——矩形本身不转，
- * 只有渐变色在走；描边向内收半个线宽，整条 2dp 都落在 20dp 圆角裁剪内。
+ * 顶卡渐变呼吸描边（重设计 §2.2）：只画顶卡。
+ * 渐变沿卡边缓慢移动、描边透明度呼吸；减动效时静止（不播动画）。
+ * 实现：线性渐变的方向角绕卡旋转——矩形本身不转，只有渐变色在走；
+ * 描边向内收半个线宽，整条描边都落在 20dp 圆角裁剪内。
+ * 第二十六批（Bob 2026-11-14：光晕太淡感受不到）：描边 2dp→3dp、
+ * 呼吸下限 0.5→0.8、一圈 6 秒→4 秒（呼吸半程 2 秒）、玫/青加深一档
+ * （见 smartCardBorderColors），仍在浅暖灰主题与色彩克制口径内，
+ * 不做刺眼的跑马灯；参数见 SmartCardHaloStroke／SmartCardHaloMinAlpha／
+ * SmartCardHaloPeriodMs（单测锁死）。
  */
 @Composable
 private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
@@ -1353,20 +1515,32 @@ private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
         } else {
             launch {
                 while (true) {
-                    angle.animateTo(360f, tween(6000, easing = LinearEasing))
+                    angle.animateTo(
+                        360f,
+                        tween(
+                            durationMillis = SmartCardHaloPeriodMs.toInt(),
+                            easing = LinearEasing
+                        )
+                    )
                     angle.snapTo(0f)
                 }
             }
             launch {
                 while (true) {
-                    borderAlpha.animateTo(0.5f, tween(3000))
-                    borderAlpha.animateTo(1f, tween(3000))
+                    borderAlpha.animateTo(
+                        SmartCardHaloMinAlpha,
+                        tween(durationMillis = (SmartCardHaloPeriodMs / 2).toInt())
+                    )
+                    borderAlpha.animateTo(
+                        1f,
+                        tween(durationMillis = (SmartCardHaloPeriodMs / 2).toInt())
+                    )
                 }
             }
         }
     }
     val density = LocalDensity.current
-    val strokePx = with(density) { 2.dp.toPx() }
+    val strokePx = with(density) { SmartCardHaloStroke.toPx() }
     val radiusPx = with(density) { 19.dp.toPx() }
     val insetPx = with(density) { 1.dp.toPx() }
     val colors = smartCardBorderColors()
@@ -1394,7 +1568,10 @@ private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
 
 /**
  * 露边卡面（重设计 §2.5）：只是一张卡的边——玻璃＋暖灰衬底＋1dp 细线，
- * 不画任何文字内容。升上来成为顶卡时，它的内容才在顶卡位置组合。
+ * 不画任何文字内容。第二十六批：拖动揭示时，下一张卡的内容另有一层
+ * 盖在这张空玻璃面上渐显（见 SmartCardStack 的 PeekContent 槽），
+ * 静止时那层透明度为 0、这里仍是不画字的边；升上来成为顶卡时，
+ * 它的内容在顶卡位置组合。
  * 高度与顶卡同高（SmartCardHeight）；按 peekCardTransform 的位置／缩放／
  * 透明度放，只露底边 8dp 一格。
  */
