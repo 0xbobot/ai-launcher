@@ -202,6 +202,38 @@ fun isVersionUpdateRowClickable(checking: Boolean, downloading: Boolean): Boolea
     !checking && !downloading
 
 /**
+ * 版本卡下行（加入测试计划）副文案（纯函数，2026-11-14 Bob 定：
+ * 不要一句写死——随开关状态变，告诉用户升级会升到什么版本）。
+ * 两个轨道的最新版本号来源不同：测试轨道 = update.json 的 versionName
+ * （复用更新行已有的检查结果，不为副文单独再发 update.json 请求）；
+ * 正式轨道 = releases/latest.json 的 versionName（设置页打开时读一次
+ * 存 prefs，见 OtaUpdater.refreshFormalLatest）。
+ * 比较用 versionCode，versionName 只做展示；五种情况逐字锁死（见
+ * VersionCardTest）。任一轨道版本号未知 → 兜底通用句。
+ */
+fun betaPlanHint(
+    betaOptIn: Boolean,
+    latestTestVersion: OtaInfo?,
+    latestFormalVersion: OtaInfo?,
+    currentVersionCode: Int,
+): String {
+    if (betaOptIn) {
+        val test = latestTestVersion ?: return "开着能提前收到测试版本，关掉只收正式版。"
+        return if (test.versionCode > currentVersionCode) {
+            "开着，下次升级会升到测试版 v${test.versionName}。"
+        } else {
+            "开着，已经是最新测试版了。"
+        }
+    }
+    val formal = latestFormalVersion ?: return "开着能提前收到测试版本，关掉只收正式版。"
+    return if (formal.versionCode > currentVersionCode) {
+        "关着，下次升级只会升到正式版 v${formal.versionName}。"
+    } else {
+        "关着，已经是最新正式版了。"
+    }
+}
+
+/**
  * 设置页（v0.57.0 重构）：
  * - 只剩三项：让助手更聪明（收起）/ 关于 / 接收测试版更新（v0.68.80）
  * - 电量守护默认开启，不设开关；Dock 显示纯手势；排序默认智能
@@ -324,6 +356,18 @@ fun SettingsScreen(
             var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
             val dlState by OtaDownloader.state.collectAsState()
 
+            // 下行副文的两个版本号来源：测试轨道复用更新行已有的检查结果
+            // （手动检查的 updateInfo / 每天自动检查的 latestAvailable，
+            // 不为副文单独再发 update.json 请求）；正式轨道读 prefs 里存的
+            // 上次读到的 releases/latest.json，设置页打开时刷新一次
+            // （LaunchedEffect 一次，刷新本身在 Dispatchers.IO、失败全吞）。
+            val latestAvailable by OtaUpdater.latestAvailable.collectAsState()
+            var formalLatest by remember { mutableStateOf(OtaUpdater.formalLatest(context)) }
+            LaunchedEffect(Unit) {
+                OtaUpdater.refreshFormalLatest(context)
+                formalLatest = OtaUpdater.formalLatest(context)
+            }
+
             val downloading = dlState is OtaDownloader.State.Downloading
             val dlProgress = (dlState as? OtaDownloader.State.Downloading)?.progress ?: 0f
             val dlDone = dlState is OtaDownloader.State.Success
@@ -398,8 +442,18 @@ fun SettingsScreen(
 
             // 版本（2026-11-14 Bob 定：检查更新 + 加入测试计划合成一张卡，
             // 两行、中间一条细分隔线；上行更新各态与点按行为原样保留，
-            // 下行只留标题 + 开关，说明文字不要了）
+            // 下行标题 + 动态副文 + 开关）
             var betaOptIn by remember { mutableStateOf(OtaUpdater.isBetaOptIn(context)) }
+            // 下行副文随开关状态变（betaPlanHint 五种情况）：betaOptIn 是
+            // 屏幕持有的 state，开关一拨副文立刻跟着变；测试轨道取更新行
+            // 已有的检查结果（updateInfo 优先，自动检查的 latestAvailable
+            // 兜底），正式轨道取 prefs 里的上次读数。
+            val betaHint = betaPlanHint(
+                betaOptIn,
+                updateInfo ?: latestAvailable,
+                formalLatest,
+                BuildConfig.VERSION_CODE
+            )
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
@@ -514,22 +568,30 @@ fun SettingsScreen(
                     modifier = Modifier.padding(horizontal = 16.dp),
                     color = AILauncherColors.current.Divider
                 )
-                // 下行：测试计划行——只有开关切换（v0.68.80：开启后可收到
-                // prerelease 测试版推送）；说明文字不要了，开关本身就是意思。
-                // 点按开关只走测试计划，不触发上行更新；下载中开关照常用。
+                // 下行：测试计划行——标题 + 动态副文 + 开关（2026-11-14 Bob 定：
+                // 副文随开关状态变，告诉用户升级会升到什么版本，与上行
+                // 「当前版本 vX」同一口径）。点按开关只走测试计划，
+                // 不触发上行更新；下载中开关照常用。
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "加入测试计划",
-                        fontSize = AILauncherType.BodyLarge.fontSize,
-                        fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.current.Title,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "加入测试计划",
+                            fontSize = AILauncherType.BodyLarge.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Title
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = betaHint,
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Hint
+                        )
+                    }
                     Switch(
                         checked = betaOptIn,
                         onCheckedChange = {

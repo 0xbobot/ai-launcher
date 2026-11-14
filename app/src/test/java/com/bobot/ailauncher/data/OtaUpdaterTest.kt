@@ -143,4 +143,58 @@ class OtaUpdaterTest {
             OtaUpdater.evaluateManifest(manifest(code = 300), 300, false)
         )
     }
+
+    // 正式版档案解析（2026-11-14 测试计划副文用）：只要 versionCode
+    // 与 versionName；apkUrl/sha256 缺了也不影响。
+
+    private fun formalLatestJson(
+        code: Int? = 446,
+        name: String? = "1.1.0",
+        url: String? = "https://bobot.is-a.dev/ai-launcher/releases/ai-launcher-v1.1.0.apk",
+        sha: String? = "14ab10e2"
+    ): String {
+        val sb = StringBuilder("{")
+        if (code != null) sb.append("\"versionCode\": $code,")
+        if (name != null) sb.append("\"versionName\": \"$name\",")
+        if (url != null) sb.append("\"apkUrl\": \"$url\",")
+        if (sha != null) sb.append("\"sha256\": \"$sha\",")
+        sb.append("\"prerelease\": false}")
+        return sb.toString()
+    }
+
+    @Test
+    fun `formal latest parses code and name`() {
+        val info = OtaUpdater.parseFormalLatest(formalLatestJson())
+        assertTrue(info != null)
+        assertEquals(446, info!!.versionCode)
+        assertEquals("1.1.0", info.versionName)
+        assertEquals(false, info.prerelease)
+    }
+
+    @Test
+    fun `formal latest parses without apk url and sha`() {
+        val info = OtaUpdater.parseFormalLatest(formalLatestJson(url = null, sha = null))
+        assertTrue(info != null)
+        assertEquals(446, info!!.versionCode)
+        assertEquals("1.1.0", info.versionName)
+    }
+
+    @Test
+    fun `formal latest malformed json returns null`() {
+        assertEquals(null, OtaUpdater.parseFormalLatest("not json"))
+        assertEquals(null, OtaUpdater.parseFormalLatest(""))
+        assertEquals(null, OtaUpdater.parseFormalLatest("[1,2]"))
+    }
+
+    @Test
+    fun `formal latest missing name returns null`() {
+        assertEquals(null, OtaUpdater.parseFormalLatest(formalLatestJson(name = null)))
+        assertEquals(null, OtaUpdater.parseFormalLatest(formalLatestJson(name = "")))
+    }
+
+    @Test
+    fun `formal latest missing or zero code returns null`() {
+        assertEquals(null, OtaUpdater.parseFormalLatest(formalLatestJson(code = null)))
+        assertEquals(null, OtaUpdater.parseFormalLatest(formalLatestJson(code = 0)))
+    }
 }
