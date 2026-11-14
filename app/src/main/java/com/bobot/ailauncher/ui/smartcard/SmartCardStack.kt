@@ -40,6 +40,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -128,14 +129,21 @@ import kotlin.math.sin
  * 智能卡片叠层宿主（第一阶段，447/v1.2.0，设计稿 §4）：
  * 收集卡片流、回桌面与分钟翻页时重算；没有卡时什么都不渲染、不留占位。
  *
- * 叠层交互：多张卡叠成一摞，最上面一张完整显示、下面露个边（最多露两张）；
+ * 叠层交互（第三十二批，Bob 2026-11-14 20:49 定：叠层改 Hero 轮播——
+ * 划卡线先停，501/512/516/518/520/521/522 的划走修法全部作废）：
+ * 多张卡叠成一摞，最上面一张完整显示、下面露个边（最多露两张）；
+ * 自动定时轮换（5 秒一档，≥2 张才轮，1 张不轮）；叠层下方有圆点指示
+ * （当前张实心金、其余空心淡，点圆点跳到那一张）；左右滑手动切到
+ * 下一张／上一张——划只是切卡、不摘卡，卡还在轮播里；只有点
+ * 「我知道了」才摘卡（真卡 markDone／引导卡轮换推，走原有口径）。
  * 点下一步动作算处理完一张、卡片消失——除了第十九批的有时间段提醒
  * （日历/预约）：时间段内点动作不摘卡、卡片留在摞里，只有「我知道了」
- * 或过了截止点才摘；横滑跳过播离场动画——用户的事项
- * 提醒（账单/预约/日历/未接来电/快递航班）沉到摞底，看完其他卡就轮到它，
- * 只有点「我知道了」才丢（第十四批，Bob 2026-11-10 23:43 定，取代 482
- * 「本轮收起来」）；应用推的提醒划过就丢。全部处理完或跳过后区域清空、
- * 不留占位条。
+ * 或过了截止点才摘。全部处理完后区域清空、不留占位条。
+ * 旧口径（第十四批划走按卡种分：事项卡划过沉底、应用推划过就丢、
+ * 引导卡划过放队尾）随轮播作废——划不再摘卡，沉底／丢／轮换只由
+ * 「我知道了」触发；仓库 skip() 不再由划走调用（UI 侧无调用方，
+ * 旧版已写的 skipped_／skipAt_ 键仍由 liveIdList／orderSkippedIds
+ * 读来排沉底顺序，见 SmartCardRepository.skip）。
  *
  * 每张卡两个响应（设计稿 §4.2，449/v1.2.2，Bob 2026-11-07 晚真机 verdict；
  * 第十一批 Bob 2026-11-09 定文案）：我知道了（卡片消失、不再出现、不追问）
@@ -342,7 +350,6 @@ fun SmartCardStackHost() {
                         opened
                     }
                 },
-                onSkip = { card -> SmartCardRepository.skip(context, card) },
                 onIgnore = { card -> SmartCardRepository.markDone(context, card) },
                 onBodyClick = { card ->
                     // 点预约卡正文（除按钮外）看原文：建提醒前是短信会话/
@@ -487,20 +494,6 @@ fun SmartCardStackHost() {
                 }
                 true
             },
-            onSkip = { card ->
-                if (card.id in connectedIds) {
-                    // 滑走“已连接”反馈卡＝直接记永久忽略，不再出现
-                    SmartCardRepository.dismissGuideCard(context, card)
-                    dismissedGuideIds += card.id
-                    connectedFeedbacks -= card.id
-                    pendingConnectLevels -= card.id
-                } else {
-                    // 横滑一张引导卡＝被拒一次：放队尾（第十四批轮换推），
-                    // 其他来源推完后再回来一次，再拒就本版不再推。
-                    SmartCardRepository.rejectGuideCard(context, card)
-                    guideTick++
-                }
-            },
             onIgnore = { card ->
                 // 点「我知道了」＝被拒一次（第十四批轮换推）：放队尾，不是
                 // 永久记下——旧口径“这张不用了、不再出现”作废一半（不追问是
@@ -573,8 +566,11 @@ fun SmartCardStackHost() {
  * 卡片叠层：最上面一张完整显示，下面两张露个边（8dp 一层）。
  * 重设计 §2.5：露边卡只有边、没有字——内容只在顶卡上组合，滑动时
  * 下一张升上来成为顶卡、内容才画上去；玻璃透出来也不会几张字混在一起。
- * 点动作立即执行（不拖 250ms 动画等开应用）；横滑跳过播离场动画——
- * 用户的事项提醒沉到摞底（第十四批）、应用推的提醒划过就丢。
+ * 点动作立即执行（不拖 250ms 动画等开应用）；横滑切卡播离场动画——
+ * 第三十二批改 Hero 轮播（Bob 2026-11-14 20:49 定）：自动定时轮换
+ * （5 秒一档，≥2 张才轮）、叠层下方圆点指示（当前张实心金、其余空心淡，
+ * 点圆点跳到那一张）、左右滑手动切到下一张／上一张；划只是切卡、不摘卡，
+ * 卡还在轮播里，只有点「我知道了」才摘卡（真卡 markDone／引导卡轮换推）。
  * 每张卡两个响应：我知道了（消失、不再出现）与右按钮（卡片定义的下一步意图）。
  * onClose 非空时（引导卡片模式）× 在顶卡表头右上角、卡片内部：点一下
  * 整叠消失，不再出现；仍在叠层自己的槽位里，不另开浮层。
@@ -722,7 +718,6 @@ fun smartCardTintAlpha(backdropKind: BackdropKind?): Float = when (backdropKind)
 fun SmartCardStack(
     cards: List<SmartCard>,
     onAction: (SmartCard) -> Boolean,
-    onSkip: (SmartCard) -> Unit,
     onIgnore: (SmartCard) -> Unit,
     modifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
@@ -740,18 +735,85 @@ fun SmartCardStack(
     // 顶卡划走动画复位代次（第十二批）：仓库 skip() 时加一；
     // TopSmartCard 的组合键挂上它，同一张卡以新代次重新呈现时动画状态
     // （offsetX/alpha）重建，不会再出现“数着卡、看不见卡”。
+    // 第三十二批：划走不再调 skip()，代次不再因划走而变；仍挂在组合键上
+    // （同一张卡以新代次重现时动画复位），其余不动。
     skipEpoch: Int = 0
 ) {
     if (cards.isEmpty()) return
+    // 轮播下标（第三十二批，Bob 2026-11-14 20:49 定：叠层改 Hero 轮播）：
+    // 当前顶卡在轮播里的位置。划＝切卡（只改下标，不摘卡）；点「我知道了」
+    // 才摘卡（onIgnore，走 markDone／rejectGuideCard 原有口径）。
+    // 摘卡后列表缩短，下标可能越界——carouselClampIndex 钳回末尾；
+    // 摘掉顶卡后下标不动，顶上自然是下一张（“摘卡后自动进到下一张”）。
+    var currentIndex by remember { mutableIntStateOf(0) }
+    val index = carouselClampIndex(currentIndex, cards.size)
+    // 切卡请求（第三十二批）：自动轮换／点圆点两路共用——SmartCardStack
+    // 发请求，TopSmartCard 收到新请求就飞出（沿 dir 方向），飞完才改下标；
+    // tick 保证连续两次同目标的请求也能触发。手动划不走这条路（手势在
+    // TopSmartCard 内部，飞完直接调 onAdvance）。
+    var advanceRequest by remember { mutableStateOf<CarouselAdvance?>(null) }
+    // 揭示目标（第三十二批）：拖动／飞出时露边槽里要显示的那一张。
+    // 默认下一张（index+1）；拖动方向是向右（看上一张）或点圆点／自动
+    // 轮换有明确目标时，改成那一张；-1＝无明确目标（用默认下一张）。
+    // 揭示内容跟方向走——向右划露出的是上一张，不是下一张（轮播与旧
+    // “双向划走都露下一张”不同，方向现在进判定）。
+    var revealTarget by remember { mutableIntStateOf(-1) }
+    // 手动切后暂停自动轮换到这个时刻（第三十二批）：手动切一次停 8 秒
+    // 再恢复 5 秒一档；Hero 无现成逻辑（CoverHero 按日期哈希每天换模板，
+    // 无定时器、无圆点、无手动切），取 8 秒，见 carouselWaitMs。
+    var resumeAtMillis by remember { mutableLongStateOf(0L) }
+    // 自动轮换计时（第三十二批）：下标／张数／恢复时刻／切卡请求任一变
+    // 就重计时；advanceRequest 变也重计时（顶卡若正飞出、这次请求被
+    // TopSmartCard 丢掉，计时重开、下一档再转，不会停摆）。
+    LaunchedEffect(index, cards.size, resumeAtMillis, advanceRequest) {
+        if (!carouselShouldAutoRotate(cards.size)) return@LaunchedEffect
+        delay(
+            carouselWaitMs(
+                SMART_CARD_CAROUSEL_INTERVAL_MS,
+                resumeAtMillis,
+                System.currentTimeMillis()
+            )
+        )
+        val target = carouselNextIndex(index, cards.size, +1)
+        revealTarget = target
+        advanceRequest = CarouselAdvance(
+            target = target,
+            dir = -1f,
+            manual = false,
+            tick = (advanceRequest?.tick ?: 0) + 1
+        )
+    }
+    // 切卡落点（第三十二批）：飞完后下标落到目标；手动切（划／点圆点）
+    // 顺带把自动轮换暂停 8 秒（resumeAtMillis），自动轮换不暂停自己。
+    // 请求清掉——顶卡重挂载时 LaunchedEffect(advanceRequest) 不会拿旧
+    // 请求再飞一次。
+    fun advanceTo(target: Int, dir: Float, manual: Boolean) {
+        currentIndex = target
+        revealTarget = -1
+        advanceRequest = null
+        if (manual) {
+            resumeAtMillis =
+                System.currentTimeMillis() + SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS
+        }
+    }
     // 准备清单覆盖：大模型回来了就显示，没回来显示构建时的 prep（null
     // 即没有，不贴模板）。copy 只换 prep，不动 id/动作/排序键。
-    val top = cards[0].let { it.copy(prep = prepById[it.id] ?: it.prep) }
+    val top = cards[index].let { it.copy(prep = prepById[it.id] ?: it.prep) }
     val connectedIds: Set<String> = connectedFeedbacks.keys
     // 下一张卡（第二十六批，揭示过渡）：拖动顶卡时它的内容要跟着露出来，
     // 不是等松手切过去后才突然出现。内容组合在露边槽里、盖在空玻璃面
     // （PeekCardFace）之上，透明度/缩放/上浮都跟揭示进度走（见下）；
     // 静止时进度为 0、内容全透明，外观与以前的空露边一模一样。
-    val next = cards.getOrNull(1)?.let { it.copy(prep = prepById[it.id] ?: it.prep) }
+    // 第三十二批：揭示内容跟方向／目标走——默认下一张，有明确目标时
+    // （向右拖看上一张、点圆点跳某一张、自动轮换下一张）显示那一张；
+    // 只有 1 张时没有下一张可揭示，next 为 null（不组合揭示层、不画露边）。
+    val revealIndex = if (revealTarget >= 0) {
+        carouselClampIndex(revealTarget, cards.size)
+    } else {
+        carouselNextIndex(index, cards.size, +1)
+    }
+    val next = if (cards.size < 2) null else
+        cards[revealIndex].let { it.copy(prep = prepById[it.id] ?: it.prep) }
     // 揭示进度（第二十六批）：0＝静止（下一张内容全透明）、1＝顶卡已拖过
     // 切卡阈值（下一张内容完整在位）。以顶卡 id 为键：顶卡换了就重建回 0，
     // 新的下一张从全透明开始；切卡离场那一刻进度停在 1，新顶卡挂载时
@@ -763,7 +825,12 @@ fun SmartCardStack(
     // 升上来成为顶卡时，它的内容才在顶卡位置组合（见 top）。
     // 第二十六批补一句：下一张卡的内容在拖动揭示时提前组合在露边槽里
     // （见 next／revealAnim），静止时透明度为 0、仍是不画字的边。
-    val peekIds = cards.drop(1).take(2).map { it.id }
+    // 第三十二批：露边按轮播顺序取顶卡之后的两张（首尾相接）；只有 1 张
+    // 时没有露边（minOf(2, size-1)＝0），2 张时只露 1 张（不把顶卡自己
+    // 再露一遍）。
+    val peekIds = (1..minOf(2, cards.size - 1)).map {
+        cards[carouselNextIndex(index, cards.size, it)].id
+    }
     // 第十批：卡片按桌面卡片语言收边——两侧各留 SmartCardStackSideMargin，
     // 不贴边、不满宽。收边放在最外层 Column：顶卡、露边卡一起收，
     // 摞高量测（SubcomposeLayout）与手势带（cardStackBandPx 的上下缘）
@@ -788,13 +855,32 @@ fun SmartCardStack(
                     TopSmartCard(
                         card = top,
                         onAction = onAction,
-                        onSkip = onSkip,
                         onIgnore = onIgnore,
                         onClose = onClose,
                         onBodyClick = onBodyClick,
                         hideActionRow = top.id in connectedIds,
                         celebration = connectedFeedbacks[top.id],
                         revealAnim = revealAnim,
+                        // 轮播切卡（第三十二批）：手动划飞完后调 onAdvance
+                        // 改下标（manual=true，暂停自动轮换 8 秒）；自动轮换／
+                        // 点圆点走 advanceRequest（TopSmartCard 收到新请求
+                        // 就飞出，飞完同样调 onAdvance）。
+                        currentIndex = index,
+                        cardCount = cards.size,
+                        advanceRequest = advanceRequest,
+                        onAdvance = { target, dir, manual ->
+                            advanceTo(target, dir, manual)
+                        },
+                        onDragDirChange = { dir ->
+                            // 拖动方向上报（第三十二批）：揭示内容跟方向走。
+                            // dir＝0＝方向清除（弹回时揭示收回去，内容换回
+                            // 默认下一张）；dir＜0＝向左拖（看下一张）、
+                            // dir＞0＝向右拖（看上一张）。
+                            revealTarget = if (dir == 0f) -1 else
+                                carouselNextIndex(
+                                    index, cards.size, if (dir < 0) +1 else -1
+                                )
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("smart_card_top")
@@ -883,6 +969,28 @@ fun SmartCardStack(
                 topPlaceables.forEach { it.place(0, 0) }
             }
         }
+        // 圆点指示（第三十二批）：≥2 张才画——当前张实心金、其余空心淡；
+        // 点圆点跳到那一张（与自动轮换同路：先飞出再换下标，manual=true、
+        // 暂停自动轮换 8 秒）。1 张不画圆点、也不自动轮换。
+        if (cards.size >= 2) {
+            Spacer(modifier = Modifier.height(SmartCardCarouselDotGap))
+            CarouselDots(
+                count = cards.size,
+                current = index,
+                onDotClick = { target ->
+                    if (target != index) {
+                        revealTarget = target
+                        advanceRequest = CarouselAdvance(
+                            target = target,
+                            dir = if (target > index) -1f else +1f,
+                            manual = true,
+                            tick = (advanceRequest?.tick ?: 0) + 1
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         // 划卡诊断行已拆（第三十一批，Bob 2026-11-14 18:46 亲口）：
         // 519 立的临时出口使命已完成（证明了手势通、沉底通、飞出通），
         // 叠层下方不再留调试小字。
@@ -896,6 +1004,65 @@ private enum class SmartCardStackSlot {
     companion object {
         fun Peek(index: Int): SmartCardStackSlot =
             if (index == 0) Peek0 else Peek1
+    }
+}
+
+/**
+ * 轮播圆点指示（第三十二批）：当前张实心金、其余空心淡；点圆点跳到那一张。
+ * Hero 无现成圆点可抄（CoverHero 无圆点），样式取主题 token：当前张 Accent
+ * 金（去 AI 味：金色只留主操作，圆点当前态是主操作指示）、其余 Hint 40%
+ * 透明度；尺寸走 8dp 网格（6dp 点、8dp 间距）。
+ * 点按：整行一个 pointerInput，按落点 x 换算到最近的圆点（不给每个 6dp
+ * 点单独挂 clickable——点太小，触控区会重叠、点到相邻的点）。行高 32dp，
+ * 圆点居中；落点消费掉，不落到叠层下层。pointerInput 的键挂上 count 与
+ * current——下标变了就用新的 onDotClick（旧闭包里的 index 会过期）。
+ */
+@Composable
+private fun CarouselDots(
+    count: Int,
+    current: Int,
+    onDotClick: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    Box(
+        modifier = modifier
+            .height(32.dp)
+            .pointerInput(count, current) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val pitch = with(density) {
+                        (SmartCardCarouselDotSize + SmartCardCarouselDotGap).toPx()
+                    }
+                    val dot = with(density) { SmartCardCarouselDotSize.toPx() }
+                    val rowWidth = count * dot + (count - 1) * (pitch - dot)
+                    val startX = (size.width - rowWidth) / 2f
+                    val idx = ((down.position.x - startX + pitch / 2f) / pitch)
+                        .toInt().coerceIn(0, count - 1)
+                    onDotClick(idx)
+                    down.consume()
+                }
+            }
+            .testTag("smart_card_carousel_dots"),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(SmartCardCarouselDotGap),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            for (i in 0 until count) {
+                val selected = i == current
+                Box(
+                    modifier = Modifier
+                        .size(SmartCardCarouselDotSize)
+                        .clip(CircleShape)
+                        .background(
+                            if (selected) AILauncherColors.current.Accent
+                            else AILauncherColors.current.Hint.copy(alpha = 0.4f)
+                        )
+                )
+            }
+        }
     }
 }
 
@@ -922,12 +1089,76 @@ internal fun flyOutDurationMs(reduceMotion: Boolean): Int =
     if (reduceMotion) SMART_CARD_FLY_OUT_REDUCED_MS else SMART_CARD_FLY_OUT_MS
 
 /**
+ * 轮播自动轮换间隔（毫秒，第三十二批）：Hero 无现成间隔可抄——
+ * CoverHero 是按日期哈希每天换模板（coverTemplateFor：dayOfYear % 3），
+ * 无定时器、无圆点、无手动切。取 5 秒，常见轮播档；Bob 可再定。
+ */
+internal const val SMART_CARD_CAROUSEL_INTERVAL_MS = 5000L
+
+/**
+ * 手动切后暂停自动轮换的时长（毫秒，第三十二批）：Hero 无现成逻辑——
+ * 取 8 秒，手动切完安静 8 秒再恢复 5 秒一档。
+ */
+internal const val SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS = 8000L
+
+/** 轮播圆点直径（第三十二批）：6dp；圆点间距 8dp（8dp 网格）。 */
+val SmartCardCarouselDotSize = 6.dp
+val SmartCardCarouselDotGap = 8.dp
+
+/**
+ * 轮播切卡请求（第三十二批）：自动轮换／点圆点两路共用。
+ * target＝飞完后要落到的下标；dir＝飞出方向（-1＝向左飞、看下一张，
+ * +1＝向右飞、看上一张）；manual＝是否用户手动发起（手动切完暂停自动
+ * 轮换 8 秒，自动轮换不暂停自己）；tick 保证连续两次同目标的请求也能
+ * 触发（下标不变时不重组）。
+ */
+internal data class CarouselAdvance(
+    val target: Int,
+    val dir: Float,
+    val manual: Boolean,
+    val tick: Int
+)
+
+/**
+ * 轮播下一张下标（纯函数，第三十二批单测锁死）：dir +1＝下一张、
+ * -1＝上一张，首尾相接循环；只有 0／1 张时下标恒为 0（没有下一张可切）。
+ */
+internal fun carouselNextIndex(current: Int, size: Int, dir: Int): Int {
+    if (size <= 1) return 0
+    return ((current + dir) % size + size) % size
+}
+
+/**
+ * 轮播是否自动轮换（纯函数，第三十二批单测锁死）：≥2 张才轮换，
+ * 1 张不轮、0 张不画叠层。
+ */
+internal fun carouselShouldAutoRotate(size: Int): Boolean = size >= 2
+
+/**
+ * 轮播下标钳制（纯函数，第三十二批单测锁死）：摘卡后列表缩短，下标
+ * 可能越界，钳回末尾；空列表为 0。
+ */
+internal fun carouselClampIndex(index: Int, size: Int): Int =
+    if (size <= 0) 0 else index.coerceIn(0, size - 1)
+
+/**
+ * 自动轮换等待时长（纯函数，第三十二批单测锁死）：正常一档间隔；
+ * 手动切后恢复时刻未到就等到恢复时刻（手动切完安静 8 秒再恢复）。
+ * resumeAtMillis 已过时等一档间隔（coerceAtLeast 兜底，不等 0、不立即连转）。
+ * 注：kotlin.math.maxOf 在此 Kotlin 版本不存在（516 实证），用 coerceAtLeast。
+ */
+internal fun carouselWaitMs(intervalMs: Long, resumeAtMillis: Long, nowMillis: Long): Long =
+    intervalMs.coerceAtLeast(resumeAtMillis - nowMillis)
+
+/**
  * 横滑切卡判定（纯函数，第二十三批单测锁死）：
  * 位移或速度任一过线就切卡。位移阈值 96dp（由 120dp 放宽，慢拖也好切）；
  * 速度阈值 1000dp/s（快速轻扫即使位移不到阈值也切）。
  * 输入用 dp（与密度无关），调用处把 px / density 换算进来。
  * 第二十六批：这个谓词判的是“某一个位移值”——松手判定（见
  * resolveSwipeRelease）给它喂的是峰值位移，不是松手瞬间净位移。
+ * 第三十二批（轮播）：判的仍是“切不切”，不改；“切卡”的后果从“划走顶卡
+ * （沉底／丢）”改成“换到下一张／上一张（不摘卡）”，见 TopSmartCard。
  */
 internal fun shouldSkipCard(
     offsetXDp: Float,
@@ -965,13 +1196,14 @@ internal fun swipeRevealProgress(offsetXPx: Float, thresholdPx: Float): Float {
  * （offsetX.value，真正在屏上画出来的位置）：手势循环里累计的 totalX
  * 万一漏了事件、与渲染对不上，卡片 visibly 已拖过阈值时也不能弹回。
  * 净位移不再单独进判定（峰值恒 ≥ |净位移|，已被峰值包含）。
- * 方向不进判定（abs）：左划右划都是“划走这张看下一张”，不是
- * 上一张/下一张翻页器（双向划走，Bob 2026-11-14 定）。
+ * 方向不进「切不切」的判定（abs）：左划右划都切卡；切到哪一张由调用方
+ * 按 totalX 符号定（左＝下一张、右＝上一张），见 TopSmartCard 的 Skip 分支。
+ * 旧「双向划走都露下一张」（Bob 2026-11-14 定）随轮播作废（第三十二批）。
  */
 internal enum class SwipeRelease {
     /** 没认领或已在离场：本次手势什么都不做。 */
     Ignore,
-    /** 位移或速度过线：离场、划走顶卡。 */
+    /** 位移或速度过线：离场、切到下一张／上一张（轮播，不摘卡）。 */
     Skip,
     /** 没过线：弹回原位。 */
     SnapBack
@@ -990,12 +1222,15 @@ internal fun resolveSwipeRelease(
     ) SwipeRelease.Skip else SwipeRelease.SnapBack
 }
 
-/** 顶卡：横滑跳过（位移或速度过线离场、沉到摞底，不够回弹）；点动作立即执行 */
+/** 顶卡：横滑切卡（轮播：位移或速度过线离场、换到下一张／上一张，不够回弹）；点动作立即执行。
+ * 第三十二批（Bob 2026-11-14 20:49 定：叠层改 Hero 轮播）：划＝切卡、不摘卡——
+ * 飞出后调 onAdvance 改下标（manual=true，暂停自动轮换 8 秒）；自动轮换／
+ * 点圆点走 advanceRequest（收到新请求就飞出，飞完同样调 onAdvance）。
+ * 「我知道了」才摘卡（onIgnore，走 markDone／rejectGuideCard 原有口径）。 */
 @Composable
 private fun TopSmartCard(
     card: SmartCard,
     onAction: (SmartCard) -> Boolean,
-    onSkip: (SmartCard) -> Unit,
     onIgnore: (SmartCard) -> Unit,
     onClose: (() -> Unit)?,
     modifier: Modifier = Modifier,
@@ -1003,7 +1238,15 @@ private fun TopSmartCard(
     hideActionRow: Boolean = false,
     celebration: ConnectedFeedback? = null,
     // 下一张卡的揭示进度（第二十六批）：手势里跟手写，露边内容读它渐显。
-    revealAnim: Animatable<Float, AnimationVector1D>
+    revealAnim: Animatable<Float, AnimationVector1D>,
+    // 轮播切卡（第三十二批）：currentIndex／cardCount 供手动划算目标下标；
+    // advanceRequest 是自动轮换／点圆点的切卡请求；onAdvance 是飞完后的
+    // 落点回调（改下标）；onDragDirChange 上报拖动方向（揭示内容跟方向走）。
+    currentIndex: Int,
+    cardCount: Int,
+    advanceRequest: CarouselAdvance?,
+    onAdvance: (target: Int, dir: Float, manual: Boolean) -> Unit,
+    onDragDirChange: (dir: Float) -> Unit
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -1011,6 +1254,57 @@ private fun TopSmartCard(
     val offsetX = remember { Animatable(0f) }
     val alpha = remember { Animatable(1f) }
     var skipping by remember { mutableStateOf(false) }
+    // 正在拖动（第三十二批）：自动轮换／点圆点的切卡请求来时，若用户正
+    // 在拖、或正在飞出，这次请求丢掉（计时会重开、下一档再转，不停摆），
+    // 不在用户手指底下把卡飞走。
+    var dragging by remember { mutableStateOf(false) }
+    // 飞出并切卡（第三十二批）：手动划／自动轮换／点圆点三路共用——
+    // 先在组合 scope 里把飞出跑完（卡沿 dir 方向飞出屏＋淡出，下一张
+    // 内容同步揭示到 1），再调 onAdvance 改下标；finally 兜底：动画
+    // 中途被取消也要切卡，不留一张飞出一半还顶在上面的卡。
+    // skipping guard：飞出进行中再调直接返回（300ms 窗口内重复请求丢掉）。
+    // cardCount guard：只有 1 张时没有下一张可切，不飞出（到不了这里——
+    // 1 张时松手判定已改成弹回、自动轮换与圆点都不发请求，纯兜底）。
+    fun flyOutAndAdvance(target: Int, dir: Float, manual: Boolean) {
+        if (skipping || cardCount < 2) return
+        skipping = true
+        val flyOutMs = flyOutDurationMs(reduceMotion)
+        scope.launch {
+            try {
+                val flyX = launch {
+                    offsetX.animateTo(
+                        dir * SMART_CARD_FLY_OUT_DISTANCE_PX,
+                        tween(durationMillis = flyOutMs, easing = MotionTokens.Easing)
+                    )
+                }
+                val fade = launch {
+                    alpha.animateTo(
+                        0f,
+                        tween(durationMillis = flyOutMs, easing = MotionTokens.Easing)
+                    )
+                }
+                val reveal = launch {
+                    revealAnim.animateTo(
+                        1f,
+                        tween(durationMillis = flyOutMs, easing = MotionTokens.Easing)
+                    )
+                }
+                flyX.join()
+                fade.join()
+                reveal.join()
+            } finally {
+                onAdvance(target, dir, manual)
+            }
+        }
+    }
+    // 自动轮换／点圆点的切卡请求（第三十二批）：新请求来就飞出切卡；
+    // 正拖着、或正飞出时丢掉这次请求（计时重开、下一档再转，不停摆）。
+    LaunchedEffect(advanceRequest) {
+        val request = advanceRequest ?: return@LaunchedEffect
+        if (request.tick <= 0) return@LaunchedEffect
+        if (skipping || dragging) return@LaunchedEffect
+        flyOutAndAdvance(request.target, request.dir, request.manual)
+    }
 
     SmartCardView(
         card = card,
@@ -1041,7 +1335,7 @@ private fun TopSmartCard(
                 // 又在 0.12 秒内弹回，同一张卡仍在顶、角标仍 2，4–5 次都这样。
                 // 根因不是父级盲操（449 仲裁已把卡片区排除、录屏里扇形／应用
                 // 中心一个没弹），不是 onDragEnd 读到小位移（f_029 渲染值就是
-                // offsetX），不是 onSkip 没顶上下一张（onSkip 根本没被调到，
+                // offsetX），不是换卡回调没顶上下一张（当时 onSkip 根本没被调到，
                 // 卡没有飞出淡出）。SmartCardView 里「横滑切卡与正文竖翻是
                 // 两个方向，不冲突」的注释是错的假设——Compose 的消费是按
                 // change 计的单一位，竖向检测器消费一条 move 就能取消横向拖拽。
@@ -1053,8 +1347,11 @@ private fun TopSmartCard(
                 // 视觉跟手仍走 scope.launch 异步 snapTo（awaitEachGesture 是
                 // 受限作用域，不能直接调挂起的 snapTo）。松手加速度判断
                 // （快速轻扫即使位移不到阈值也切，见 shouldSkipCard）。
-                // 划走语义不动：onSkip 仍接 skip()，用户的事项卡沉底、
-                // 应用推的提醒丢、引导卡走轮换推。
+                // 划走语义（第三十二批，Bob 2026-11-14 20:49 定：改 Hero
+                // 轮播）：划＝切卡、不摘卡——向左划看下一张、向右划看
+                // 上一张，方向现在进判定（旧“双向划走都露下一张”作废）；
+                // 只有点「我知道了」才摘卡（onIgnore）。onSkip 接线已拆，
+                // skip() 不再由划走调用。
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val velocityTracker = VelocityTracker()
@@ -1066,6 +1363,9 @@ private fun TopSmartCard(
                     // 但峰值才是用户的划走意图，松手判定看它（见 resolveSwipeRelease）。
                     var peakX = 0f
                     var claimed = false
+                    // 拖动方向上报的去重（第三十二批）：方向只在符号翻转时
+                    // 上报一次，避免每条 move 都触发重组。
+                    var lastReportedDir = 0f
                     val touchSlop = viewConfiguration.touchSlop
                     val revealThresholdPx =
                         with(density) { SMART_CARD_SWIPE_DISPLACEMENT_DP.dp.toPx() }
@@ -1094,12 +1394,23 @@ private fun TopSmartCard(
                             when {
                                 abs(totalX) > touchSlop && abs(totalX) >= abs(totalY) -> {
                                     claimed = true
+                                    dragging = true
                                 }
                                 abs(totalY) > touchSlop && abs(totalY) > abs(totalX) -> {
                                     // 竖向占优：让路给正文竖翻，卡片不动、不消费。
                                     break
                                 }
                                 else -> continue
+                            }
+                        }
+                        // 拖动方向上报（第三十二批）：揭示内容跟方向走——
+                        // 向左拖露下一张、向右拖露上一张。方向只在符号翻转
+                        // 时上报一次（见 lastReportedDir）。
+                        if (claimed) {
+                            val dir = if (totalX >= 0) 1f else -1f
+                            if (dir != lastReportedDir) {
+                                lastReportedDir = dir
+                                onDragDirChange(dir)
                             }
                         }
                         // 已认领：吃掉这条 move（父级盲操见了已消费就退出）。
@@ -1129,9 +1440,20 @@ private fun TopSmartCard(
                         renderedOffsetXDp = renderedDp,
                         velocityXDps = velocity / densityScale
                     )
-                    when (release) {
+                    // 手势到此结束（第三十二批）：拖动标志清掉，自动轮换／
+                    // 点圆点的请求不再被挡；只有 1 张时没有下一张可切——
+                    // 判定过线也弹回（不飞出；飞出去就回不来了）。
+                    dragging = false
+                    val effectiveRelease =
+                        if (release == SwipeRelease.Skip && cardCount < 2) {
+                            SwipeRelease.SnapBack
+                        } else release
+                    when (effectiveRelease) {
                         SwipeRelease.Ignore -> return@awaitEachGesture
                         SwipeRelease.SnapBack -> {
+                            // 揭示方向清除（第三十二批）：弹回时揭示收回去，
+                            // 内容换回默认下一张（alpha→0，换内容不可见）。
+                            onDragDirChange(0f)
                             scope.launch {
                                 offsetX.animateTo(0f, tween(MotionTokens.Fast))
                             }
@@ -1141,48 +1463,16 @@ private fun TopSmartCard(
                             }
                         }
                         SwipeRelease.Skip -> {
-                            skipping = true
+                            // 第三十二批：划＝切卡（轮播），不摘卡——飞出后调
+                            // onAdvance 改下标（manual=true，暂停自动轮换 8 秒）。
+                            // 向左划看下一张（index+1，飞出方向向左 dir=-1），
+                            // 向右划看上一张（index-1，飞出方向向右 dir=+1）。
+                            // 飞出先行、换卡在后（第三十批）：飞出跑完再改下标，
+                            // 重组截断不了飞出；finally 兜底见 flyOutAndAdvance。
                             val dir = if (totalX >= 0) 1f else -1f
-                            // 第三十批：飞出先行、换卡在后。之前是先调
-                            // onSkip 再飞——skip()→refresh() 立即改 _cards、
-                            // skipEpoch 加一、重组 dispose 旧 TopSmartCard，
-                            // 飞出动画的 scope.launch 一帧都跑不出来，视觉
-                            // 上就是直接换下一张（Bob 2026-11-14 17:46：
-                            // 切换不明显、感觉不到它被划走）。现在反过来：
-                            // 先在组合 scope 里把飞出跑完（卡沿划的方向飞
-                            // 出屏＋淡出，下一张内容同步揭示到 1），再调
-                            // onSkip 换卡。飞出跑在 onSkip 之前，组合还活
-                            // 着，重组截断不了它。finally 兜底：动画中途被
-                            // 取消（切后台等）也要把卡沉下去，不留一张飞
-                            // 出一半还顶在上面的卡。
-                            val flyOutMs = flyOutDurationMs(reduceMotion)
-                            scope.launch {
-                                try {
-                                    val flyX = launch {
-                                        offsetX.animateTo(
-                                            dir * SMART_CARD_FLY_OUT_DISTANCE_PX,
-                                            tween(durationMillis = flyOutMs, easing = MotionTokens.Easing)
-                                        )
-                                    }
-                                    val fade = launch {
-                                        alpha.animateTo(
-                                            0f,
-                                            tween(durationMillis = flyOutMs, easing = MotionTokens.Easing)
-                                        )
-                                    }
-                                    val reveal = launch {
-                                        revealAnim.animateTo(
-                                            1f,
-                                            tween(durationMillis = flyOutMs, easing = MotionTokens.Easing)
-                                        )
-                                    }
-                                    flyX.join()
-                                    fade.join()
-                                    reveal.join()
-                                } finally {
-                                    onSkip(card)
-                                }
-                            }
+                            val step = if (totalX >= 0) -1 else +1
+                            val target = carouselNextIndex(currentIndex, cardCount, step)
+                            flyOutAndAdvance(target, dir, manual = true)
                         }
                     }
                 }
