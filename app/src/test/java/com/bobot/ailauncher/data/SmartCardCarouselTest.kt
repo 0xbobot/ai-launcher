@@ -2,25 +2,34 @@ package com.bobot.ailauncher.data
 
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CAROUSEL_INTERVAL_MS
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS
+import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CROSSFADE_MS
+import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CROSSFADE_REDUCED_MS
 import com.bobot.ailauncher.ui.smartcard.carouselClampIndex
 import com.bobot.ailauncher.ui.smartcard.carouselNextIndex
 import com.bobot.ailauncher.ui.smartcard.carouselShouldAutoRotate
 import com.bobot.ailauncher.ui.smartcard.carouselWaitMs
+import com.bobot.ailauncher.ui.smartcard.crossfadeDurationMs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Hero 轮播纯函数单测（第三十二批，Bob 2026-11-14 20:49 定：叠层改 Hero 轮播）。
+ * 单卡槽位自动轮播纯函数单测（第三十二批 Hero 轮播立、第三十三批
+ * Bob 2026-11-14 22:44 定单卡槽位自动轮播、无划走重做）。
  *
- * 锁死的是轮播下标／自动轮换／等待时长三组纯函数：
- * - carouselNextIndex：下一张／上一张，首尾相接循环；
+ * 锁死的是轮播下标／自动轮换／等待时长／淡入淡出四组纯函数：
+ * - carouselNextIndex：自动轮换下一张，首尾相接循环；
  * - carouselShouldAutoRotate／carouselClampIndex：≥2 张才轮换、摘卡后下标钳制；
- * - carouselWaitMs：正常一档间隔，手动切后等到恢复时刻。
- * 手势本身（轴向仲裁、消费、跟手）与自动轮换计时（LaunchedEffect＋delay）
- * 是 Compose 运行时，JVM 测不到，靠代码走查＋Bob 真机验（自动轮换、圆点、
- * 左右滑切卡、划不摘卡、「我知道了」才摘卡、1 张不轮）。
+ * - carouselWaitMs：正常一档间隔，点圆点后等到恢复时刻；
+ * - crossfadeDurationMs：淡入淡出时长选档（正常 300ms、减动效 120ms）。
+ * 划走判定（shouldSkipCard／resolveSwipeRelease）、飞出时长
+ * （flyOutDurationMs）、拖动揭示（swipeRevealProgress）已随第三十三批
+ * 一并删掉（SmartCardSwipeTest 整个文件已删）。
+ * 自动轮换计时（LaunchedEffect＋delay）、点圆点跳卡的接线、Crossfade
+ * 本身是 Compose 运行时，JVM 测不到，靠代码走查＋Bob 真机验（自动轮换
+ * 5 秒、圆点点按跳卡、「我知道了」摘卡进下一张、1 张不轮、0 张清空、
+ * 淡入淡出不闪）。
  */
 class SmartCardCarouselTest {
 
@@ -58,7 +67,7 @@ class SmartCardCarouselTest {
 
     @Test
     fun nextIndex_singleCard_staysAtZero() {
-        // 只有 1 张时没有下一张可切，下标恒为 0（划过阈值也弹回，不飞出）。
+        // 只有 1 张时没有下一张可切，下标恒为 0（不轮换、无圆点）。
         assertEquals(0, carouselNextIndex(0, 1, +1))
         assertEquals(0, carouselNextIndex(0, 1, -1))
     }
@@ -105,11 +114,11 @@ class SmartCardCarouselTest {
         assertEquals(0, carouselClampIndex(3, 0))
     }
 
-    // ---------- 等待时长：正常一档，手动切后等到恢复时刻 ----------
+    // ---------- 等待时长：正常一档，点圆点后等到恢复时刻 ----------
 
     @Test
     fun waitMs_noManualPause_isInterval() {
-        // 没手动切过（resumeAt 已过），等一档间隔 5 秒。
+        // 没点过圆点（resumeAt 已过），等一档间隔 5 秒。
         assertEquals(
             SMART_CARD_CAROUSEL_INTERVAL_MS,
             carouselWaitMs(SMART_CARD_CAROUSEL_INTERVAL_MS, 0L, 10_000L)
@@ -118,7 +127,7 @@ class SmartCardCarouselTest {
 
     @Test
     fun waitMs_manualPausePending_waitsUntilResume() {
-        // 手动切完 2 秒（恢复时刻在 6 秒后），等 6 秒（不是 5 秒一档、也不是满 8 秒）。
+        // 点圆点后 2 秒（恢复时刻在 6 秒后），等 6 秒（不是 5 秒一档、也不是满 8 秒）。
         assertEquals(
             6_000L,
             carouselWaitMs(
@@ -131,7 +140,7 @@ class SmartCardCarouselTest {
 
     @Test
     fun waitMs_manualPauseAlmostOver_isInterval() {
-        // 手动切完 7 秒（恢复时刻在 1 秒后），等一档间隔 5 秒（不等 1 秒连转）。
+        // 点圆点后 7 秒（恢复时刻在 1 秒后），等一档间隔 5 秒（不等 1 秒连转）。
         assertEquals(
             SMART_CARD_CAROUSEL_INTERVAL_MS,
             carouselWaitMs(
@@ -140,5 +149,39 @@ class SmartCardCarouselTest {
                 10_000L + 7_000L
             )
         )
+    }
+
+    // ---------- 第三十三批：摘卡后下标——摘掉当前卡进下一张 ----------
+
+    @Test
+    fun clampIndex_afterDismissTop_staysOnNextCard() {
+        // 3 张、当前下标 1 的卡被「我知道了」摘掉，剩 2 张，下标 1 不动——
+        // 顶上自然是下一张（摘卡后自动进到下一张），不是钳回末尾。
+        assertEquals(1, carouselClampIndex(1, 2))
+        assertEquals(0, carouselClampIndex(0, 2))
+    }
+
+    // ---------- 第三十三批：淡入淡出时长选档（crossfadeDurationMs） ----------
+    // 单卡槽位切卡只用淡入淡出：正常 300ms 看得见切换、不拖沓；
+    // 减动效 120ms 缩短但不硬切。
+
+    @Test
+    fun crossfadeDuration_normal_is300ms() {
+        assertEquals(SMART_CARD_CROSSFADE_MS, crossfadeDurationMs(false))
+        assertEquals(300, SMART_CARD_CROSSFADE_MS)
+    }
+
+    @Test
+    fun crossfadeDuration_reducedMotion_is120ms() {
+        assertEquals(SMART_CARD_CROSSFADE_REDUCED_MS, crossfadeDurationMs(true))
+        assertEquals(120, SMART_CARD_CROSSFADE_REDUCED_MS)
+    }
+
+    @Test
+    fun crossfadeDuration_reduced_isShorterButNotZero() {
+        // 减动效缩短、但不直接硬切：时长必须大于 0 且小于正常档。
+        val reduced = crossfadeDurationMs(true)
+        assertTrue(reduced > 0)
+        assertTrue(reduced < crossfadeDurationMs(false))
     }
 }
