@@ -276,4 +276,106 @@ class SmartCardLogicTest {
         assertEquals("昨天用过", formatLastUsed(ms(2026, 11, 4, 9, 0), now))
         assertEquals("3 天前用过", formatLastUsed(ms(2026, 11, 2, 9, 0), now))
     }
+
+    // ---------- 第二十九批：沉底顺序按划走时刻排（orderSkippedIds） ----------
+    // Bob 2026-11-14 13:07 录屏：两张日历卡划 8 次、顶卡一次没换。
+    // 根因之一是沉底顺序按截止点排：两张都划过后，沉底顺序固定为截止点
+    // 早的在前、再划顶卡什么都不变。此后按划走时刻排——早划在前、新划
+    // 沉最后，重划已沉底的卡刷新时刻、轮转一圈。
+
+    @Test
+    fun orderSkippedIds_earliestSwipeFirst() {
+        val now = ms(2026, 11, 14, 13, 0)
+        val future = ms(2026, 11, 14, 14, 0)
+        assertEquals(
+            listOf("a", "b"),
+            SmartCardRepository.orderSkippedIds(
+                listOf(
+                    Triple("a", future, 1000L),
+                    Triple("b", future, 2000L)
+                ),
+                now
+            )
+        )
+    }
+
+    @Test
+    fun orderSkippedIds_reswipeMovesToEnd() {
+        // a 先划（t=1000）、b 后划（t=2000），再划 a（t=3000）→
+        // a 的时刻刷新到最新，沉最后，b 顶上来。
+        val now = ms(2026, 11, 14, 13, 0)
+        val future = ms(2026, 11, 14, 14, 0)
+        assertEquals(
+            listOf("b", "a"),
+            SmartCardRepository.orderSkippedIds(
+                listOf(
+                    Triple("a", future, 3000L),
+                    Triple("b", future, 2000L)
+                ),
+                now
+            )
+        )
+    }
+
+    @Test
+    fun orderSkippedIds_expiredFilteredOut() {
+        val now = ms(2026, 11, 14, 13, 0)
+        assertEquals(
+            listOf("b"),
+            SmartCardRepository.orderSkippedIds(
+                listOf(
+                    Triple("a", ms(2026, 11, 14, 12, 0), 1000L),
+                    Triple("b", ms(2026, 11, 14, 14, 0), 2000L)
+                ),
+                now
+            )
+        )
+    }
+
+    @Test
+    fun orderSkippedIds_missingSkipAt_sortsFirst() {
+        // 旧版键没有 skipAt_（缺省 0），排最前。
+        val now = ms(2026, 11, 14, 13, 0)
+        val future = ms(2026, 11, 14, 14, 0)
+        assertEquals(
+            listOf("old", "new"),
+            SmartCardRepository.orderSkippedIds(
+                listOf(
+                    Triple("new", future, 2000L),
+                    Triple("old", future, 0L)
+                ),
+                now
+            )
+        )
+    }
+
+    @Test
+    fun visible_bothSkipped_reswipeRotates() {
+        // Bob 的两张卡场景：a（12:58–13:08）b（13:08–13:18）都划过后，
+        // 沉底顺序 = 划走先后；重划顶卡 a → skippedIds 变成 [b, a]，
+        // 顶卡换成 b（轮转），不是死死钉在 a 上。
+        val now = ms(2026, 11, 14, 13, 0)
+        val a = card(
+            "a", SmartCardKind.CALENDAR,
+            ms(2026, 11, 14, 12, 58), ms(2026, 11, 14, 13, 8),
+            appearFromMs = ms(2026, 11, 14, 12, 28)
+        )
+        val b = card(
+            "b", SmartCardKind.CALENDAR,
+            ms(2026, 11, 14, 13, 8), ms(2026, 11, 14, 13, 18),
+            appearFromMs = ms(2026, 11, 14, 12, 38)
+        )
+        // a 先划、b 后划：沉底 [a, b]，顶回 a。
+        val firstRound = visibleSmartCards(
+            listOf(a, b), doneIds = emptySet(),
+            skippedIds = listOf("a", "b"), nowMs = now
+        )
+        assertEquals(listOf("a", "b"), firstRound.map { it.id })
+        // 再划顶卡 a：a 的时刻刷新到最新，沉底 [b, a]，顶换成 b。
+        val secondRound = visibleSmartCards(
+            listOf(a, b), doneIds = emptySet(),
+            skippedIds = listOf("b", "a"), nowMs = now
+        )
+        assertEquals(listOf("b", "a"), secondRound.map { it.id })
+    }
 }

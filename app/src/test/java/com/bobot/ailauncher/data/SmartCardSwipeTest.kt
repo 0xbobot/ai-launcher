@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.data
 
 import com.bobot.ailauncher.ui.smartcard.SwipeRelease
+import com.bobot.ailauncher.ui.smartcard.formatSkipRepoSuffix
 import com.bobot.ailauncher.ui.smartcard.formatSwipeDiagnosis
 import com.bobot.ailauncher.ui.smartcard.resolveSwipeRelease
 import com.bobot.ailauncher.ui.smartcard.shouldSkipCard
@@ -385,6 +386,34 @@ class SmartCardSwipeTest {
                 netDp = 120.4f, peakDp = 150.6f, renderedDp = 118f,
                 velocityDps = 200.6f, exitReason = "up", moveCount = 18
             )
+        )
+    }
+
+    // ---------- 第二十九批：划卡诊断行·仓库结果后缀 ----------
+    // onSkip 调完立刻读仓库顶卡：顶换了「顶已换」，还是被划走那张
+    // 「顶未换」，栈空了「已空」。Bob 划完直接读这半句。
+
+    @Test
+    fun repoSuffix_topChanged_showsSwapped() {
+        assertEquals(
+            "｜仓库：顶已换 张数=2",
+            formatSkipRepoSuffix("a", "b", 2)
+        )
+    }
+
+    @Test
+    fun repoSuffix_topUnchanged_showsNotSwapped() {
+        assertEquals(
+            "｜仓库：顶未换 张数=2",
+            formatSkipRepoSuffix("a", "a", 2)
+        )
+    }
+
+    @Test
+    fun repoSuffix_emptyStack_showsEmpty() {
+        assertEquals(
+            "｜仓库：已空 张数=0",
+            formatSkipRepoSuffix("a", null, 0)
         )
     }
 }
