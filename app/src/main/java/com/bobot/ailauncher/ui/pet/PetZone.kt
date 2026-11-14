@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -78,6 +79,15 @@ import kotlin.math.roundToInt
  * 抚摸手势、长按刷新天气、十万火急舞台动效、编辑模式（含其 BackHandler 与
  * 版本更新指引文案）。天气/通知/会议提醒等共享状态与 effect 全部保留，行为不变。
  */
+/**
+ * 扇形淡化目标透明度（Bob 2026-11-14 10:43，单测锁死）：与 Dock 同口径
+ * （MainScreen.kt v0.68.32）：扇形展开时淡出到 0.3，收起后恢复 1。
+ * 信号是 blindActive（Selecting || Editing），不是 blindFanState——
+ * Dismissing 不计入，Dock 在收起动画开始时即恢复，本处同款。
+ */
+internal fun fanDimTargetAlpha(blindActive: Boolean): Float =
+    if (blindActive) 0.3f else 1f
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PetZone(
@@ -92,7 +102,12 @@ fun PetZone(
     intentSlot: @Composable () -> Unit = {},
     // 智能卡片（447）：叠层槽位——会行下方、独立一段；无卡时零高度，
     // 构图与无槽一致；输入态与简报一起淡出（卡片是首页内容，不是输入内容）。
-    cardStack: @Composable () -> Unit = {}
+    cardStack: @Composable () -> Unit = {},
+    // 扇形淡化（Bob 2026-11-14 10:43）：扇形唤起时桌面所有元素淡化，
+    // 与 Dock 同信号（blindActive：Selecting || Editing，见 HomeScreen）、
+    // 同目标透明度 0.3、同 180ms tween（MainScreen.kt v0.68.32 Dock 口径）。
+    // 本区含杂志 hero 与智能卡片叠层，一起淡化；Dock 自有同款实现，不在本处。
+    blindActive: Boolean = false
 ) {
     // v0.30.0：天气微动作
     val weatherDesc by com.bobot.ailauncher.data.WeatherState.desc.collectAsState()
@@ -285,6 +300,16 @@ fun PetZone(
         BriefingTextMode.FALLBACK_SCRIM -> AILauncherColors.current.Accent
     }
 
+    // 扇形淡化（Bob 2026-11-14 10:43）：与 Dock 同款 animateFloatAsState，
+    // 目标 0.3/1、tween(PetMotion.FadeHandoff)（180ms）。只做视觉淡化，
+    // 不拦点按——扇形打开期间手势归盲操层（Selecting）/扇形自身层（Editing），
+    // 与 Dock 同口径：alpha 本身不禁触，扇形收起后恢复。
+    val fanDimAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = fanDimTargetAlpha(blindActive),
+        animationSpec = androidx.compose.animation.core.tween(PetMotion.FadeHandoff),
+        label = "fanDimAlpha",
+    )
+
     // v0.68.44（Bob）：封面模式——杂志 hero + 紧凑条；TodaySection 只跑数据不上 UI
     // v0.68.45：恢复快捷面板（Bob：快捷服务别删）；无会议时紧凑条隐藏（Bob：别和 hero 重复）
     // v0.68.47：装备环收进简报槽位（Bob：散落不优雅）
@@ -314,6 +339,7 @@ fun PetZone(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .graphicsLayer { alpha = fanDimAlpha }
                 .onGloballyPositioned { briefingColumnHPx = it.size.height }
         ) {
         // v0.68.101（D-1）：横屏输入态 hero 整体让位——横屏 IME 抬升后

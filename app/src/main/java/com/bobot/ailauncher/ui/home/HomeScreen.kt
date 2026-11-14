@@ -352,6 +352,9 @@ fun HomeScreen(
                     .fillMaxWidth()
             ) {
             PetZone(
+                // 扇形淡化（Bob 2026-11-14 10:43）：与 Dock 同信号 blindActive
+                //（Selecting || Editing），hero 与智能卡片叠层一起淡到 0.3。
+                blindActive = blindActive,
                 // 智能卡片（447）：叠层槽位——会行下方独立一段，无卡零高度，
                 // 输入态与简报一起淡出。
                 // 449/v1.2.2：包裹 Box 捕获叠层 boundsInRoot，供盲操手势仲裁
