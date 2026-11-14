@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.ui.settings.llmCardCollapsedHint
 import com.bobot.ailauncher.ui.settings.llmCardTitle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -187,5 +188,18 @@ class LlmCardFoldTest {
     fun expandedAlwaysShowsCardName() {
         assertEquals("让助手更聪明", llmCardTitle(expanded = true, apiKeyBlank = true))
         assertEquals("让助手更聪明", llmCardTitle(expanded = true, apiKeyBlank = false))
+    }
+
+    // 收起行描述（2026-11-14 Bob 定：收起加一行，告诉用户配好大模型会起
+    // 什么作用）：没填 Key 写配好之后的效果，填了写已经配好的效果
+
+    @Test
+    fun collapsedHintWithoutKeyStatesEffectAfterSetup() {
+        assertEquals("配好之后，助手能听懂你说话、帮你办事。", llmCardCollapsedHint(apiKeyBlank = true))
+    }
+
+    @Test
+    fun collapsedHintWithKeyStatesEffectNow() {
+        assertEquals("配好了，助手能听懂你说话、帮你办事。", llmCardCollapsedHint(apiKeyBlank = false))
     }
 }

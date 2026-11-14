@@ -1,5 +1,7 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.ui.settings.sourcesCardCollapsedHint
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -35,5 +37,13 @@ class SourcesCardFoldTest {
         assertFalse(UiPrefs.effectiveSourcesCardCollapsed(allConnected = false, storedCollapsed = null))
         assertFalse(UiPrefs.effectiveSourcesCardCollapsed(allConnected = false, storedCollapsed = true))
         assertFalse(UiPrefs.effectiveSourcesCardCollapsed(allConnected = false, storedCollapsed = false))
+    }
+
+    // 收起行描述（2026-11-14 Bob 定：收起加一行，告诉用户接上这些来源
+    // 会起什么作用；一行写完，不带数字——数字已在标题行）
+
+    @Test
+    fun collapsedHintStatesEffectOfConnectedSources() {
+        assertEquals("接上之后，桌面会主动提醒你该做的事。", sourcesCardCollapsedHint())
     }
 }

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
@@ -120,6 +121,68 @@ import com.bobot.ailauncher.ui.island.IslandToasts
  */
 fun llmCardTitle(expanded: Boolean, apiKeyBlank: Boolean): String =
     if (!expanded && !apiKeyBlank) "大模型已经配好了" else "让助手更聪明"
+
+/**
+ * 来源卡收起行描述（纯函数，2026-11-14 Bob 定：收起加一行，告诉用户接上
+ * 这些来源会起什么作用；展开态完整说明不动）：接上之后桌面会主动提醒。
+ * 收起只在 4/4 时出现，描述不带数字——数字已在标题行。
+ */
+fun sourcesCardCollapsedHint(): String = "接上之后，桌面会主动提醒你该做的事。"
+
+/**
+ * 「让助手更聪明」卡收起行描述（纯函数，2026-11-14 Bob 定：收起加一行，
+ * 告诉用户配好大模型会起什么作用；展开态完整说明不动）：没填 Key 写配好
+ * 之后的效果，填了写已经配好的效果。
+ */
+fun llmCardCollapsedHint(apiKeyBlank: Boolean): String =
+    if (apiKeyBlank) "配好之后，助手能听懂你说话、帮你办事。" else "配好了，助手能听懂你说话、帮你办事。"
+
+/**
+ * 版本卡上行（更新行）主文案（纯函数，2026-11-14 Bob 定：检查更新 +
+ * 加入测试计划合成一张卡）：检查中 / 下载中 / 下完 / 失败 / 有新版 /
+ * 平时六态，与原来检查更新卡逐字一致；合并后行内复用。
+ */
+fun versionUpdateTitle(
+    checking: Boolean,
+    downloading: Boolean,
+    downloadDone: Boolean,
+    downloadFailed: Boolean,
+    updateVersionName: String?,
+): String = when {
+    checking -> "正在检查..."
+    downloading -> "正在下载 v${updateVersionName ?: ""}"
+    downloadDone -> "下载完成"
+    downloadFailed -> "下载失败"
+    updateVersionName != null -> "发现新版本 v$updateVersionName"
+    else -> "检查更新"
+}
+
+/**
+ * 版本卡上行副文案（纯函数）：下完「点按安装 vX」/ 失败「点按重试」/
+ * 有新版更新说明 / 平时「当前版本 vX」。下载中返回 null——下载中副文
+ * 是进度条 + downloadStatusText，不走这里。与原来检查更新卡逐字一致。
+ */
+fun versionUpdateHint(
+    downloading: Boolean,
+    downloadDone: Boolean,
+    downloadFailed: Boolean,
+    updateVersionName: String?,
+    changelog: String?,
+    currentVersionName: String,
+): String? = when {
+    downloading -> null
+    downloadDone -> "点击安装 v${updateVersionName ?: ""}"
+    downloadFailed -> "点击重试"
+    updateVersionName != null -> changelog
+    else -> "当前版本 v$currentVersionName"
+}
+
+/**
+ * 版本卡上行是否可点（纯函数）：检查中 / 下载中点按无反应，其余各态
+ * 都有动作（检查 / 下载 / 安装 / 重试）。
+ */
+fun isVersionUpdateRowClickable(checking: Boolean, downloading: Boolean): Boolean =
+    !checking && !downloading
 
 /**
  * 设置页（v0.57.0 重构）：
@@ -249,6 +312,17 @@ fun SettingsScreen(
             val dlDone = dlState is OtaDownloader.State.Success
             val dlFailed = dlState is OtaDownloader.State.Failed
 
+            // 上行文案走纯函数（单测锁死，见 VersionCardTest）：主文六态、
+            // 副文四态，与原来检查更新卡逐字一致。
+            val updateTitle = versionUpdateTitle(
+                checking, downloading, dlDone, dlFailed, updateInfo?.versionName
+            )
+            val updateHint = versionUpdateHint(
+                downloading, dlDone, dlFailed,
+                updateInfo?.versionName, updateInfo?.changelog,
+                BuildConfig.VERSION_NAME
+            )
+
             val onCardClick: (() -> Unit)? = when {
                 checking || downloading -> null
                 dlDone -> {
@@ -305,101 +379,102 @@ fun SettingsScreen(
                 }
             }
 
+            // 版本（2026-11-14 Bob 定：检查更新 + 加入测试计划合成一张卡，
+            // 两行、中间一条细分隔线；上行更新各态与点按行为原样保留，
+            // 下行只留标题 + 开关，说明文字不要了）
+            var betaOptIn by remember { mutableStateOf(OtaUpdater.isBetaOptIn(context)) }
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f)),
-                // F-10：整卡点按补 tick（不可点态不震，与视觉禁用一致）
-                onClick = { onCardClick?.let { view.tickHaptic(); it() } }
+                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = when {
-                                checking -> "正在检查..."
-                                downloading -> "正在下载 v${updateInfo?.versionName ?: ""}"
-                                dlDone -> "下载完成"
-                                dlFailed -> "下载失败"
-                                updateInfo != null -> "发现新版本 v${updateInfo!!.versionName}"
-                                else -> "检查更新"
-                            },
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        when {
-                            downloading -> {
-                                LinearProgressIndicator(
-                                    progress = { dlProgress },
-                                    modifier = Modifier.fillMaxWidth()
+                Column {
+                    // 上行：更新行——点按只走更新（F-10：可点态补 tick；
+                    // 检查中/下载中不可点，不震，与视觉禁用一致）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = onCardClick != null) {
+                                onCardClick?.let { view.tickHaptic(); it() }
+                            }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = updateTitle,
+                                fontSize = AILauncherType.BodyLarge.fontSize,
+                                fontWeight = FontWeight.Medium,
+                                color = AILauncherColors.current.Title
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            when {
+                                downloading -> {
+                                    LinearProgressIndicator(
+                                        progress = { dlProgress },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = downloadStatusText(
+                                            dlState as OtaDownloader.State.Downloading
+                                        ),
+                                        fontSize = AILauncherType.Footnote.fontSize,
+                                        color = AILauncherColors.current.Hint
+                                    )
+                                }
+                                dlDone -> Text(
+                                    text = updateHint.orEmpty(),
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    color = AILauncherColors.current.Accent
                                 )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = downloadStatusText(
-                                        dlState as OtaDownloader.State.Downloading
-                                    ),
+                                dlFailed -> {
+                                    Text(
+                                        text = updateHint.orEmpty(),
+                                        fontSize = AILauncherType.Footnote.fontSize,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    val apkUrl = updateInfo?.apkUrl
+                                    if (!apkUrl.isNullOrBlank()) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        TextButton(
+                                            onClick = {
+                                                view.tickHaptic()
+                                                try {
+                                                    val intent = Intent(
+                                                        Intent.ACTION_VIEW,
+                                                        android.net.Uri.parse(apkUrl)
+                                                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                                    context.startActivity(intent)
+                                                } catch (_: Exception) {
+                                                    IslandToasts.show("无法打开浏览器")
+                                                }
+                                            },
+                                            contentPadding = PaddingValues(0.dp)
+                                        ) {
+                                            Text(
+                                                text = "手动下载（浏览器打开）",
+                                                fontSize = AILauncherType.Footnote.fontSize,
+                                                color = AILauncherColors.current.Accent
+                                            )
+                                        }
+                                    }
+                                }
+                                updateInfo != null -> Text(
+                                    text = updateHint.orEmpty(),
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    color = AILauncherColors.current.Hint,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                else -> Text(
+                                    text = updateHint.orEmpty(),
                                     fontSize = AILauncherType.Footnote.fontSize,
                                     color = AILauncherColors.current.Hint
                                 )
                             }
-                            dlDone -> Text(
-                                text = "点击安装 v${updateInfo?.versionName ?: ""}",
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Accent
-                            )
-                            dlFailed -> {
-                                Text(
-                                    text = "点击重试",
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                val apkUrl = updateInfo?.apkUrl
-                                if (!apkUrl.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    TextButton(
-                                        onClick = {
-                                            view.tickHaptic()
-                                            try {
-                                                val intent = Intent(
-                                                    Intent.ACTION_VIEW,
-                                                    android.net.Uri.parse(apkUrl)
-                                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-                                                context.startActivity(intent)
-                                            } catch (_: Exception) {
-                                                IslandToasts.show("无法打开浏览器")
-                                            }
-                                        },
-                                        contentPadding = PaddingValues(0.dp)
-                                    ) {
-                                        Text(
-                                            text = "手动下载（浏览器打开）",
-                                            fontSize = AILauncherType.Footnote.fontSize,
-                                            color = AILauncherColors.current.Accent
-                                        )
-                                    }
-                                }
-                            }
-                            updateInfo != null -> Text(
-                                text = updateInfo!!.changelog,
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            else -> Text(
-                                text = "当前版本 v${BuildConfig.VERSION_NAME}",
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint
-                            )
                         }
-                    }
                     if (checking || downloading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
@@ -416,38 +491,28 @@ fun SettingsScreen(
                         )
                     }
                 }
-            }
-        }
-
-        // v0.68.80：测试版开关——开启后可收到 prerelease 测试版推送
-        item {
-            var betaOptIn by remember { mutableStateOf(OtaUpdater.isBetaOptIn(context)) }
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-            ) {
+                // 两行之间的细分隔线（与应用弹窗同一口径：
+                // HorizontalDivider + 横向 16.dp + 主题 Divider 色）
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = AILauncherColors.current.Divider
+                )
+                // 下行：测试计划行——只有开关切换（v0.68.80：开启后可收到
+                // prerelease 测试版推送）；说明文字不要了，开关本身就是意思。
+                // 点按开关只走测试计划，不触发上行更新；下载中开关照常用。
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "加入测试计划",
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "加入后可提前收到测试版本，适合尝鲜；默认只收正式版",
-                            fontSize = AILauncherType.Footnote.fontSize,
-                            color = AILauncherColors.current.Hint
-                        )
-                    }
+                    Text(
+                        text = "加入测试计划",
+                        fontSize = AILauncherType.BodyLarge.fontSize,
+                        fontWeight = FontWeight.Medium,
+                        color = AILauncherColors.current.Title,
+                        modifier = Modifier.weight(1f)
+                    )
                     Switch(
                         checked = betaOptIn,
                         onCheckedChange = {
@@ -458,6 +523,7 @@ fun SettingsScreen(
                         }
                     )
                 }
+            }
             }
         }
 
@@ -524,7 +590,8 @@ fun SettingsScreen(
             }
             // 智能等级（设计稿 §2，2026-11-08 Bob 定）：已经接上了 N/4 个来源，
             // 数字随接上/断开实时变（connectorStates 本就随权限状态重算；第十三批起只认权限）。
-            // 2026-11-14 Bob 定：4 个源全接上时这块默认收起，只留一行摘要；
+            // 2026-11-14 Bob 定：4 个源全接上时这块默认收起，收起是标题行 +
+            // 一行描述 + chevron（描述写接上之后的效果，sourcesCardCollapsedHint）；
             // 没接满时保持展开，方便接上剩下的。收起/展开记下来，下次进
             // 设置页还按上次的来；4/4 首次接满（从未点过）默认收起。
             val connectedCount = connectedSourceCount(connectorStates)
@@ -570,6 +637,19 @@ fun SettingsScreen(
                                     tint = AILauncherColors.current.Hint
                                 )
                             }
+                        }
+                        if (sourcesCollapsed) {
+                            // 2026-11-14 Bob 定：收起加一行描述，告诉用户接上
+                            // 这些来源会起什么作用；一行写完，展开态说明不动。
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = sourcesCardCollapsedHint(),
+                                fontSize = AILauncherType.Footnote.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                lineHeight = 18.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                         if (!sourcesCollapsed) {
                             Spacer(modifier = Modifier.height(8.dp))
@@ -666,8 +746,9 @@ fun SettingsScreen(
         // Key 输入框 + DeepSeek 链接 + 接口地址 + 模型名 + 测试连接 + Key 存放形态
         // 明示一起搬；助手分区随之取消（只剩这一块）。
         // 让助手更聪明（收起一层）：2026-11-14 Bob 定，收起样式与来源卡一致——
-        // 收起只留一行状态句 + chevron，说明文字挪进展开块；已填 Key 时收起行写
-        // 「大模型已经配好了」，没填写卡名（llmCardTitle）。
+        // 收起是标题行 + 一行描述 + chevron，完整说明文字挪进展开块；已填 Key
+        // 时收起行写「大模型已经配好了」，没填写卡名（llmCardTitle），描述行
+        // 写配好之后的效果（llmCardCollapsedHint）。
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -680,8 +761,9 @@ fun SettingsScreen(
                     // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
                     // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
                     // F-10：点按补 tick（走 Haptics 两档门面）。
-                    // 收起行与来源卡同一口径：一行状态句 + chevron（llmCardTitle），
-                    // 说明文字不在这里、只在展开块里。
+                    // 收起行与来源卡同一口径：标题行 + 一行描述 + chevron
+                    // （llmCardTitle + llmCardCollapsedHint），完整说明文字
+                    // 只在展开块里。
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -691,13 +773,27 @@ fun SettingsScreen(
                             },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = llmCardTitle(llmExpanded, apiKey.isBlank()),
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = llmCardTitle(llmExpanded, apiKey.isBlank()),
+                                fontSize = AILauncherType.BodyLarge.fontSize,
+                                fontWeight = FontWeight.Medium,
+                                color = AILauncherColors.current.Title
+                            )
+                            if (!llmExpanded) {
+                                // 2026-11-14 Bob 定：收起加一行描述，告诉用户配好
+                                // 大模型会起什么作用；一行写完，展开态说明不动。
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = llmCardCollapsedHint(apiKey.isBlank()),
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    color = AILauncherColors.current.Hint,
+                                    lineHeight = 18.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                         Icon(
                             if (llmExpanded) Icons.Filled.KeyboardArrowUp
                             else Icons.Filled.KeyboardArrowDown,
