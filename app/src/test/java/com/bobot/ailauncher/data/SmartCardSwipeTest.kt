@@ -1,6 +1,9 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.ui.smartcard.SwipeRelease
+import com.bobot.ailauncher.ui.smartcard.resolveSwipeRelease
 import com.bobot.ailauncher.ui.smartcard.shouldSkipCard
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -101,6 +104,103 @@ class SmartCardSwipeTest {
                 offsetXDp = 0f,
                 velocityXDps = 500f,
                 flingThresholdDps = 600f
+            )
+        )
+    }
+
+    // ---------- 第二十五批：松手判定（resolveSwipeRelease） ----------
+    // 手势怎么结束（正常抬起 / 指针从事件里消失）不影响判定——只看
+    // 认领与位移/速度。501 的 pointerGone 分支无条件弹回是本批根因：
+    // Bob 2026-11-14 录屏里顶卡向右拖到近乎出屏（峰值位移约 889px
+    // ≈ 300dp）却两次都弹回。手势本身 JVM 测不到，判定函数锁死在这里，
+    // 指针消失后仍走判定由代码走查＋Bob 真机验。
+
+    @Test
+    fun release_largeDisplacement_skips() {
+        // 录屏实测峰值约 300dp，远超 96dp 阈值，必须切卡。
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                offsetXDp = 300f, velocityXDps = 0f
+            )
+        )
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                offsetXDp = 136f, velocityXDps = 0f
+            )
+        )
+    }
+
+    @Test
+    fun release_negativeDisplacement_skips() {
+        // 双向划走：左划右划都是“划走这张看下一张”，不是翻页器。
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                offsetXDp = -300f, velocityXDps = 0f
+            )
+        )
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                offsetXDp = -97f, velocityXDps = 0f
+            )
+        )
+    }
+
+    @Test
+    fun release_smallDisplacement_snapsBack() {
+        assertEquals(
+            SwipeRelease.SnapBack,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                offsetXDp = 50f, velocityXDps = 0f
+            )
+        )
+        assertEquals(
+            SwipeRelease.SnapBack,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                offsetXDp = -50f, velocityXDps = -300f
+            )
+        )
+    }
+
+    @Test
+    fun release_fastFling_skips() {
+        assertEquals(
+            SwipeRelease.Skip,
+            resolveSwipeRelease(
+                claimed = true, skipping = false,
+                offsetXDp = 20f, velocityXDps = 1500f
+            )
+        )
+    }
+
+    @Test
+    fun release_notClaimed_isIgnored() {
+        // 竖向占优让路、正文竖翻时，手势没认领，什么都不做。
+        assertEquals(
+            SwipeRelease.Ignore,
+            resolveSwipeRelease(
+                claimed = false, skipping = false,
+                offsetXDp = 300f, velocityXDps = 0f
+            )
+        )
+    }
+
+    @Test
+    fun release_alreadySkipping_isIgnored() {
+        assertEquals(
+            SwipeRelease.Ignore,
+            resolveSwipeRelease(
+                claimed = true, skipping = true,
+                offsetXDp = 300f, velocityXDps = 0f
             )
         )
     }

@@ -20,7 +20,12 @@ data class CalEvent(
     val location: String,
     val description: String = "",
     val allDay: Boolean,
-    val eventId: Long = 0L
+    val eventId: Long = 0L,
+    /**
+     * 事件所在日历账户的显示名（第二十五批，问题 3：日历卡小标用它，
+     * 如“豆包日历”；不是用来打开的日历应用）。取不到为空串。
+     */
+    val calendarName: String = ""
 )
 
 /**
@@ -72,7 +77,8 @@ object CalendarRepository {
                     CalendarContract.Instances.EVENT_LOCATION,
                     CalendarContract.Instances.DESCRIPTION,
                     CalendarContract.Instances.ALL_DAY,
-                    CalendarContract.Instances.EVENT_ID
+                    CalendarContract.Instances.EVENT_ID,
+                    CalendarContract.Instances.CALENDAR_ID
                 ),
                 null, null,
                 CalendarContract.Instances.BEGIN + " ASC"
@@ -86,8 +92,11 @@ object CalendarRepository {
                 val di = it.getColumnIndex(CalendarContract.Instances.DESCRIPTION)
                 val ai = it.getColumnIndex(CalendarContract.Instances.ALL_DAY)
                 val eidi = it.getColumnIndex(CalendarContract.Instances.EVENT_ID)
-                while (it.moveToNext() && list.size < 20) {
-                    list += CalEvent(
+                val cidi = it.getColumnIndex(CalendarContract.Instances.CALENDAR_ID)
+                // 先按行读出事件＋所属日历 id，账户名第二步批量查（见下）。
+                val rows = mutableListOf<Pair<CalEvent, Long>>()
+                while (it.moveToNext() && rows.size < 20) {
+                    rows += CalEvent(
                         title = if (ti >= 0) it.getString(ti).orEmpty() else "",
                         begin = if (bi >= 0) it.getLong(bi) else 0L,
                         end = if (ei >= 0) it.getLong(ei) else 0L,
@@ -95,12 +104,59 @@ object CalendarRepository {
                         description = if (di >= 0) it.getString(di).orEmpty() else "",
                         allDay = if (ai >= 0) it.getInt(ai) == 1 else false,
                         eventId = if (eidi >= 0) it.getLong(eidi) else 0L
-                    )
+                    ) to (if (cidi >= 0) it.getLong(cidi) else 0L)
+                }
+                // 批量查日历账户显示名（第二十五批，问题 3：日历卡小标用它，
+                // 如“豆包日历”）；查不到只影响小标、不挡事件本身。
+                val names = calendarDisplayNames(
+                    context, rows.map { it.second }.toSet()
+                )
+                rows.forEach { (event, calId) ->
+                    list += event.copy(calendarName = names[calId].orEmpty())
                 }
             }
             list
         } catch (_: Exception) {
             emptyList()
+        }
+    }
+
+    /**
+     * 批量查日历账户显示名（第二十五批，问题 3）：按 calendarId 取
+     * Calendars 表的 CALENDAR_DISPLAY_NAME（如“豆包日历”）。日历数
+     * 很少，直接全表读出再按 id 过滤，不拼 IN 子句。查不到或异常返回
+     * 空 map（调用方按空串处理，只影响小标、不挡事件本身）。
+     */
+    internal fun calendarDisplayNames(
+        context: Context,
+        calendarIds: Set<Long>
+    ): Map<Long, String> {
+        if (calendarIds.isEmpty()) return emptyMap()
+        return try {
+            val result = mutableMapOf<Long, String>()
+            val cursor = context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                arrayOf(
+                    CalendarContract.Calendars._ID,
+                    CalendarContract.Calendars.CALENDAR_DISPLAY_NAME
+                ),
+                null, null, null
+            )
+            cursor?.use {
+                val idIdx = it.getColumnIndex(CalendarContract.Calendars._ID)
+                val nameIdx =
+                    it.getColumnIndex(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+                while (it.moveToNext()) {
+                    if (idIdx < 0 || nameIdx < 0) continue
+                    val id = it.getLong(idIdx)
+                    if (id in calendarIds) {
+                        result[id] = it.getString(nameIdx).orEmpty()
+                    }
+                }
+            }
+            result
+        } catch (_: Exception) {
+            emptyMap()
         }
     }
 }

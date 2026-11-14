@@ -347,14 +347,52 @@ fun calendarCardSourceKey(event: CalEvent): String {
 }
 
 /**
- * 解析一个真正能拉起的日历应用包名（第二十五批，问题 1 根因修法；纯解析，
+ * 日历事件详情意图的 URI 字符串（纯函数，第二十五批单测锁死）：返回
+ * content://com.android.calendar/events/{eventId}。解析器用它在包内
+ * 校验“这个包是不是真能打开事件详情”——只问 URI 模式，不问具体
+ * 事件存不存在（id 只进模式匹配，取不到真 id 时用 1 占位）。
+ * 返回 String（不直接给 Uri）：与 feishuJoinDeepLink 同款，
+ * JVM 单测不用碰 Android 框架就能锁死格式。
+ */
+internal fun calendarEventDetailUri(eventId: Long): String {
+    val id = if (eventId > 0) eventId else 1L
+    return "content://com.android.calendar/events/$id"
+}
+
+/**
+ * 包内校验事件详情意图是否可解析（第二十五批，问题 3）：把事件详情
+ * 意图限定到该包，resolveActivity 非空才算接得住。真日历应用接得住，
+ * 谷歌 APP（com.google.android.googlequicksearchbox）接不住——它声称
+ * 能接日历内容 URI 又有主入口，才在 510 成了唯一候选。PackageManager
+ * 本身 JVM 测不到，URI 格式由 calendarEventDetailUri 单测锁死。
+ */
+internal fun canOpenCalendarEventDetail(
+    pm: PackageManager,
+    pkg: String,
+    eventId: Long
+): Boolean {
+    return try {
+        val intent = Intent(
+            Intent.ACTION_VIEW, Uri.parse(calendarEventDetailUri(eventId))
+        ).setPackage(pkg)
+        intent.resolveActivity(pm) != null
+    } catch (_: Exception) {
+        false
+    }
+}
+
+/**
+ * 解析一个真正能拉起的日历应用包名（第二十四批，问题 1 根因修法；纯解析，
  * 不启动）：只认 getLaunchIntentForPackage 非空的包（有主入口才是真应用）。
  * resolveActivity 在中兴上会落到系统包（无真实日历 Activity），不能只认
  * 它。候选按优先序：rili 能力已装提供方（按最近使用）→ 能接
  * CATEGORY_APP_CALENDAR 的应用 → 能接日历内容 URI 的应用。
+ * 第二十五批问题 3 再加一道：在包内校验事件详情意图可解析才认——候选
+ * 只问“声称能接日历意图”，不问“是不是日历应用”，谷歌 APP 就这么混
+ * 进来成了唯一候选（小标画成它、「看日程」也只能开它的主界面）。
  * 拿不到返回 null（调用方返回 false、给我们自己的提示）。
  */
-fun resolveLaunchableCalendarPackage(context: Context): String? {
+fun resolveLaunchableCalendarPackage(context: Context, eventId: Long = 0L): String? {
     val pm = context.packageManager
     val candidates = linkedSetOf<String>()
     // 1) rili 能力已装提供方（按最近使用排在前）。
@@ -395,10 +433,13 @@ fun resolveLaunchableCalendarPackage(context: Context): String? {
             .mapNotNull { it.activityInfo?.packageName }
             .forEach { candidates += it }
     } catch (_: Exception) { }
-    // 只认有主入口的真应用（系统壳包直接排除）。
+    // 只认有主入口、且真能打开事件详情的包（系统壳包直接排除；
+    // 谷歌 APP 这类“声称能接日历意图、但没有事件详情 Activity”的
+    // 非日历应用，在事件详情校验这一步被挡掉）。
     return candidates.firstOrNull { pkg ->
         try {
-            pm.getLaunchIntentForPackage(pkg) != null
+            pm.getLaunchIntentForPackage(pkg) != null &&
+                canOpenCalendarEventDetail(pm, pkg, eventId)
         } catch (_: Exception) {
             false
         }
@@ -414,10 +455,11 @@ fun resolveLaunchableCalendarPackage(context: Context): String? {
  *    &confid=<会议号>，显式包名＋resolveActivity 校验，接不住落回下一级）；
  *    再走第十七批的显式包名 https 意图（同一条链接限定到该包，resolveActivity 非空
  *    才真正发），接不住落回通用浏览器意图直开链接；
- * 2) 无链接 → 先解析一个真正能拉起的日历应用包名
- *    （resolveLaunchableCalendarPackage），再按该包名拉起：先试事件详情
- *    （content://com.android.calendar/events/{eventId} 限定到该包），
- *    接不住打开该应用主界面；没有能拉起的日历应用时返回 false；
+ * 2) 无链接 → 先解析一个真正能打开事件详情的日历应用包名
+ *    （resolveLaunchableCalendarPackage，带 eventId 在包内校验事件详情
+ *    意图可解析，非日历应用进不来），再按该包名拉起事件详情；
+ *    事件详情打不开就返回 false，不退回开应用主界面（开主界面只会
+ *    打开一个跟日程无关的应用）；没有能拉起的日历应用时返回 false；
  * 全失败返回 false（调用方提示，不在这里弹）。
  */
 fun openCalendarEvent(context: Context, eventId: Long, meetingUrl: String?): Boolean {
@@ -476,37 +518,30 @@ fun openCalendarEvent(context: Context, eventId: Long, meetingUrl: String?): Boo
             return true
         } catch (_: Exception) { /* 链接打开失败 → 落日历兜底 */ }
     }
-    // 第二十五批：无链接时不再只依赖 CATEGORY_APP_CALENDAR 和 content URI
+    // 第二十四批：无链接时不再只依赖 CATEGORY_APP_CALENDAR 和 content URI
     // 的泛解析——中兴上泛解析会落到系统包（无真实日历 Activity），直接发
     // 只会换来系统 toast「未安装该应用」，我们的「没能打开」还不会出现。
-    // 先解析一个真正能拉起的日历应用包名，再按该包名拉起。
-    val calendarPkg = resolveLaunchableCalendarPackage(context)
-    if (calendarPkg != null) {
-        // 先试事件详情（content URI 限定到该包）。
-        if (eventId > 0) {
-            try {
-                val uri = Uri.parse("content://com.android.calendar/events/$eventId")
-                val viewIntent = Intent(Intent.ACTION_VIEW, uri)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    .setPackage(calendarPkg)
-                if (viewIntent.resolveActivity(context.packageManager) != null) {
-                    context.startActivity(viewIntent)
-                    return true
-                }
-            } catch (_: Exception) { /* 事件详情接不住 → 打开应用主界面 */ }
-        }
-        // 事件详情接不住 → 打开该应用主界面。
+    // 先解析一个真正能打开事件详情的日历应用包名（带 eventId 校验，
+    // 谷歌 APP 这类非日历应用进不来），再按该包名拉起事件详情。
+    // 事件详情打不开 → 返回 false，不退回开应用主界面（第二十五批，
+    // 问题 3：限定包接不住事件详情时开主界面，只会打开一个跟日程
+    // 无关的应用——510 在 Bob 机上就是这么开到谷歌 APP 主界面的）。
+    val calendarPkg = resolveLaunchableCalendarPackage(context, eventId)
+    if (calendarPkg != null && eventId > 0) {
         try {
-            val launch = context.packageManager
-                .getLaunchIntentForPackage(calendarPkg)
-                ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (launch != null) {
-                context.startActivity(launch)
+            val viewIntent = Intent(
+                Intent.ACTION_VIEW, Uri.parse(calendarEventDetailUri(eventId))
+            )
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .setPackage(calendarPkg)
+            if (viewIntent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(viewIntent)
                 return true
             }
-        } catch (_: Exception) { /* 主界面也起不来 → 返回 false */ }
+        } catch (_: Exception) { /* 事件详情接不住 → 返回 false */ }
     }
-    // 没有能打开的日历应用 → 返回 false，调用方给我们自己的提示
-    // （IslandToasts「没能打开」），不再让系统 toast 成为唯一反馈。
+    // 没有能打开事件详情的日历应用 → 返回 false，调用方给我们自己的提示
+    // （IslandToasts「没能打开」），不再让系统 toast 成为唯一反馈，
+    // 也不开一个跟日程无关的应用主界面。
     return false
 }

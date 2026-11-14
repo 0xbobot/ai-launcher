@@ -2,6 +2,7 @@ package com.bobot.ailauncher.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
@@ -26,7 +27,8 @@ class CalendarCardTest {
         end: Long,
         location: String = "",
         description: String = "",
-        eventId: Long = 7L
+        eventId: Long = 7L,
+        calendarName: String = ""
     ) = CalEvent(
         title = title,
         begin = begin,
@@ -34,7 +36,8 @@ class CalendarCardTest {
         location = location,
         description = description,
         allDay = false,
-        eventId = eventId
+        eventId = eventId,
+        calendarName = calendarName
     )
 
     @Test
@@ -263,5 +266,82 @@ class CalendarCardTest {
             description = "链接：https://zoom.us/j/123456789。"
         )
         assertEquals("https://zoom.us/j/123456789", extractMeetingUrl(e))
+    }
+
+    // ---------- 第二十五批，问题 3：日历卡小标＝事件所在的日历账户名 ----------
+    // 小标告诉用户这场日程来自哪个日历（豆包日历），不是用来打开的日历
+    // 应用。账户名没有包名可取图标，TargetApp.packageName 为 null，
+    // UI 只画文字（AppSubscript）。打开链路（resolveLaunchableCalendarPackage
+    // ＋ openCalendarEvent）是另一回事，不动小标、也不被小标带偏。
+
+    @Test
+    fun calendarCardTargetApp_accountName_winsOverResolvedApp() {
+        // Bob 机上的真实例子：两场“测试”都是豆包建的，账户就是“豆包日历”；
+        // 哪怕解析出的打开目标是别的，小标也只写账户名、不画图标。
+        val e = event(
+            "测试", ms(2026, 11, 14, 8, 0), ms(2026, 11, 14, 10, 0),
+            calendarName = "豆包日历"
+        )
+        val resolved = TargetApp("com.google.android.calendar", "Google 日历")
+        val target = SmartCardRepository.calendarCardTargetApp(e, resolved)
+        assertEquals(TargetApp(packageName = null, label = "豆包日历"), target)
+    }
+
+    @Test
+    fun calendarCardTargetApp_accountName_trimmed() {
+        val e = event(
+            "测试", ms(2026, 11, 14, 8, 0), ms(2026, 11, 14, 10, 0),
+            calendarName = "  豆包日历  "
+        )
+        val target = SmartCardRepository.calendarCardTargetApp(e, null)
+        assertEquals(TargetApp(packageName = null, label = "豆包日历"), target)
+    }
+
+    @Test
+    fun calendarCardTargetApp_blankAccountName_fallsBackToResolvedApp() {
+        val e = event(
+            "测试", ms(2026, 11, 14, 8, 0), ms(2026, 11, 14, 10, 0),
+            calendarName = "   "
+        )
+        val resolved = TargetApp("com.google.android.calendar", "Google 日历")
+        assertEquals(
+            resolved,
+            SmartCardRepository.calendarCardTargetApp(e, resolved)
+        )
+    }
+
+    @Test
+    fun calendarCardTargetApp_noAccountNoApp_noSubscript() {
+        val e = event(
+            "测试", ms(2026, 11, 14, 8, 0), ms(2026, 11, 14, 10, 0)
+        )
+        assertNull(SmartCardRepository.calendarCardTargetApp(e, null))
+    }
+
+    // ---------- 第二十五批，问题 3：事件详情 URI 格式 ----------
+
+    @Test
+    fun calendarEventDetailUri_usesEventId() {
+        assertEquals(
+            "content://com.android.calendar/events/7",
+            calendarEventDetailUri(7L)
+        )
+        assertEquals(
+            "content://com.android.calendar/events/12345",
+            calendarEventDetailUri(12345L)
+        )
+    }
+
+    @Test
+    fun calendarEventDetailUri_invalidId_usesPlaceholder() {
+        // 拿不到真 id 时用 1 占位：URI 模式匹配不问具体事件存不存在。
+        assertEquals(
+            "content://com.android.calendar/events/1",
+            calendarEventDetailUri(0L)
+        )
+        assertEquals(
+            "content://com.android.calendar/events/1",
+            calendarEventDetailUri(-3L)
+        )
     }
 }

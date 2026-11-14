@@ -107,10 +107,13 @@ const val SMART_CARD_DISMISS_LABEL = "我知道了"
  * 只存包名＋应用名（UI 层按包名取真实图标）；只做展示、不可点。
  * 账单＝还款目标应用；预约＝日历（建提醒的目标；建完提醒后是看预约
  * 的目标应用）；未接来电＝电话；快递/航班＝通知所属应用。
+ * 第二十五批：日历卡小标改成事件所在的日历账户名（如“豆包日历”），
+ * 不是用来打开的日历应用——账户名没有包名可取图标，packageName
+ * 为 null 时 UI 只画文字、不画图标（见 AppSubscript）。
  */
 data class TargetApp(
-    val packageName: String,
-    /** 应用显示名（PackageManager 读到的真实标签） */
+    val packageName: String?,
+    /** 应用显示名（PackageManager 读到的真实标签）；日历卡是账户显示名 */
     val label: String
 )
 
