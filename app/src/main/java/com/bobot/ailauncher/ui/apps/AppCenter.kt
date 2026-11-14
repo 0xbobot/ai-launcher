@@ -291,17 +291,38 @@ fun AppCenterContent(
         }
     }
     // v0.41.31（Bob）：Dock 分区——A 之前，像隐藏分区一样；
-    // UiPrefs.getDockPinned 转 AppInfo（按置顶顺序，去隐藏）
+    // UiPrefs.getDockPinned 转 AppInfo（按置顶顺序，去隐藏、去未读）
     val dockTick by UiPrefs.dockTick.collectAsState()
     // v0.56.2（Bob）：Rail 图标闪烁
     val railFlashState by UiPrefs.railFlash.collectAsState()
     val (flashTick, flashTarget) = railFlashState
-    val dockApps = remember(catalog, dockTick, hidden) {
+    // v0.22：分类区取消（等需要时再重新设计），只保留 A-Z
+    // （2026-11-14 长按 bug：本块从 Dock 分区之后移到之前——dockApps 要
+    // 滤未读，得先算出 unreadMemberPkgs；派生口径一字不动。）
+
+    // A-Z 数据：全部可启动应用（去自己、去隐藏），中文按拼音首字母排序分组。
+    // v0.68.95（F-04）：直接读仓库快照的可见集（IO 构建、口径与原组合期实现
+    // 逐字一致：去自己/去隐藏 + Collator(CHINA) 排序）；装卸时快照在后台换代，
+    // 结果到了才换表，组合期不再整表同步重建。
+    val azApps = catalog?.visibleApps ?: emptyList()
+    // 未读组（Bob 2026-11-07 晚）：角标 > 0 的应用排到 A 前面最优先显示。
+    // badgeCounts 是角标计数口径（451：三路最大值），本批只读它，不改计数。
+    val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
+    val unreadApps = remember(azApps, badgeCounts) { deriveUnreadApps(azApps, badgeCounts) }
+    val unreadMemberPkgs = remember(unreadApps) { unreadApps.map { it.packageName }.toSet() }
+    val unreadVisible = unreadApps.isNotEmpty()
+    val dockApps = remember(catalog, dockTick, hidden, unreadMemberPkgs) {
         val pinned = UiPrefs.getDockPinned(context)
         if (pinned.isEmpty()) emptyList()
         else {
             val all = (catalog?.apps ?: emptyList()).associateBy { it.packageName }
-            pinned.mapNotNull { all[it] }.filter { it.packageName !in hidden }
+            // 2026-11-14（Bob 长按微信 bug）：未读组里的应用只在未读组出现
+            // （453 单一归属口径也覆盖 Dock 分区）——置顶又未读的应用此前同
+            // 时进 Dock 分区与未读组，长按时快捷浮层渲染两份、Dock 行的拖拽
+            // 手柄冒在未读行旁、首行幽灵 ★ 随展开的面板脱离行。读完角标归零
+            // 即回 Dock 分区（dockOrder 经 LaunchedEffect(dockApps) 同步）。
+            pinned.mapNotNull { all[it] }
+                .filter { it.packageName !in hidden && it.packageName !in unreadMemberPkgs }
         }
     }
     // v0.41.34（Bob）：Dock 分区拖动排序——本地顺序状态，拖动时实时更新，松手保存。
@@ -320,19 +341,6 @@ fun AppCenterContent(
     // v0.41.32（Bob）：幽灵 ★ 与第一行同行，不再单独占一行
     val dockSectionSize = if (dockApps.isNotEmpty()) dockApps.size + 1 else 0
 
-    // v0.22：分类区取消（等需要时再重新设计），只保留 A-Z
-
-    // A-Z 数据：全部可启动应用（去自己、去隐藏），中文按拼音首字母排序分组。
-    // v0.68.95（F-04）：直接读仓库快照的可见集（IO 构建、口径与原组合期实现
-    // 逐字一致：去自己/去隐藏 + Collator(CHINA) 排序）；装卸时快照在后台换代，
-    // 结果到了才换表，组合期不再整表同步重建。
-    val azApps = catalog?.visibleApps ?: emptyList()
-    // 未读组（Bob 2026-11-07 晚）：角标 > 0 的应用排到 A 前面最优先显示。
-    // badgeCounts 是角标计数口径（451：三路最大值），本批只读它，不改计数。
-    val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
-    val unreadApps = remember(azApps, badgeCounts) { deriveUnreadApps(azApps, badgeCounts) }
-    val unreadMemberPkgs = remember(unreadApps) { unreadApps.map { it.packageName }.toSet() }
-    val unreadVisible = unreadApps.isNotEmpty()
     // 未读组打磨（Bob 2026-11-08 08:02 反馈①）：
     // - 每包最新一条在用通知（完整列表，不截 20 条），供预览行 + 左滑启用判定；
     // - 短信包（默认 + 可见）用于识别短信应用（预览取未读短信正文）；
@@ -382,6 +390,13 @@ fun AppCenterContent(
     // 未读组左滑清理：取消该包的在用通知（走通知监听服务），角标随之重算。
     val onClearUnreadNotifications: (String) -> Unit = { pkg ->
         LauncherNotificationService.cancelNotificationsForPackage(pkg)
+    }
+    // 未读组右滑关通知（Bob 2026-11-14 09:55 亲定右滑）：跳到该应用的系统
+    // 通知设置页，由用户拨开关（第三方关不掉别的 App 的通知权限）；打不开
+    // 时退到应用详情页。行不消失——关掉后角标重算、行自然离组；角标来自
+    // 短信库等非通知口径时，关权限后行仍在（收据写明）。
+    val onDisableUnreadNotifications: (String) -> Unit = { pkg ->
+        openAppNotificationSettings(context, pkg)
     }
     // 折叠组（419）：不活跃集——可见 = azApps（已去隐藏、去自己）；共享规则
     // （AppUsageTracker.inactiveMembers：系统 UsageStats 优先，没授权退回
@@ -1134,6 +1149,7 @@ fun AppCenterContent(
                 unreadDisplayNames = unreadDisplayNames,
                 activeNotifPkgs = activeNotifPkgs,
                 onClearNotifications = onClearUnreadNotifications,
+                onDisableAppNotifications = onDisableUnreadNotifications,
                 foldExpanded = foldExpandedState,
                 onToggleFold = {
                     val next = !foldExpandedState
@@ -1271,6 +1287,7 @@ fun AppCenterContent(
                     unreadDisplayNames = unreadDisplayNames,
                     activeNotifPkgs = activeNotifPkgs,
                     onClearUnreadNotifications = onClearUnreadNotifications,
+                    onDisableAppNotifications = onDisableUnreadNotifications,
                     unreadVisible = unreadVisible,
                     stuckUnread = stuckState.stuckUnread,
                     actions = rowActions

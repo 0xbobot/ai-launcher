@@ -120,6 +120,9 @@ fun AppCenterLandscape(
     unreadDisplayNames: Map<String, String> = emptyMap(),
     activeNotifPkgs: Set<String> = emptySet(),
     onClearNotifications: (String) -> Unit = {},
+    // 未读组右滑关通知（Bob 2026-11-14 09:55 亲定右滑）：跳系统通知设置页；
+    // 默认空操作（调用点传入，与 onClearNotifications 同款）。
+    onDisableAppNotifications: (String) -> Unit = {},
     onToggleFold: () -> Unit = {},
     // 折叠组（421 安静版）：组底“取消折叠”——调用点传入竖屏同一双写逻辑。
     onUnfold: () -> Unit = {},
@@ -236,8 +239,9 @@ fun AppCenterLandscape(
         // hiddenUnlocked 必须进 key：解锁前后隐藏列形态不同（锁定占位 ↔
         // 应用列），否则解锁后列流不重建。
         // 未读列索引与列流同源（466）：构建时记下未读组首列的索引，随
-        // columns 一起返回；不能事后按“列内是否含未读应用”找——收藏列
-        // 里也可能有未读应用（收藏了又有角标），会错认成收藏列。
+        // columns 一起返回；不能事后按“列内是否含未读应用”找。
+        // 2026-11-14：收藏列不再可能含未读应用（单一归属口径覆盖
+        // dockApps 源头，未读只进未读列）——但索引仍构建时记下，不事后找。
         val (columns, unreadColIdx) = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, unreadApps, rowsPerCol) {
             val cols = mutableListOf<MutableList<FlowItem>>()
             var cur = mutableListOf<FlowItem>()
@@ -791,7 +795,8 @@ fun AppCenterLandscape(
                                                 ) {
                                                     ClearableUnreadRow(
                                                         enabled = pkg in activeNotifPkgs,
-                                                        onClear = { onClearNotifications(pkg) }
+                                                        onClear = { onClearNotifications(pkg) },
+                                                        onDisableNotifications = { onDisableAppNotifications(pkg) }
                                                     ) {
                                                         LandscapeAppRow(
                                                             app = item.app,
