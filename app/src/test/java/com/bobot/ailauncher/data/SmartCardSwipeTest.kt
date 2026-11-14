@@ -1,6 +1,10 @@
 package com.bobot.ailauncher.data
 
 import com.bobot.ailauncher.ui.smartcard.SwipeRelease
+import com.bobot.ailauncher.ui.smartcard.SMART_CARD_FLY_OUT_DISTANCE_PX
+import com.bobot.ailauncher.ui.smartcard.SMART_CARD_FLY_OUT_MS
+import com.bobot.ailauncher.ui.smartcard.SMART_CARD_FLY_OUT_REDUCED_MS
+import com.bobot.ailauncher.ui.smartcard.flyOutDurationMs
 import com.bobot.ailauncher.ui.smartcard.formatSkipRepoSuffix
 import com.bobot.ailauncher.ui.smartcard.formatSwipeDiagnosis
 import com.bobot.ailauncher.ui.smartcard.resolveSwipeRelease
@@ -415,5 +419,37 @@ class SmartCardSwipeTest {
             "｜仓库：已空 张数=0",
             formatSkipRepoSuffix("a", null, 0)
         )
+    }
+
+    // ---------- 第三十批：划走飞出时长选档 ----------
+    // 飞出先行、换卡在后（Bob 2026-11-14 17:46：切换不明显、感觉不到它
+    // 被划走）：正常 300ms 看得见、不拖沓；减动效 120ms 缩短但不硬切。
+
+    @Test
+    fun flyOutDuration_normal_is300ms() {
+        assertEquals(SMART_CARD_FLY_OUT_MS, flyOutDurationMs(false))
+        assertEquals(300, SMART_CARD_FLY_OUT_MS)
+    }
+
+    @Test
+    fun flyOutDuration_reducedMotion_is120ms() {
+        assertEquals(SMART_CARD_FLY_OUT_REDUCED_MS, flyOutDurationMs(true))
+        assertEquals(120, SMART_CARD_FLY_OUT_REDUCED_MS)
+    }
+
+    @Test
+    fun flyOutDuration_reduced_isShorterButNotZero() {
+        // 减动效缩短、但不直接硬切：时长必须大于 0 且小于正常档。
+        val reduced = flyOutDurationMs(true)
+        assertTrue(reduced > 0)
+        assertTrue(reduced < flyOutDurationMs(false))
+    }
+
+    @Test
+    fun flyOutDistance_clearsCardWidth() {
+        // 卡宽约 350dp，密度 2.8 时约 980px——飞出距离必须大于它，卡才
+        // 能整张飞出屏（淡出同步走是兜底，不是主通道）。
+        assertTrue(SMART_CARD_FLY_OUT_DISTANCE_PX > 1000f)
+        assertEquals(1600f, SMART_CARD_FLY_OUT_DISTANCE_PX)
     }
 }
