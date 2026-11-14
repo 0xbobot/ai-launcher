@@ -240,9 +240,9 @@ fun PullUpDock(
     }
     // 可见条件：seenTail 已存在，且 tail 里有 seenTail 没有的包，且该包有
     // 数据理由（复用说明页的理由判定：时段聚合 ≥3，或转移占主导
-    // （[transferDominant]：≥2 且占比 ≥0.5，沿用说明页的 prevRecent 门，
+    // （[transferDominant]：≥5 且占比 ≥0.6，沿用说明页的 prevRecent 门，
     // 避免点开却是 fallback），或近 7 天窗口计数 >0；全是 fallback
-    // “暂无你的使用记录”或“最近没怎么开”的不算洞察）。
+    // “暂无你的使用记录”或“最近没怎么开”/“以前常开”的不算洞察）。
     val insightVisible = remember(insightTail, insightSeenTail) {
         val seen = insightSeenTail
         if (seen == null) {
@@ -697,6 +697,9 @@ fun PullUpDock(
             val (sheetPrevPkg, sheetPrevTime) = AppUsageTracker.prevLaunch(context)
             val sheetPrevRecent = sheetPrevPkg.isNotEmpty() &&
                 System.currentTimeMillis() - sheetPrevTime <= 10 * 60 * 1000
+            // 窗口是否记满：没满时 recent == 0 证明不了“7 天没开”，理由
+            // 不许说“最近没怎么开”（见 dockReason；Bob 2026-11-14 设计铁律）。
+            val sheetWindowMature = AppUsageTracker.windowMature(context)
             val sheetPrevLabel = if (sheetPrevRecent) {
                 allApps.find { it.packageName == sheetPrevPkg }?.label?.toString()
             } else null
@@ -734,7 +737,8 @@ fun PullUpDock(
                                 context, sheetPrevPkg, app.packageName
                             ),
                             total = AppUsageTracker.totalCount(context, app.packageName),
-                            recent = AppUsageTracker.recentCount(context, app.packageName)
+                            recent = AppUsageTracker.recentCount(context, app.packageName),
+                            windowMature = sheetWindowMature
                         )
                         Row(
                             modifier = Modifier

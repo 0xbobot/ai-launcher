@@ -459,14 +459,16 @@ object AppUsageTracker {
     }
 
     /**
-     * 转移是否“占主导”（纯函数）：转移计数 ≥2 且占该应用衰减后总次数一半以上
-     * （transfer * 2 >= total，整数算，无浮点）。枢纽应用（Muse）带出来的
-     * 转移计数再高、占比低也不算——“接着开”只在真是习惯时才出现。0.5 是
-     * 判断值（Bob 2026-11-13 21:33：全是 Muse 之后打开，失去意义）。
+     * 转移是否“占主导”（纯函数）：转移计数 ≥5 且占该应用衰减后总次数六成以上
+     * （transfer * 5 >= total * 3，整数算，无浮点）。2 次就敢说是轶事不是
+     * 习惯——Bob 2026-11-14 07:52 设计铁律：数据不够不硬给理由。5 次约
+     * 一周的日习惯量，0.6 意味着明显多于一半、不是抛硬币。枢纽应用
+     * （Muse）带出来的转移计数再高、占比低也不算。0.5→0.6、2 次→5 次
+     * 都是判断值（Bob 2026-11-14 07:56 定按此方向改）。
      * 转移与总量同按月度衰减，衰减不改变占比。
      */
     fun transferDominant(transfer: Int, total: Int): Boolean {
-        return transfer >= 2 && total > 0 && transfer * 2 >= total
+        return transfer >= 5 && total > 0 && transfer * 5 >= total * 3
     }
 
     /** yyyyMMdd 格式化（纯函数，month 取 1-12），不用 String.format 避 locale。 */
@@ -551,12 +553,70 @@ object AppUsageTracker {
     }
 
     /**
-     * Dock 排序分（纯函数）：时段聚合 ≥3 时 ×10000 主导 + 衰减后总次数
-     * + 10 分钟内转移占主导（[transferDominant]：≥2 且占比 ≥0.5）时 +500
-     * − 30 分钟内刚用过 −2；并列按最近（调用方）。
+     * 近 7 天窗口是否“记满”（纯函数）：最早一条 day 记录距今天 ≥6 天，即
+     * 覆盖了完整的 7 个自然日。day 键每天清理、只留最近 7 天，所以最早的
+     * 存活键就是记录起点：刚装 502（开始记 day 键）时最早的键只有 1–2 天
+     * 前，窗口没满；记满后最早的键恒为 6 天前。earliestDayYmd 为 null
+     * （一条 day 记录都没有）时一定没满。
+     * 用途：窗口没满时 recent == 0 证明不了“7 天没开”，理由不许说
+     * “最近没怎么开”（Bob 2026-11-14 07:52 设计铁律：数据不够不硬给）。
+     */
+    fun windowMature(earliestDayYmd: String?, todayYmd: String): Boolean {
+        if (earliestDayYmd == null) return false
+        if (earliestDayYmd.length != 8 || !earliestDayYmd.all { it.isDigit() }) return false
+        if (todayYmd.length != 8 || !todayYmd.all { it.isDigit() }) return false
+        return earliestDayYmd <= shiftYmd(todayYmd, -(RECENT_WINDOW_DAYS - 1))
+    }
+
+    /** 最早一条 day 记录的日期 yyyyMMdd；没有 day 记录返回 null。一次扫表。 */
+    fun earliestDayDate(context: Context): String? {
+        return try {
+            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            var earliest: String? = null
+            for ((k, v) in p.all) {
+                if (v is Int && k.startsWith(KEY_DAY_PREFIX) && k.length > KEY_DAY_PREFIX.length + 8) {
+                    val date = k.substring(KEY_DAY_PREFIX.length, KEY_DAY_PREFIX.length + 8)
+                    if (date.length == 8 && date.all { it.isDigit() }) {
+                        if (earliest == null || date < earliest) earliest = date
+                    }
+                }
+            }
+            earliest
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 近 7 天窗口是否记满（便捷口径）：最早 day 记录 + 今天。 */
+    fun windowMature(context: Context): Boolean {
+        return windowMature(earliestDayDate(context), todayYmd())
+    }
+
+    /**
+     * 近期因子（纯函数）：按距上次打开的天数，平滑衰减累计用量的权重。
+     * 7 天内不扣分；7 天后每 7 天减半（0.5^((days-7)/7)），不断崖——
+     * 30 天没开约剩 0.10，60 天没开约剩 0.005。lastUsedMs == 0（无记录）
+     * 返回 1.0：无证据不扣分，总量本身为 0。
+     * 只作用于累计用量与转移加分；时段桶（hwPart）不动——时段桶靠月度
+     * 衰减与“同一时段 ≥3 次”自带近期性。用 last_used（有完整历史）算，
+     * 不拿 7 天窗口计数——窗口数据还嫩，不能当排序依据
+     * （Bob 2026-11-14 07:52 设计铁律：数据不够不硬套固定标准）。
+     */
+    fun recencyFactor(lastUsedMs: Long, nowMs: Long): Double {
+        if (lastUsedMs == 0L) return 1.0
+        val daysIdle = (nowMs - lastUsedMs) / 86_400_000L
+        if (daysIdle <= 7) return 1.0
+        return Math.pow(0.5, (daysIdle - 7) / 7.0)
+    }
+
+    /**
+     * Dock 排序分（纯函数）：时段聚合 ≥3 时 ×10000 主导 +（衰减后总次数
+     * + 10 分钟内转移占主导（[transferDominant]：≥5 且占比 ≥0.6）时 +500）
+     * × 近期因子 − 30 分钟内刚用过 −2；并列按最近（调用方）。
      * 与说明页理由同源——[dockReason] 用同一阈值。
-     * 排序分仍用衰减后总次数：窗口计数刚换过去头几天数字偏小（要从新数据
-     * 攒），排序不能跟着跳——过渡期见收据。
+     * 排序分仍用衰减后总次数打底，但近期因子让 7 天以上没开过的慢慢
+     * 往下掉：历史总量再高，30 天没开也低不过近期中等用量——排序和理由
+     * 不再各说各话（Bob 2026-11-14 07:56 定按此方向改）。时段桶不动。
      */
     fun dockScore(
         hwDayType: Int,
@@ -570,15 +630,20 @@ object AppUsageTracker {
         val trPart = if (prevRecent && transferDominant(transfer, total)) 500.0 else 0.0
         val recentPenalty =
             if (lastUsedMs != 0L && nowMs - lastUsedMs < 30 * 60 * 1000) 2.0 else 0.0
-        return hwPart * 10000.0 + total + trPart - recentPenalty
+        return hwPart * 10000.0 + (total + trPart) * recencyFactor(lastUsedMs, nowMs) - recentPenalty
     }
 
     /**
      * Dock 说明页理由（纯函数）：与排序同源——时段聚合 ≥3、转移占主导
-     * （≥2 且占比 ≥0.5）、近 7 天窗口计数 >0。
+     * （≥5 且占比 ≥0.6）、近 7 天窗口计数 >0。
      * “常开”分支的触发与显示都用窗口计数 [recent]，不再用衰减后总量：
-     * recent > 0 →“常开 · 近 7 天 X 次”；总量 >0 但 7 天内没开过 →
-     * “最近没怎么开”，绝不显示“近 7 天 0 次”。
+     * recent > 0 →“常开 · 近 7 天 X 次”。
+     * “最近没怎么开”只在窗口记满（[windowMature]）时才说：窗口没满时
+     * recent == 0 证明不了“7 天没开”（刚开始记，前面几天根本没观测），
+     * 只能落到“以前常开”——以前用得多是累计用量诚实支撑的，不对最近
+     * 下结论。窗口记满后 recent == 0 才是真 7 天没开，才说“最近没怎么开”，
+     * 绝不显示“近 7 天 0 次”。
+     * 正数 recent 是下限（真值只会更大），窗口没满也能诚实说“近 7 天 X 次”。
      */
     fun dockReason(
         pinned: Boolean,
@@ -590,6 +655,7 @@ object AppUsageTracker {
         transfer: Int,
         total: Int,
         recent: Int,
+        windowMature: Boolean,
     ): String {
         return when {
             pinned -> "你固定在 Dock 上"
@@ -610,7 +676,8 @@ object AppUsageTracker {
             }
             prevRecent && prevLabel != null && transferDominant(transfer, total) -> "打开 $prevLabel 后常接着开"
             recent > 0 -> "常开 · 近 ${RECENT_WINDOW_DAYS} 天 $recent 次"
-            total > 0 -> "最近没怎么开"
+            windowMature && total > 0 -> "最近没怎么开"
+            total > 0 -> "以前常开"
             else -> "热门应用（暂无你的使用记录）"
         }
     }
@@ -618,8 +685,8 @@ object AppUsageTracker {
     /**
      * 取 [count] 个最常用应用。
      * @param smartSort true=智能排序（智能 v3：当前小时的日类型聚合桶
-     *   ≥3 时 ×10000 主导 + 衰减后总次数 + 10 分钟内转移 ≥2 时 +500
-     *   - 30 分钟内刚用过 -2；并列按最近）；false=按名称排列。
+     *   ≥3 时 ×10000 主导 +（衰减后总次数 + 10 分钟内转移占主导时 +500）
+     *   × 近期因子 − 30 分钟内刚用过 -2；并列按最近）；false=按名称排列。
      * 不足时用国民应用优先级补齐（只取本机已安装的），排除桌面自身。
      */
     fun topApps(
@@ -641,8 +708,8 @@ object AppUsageTracker {
         }
         // 智能 v3 排序分（Dock 与助手常用 5 名共用同一口径）：
         // 当前小时的日类型聚合桶 ≥3 才参与主导（×10000），否则按 0 计——
-        // 稀疏格子不靠一两次偶然上位；转移只看 10 分钟内且 ≥2 次；-2 惩罚
-        // 保留（防单调）。分值与理由同源，走 [dockScore] 纯函数。
+        // 稀疏格子不靠一两次偶然上位；转移只看 10 分钟内且占主导（≥5 次
+        // 且占比 ≥0.6）；-2 惩罚保留（防单调）。分值与理由同源，走 [dockScore] 纯函数。
         val now = System.currentTimeMillis()
         val (dow, hour) = currentDowHour()
         val (prevPkg, prevTime) = if (p == null) "" to 0L else

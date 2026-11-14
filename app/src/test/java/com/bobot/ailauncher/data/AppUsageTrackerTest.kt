@@ -10,7 +10,8 @@ import org.junit.Test
  * 清楚是多久——转移改算占比、窗口计数定死 7 天（Bob 2026-11-13 22:24：
  * 30 天太长，Dock 按周走，改成 7 天）。
  * 只测纯函数 dayTypeHwSum / transferDominant / shiftYmd / recentCount /
- * dockScore / dockReason；SharedPreferences 读数与重组走分支 CI + Bob 真机验收。
+ * dockScore / dockReason / recencyFactor / windowMature；SharedPreferences
+ * 读数与重组走分支 CI + Bob 真机验收。
  */
 class AppUsageTrackerTest {
 
@@ -38,7 +39,7 @@ class AppUsageTrackerTest {
         assertEquals(0, AppUsageTracker.dayTypeHwSum(mapOf(6 to 3), 1))
     }
 
-    // ---- dockScore：时段聚合 ≥3 主导，转移占主导（≥2 且占比 ≥0.5）才 +500 ----
+    // ---- dockScore：时段聚合 ≥3 主导，转移占主导（≥5 且占比 ≥0.6）才 +500 ----
 
     @Test
     fun `day-type bucket at 3 dominates`() {
@@ -48,8 +49,12 @@ class AppUsageTrackerTest {
 
     @Test
     fun `transfer adds 500 only when dominant and prev recent`() {
-        // 转移 2 / 总量 4 → 占比 0.5，占主导，+500
-        assertEquals(504.0, AppUsageTracker.dockScore(0, 4, 2, true, 0L, 1000L), 0.0)
+        // 转移 5 / 总量 8 → 占比 0.625，占主导，+500
+        assertEquals(505.0, AppUsageTracker.dockScore(0, 5, 5, true, 0L, 1000L), 0.0)
+        // 转移 5 / 总量 9 → 占比 0.556，占比不够，不加分
+        assertEquals(9.0, AppUsageTracker.dockScore(0, 9, 5, true, 0L, 1000L), 0.0)
+        // 转移 2 / 总量 4 → 次数不够（要 ≥5 次才敢说是习惯），不加分
+        assertEquals(4.0, AppUsageTracker.dockScore(0, 4, 2, true, 0L, 1000L), 0.0)
         // 转移 2 / 总量 10 → 占比 0.2，枢纽带出来的噪音，不加分
         assertEquals(10.0, AppUsageTracker.dockScore(0, 10, 2, true, 0L, 1000L), 0.0)
         assertEquals(4.0, AppUsageTracker.dockScore(0, 4, 2, false, 0L, 1000L), 0.0)
@@ -64,17 +69,22 @@ class AppUsageTrackerTest {
         assertEquals(10.0, AppUsageTracker.dockScore(0, 10, 0, false, 0L, now), 0.0)
     }
 
-    // ---- transferDominant：转移 ≥2 且占比 ≥0.5 ----
+    // ---- transferDominant：转移 ≥5 且占比 ≥0.6 ----
 
     @Test
-    fun `transfer dominant needs count 2 and ratio half`() {
+    fun `transfer dominant needs count 5 and ratio six tenths`() {
         // 枢纽带出来的：转移 5 / 总量 17 → 占比 0.29，不占主导
         assertEquals(false, AppUsageTracker.transferDominant(5, 17))
-        // 真习惯：转移 3 / 总量 5 → 占比 0.6，占主导
-        assertEquals(true, AppUsageTracker.transferDominant(3, 5))
-        // 边界 0.5 算占主导
-        assertEquals(true, AppUsageTracker.transferDominant(2, 4))
+        // 转移 3 / 总量 5 → 占比 0.6，但次数不够（要 ≥5 次才敢说是习惯）
+        assertEquals(false, AppUsageTracker.transferDominant(3, 5))
+        // 转移 5 / 总量 8 → 占比 0.625，次数与占比都够，占主导
+        assertEquals(true, AppUsageTracker.transferDominant(5, 8))
+        // 边界 0.6 算占主导
+        assertEquals(true, AppUsageTracker.transferDominant(6, 10))
         // 边界下一点不算
+        assertEquals(false, AppUsageTracker.transferDominant(5, 9))
+        // 2 次的轶事不算，哪怕占比够
+        assertEquals(false, AppUsageTracker.transferDominant(2, 4))
         assertEquals(false, AppUsageTracker.transferDominant(2, 5))
         // 计数不够 / 总量为 0 都不算
         assertEquals(false, AppUsageTracker.transferDominant(1, 1))
@@ -121,7 +131,7 @@ class AppUsageTrackerTest {
     fun `pinned reason wins`() {
         assertEquals(
             "你固定在 Dock 上",
-            AppUsageTracker.dockReason(true, 5, 5, 8, "微信", true, 5, 100, 60)
+            AppUsageTracker.dockReason(true, 5, 5, 8, "微信", true, 5, 100, 60, true)
         )
     }
 
@@ -129,41 +139,46 @@ class AppUsageTrackerTest {
     fun `day-type reason names weekday and period`() {
         assertEquals(
             "工作日早上 8 点常开",
-            AppUsageTracker.dockReason(false, 3, 5, 8, null, false, 0, 10, 10)
+            AppUsageTracker.dockReason(false, 3, 5, 8, null, false, 0, 10, 10, true)
         )
         assertEquals(
             "周六下午 15 点常开",
-            AppUsageTracker.dockReason(false, 4, 6, 15, null, false, 0, 10, 10)
+            AppUsageTracker.dockReason(false, 4, 6, 15, null, false, 0, 10, 10, true)
         )
         assertEquals(
             "周日夜里 2 点常开",
-            AppUsageTracker.dockReason(false, 3, 7, 2, null, false, 0, 10, 10)
+            AppUsageTracker.dockReason(false, 3, 7, 2, null, false, 0, 10, 10, true)
         )
     }
 
     @Test
     fun `transfer reason needs dominant ratio`() {
-        // 转移 2 / 总量 4 → 占比 0.5，占主导，仍是“接着开”
+        // 转移 6 / 总量 10 → 占比 0.6、次数够，占主导，仍是“接着开”
         assertEquals(
             "打开 微信 后常接着开",
-            AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 2, 4, 4)
+            AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 6, 10, 10, true)
+        )
+        // 转移 2 / 总量 4 → 次数不够（要 ≥5 次），小样本不硬说，落到“常开”
+        assertEquals(
+            "常开 · 近 7 天 4 次",
+            AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 2, 4, 4, true)
         )
         // 转移 5 / 总量 17 → 占比 0.29，枢纽噪音，被占比拦下后落到“常开”
         assertEquals(
             "常开 · 近 7 天 17 次",
-            AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 5, 17, 17)
+            AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 5, 17, 17, true)
         )
         assertEquals(
             "常开 · 近 7 天 10 次",
-            AppUsageTracker.dockReason(false, 0, 5, 8, "微信", false, 5, 10, 10)
+            AppUsageTracker.dockReason(false, 0, 5, 8, "微信", false, 5, 10, 10, true)
         )
         assertEquals(
             "常开 · 近 7 天 10 次",
-            AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 1, 10, 10)
+            AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 1, 10, 10, true)
         )
         assertEquals(
             "常开 · 近 7 天 10 次",
-            AppUsageTracker.dockReason(false, 0, 5, 8, null, true, 5, 10, 10)
+            AppUsageTracker.dockReason(false, 0, 5, 8, null, true, 5, 10, 10, true)
         )
     }
 
@@ -171,23 +186,110 @@ class AppUsageTrackerTest {
     fun `frequent reason carries the 7 day count`() {
         assertEquals(
             "常开 · 近 7 天 42 次",
-            AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 42)
+            AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 42, true)
         )
     }
 
     @Test
     fun `stale app says not opened recently never zero times`() {
-        // 总量 >0 但 7 天内一次没开：不说“近 7 天 0 次”，说“最近没怎么开”
-        val reason = AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 0)
+        // 窗口记满、总量 >0 但 7 天内一次没开：不说“近 7 天 0 次”，说“最近没怎么开”
+        val reason = AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 0, true)
         assertEquals("最近没怎么开", reason)
         assertEquals(false, reason.contains("0 次"))
+    }
+
+    @Test
+    fun `immature window never claims not opened recently`() {
+        // 窗口没满（刚开始记，前面几天根本没观测）：recent == 0 证明不了
+        // “7 天没开”，不说“最近没怎么开”，只说以前用得多
+        assertEquals(
+            "以前常开",
+            AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 0, false)
+        )
+        // 窗口没满但 recent > 0：正数是下限，照实说“近 7 天 X 次”
+        assertEquals(
+            "常开 · 近 7 天 3 次",
+            AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 3, false)
+        )
+        // 窗口没满且总量为 0：还是“暂无你的使用记录”
+        assertEquals(
+            "热门应用（暂无你的使用记录）",
+            AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 0, 0, false)
+        )
     }
 
     @Test
     fun `no record falls back to hot apps`() {
         assertEquals(
             "热门应用（暂无你的使用记录）",
-            AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 0, 0)
+            AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 0, 0, true)
         )
+    }
+
+    // ---- recencyFactor：7 天内不扣分，之后每 7 天减半，不断崖 ----
+
+    @Test
+    fun `recency factor is one within 7 days`() {
+        val now = 1000L * 60 * 60 * 24 * 100
+        val day = 86_400_000L
+        assertEquals(1.0, AppUsageTracker.recencyFactor(0L, now), 0.0)
+        assertEquals(1.0, AppUsageTracker.recencyFactor(now, now), 0.0)
+        assertEquals(1.0, AppUsageTracker.recencyFactor(now - 7 * day, now), 0.0)
+    }
+
+    @Test
+    fun `recency factor halves every week past day 7`() {
+        val now = 1000L * 60 * 60 * 24 * 100
+        val day = 86_400_000L
+        // 14 天没开剩一半，21 天剩四分之一
+        assertEquals(0.5, AppUsageTracker.recencyFactor(now - 14 * day, now), 1e-9)
+        assertEquals(0.25, AppUsageTracker.recencyFactor(now - 21 * day, now), 1e-9)
+        // 8 天只比 7 天少一点（不断崖），30 天剩约一成
+        val f7 = AppUsageTracker.recencyFactor(now - 7 * day, now)
+        val f8 = AppUsageTracker.recencyFactor(now - 8 * day, now)
+        assertEquals(true, f8 < f7 && f8 > 0.9 * f7)
+        val f30 = AppUsageTracker.recencyFactor(now - 30 * day, now)
+        assertEquals(true, f30 > 0.09 && f30 < 0.11)
+    }
+
+    @Test
+    fun `dockScore fades idle apps below recent medium ones`() {
+        val now = 1000L * 60 * 60 * 24 * 100
+        val day = 86_400_000L
+        // 历史总量 50、30 天没开，要低于近期总量 15、今天开过
+        val idleHigh = AppUsageTracker.dockScore(0, 50, 0, false, now - 30 * day, now)
+        val recentMedium = AppUsageTracker.dockScore(0, 15, 0, false, now, now)
+        assertEquals(true, idleHigh < recentMedium)
+        // 7 天内没开不扣分：总量 50、7 天没开，仍高于近期总量 15
+        val weekIdle = AppUsageTracker.dockScore(0, 50, 0, false, now - 7 * day, now)
+        assertEquals(true, weekIdle > recentMedium)
+    }
+
+    @Test
+    fun `dockScore keeps time bucket dominant despite recency`() {
+        val now = 1000L * 60 * 60 * 24 * 100
+        val day = 86_400_000L
+        // 时段桶 ≥3 照旧 ×10000 主导，近期因子只作用于累计用量部分
+        val score = AppUsageTracker.dockScore(3, 50, 0, false, now - 30 * day, now)
+        assertEquals(true, score > 30000.0 && score < 30010.0)
+    }
+
+    // ---- windowMature：最早 day 记录 ≥6 天前，窗口才算记满 ----
+
+    @Test
+    fun `window mature needs 7 days of recording`() {
+        // 今天 20261113：最早记录 20261107（6 天前）→ 覆盖 7 天，记满
+        assertEquals(true, AppUsageTracker.windowMature("20261107", "20261113"))
+        // 最早记录 20261106（7 天前）也记满
+        assertEquals(true, AppUsageTracker.windowMature("20261106", "20261113"))
+        // 最早记录 20261108（5 天前）→ 只覆盖 6 天，没满
+        assertEquals(false, AppUsageTracker.windowMature("20261108", "20261113"))
+        // 今天才开始记，没满
+        assertEquals(false, AppUsageTracker.windowMature("20261113", "20261113"))
+        // 一条记录都没有，没满
+        assertEquals(false, AppUsageTracker.windowMature(null, "20261113"))
+        // 脏日期不算记满
+        assertEquals(false, AppUsageTracker.windowMature("garbage", "20261113"))
+        assertEquals(false, AppUsageTracker.windowMature("2026111", "20261113"))
     }
 }
