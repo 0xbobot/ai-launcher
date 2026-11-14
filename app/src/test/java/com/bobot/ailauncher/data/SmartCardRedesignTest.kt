@@ -10,6 +10,9 @@ import com.bobot.ailauncher.ui.smartcard.SmartCardRowGap
 import com.bobot.ailauncher.ui.smartcard.SmartCardStackTopGap
 import com.bobot.ailauncher.ui.smartcard.SmartCardSubtitleEndInset
 import com.bobot.ailauncher.ui.smartcard.SmartCardTitleRowHeight
+import com.bobot.ailauncher.ui.smartcard.SmartCardHaloMinAlpha
+import com.bobot.ailauncher.ui.smartcard.SmartCardHaloPeriodMs
+import com.bobot.ailauncher.ui.smartcard.SmartCardHaloStroke
 import com.bobot.ailauncher.ui.smartcard.smartCardBorderColors
 import com.bobot.ailauncher.ui.smartcard.smartCardFactAreaHeight
 import com.bobot.ailauncher.ui.smartcard.smartCardTintAlpha
@@ -27,8 +30,9 @@ import org.junit.Test
  * 让出右上角待办数角标）；④呼吸描边渐变色（暖金→柔玫→冷青→暖金闭环，
  * 玫/青低饱和）；⑤暖灰衬底透明度（有纹理壁纸 0.55、低对比环境 0.75）；
  * ⑥叠层与 hero 的间距 16dp（8dp 网格）。
- * 正文 15sp Medium、去截断、卡内滚动、露边无字、2dp 呼吸描边、小标换位
- * 本身是 Compose 排版／绘制行为，见收据的 diff 复核＋Bob 真机验收。
+ * 正文 15sp Medium、去截断、卡内滚动、露边无字、3dp 呼吸描边（第二十六批
+ * 由 2dp 加粗）、小标换位本身是 Compose 排版／绘制行为，见收据的 diff 复核
+ * ＋Bob 真机验收。
  */
 class SmartCardRedesignTest {
 
@@ -94,8 +98,8 @@ class SmartCardRedesignTest {
         // 首尾同为 Bob 点名的暖金，绕一圈不断色。
         assertEquals(Color(0xFFD4A24E), colors[0])
         assertEquals(Color(0xFFD4A24E), colors[3])
-        assertEquals(Color(0xFFD9A5A0), colors[1])
-        assertEquals(Color(0xFF8FB8B5), colors[2])
+        assertEquals(Color(0xFFD99B90), colors[1])
+        assertEquals(Color(0xFF6FA8A0), colors[2])
     }
 
     @Test
@@ -111,6 +115,26 @@ class SmartCardRedesignTest {
             val min = minOf(r, g, b)
             assertTrue((max - min) / max < 0.35f)
         }
+    }
+
+    // ---------- 第二十六批：光晕加亮（Bob 2026-11-14：太淡感受不到） ----------
+
+    @Test
+    fun halo_strokeIs3dp() {
+        // 描边 2dp→3dp，只加存在感，不改卡片结构与配色体系。
+        assertEquals(3.dp, SmartCardHaloStroke)
+    }
+
+    @Test
+    fun halo_minAlphaIs08() {
+        // 呼吸下限 0.5→0.8：描边不再长时间躲在半透明里。
+        assertEquals(0.8f, SmartCardHaloMinAlpha, 0.001f)
+    }
+
+    @Test
+    fun halo_periodIs4Seconds() {
+        // 一圈 6 秒→4 秒（呼吸半程 2 秒），节奏略快、仍不是跑马灯。
+        assertEquals(4000L, SmartCardHaloPeriodMs)
     }
 
     // ---------- 暖灰衬底透明度 ----------
