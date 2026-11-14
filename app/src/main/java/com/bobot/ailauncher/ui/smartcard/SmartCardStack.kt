@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.ui.smartcard
 
-import android.util.Log
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.LinearEasing
@@ -123,7 +122,6 @@ import com.bobot.ailauncher.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -709,9 +707,6 @@ const val SmartCardHaloMinAlpha = 0.8f
  */
 const val SmartCardHaloPeriodMs = 4000L
 
-/** 横滑切卡的手势日志 tag（第二十六批：松手判定现打一行日志，见 TopSmartCard）。 */
-private const val TAG = "SmartCardStack"
-
 /**
  * 暖灰半透明衬底的透明度（重设计 §2.1）：下限 0.55；低对比环境回到 0.75 兜底。
  * 低对比＝壁纸平（GlassPolicy 判 FLAT，低亮度方差／低饱和，衬底与壁纸分不开）
@@ -764,11 +759,6 @@ fun SmartCardStack(
     // 松手弹回时动画回 0），露边内容在 graphicsLayer 里读它（只重绘
     // 图层，不触发整卡重组）。
     val revealAnim = remember(top.id) { Animatable(0f) }
-    // 划卡诊断行（第二十八批，临时）：上一次划卡的判定结果，划完就显示、
-    // 常驻到下一次划卡。Bob 不用接电脑抓 logcat，划完读这行再告诉我。
-    // 顶卡换了不清空——上一条判定仍有效，直到下一次划卡。定性后下一批
-    // 拆掉，不进设计稿、不做设置项。
-    var swipeDiag by remember { mutableStateOf<String?>(null) }
     // 露边卡只有边、没有字（重设计 §2.5）：只留张数与 id 作键，内容不组合；
     // 升上来成为顶卡时，它的内容才在顶卡位置组合（见 top）。
     // 第二十六批补一句：下一张卡的内容在拖动揭示时提前组合在露边槽里
@@ -805,7 +795,6 @@ fun SmartCardStack(
                         hideActionRow = top.id in connectedIds,
                         celebration = connectedFeedbacks[top.id],
                         revealAnim = revealAnim,
-                        onSwipeDiagnosed = { swipeDiag = it },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("smart_card_top")
@@ -894,18 +883,9 @@ fun SmartCardStack(
                 topPlaceables.forEach { it.place(0, 0) }
             }
         }
-        // 划卡诊断行（第二十八批，临时）：贴着叠层下方、一行小字，不挡
-        // 卡片内容。没划过卡时不画；划完常驻到下一次划卡。
-        swipeDiag?.let { diag ->
-            Text(
-                text = diag,
-                fontSize = AILauncherType.Caption.fontSize,
-                color = AILauncherColors.current.Hint,
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .testTag("smart_card_swipe_diag")
-            )
-        }
+        // 划卡诊断行已拆（第三十一批，Bob 2026-11-14 18:46 亲口）：
+        // 519 立的临时出口使命已完成（证明了手势通、沉底通、飞出通），
+        // 叠层下方不再留调试小字。
     }
 }
 
@@ -1010,54 +990,6 @@ internal fun resolveSwipeRelease(
     ) SwipeRelease.Skip else SwipeRelease.SnapBack
 }
 
-/**
- * 划卡诊断行文案（纯函数，第二十八批单测锁死）：把松手判定那一行的数值
- * 拼成一行给 Bob 看的字——与 logcat 里 "swipe release" 那行同值，屏上
- * 与日志永远对得上。判定三种：切卡／弹回／忽略；onSkip 只在切卡分支调
- * （Skip 分支内必调，减动效直调、否则动画里调），其余两档未调。
- * 临时诊断出口（Bob 2026-11-14：adb 抓日志太复杂）：定性后下一批拆掉，
- * 不进设计稿、不做设置项。
- */
-internal fun formatSwipeDiagnosis(
-    release: SwipeRelease,
-    claimed: Boolean,
-    netDp: Float,
-    peakDp: Float,
-    renderedDp: Float,
-    velocityDps: Float,
-    exitReason: String,
-    moveCount: Int
-): String {
-    val verdict = when (release) {
-        SwipeRelease.Skip -> "切卡"
-        SwipeRelease.SnapBack -> "弹回"
-        SwipeRelease.Ignore -> "忽略"
-    }
-    val onSkip = if (release == SwipeRelease.Skip) "已调" else "未调"
-    return "划卡诊断：$verdict｜认领=$claimed 峰值=${peakDp.roundToInt()}dp " +
-        "净=${netDp.roundToInt()}dp 渲染=${renderedDp.roundToInt()}dp " +
-        "速度=${velocityDps.roundToInt()}dp/s 退出=$exitReason 步数=$moveCount onSkip=$onSkip"
-}
-
-/**
- * 划卡诊断行·仓库结果后缀（第二十九批，临时）：onSkip 调完立刻读仓库
- * 顶卡——顶换了就是「仓库：顶已换」，还是被划走那张就是「仓库：顶未换」，
- * 栈空了就是「仓库：已空」。Bob 划完直接读这半句，不再靠猜 onSkip
- * 有没有生效。定性后与诊断行一起拆掉。
- */
-internal fun formatSkipRepoSuffix(
-    swipedId: String,
-    topId: String?,
-    visibleCount: Int
-): String {
-    val verdict = when {
-        topId == null -> "仓库：已空"
-        topId == swipedId -> "仓库：顶未换"
-        else -> "仓库：顶已换"
-    }
-    return "｜$verdict 张数=$visibleCount"
-}
-
 /** 顶卡：横滑跳过（位移或速度过线离场、沉到摞底，不够回弹）；点动作立即执行 */
 @Composable
 private fun TopSmartCard(
@@ -1071,11 +1003,7 @@ private fun TopSmartCard(
     hideActionRow: Boolean = false,
     celebration: ConnectedFeedback? = null,
     // 下一张卡的揭示进度（第二十六批）：手势里跟手写，露边内容读它渐显。
-    revealAnim: Animatable<Float, AnimationVector1D>,
-    // 划卡诊断出口（第二十八批，临时）：松手判定后把同一行数值拼成字
-    // 交给上层显示——Bob 划完直接读屏，不用接电脑抓 logcat。只读判定
-    // 输入，不改判定逻辑。定性后下一批拆掉。
-    onSwipeDiagnosed: (String) -> Unit = {}
+    revealAnim: Animatable<Float, AnimationVector1D>
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -1096,6 +1024,7 @@ private fun TopSmartCard(
         onBodyClick = { if (!skipping) onBodyClick(card) },
         hideActionRow = hideActionRow,
         celebration = celebration,
+        freezeBreathingBorder = skipping,
         modifier = modifier
             .graphicsLayer {
                 translationX = offsetX.value
@@ -1137,11 +1066,6 @@ private fun TopSmartCard(
                     // 但峰值才是用户的划走意图，松手判定看它（见 resolveSwipeRelease）。
                     var peakX = 0f
                     var claimed = false
-                    // 手势退出原因（第二十七批诊断日志）：up＝正常抬起、
-                    // pointerGone＝指针从事件里消失（系统取消）、
-                    // vertical＝竖向占优让路。moveCount＝收到的 move 条数。
-                    var exitReason = "up"
-                    var moveCount = 0
                     val touchSlop = viewConfiguration.touchSlop
                     val revealThresholdPx =
                         with(density) { SMART_CARD_SWIPE_DISPLACEMENT_DP.dp.toPx() }
@@ -1152,7 +1076,6 @@ private fun TopSmartCard(
                             // 指针从事件里消失（系统取消，见 awaitDragOrUp 的
                             // null 分支）：手势到此结束，但已累计的位移仍参与
                             // 下面的松手判定（第二十五批：不再无条件弹回）。
-                            exitReason = "pointerGone"
                             break
                         }
                         if (change.changedToUpIgnoreConsumed()) break
@@ -1164,7 +1087,6 @@ private fun TopSmartCard(
                         totalX = change.position.x - down.position.x
                         totalY = change.position.y - down.position.y
                         peakX = peakX.coerceAtLeast(abs(totalX))
-                        moveCount++
                         velocityTracker.addPosition(
                             change.uptimeMillis, change.position
                         )
@@ -1175,7 +1097,6 @@ private fun TopSmartCard(
                                 }
                                 abs(totalY) > touchSlop && abs(totalY) > abs(totalX) -> {
                                     // 竖向占优：让路给正文竖翻，卡片不动、不消费。
-                                    exitReason = "vertical"
                                     break
                                 }
                                 else -> continue
@@ -1196,12 +1117,9 @@ private fun TopSmartCard(
                     }
                     // 松手判定（第二十六批）：正常抬起与指针消失（系统取消）
                     // 走同一判定——resolveSwipeRelease 只看认领、峰值位移、
-                    // 渲染位移与速度。拖够阈值就切卡，不过线才弹回。判定的
-                    // 输入现打一行日志：再有“拖出去还弹回”，logcat 里直接
-                    // 看是哪一项没过线（只记数值，不记卡片内容）。
+                    // 渲染位移与速度。拖够阈值就切卡，不过线才弹回。
                     val velocity = velocityTracker.calculateVelocity().x
                     val densityScale = density.density
-                    val netDp = totalX / densityScale
                     val peakDp = peakX / densityScale
                     val renderedDp = offsetX.value / densityScale
                     val release = resolveSwipeRelease(
@@ -1211,27 +1129,6 @@ private fun TopSmartCard(
                         renderedOffsetXDp = renderedDp,
                         velocityXDps = velocity / densityScale
                     )
-                    Log.d(
-                        TAG,
-                        "swipe release: card=${card.id} claimed=$claimed " +
-                            "skipping=$skipping net=${netDp}dp peak=${peakDp}dp " +
-                            "rendered=${renderedDp}dp " +
-                            "velocity=${velocity / densityScale}dp/s " +
-                            "exit=$exitReason moves=$moveCount -> $release"
-                    )
-                    // 诊断行上屏（第二十八批，临时）：与上面那行日志同值——
-                    // 屏上与 logcat 永远对得上。常驻到下一次划卡。
-                    val diagnosis = formatSwipeDiagnosis(
-                        release = release,
-                        claimed = claimed,
-                        netDp = netDp,
-                        peakDp = peakDp,
-                        renderedDp = renderedDp,
-                        velocityDps = velocity / densityScale,
-                        exitReason = exitReason,
-                        moveCount = moveCount
-                    )
-                    onSwipeDiagnosed(diagnosis)
                     when (release) {
                         SwipeRelease.Ignore -> return@awaitEachGesture
                         SwipeRelease.SnapBack -> {
@@ -1246,11 +1143,6 @@ private fun TopSmartCard(
                         SwipeRelease.Skip -> {
                             skipping = true
                             val dir = if (totalX >= 0) 1f else -1f
-                            // 诊断日志（第二十七批）：onSkip 有没有被调到，
-                            // 与上面那行 swipe release 对上——release=Skip
-                            // 却没这行，就是 Skip 分支没走到；有这行而顶卡
-                            // 没换，看仓库那行 skip 日志。
-                            Log.d(TAG, "swipe skip: onSkip card=${card.id} dir=$dir")
                             // 第三十批：飞出先行、换卡在后。之前是先调
                             // onSkip 再飞——skip()→refresh() 立即改 _cards、
                             // skipEpoch 加一、重组 dispose 旧 TopSmartCard，
@@ -1262,9 +1154,7 @@ private fun TopSmartCard(
                             // onSkip 换卡。飞出跑在 onSkip 之前，组合还活
                             // 着，重组截断不了它。finally 兜底：动画中途被
                             // 取消（切后台等）也要把卡沉下去，不留一张飞
-                            // 出一半还顶在上面的卡。诊断行的仓库结果在
-                            // onSkip 之后追加（飞出跑完才有），Bob 划完读
-                            // 到「仓库：顶已换／顶未换 张数=n」不变。
+                            // 出一半还顶在上面的卡。
                             val flyOutMs = flyOutDurationMs(reduceMotion)
                             scope.launch {
                                 try {
@@ -1291,19 +1181,6 @@ private fun TopSmartCard(
                                     reveal.join()
                                 } finally {
                                     onSkip(card)
-                                    val repoCards =
-                                        SmartCardRepository.cards.value
-                                    val repoTop = repoCards.firstOrNull()
-                                    val repoSuffix = formatSkipRepoSuffix(
-                                        card.id, repoTop?.id, repoCards.size
-                                    )
-                                    Log.d(
-                                        TAG,
-                                        "swipe skip repo: $repoSuffix " +
-                                            "top=${repoTop?.id} " +
-                                            "visible=${repoCards.size}"
-                                    )
-                                    onSwipeDiagnosed(diagnosis + repoSuffix)
                                 }
                             }
                         }
@@ -1358,7 +1235,12 @@ private fun SmartCardView(
     celebration: ConnectedFeedback? = null,
     // 呼吸描边（第二十六批）：只画在顶卡。露边揭示内容传 false——
     // 升上来成为顶卡后自带光晕，揭示过程中不抢顶卡的光。
-    showBreathingBorder: Boolean = true
+    showBreathingBorder: Boolean = true,
+    // 飞出中定住光晕（第三十一批）：顶卡划走离场时呼吸描边不再播
+    // （角度与透明度停在当前值），飞出的卡内容静止、只剩图层位移＋
+    // 淡出，GPU 只做变换不重画内容，切换更顺滑。卡离场后即 dispose，
+    // 不需要恢复。
+    freezeBreathingBorder: Boolean = false
 ) {
     val shape = RoundedCornerShape(20.dp)
     // 庆祝动效：整卡从 0.94 轻弹到 1（带回弹的弹簧），对勾从 0 弹入到 1。
@@ -1433,7 +1315,7 @@ private fun SmartCardView(
                 shape = shape
             )
             .then(
-                if (showBreathingBorder) breathingBorderModifier(reduceMotion)
+                if (showBreathingBorder) breathingBorderModifier(reduceMotion, frozen = freezeBreathingBorder)
                 else Modifier
             )
             .height(SmartCardHeight)
@@ -1643,10 +1525,13 @@ private fun smartCardTint(): Color {
  * SmartCardHaloPeriodMs（单测锁死）。
  */
 @Composable
-private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
+private fun breathingBorderModifier(reduceMotion: Boolean, frozen: Boolean = false): Modifier {
     val angle = remember { Animatable(0f) }
     val borderAlpha = remember { Animatable(1f) }
-    LaunchedEffect(reduceMotion) {
+    LaunchedEffect(reduceMotion, frozen) {
+        // 飞出中定住（第三十一批）：不启动循环，角度与透明度停在当前值；
+        // 键变化会取消上一轮的循环，卡离场后即 dispose，不需要恢复。
+        if (frozen) return@LaunchedEffect
         if (reduceMotion) {
             angle.snapTo(0f)
             borderAlpha.snapTo(1f)

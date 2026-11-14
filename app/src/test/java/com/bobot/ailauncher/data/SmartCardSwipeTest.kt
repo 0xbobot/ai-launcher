@@ -5,8 +5,6 @@ import com.bobot.ailauncher.ui.smartcard.SMART_CARD_FLY_OUT_DISTANCE_PX
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_FLY_OUT_MS
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_FLY_OUT_REDUCED_MS
 import com.bobot.ailauncher.ui.smartcard.flyOutDurationMs
-import com.bobot.ailauncher.ui.smartcard.formatSkipRepoSuffix
-import com.bobot.ailauncher.ui.smartcard.formatSwipeDiagnosis
 import com.bobot.ailauncher.ui.smartcard.resolveSwipeRelease
 import com.bobot.ailauncher.ui.smartcard.shouldSkipCard
 import com.bobot.ailauncher.ui.smartcard.swipeRevealProgress
@@ -321,104 +319,6 @@ class SmartCardSwipeTest {
     @Test
     fun revealProgress_zeroThreshold_isZero() {
         assertEquals(0f, swipeRevealProgress(100f, 0f), 0.001f)
-    }
-
-    // ---------- 第二十八批：划卡诊断行文案（formatSwipeDiagnosis） ----------
-    // 与 logcat 里 "swipe release" 那行同值，屏上与日志永远对得上。
-    // 判定三种：切卡／弹回／忽略；onSkip 只在切卡分支调。
-
-    @Test
-    fun diagnosis_skip_showsAllValues() {
-        assertEquals(
-            "划卡诊断：切卡｜认领=true 峰值=150dp 净=120dp 渲染=118dp " +
-                "速度=200dp/s 退出=up 步数=18 onSkip=已调",
-            formatSwipeDiagnosis(
-                release = SwipeRelease.Skip, claimed = true,
-                netDp = 120f, peakDp = 150f, renderedDp = 118f,
-                velocityDps = 200f, exitReason = "up", moveCount = 18
-            )
-        )
-    }
-
-    @Test
-    fun diagnosis_snapBack_showsAllValues() {
-        assertEquals(
-            "划卡诊断：弹回｜认领=true 峰值=40dp 净=30dp 渲染=28dp " +
-                "速度=150dp/s 退出=up 步数=9 onSkip=未调",
-            formatSwipeDiagnosis(
-                release = SwipeRelease.SnapBack, claimed = true,
-                netDp = 30f, peakDp = 40f, renderedDp = 28f,
-                velocityDps = 150f, exitReason = "up", moveCount = 9
-            )
-        )
-    }
-
-    @Test
-    fun diagnosis_ignore_vertical_showsAllValues() {
-        assertEquals(
-            "划卡诊断：忽略｜认领=false 峰值=10dp 净=5dp 渲染=0dp " +
-                "速度=80dp/s 退出=vertical 步数=4 onSkip=未调",
-            formatSwipeDiagnosis(
-                release = SwipeRelease.Ignore, claimed = false,
-                netDp = 5f, peakDp = 10f, renderedDp = 0f,
-                velocityDps = 80f, exitReason = "vertical", moveCount = 4
-            )
-        )
-    }
-
-    @Test
-    fun diagnosis_negativeDirection_keepsSign() {
-        // 左划：峰值是绝对值恒正，净位移／渲染／速度保留负号。
-        assertEquals(
-            "划卡诊断：切卡｜认领=true 峰值=136dp 净=-136dp 渲染=-130dp " +
-                "速度=-900dp/s 退出=up 步数=12 onSkip=已调",
-            formatSwipeDiagnosis(
-                release = SwipeRelease.Skip, claimed = true,
-                netDp = -136f, peakDp = 136f, renderedDp = -130f,
-                velocityDps = -900f, exitReason = "up", moveCount = 12
-            )
-        )
-    }
-
-    @Test
-    fun diagnosis_roundsToWholeDp() {
-        assertEquals(
-            "划卡诊断：切卡｜认领=true 峰值=151dp 净=120dp 渲染=118dp " +
-                "速度=201dp/s 退出=up 步数=18 onSkip=已调",
-            formatSwipeDiagnosis(
-                release = SwipeRelease.Skip, claimed = true,
-                netDp = 120.4f, peakDp = 150.6f, renderedDp = 118f,
-                velocityDps = 200.6f, exitReason = "up", moveCount = 18
-            )
-        )
-    }
-
-    // ---------- 第二十九批：划卡诊断行·仓库结果后缀 ----------
-    // onSkip 调完立刻读仓库顶卡：顶换了「顶已换」，还是被划走那张
-    // 「顶未换」，栈空了「已空」。Bob 划完直接读这半句。
-
-    @Test
-    fun repoSuffix_topChanged_showsSwapped() {
-        assertEquals(
-            "｜仓库：顶已换 张数=2",
-            formatSkipRepoSuffix("a", "b", 2)
-        )
-    }
-
-    @Test
-    fun repoSuffix_topUnchanged_showsNotSwapped() {
-        assertEquals(
-            "｜仓库：顶未换 张数=2",
-            formatSkipRepoSuffix("a", "a", 2)
-        )
-    }
-
-    @Test
-    fun repoSuffix_emptyStack_showsEmpty() {
-        assertEquals(
-            "｜仓库：已空 张数=0",
-            formatSkipRepoSuffix("a", null, 0)
-        )
     }
 
     // ---------- 第三十批：划走飞出时长选档 ----------
