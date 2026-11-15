@@ -232,7 +232,7 @@ class VersionCardTest {
     fun `unknown version falls back to generic sentence`() {
         // 开着但测试轨道版本号未知 → 兜底（正式轨道版本号再全也不用）
         assertEquals(
-            "开着能提前收到测试版本，关掉只收正式版。",
+            "开着收测试版，关掉只收正式版。",
             betaPlanHint(
                 betaOptIn = true,
                 latestTestVersion = null,
@@ -242,7 +242,7 @@ class VersionCardTest {
         )
         // 关着但正式轨道版本号未知 → 兜底（测试轨道版本号再全也不用）
         assertEquals(
-            "开着能提前收到测试版本，关掉只收正式版。",
+            "开着收测试版，关掉只收正式版。",
             betaPlanHint(
                 betaOptIn = false,
                 latestTestVersion = info(514, "1.3.57"),

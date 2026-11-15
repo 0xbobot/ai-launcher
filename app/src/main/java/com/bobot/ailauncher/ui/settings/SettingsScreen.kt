@@ -124,21 +124,6 @@ fun llmCardTitle(expanded: Boolean, apiKeyBlank: Boolean): String =
     if (!expanded && !apiKeyBlank) "大模型已经配好了" else "让助手更聪明"
 
 /**
- * 来源卡收起行描述（纯函数，2026-11-14 Bob 定：收起加一行，告诉用户接上
- * 这些来源会起什么作用；展开态完整说明不动）：接上之后桌面会主动提醒。
- * 收起只在 4/4 时出现，描述不带数字——数字已在标题行。
- */
-fun sourcesCardCollapsedHint(): String = "接上之后，桌面会主动提醒你该做的事。"
-
-/**
- * 「让助手更聪明」卡收起行描述（纯函数，2026-11-14 Bob 定：收起加一行，
- * 告诉用户配好大模型会起什么作用；展开态完整说明不动）：没填 Key 写配好
- * 之后的效果，填了写已经配好的效果。
- */
-fun llmCardCollapsedHint(apiKeyBlank: Boolean): String =
-    if (apiKeyBlank) "配好之后，助手能听懂你说话、帮你办事。" else "配好了，助手能听懂你说话、帮你办事。"
-
-/**
  * 智能区合并卡两行可见态（纯函数状态机，2026-11-14 Bob 定：两行各展开各的）：
  * 来源行收起与否 = effectiveSourcesCardCollapsed（没接满强制展开）；
  * 大模型行展开与否 = llmExpanded 原值。一行点按只翻转本行——来源行点按
@@ -219,14 +204,14 @@ fun betaPlanHint(
     currentVersionCode: Int,
 ): String {
     if (betaOptIn) {
-        val test = latestTestVersion ?: return "开着能提前收到测试版本，关掉只收正式版。"
+        val test = latestTestVersion ?: return "开着收测试版，关掉只收正式版。"
         return if (test.versionCode > currentVersionCode) {
             "开着，下次升级会升到测试版 v${test.versionName}。"
         } else {
             "开着，已经是最新测试版了。"
         }
     }
-    val formal = latestFormalVersion ?: return "开着能提前收到测试版本，关掉只收正式版。"
+    val formal = latestFormalVersion ?: return "开着收测试版，关掉只收正式版。"
     return if (formal.versionCode > currentVersionCode) {
         "关着，下次升级只会升到正式版 v${formal.versionName}。"
     } else {
@@ -675,8 +660,7 @@ fun SettingsScreen(
             // 智能等级（设计稿 §2，2026-11-08 Bob 定）：已经接上了 N/4 个来源，
             // 数字随接上/断开实时变（connectorStates 本就随权限状态重算；第十三批起只认权限）。
             // 2026-11-14 Bob 定：4 个源全接上时这块默认收起，收起是标题行 +
-            // 一行描述 + chevron（描述写接上之后的效果，sourcesCardCollapsedHint）；
-            // 没接满时保持展开，方便接上剩下的。收起/展开记下来，下次进
+            // chevron；没接满时保持展开，方便接上剩下的。收起/展开记下来，下次进
             // 设置页还按上次的来；4/4 首次接满（从未点过）默认收起。
             val connectedCount = connectedSourceCount(connectorStates)
             val allSourcesConnected = connectedCount == SMART_SOURCE_ORDER.size
@@ -727,19 +711,6 @@ fun SettingsScreen(
                                     tint = AILauncherColors.current.Hint
                                 )
                             }
-                        }
-                        if (sourcesCollapsed) {
-                            // 2026-11-14 Bob 定：收起加一行描述，告诉用户接上
-                            // 这些来源会起什么作用；一行写完，展开态说明不动。
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = sourcesCardCollapsedHint(),
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                lineHeight = 18.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
                         }
                         if (!sourcesCollapsed) {
                             Spacer(modifier = Modifier.height(8.dp))
@@ -803,9 +774,8 @@ fun SettingsScreen(
                         // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
                         // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
                         // F-10：点按补 tick（走 Haptics 两档门面）。
-                        // 收起行与来源卡同一口径：标题行 + 一行描述 + chevron
-                        // （llmCardTitle + llmCardCollapsedHint），完整说明文字
-                        // 只在展开块里。
+                        // 收起行与来源卡同一口径：标题行 + chevron
+                        // （llmCardTitle），完整说明文字只在展开块里。
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -822,19 +792,6 @@ fun SettingsScreen(
                                     fontWeight = FontWeight.Medium,
                                     color = AILauncherColors.current.Title
                                 )
-                                if (!llmExpanded) {
-                                    // 2026-11-14 Bob 定：收起加一行描述，告诉用户配好
-                                    // 大模型会起什么作用；一行写完，展开态说明不动。
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = llmCardCollapsedHint(apiKey.isBlank()),
-                                        fontSize = AILauncherType.Footnote.fontSize,
-                                        color = AILauncherColors.current.Hint,
-                                        lineHeight = 18.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
                             }
                             Icon(
                                 if (llmExpanded) Icons.Filled.KeyboardArrowUp
@@ -1029,7 +986,6 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     SettingsPermissionRow(
                         title = "默认桌面",
-                        desc = "按 Home 键回到 AI 桌面",
                         granted = defaultGranted.value,
                         doneText = "已经设为默认",
                         todoText = "还没设为默认",
@@ -1078,13 +1034,6 @@ fun SettingsScreen(
                             color = AILauncherColors.current.Title,
                             lineHeight = 22.sp
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "点开未读消息后有没有打开应用、卡在哪一步，都记在这里",
-                            fontSize = AILauncherType.Footnote.fontSize,
-                            color = AILauncherColors.current.Hint,
-                            lineHeight = 18.sp
-                        )
                     }
                     Icon(
                         Icons.Filled.ChevronRight,
@@ -1128,17 +1077,17 @@ fun SettingsScreen(
                             color = AILauncherColors.current.Title,
                             lineHeight = 22.sp
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = if (crashUnreadCount > 0) {
-                                "$crashUnreadCount 条还没看过，点开看看"
-                            } else {
-                                "闪退过几次、为什么闪退，都记在这里"
-                            },
-                            fontSize = AILauncherType.Footnote.fontSize,
-                            color = AILauncherColors.current.Hint,
-                            lineHeight = 18.sp
-                        )
+                        // 2026-11-15 精炼：整句说明删掉，只留状态——有未看
+                        // 的记录才显示条数，没有就不显示第二行。
+                        if (crashUnreadCount > 0) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "$crashUnreadCount 条还没看过，点开看看",
+                                fontSize = AILauncherType.Footnote.fontSize,
+                                color = AILauncherColors.current.Hint,
+                                lineHeight = 18.sp
+                            )
+                        }
                     }
                     Icon(
                         Icons.Filled.ChevronRight,
@@ -1281,7 +1230,6 @@ private fun SettingsSectionTitle(text: String) {
 @Composable
 private fun SettingsPermissionRow(
     title: String,
-    desc: String,
     granted: Boolean,
     doneText: String,
     todoText: String,
@@ -1297,13 +1245,6 @@ private fun SettingsPermissionRow(
                     fontSize = AILauncherType.Body.fontSize,
                     fontWeight = FontWeight.Medium,
                     color = AILauncherColors.current.Title
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = desc,
-                    fontSize = AILauncherType.Footnote.fontSize,
-                    color = AILauncherColors.current.Hint,
-                    lineHeight = 18.sp
                 )
             }
             if (!granted) {
