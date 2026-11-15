@@ -319,6 +319,30 @@ fun calendarCardFact(event: CalEvent, nowMs: Long): String {
 }
 
 /**
+ * 本地日程详情展示行（纯函数，第四十批，单测锁死）：「看日程」退路用的
+ * Dialog 正文——时间＋地点＋说明＋日历名。标题不重复：Dialog 标题就是
+ * 事件标题，这里只给时间起（与卡片正文同口径：进行中加「进行中 · 」
+ * 前缀）；地点／说明／日历名没有就不写、不硬凑。
+ */
+fun calendarEventDetailLines(event: CalEvent, nowMs: Long): List<String> {
+    val dayStart = startOfDayMs(event.begin)
+    val startMin = ((event.begin - dayStart) / 60_000L).toInt()
+    val endMin = ((event.end - dayStart) / 60_000L).toInt()
+    val timeLine = withInProgressPrefix(
+        "${relativeDayLabel(dayStart, nowMs)} ${formatTimeRange(startMin, endMin)}",
+        event.begin, event.end, nowMs
+    )
+    val lines = mutableListOf(timeLine)
+    val place = event.location.trim()
+    if (place.isNotEmpty()) lines += "地点：$place"
+    val desc = event.description.trim()
+    if (desc.isNotEmpty()) lines += desc
+    val cal = event.calendarName.trim()
+    if (cal.isNotEmpty()) lines += "日历：$cal"
+    return lines
+}
+
+/**
  * 预约卡去重键（纯函数，第二十五批）：短信版与日历版同一口径——
  * `appt|<当天 00:00>|<开始分钟>|<结束分钟>|<地点 hash>`。同一件事短信
  * 和日历里都有，只留一张，以短信那条为准（候选顺序短信在前）。
@@ -458,6 +482,8 @@ fun resolveLaunchableCalendarPackage(context: Context, eventId: Long = 0L): Stri
  * 2) 无链接 → 先解析一个真正能打开事件详情的日历应用包名
  *    （resolveLaunchableCalendarPackage，带 eventId 在包内校验事件详情
  *    意图可解析，非日历应用进不来），再按该包名拉起事件详情；
+ *    包名解析不到时再试一次不设包的事件详情意图（第四十批：机上若有
+ *    没在白名单里、但确实能打开事件详情的日历应用，让系统自己选）；
  *    事件详情打不开就返回 false，不退回开应用主界面（开主界面只会
  *    打开一个跟日程无关的应用）；没有能拉起的日历应用时返回 false；
  * 全失败返回 false（调用方提示，不在这里弹）。
@@ -538,10 +564,29 @@ fun openCalendarEvent(context: Context, eventId: Long, meetingUrl: String?): Boo
                 context.startActivity(viewIntent)
                 return true
             }
-        } catch (_: Exception) { /* 事件详情接不住 → 返回 false */ }
+        } catch (_: Exception) { /* 事件详情接不住 → 落无包兜底 */ }
+    }
+    // 第四十批：包名解析不到时，再试一次不设包的事件详情意图——机上若有
+    // 没在包名白名单里、但确实能打开事件详情的日历应用（或系统日历），
+    // 让系统自己选（多家可开时弹一次选择框）；resolveActivity＋try/catch
+    // 守着，解析不到或被拒都返回 false（宿主改弹本地日程详情 Dialog，
+    // 不再是死胡同 toast）。注意：谷歌 APP 挡在包名校验那一步，是因为它
+    // 根本没有事件详情 Activity——无包意图同样解析不到它，不会退回开
+    // 谷歌 APP 主界面（510 教训仍守着）。
+    if (eventId > 0) {
+        try {
+            val fallback = Intent(
+                Intent.ACTION_VIEW, Uri.parse(calendarEventDetailUri(eventId))
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (fallback.resolveActivity(context.packageManager) != null) {
+                context.startActivity(fallback)
+                return true
+            }
+        } catch (_: Exception) { /* 无包意图也接不住 → 返回 false */ }
     }
     // 没有能打开事件详情的日历应用 → 返回 false，调用方给我们自己的提示
-    // （IslandToasts「没能打开」），不再让系统 toast 成为唯一反馈，
+    // （宿主弹本地日程详情 Dialog；查不到事件才弹 IslandToasts
+    // 「没能打开」），不再让系统 toast 成为唯一反馈，
     // 也不开一个跟日程无关的应用主界面。
     return false
 }
