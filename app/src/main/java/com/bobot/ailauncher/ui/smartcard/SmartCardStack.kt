@@ -1130,6 +1130,41 @@ fun SmartCardStack(
                 // 第四十批：直画当前卡——准备清单异步回来只改 prep，不触发
                 // 一次切换；摘卡／列表变化时内容直接换（单帧，无重影）。
                 // 跟手位移仍挂在这里（拖动时整张卡跟手指走）。
+                // 第四十二批：拖动时垫一张在下面——只画当前一张时，拖开
+                // 就露蓝底（539 闪的根因）；垫卡是拖动方向上的下一张／
+                // 上一张，位移＝拖动位移＋dir×卡宽（carouselDragUnderOffset），
+                // 与当前卡全程恰好差一整张卡宽，拖动露出的是下一张、不
+                // 是蓝底；松手换卡时滑入起点与垫卡位置一致，拖动到滑动
+                // 无跳变。只在拖动位移不为 0 时画（静止时垫卡在 ±卡宽外、
+                // 被 clipToBounds 裁掉，不多画一张）；1 张时不垫。垫卡先
+                // 画、在当前卡下面。
+                val dragOffset = dragOffsetX.value
+                if (cards.size >= 2 && dragOffset != 0f && cardWidthPx > 0f) {
+                    val dragDir = if (dragOffset < 0f) +1 else -1
+                    val underRaw = cards.getOrNull(
+                        carouselNextIndex(index, cards.size, dragDir)
+                    )
+                    if (underRaw != null) {
+                        val underCard =
+                            underRaw.copy(prep = prepById[underRaw.id] ?: underRaw.prep)
+                        SmartCardView(
+                            card = underCard,
+                            onActionClick = { onAction(underCard) },
+                            onIgnoreClick = { onIgnore(underCard) },
+                            onCloseClick = onClose,
+                            onBodyClick = { onBodyClick(underCard) },
+                            hideActionRow = underCard.id in connectedIds,
+                            celebration = connectedFeedbacks[underCard.id],
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer {
+                                    translationX = carouselDragUnderOffset(
+                                        dragOffset, dragDir, cardWidthPx
+                                    )
+                                }
+                        )
+                    }
+                }
                 val raw = cards[index]
                 val card = raw.copy(prep = prepById[raw.id] ?: raw.prep)
                 SmartCardView(
@@ -1411,6 +1446,26 @@ internal fun carouselSlideInOffset(
     if (cardWidthPx <= 0f) return 0f
     val start = dir * cardWidthPx + releaseOffsetPx
     return start + (0f - start) * progress
+}
+
+/**
+ * 拖动时垫在下面的卡（纯函数，第四十二批，单测锁死）：手动拖动时当前卡
+ * 跟手指走，下面那张（拖动方向上的下一张／上一张）也要跟着走——拖动
+ * 只画当前一张时，拖开就露蓝底（539 闪的根因：Bob 录屏里手动拖动
+ * 时卡后露出 100–420px 蓝底带，0.2 秒内从 0 长到 420px）。dir
+ * +1＝向左拖（下一张在右侧）、−1＝向右拖（上一张在左侧）。垫卡位移
+ * ＝拖动位移＋dir×卡宽，与当前卡全程恰好差一整张卡宽、无缝无重叠；
+ * 松手换卡时滑入起点与垫卡位置一致（见 carouselSlideInOffset，
+ * p＝0 时滑入位移＝dir×卡宽＋松手位移），拖动到滑动无跳变。卡宽没
+ * 量到（≤0）时返回拖动位移。
+ */
+internal fun carouselDragUnderOffset(
+    dragOffsetPx: Float,
+    dir: Int,
+    cardWidthPx: Float
+): Float {
+    if (cardWidthPx <= 0f) return dragOffsetPx
+    return dragOffsetPx + dir * cardWidthPx
 }
 
 /**

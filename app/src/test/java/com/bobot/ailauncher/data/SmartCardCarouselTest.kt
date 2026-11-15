@@ -10,6 +10,7 @@ import com.bobot.ailauncher.ui.smartcard.SMART_CARD_FLING_VELOCITY_DP_PER_SEC
 import com.bobot.ailauncher.ui.smartcard.carouselClampIndex
 import com.bobot.ailauncher.ui.smartcard.carouselDotTapDir
 import com.bobot.ailauncher.ui.smartcard.carouselDragOffsetClamp
+import com.bobot.ailauncher.ui.smartcard.carouselDragUnderOffset
 import com.bobot.ailauncher.ui.smartcard.carouselNextIndex
 import com.bobot.ailauncher.ui.smartcard.carouselReleaseDecision
 import com.bobot.ailauncher.ui.smartcard.carouselShouldAutoRotate
@@ -436,5 +437,60 @@ class SmartCardCarouselTest {
         val inAtHalf = carouselSlideInOffset(0.5f, +1, 300f, -100f)
         assertTrue(outAtHalf + 300f <= inAtHalf)
         assertEquals(0f, inAtHalf - (outAtHalf + 300f), 0.001f)
+    }
+
+    @Test
+    fun dragUnderOffset_leftDrag_nextCardOnRight() {
+        // 第四十二批：向左拖（位移 −100f），垫卡是下一张、在右侧，
+        // 位移＝−100＋300＝200f（卡占 [200, 500]，当前卡占 [−100, 200]，贴住）。
+        assertEquals(200f, carouselDragUnderOffset(-100f, +1, 300f), 0.001f)
+    }
+
+    @Test
+    fun dragUnderOffset_rightDrag_prevCardOnLeft() {
+        // 第四十二批：向右拖（位移 ＋100f），垫卡是上一张、在左侧，
+        // 位移＝100−300＝−200f（卡占 [−200, 100]，当前卡占 [100, 400]，贴住）。
+        assertEquals(-200f, carouselDragUnderOffset(100f, -1, 300f), 0.001f)
+    }
+
+    @Test
+    fun dragUnderOffset_zeroWidth_returnsDragOffset() {
+        // 卡宽没量到时返回拖动位移（不动，等卡宽量到再垫）。
+        assertEquals(-100f, carouselDragUnderOffset(-100f, +1, 0f), 0.001f)
+    }
+
+    @Test
+    fun dragUnderOffset_underAndCurrentExactlyOneWidthApart() {
+        // 第四十二批（539 闪的根因锁死）：拖动全程垫卡与当前卡恰好差
+        // 一整张卡宽——左拖时垫卡左缘 − 当前卡右缘恒为 0，右拖时当前卡
+        // 左缘 − 垫卡右缘恒为 0；既无重叠、也无蓝底缝。旧版拖动时只画
+        // 当前一张，拖开多少就露多少蓝底（Bob 录屏 100–420px）。
+        val width = 300f
+        for (drag in listOf(-150f, -100f, -75f, -10f)) {
+            val under = carouselDragUnderOffset(drag, +1, width)
+            assertEquals(0f, under - (drag + width), 0.001f)
+        }
+        for (drag in listOf(10f, 75f, 100f, 150f)) {
+            val under = carouselDragUnderOffset(drag, -1, width)
+            assertEquals(0f, drag - (under + width), 0.001f)
+        }
+    }
+
+    @Test
+    fun dragUnderOffset_atReleaseMatchesSlideInStart() {
+        // 第四十二批（拖动到滑动无跳变锁死）：松手那一刻垫卡位置＝滑入
+        // 起点（p＝0 的滑入位移＝dir×卡宽＋松手位移），换卡滑动从垫卡
+        // 已在的位置继续走，不弹回、不跳变。左滑松手位移 −100f 时两边
+        // 都是 200f；右滑松手位移 ＋100f 时两边都是 −200f。
+        assertEquals(
+            carouselSlideInOffset(0f, +1, 300f, -100f),
+            carouselDragUnderOffset(-100f, +1, 300f),
+            0.001f
+        )
+        assertEquals(
+            carouselSlideInOffset(0f, -1, 300f, 100f),
+            carouselDragUnderOffset(100f, -1, 300f),
+            0.001f
+        )
     }
 }
