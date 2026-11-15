@@ -288,7 +288,10 @@ fun isUserMatterCard(kind: SmartCardKind): Boolean = when (kind) {
     SmartCardKind.MISSED_CALL,
     SmartCardKind.NOTIFICATION -> true
     SmartCardKind.GUIDE,
-    SmartCardKind.DEFAULT_LAUNCHER -> false
+    SmartCardKind.DEFAULT_LAUNCHER,
+    // 总览卡 DAY_OVERVIEW：应用推的——它没有沉底语义，点「我知道了」
+    // 是 markDone 按日抑制（id 按日拼），不走 skip 的沉底路径。
+    SmartCardKind.DAY_OVERVIEW -> false
 }
 
 /**
