@@ -648,6 +648,17 @@ fun buildSnapshot(
 
 // ---------- 运行器 ----------
 
+/**
+ * 分析失败原因——只区分用户能感知、能行动的两种（UI 用大白话写清，
+ * 不写实现术语）。
+ */
+enum class AnalysisFailure {
+    /** 连不上：网络层失败（超时/断网）或调用抛异常。 */
+    NETWORK,
+    /** 调通了但没出结果：非 2xx、解析失败、复核后 0 条、无 Key。 */
+    OTHER,
+}
+
 sealed interface AnalysisOutcome {
     /** 无候选（没调模型）。 */
     data object NoCandidates : AnalysisOutcome
@@ -655,8 +666,8 @@ sealed interface AnalysisOutcome {
     /** 有建议（fromCache=true = 候选未变，直接显示上次结果，没调模型）。 */
     data class Ready(val suggestions: List<DockSuggestion>, val fromCache: Boolean) : AnalysisOutcome
 
-    /** 失败（网络错、模型非 2xx、解析失败、复核后 0 条）。 */
-    data object Failed : AnalysisOutcome
+    /** 失败（原因见 [AnalysisFailure]）。 */
+    data class Failed(val failure: AnalysisFailure) : AnalysisOutcome
 }
 
 /**
@@ -697,7 +708,7 @@ suspend fun analyzeSuggestions(
     }
     if (!LlmConfig.hasKey(context)) {
         if (BuildConfig.DEBUG) Log.d(TAG, "analyze: no key, skip call")
-        return@withContext AnalysisOutcome.Failed
+        return@withContext AnalysisOutcome.Failed(AnalysisFailure.OTHER)
     }
     val rawBody = try {
         val r = LlmRouter.postChatCompletions(
@@ -712,16 +723,18 @@ suspend fun analyzeSuggestions(
         )
         if (r.networkError != null || r.httpCode !in 200..299) {
             if (BuildConfig.DEBUG) Log.d(TAG, "analyze: http=${r.httpCode} err=${r.networkError}")
-            return@withContext AnalysisOutcome.Failed
+            val failure = if (r.networkError != null) AnalysisFailure.NETWORK
+            else AnalysisFailure.OTHER
+            return@withContext AnalysisOutcome.Failed(failure)
         }
         r.rawBody
     } catch (e: Exception) {
         if (BuildConfig.DEBUG) Log.d(TAG, "analyze: call failed (${e.javaClass.simpleName})")
-        return@withContext AnalysisOutcome.Failed
+        return@withContext AnalysisOutcome.Failed(AnalysisFailure.NETWORK)
     }
     val parsed = parseSuggestionsResponse(rawBody) ?: run {
         if (BuildConfig.DEBUG) Log.d(TAG, "analyze: parse failed")
-        return@withContext AnalysisOutcome.Failed
+        return@withContext AnalysisOutcome.Failed(AnalysisFailure.OTHER)
     }
     val verified = verifySuggestions(
         parsed = parsed,
@@ -731,7 +744,7 @@ suspend fun analyzeSuggestions(
     )
     if (verified.isEmpty()) {
         if (BuildConfig.DEBUG) Log.d(TAG, "analyze: verify dropped all (${parsed.size} parsed)")
-        return@withContext AnalysisOutcome.Failed
+        return@withContext AnalysisOutcome.Failed(AnalysisFailure.OTHER)
     }
     if (BuildConfig.DEBUG) Log.d(TAG, "analyze: parsed=${parsed.size} verified=${verified.size}")
     store.saveResult(verified, payloadJson, fingerprint)

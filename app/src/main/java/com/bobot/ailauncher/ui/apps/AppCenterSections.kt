@@ -869,7 +869,11 @@ fun LazyListScope.AppCenterDockSection(
                 // 21dp：紧凑行 60dp、手柄 18dp，(60-18)/2=21dp）——与幽灵 ★
                 // 同一毛病：此前 CenterEnd 是整项 Box 的垂直中点，行下展开快
                 // 捷面板后项变高，手柄就漂到面板旁。
-                Icon(
+                // 2026-11-15（三合一批）：弹窗展开时手柄藏起来——它和 ⓘ 落在
+                // 同一个角上（Bob 10:52 视频 f_033 放大：手柄横线压住了 ⓘ；
+                // 字母行没有手柄，只有收藏区撞上）。拖动排序只在收起态有
+                // 意义，收起时手柄恢复；ⓘ 的位置不动。
+                if (!isPopupExpandedX) Icon(
                     imageVector = Icons.Filled.DragHandle,
                     contentDescription = "拖动排序",
                     tint = AILauncherColors.current.Hint,
@@ -952,8 +956,10 @@ fun LazyListScope.AppCenterUnreadSection(
     unreadDisplayNames: Map<String, String> = emptyMap(),
     activeNotifPkgs: Set<String>,
     onClearUnreadNotifications: (String) -> Unit,
-    // 未读组右滑关通知（Bob 2026-11-14 09:55 亲定右滑）：跳系统通知设置页；
-    // 默认空操作（调用点传入，与 onClearUnreadNotifications 同款）。
+    // 未读组右滑关通知（Bob 2026-11-14 09:55 亲定右滑）：跳应用信息页
+    // （2026-11-15：通知设置页在中兴机上对微信白屏闪退，改走这页；开关
+    // 就直接在那页上）；默认空操作（调用点传入，与
+    // onClearUnreadNotifications 同款）。
     onDisableAppNotifications: (String) -> Unit = {},
     unreadVisible: Boolean,
     stuckUnread: Boolean,

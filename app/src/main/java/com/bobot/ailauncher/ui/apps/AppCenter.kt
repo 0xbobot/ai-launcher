@@ -391,12 +391,15 @@ fun AppCenterContent(
     val onClearUnreadNotifications: (String) -> Unit = { pkg ->
         LauncherNotificationService.cancelNotificationsForPackage(pkg)
     }
-    // 未读组右滑关通知（Bob 2026-11-14 09:55 亲定右滑）：跳到该应用的系统
-    // 通知设置页，由用户拨开关（第三方关不掉别的 App 的通知权限）；打不开
-    // 时退到应用详情页。行不消失——关掉后角标重算、行自然离组；角标来自
-    // 短信库等非通知口径时，关权限后行仍在（收据写明）。
+    // 未读组右滑关通知（Bob 2026-11-14 09:55 亲定右滑）：跳到该应用的
+    // 应用信息页，由用户拨「允许推送通知」开关（第三方关不掉别的 App
+    // 的通知权限）；2026-11-15 改走这页：直接跳通知设置页在 Bob 的中兴
+    // 机上对微信白屏闪退，应用信息页能正常打开、开关就直接在那页上。
+    // 打不开时 openAppDetailsPage 自己 toast 兜底。行不消失——关掉后
+    // 角标重算、行自然离组；角标来自短信库等非通知口径时，关权限后行仍
+    // 在（收据写明）。
     val onDisableUnreadNotifications: (String) -> Unit = { pkg ->
-        openAppNotificationSettings(context, pkg)
+        openAppDetailsPage(context, pkg)
     }
     // 折叠组（419）：不活跃集——可见 = azApps（已去隐藏、去自己）；共享规则
     // （AppUsageTracker.inactiveMembers：系统 UsageStats 优先，没授权退回

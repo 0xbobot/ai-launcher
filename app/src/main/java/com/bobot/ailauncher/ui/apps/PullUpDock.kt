@@ -93,6 +93,7 @@ import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import com.bobot.ailauncher.data.AnalysisFailure
 import com.bobot.ailauncher.data.AnalysisOutcome
 import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.DockSuggestion
@@ -168,21 +169,30 @@ enum class DockState { Hidden, D1, D2, D3 }
 
 /**
  * 说明页「建议」区文案（Bob 2026-11-15 亲定新版：放顶、加白话、类别
- * 改名）：纯函数/常量，JVM 单测锁死。仓库没有 Compose UI 测试
- * harness；区段排布（建议区在应用行之上）靠代码结构——建议区已抽成
+ * 改名；同日真机 verdict 精炼：一句话介绍、静默引导语删了）：纯函数/
+ * 常量，JVM 单测锁死。仓库没有 Compose UI 测试 harness；区段排布
+ * （建议区在应用行之上）靠代码结构——建议区已抽成
  * DockSuggestionsSection，说明页 Column 里它在 top10 应用行之前调用
  * ——+ 真机验收。类别名只改展示，SuggestionKind 键名、持久化、反馈
  * JSONL 原样不动。
  */
 const val SUGGESTION_PLAIN_INTRO =
-    "点一下，我看看你最近怎么用这些应用，告诉你哪个值得固定上来、哪个可以拿下去，采不采纳你说了算。"
-const val SUGGESTION_MUTE_LEAD = "点一下，这类建议以后就不出现了，再点恢复。"
+    "看看你最近怎么用这些应用，告诉你哪个值得固定、哪个可以拿下去。"
 
 /** 建议类别展示名：OBSERVE 叫「习惯提醒」，不是「模式观察」。 */
 fun suggestionKindLabel(kind: SuggestionKind): String = when (kind) {
     SuggestionKind.PIN -> "固定"
     SuggestionKind.UNPIN -> "取消固定"
     SuggestionKind.OBSERVE -> "习惯提醒"
+}
+
+/**
+ * 分析失败文案（大白话，JVM 单测锁死）：连不上就直说连不上；别的
+ * 原因不展开实现术语，只说没分析出来、再点一次。
+ */
+fun analysisFailureText(failure: AnalysisFailure): String = when (failure) {
+    AnalysisFailure.NETWORK -> "没连上，检查一下网络再点一次"
+    AnalysisFailure.OTHER -> "这次没分析出来，稍后再试"
 }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -811,7 +821,9 @@ fun PullUpDock(
  * 不引导配 Key）。建议只提议，不改 Dock 排序分数；采纳固定/取消固定
  * 走 UiPrefs 固定位。区段末尾一条分隔线，与下面的应用行分开。
  * 文案走本文件顶部的纯函数/常量（suggestionKindLabel、
- * SUGGESTION_PLAIN_INTRO、SUGGESTION_MUTE_LEAD），JVM 单测锁死。
+ * SUGGESTION_PLAIN_INTRO、analysisFailureText），JVM 单测锁死。
+ * 点完的状态（失败/无候选）用 Callout + Title 色一行醒目展示，不再
+ * 是 Footnote + Hint 小字；按钮本身就是重试入口，不另加重试按钮。
  */
 @Composable
 private fun DockSuggestionsSection(
@@ -865,8 +877,8 @@ private fun DockSuggestionsSection(
                             suggestionStatus = null
                             suggestionStore.refreshUiState()
                         }
-                        AnalysisOutcome.Failed ->
-                            suggestionStatus = "这次没分析出来，稍后再试"
+                        is AnalysisOutcome.Failed ->
+                            suggestionStatus = analysisFailureText(outcome.failure)
                     }
                 }
             },
@@ -880,8 +892,8 @@ private fun DockSuggestionsSection(
         suggestionStatus?.let { status ->
             Text(
                 text = status,
-                fontSize = AILauncherType.Footnote.fontSize,
-                color = AILauncherColors.current.Hint,
+                fontSize = AILauncherType.Callout.fontSize,
+                color = AILauncherColors.current.Title,
                 modifier = Modifier.padding(vertical = 4.dp)
             )
         }
@@ -896,38 +908,27 @@ private fun DockSuggestionsSection(
                 store = suggestionStore
             )
         }
-        // 静默类别：按类别关，关了的类别不进候选；再点恢复。
-        // 引导语变长了，放一行、类别放下一行，横排一行装不下。
-        Column(
+        // 静默类别（Bob 2026-11-15 精炼：引导语删了，三个类别紧凑排一行；
+        // 点一下关、再点恢复；类别展示名、键名、持久化、反馈 JSONL 不动）。
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 8.dp)
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = SUGGESTION_MUTE_LEAD,
-                fontSize = AILauncherType.Footnote.fontSize,
-                color = AILauncherColors.current.Hint
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SuggestionKind.entries.forEach { kind ->
-                    val muted = kind in suggestionsUi.mutedKinds
-                    Text(
-                        text = suggestionKindLabel(kind) + if (muted) "（已经关了）" else "",
-                        fontSize = AILauncherType.Footnote.fontSize,
-                        color = if (muted) AILauncherColors.current.Hint
-                        else AILauncherColors.current.Title,
-                        modifier = Modifier
-                            .clickable {
-                                suggestionStore.setKindMuted(kind, !muted)
-                            }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
+            SuggestionKind.entries.forEach { kind ->
+                val muted = kind in suggestionsUi.mutedKinds
+                Text(
+                    text = suggestionKindLabel(kind) + if (muted) "（已经关了）" else "",
+                    fontSize = AILauncherType.Footnote.fontSize,
+                    color = if (muted) AILauncherColors.current.Hint
+                    else AILauncherColors.current.Title,
+                    modifier = Modifier
+                        .clickable {
+                            suggestionStore.setKindMuted(kind, !muted)
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
             }
         }
         HorizontalDivider(

@@ -129,32 +129,25 @@ class UnreadSwipeTest {
         assertFalse(shouldDisableOnRelease(-200f, 120f))
     }
 
-    // ---------- 系统通知设置页打开目标 ----------
-    // action 与 extra key 是 Settings 的编译期常量（纯字符串，JVM 单测可直接读）。
+    // ---------- 应用信息页打开目标（右滑目的地） ----------
+    // action 与 data Uri 是 Settings 的编译期常量（纯字符串，JVM 单测可直接读）。
+    // 2026-11-15：右滑改走应用信息页——直接跳通知设置页在 Bob 的中兴机上
+    // 对微信白屏闪退，应用信息页能正常打开，「允许推送通知」开关就直接在那页上。
 
     @Test
-    fun `notificationSettingsTarget - action is app notification settings`() {
-        val target = notificationSettingsTarget("com.tencent.mm")
+    fun `appDetailsTarget - action is app details settings`() {
+        val target = appDetailsTarget("com.tencent.mm")
         assertEquals(
-            android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
             target.action
         )
     }
 
     @Test
-    fun `notificationSettingsTarget - extra key is app package key`() {
-        val target = notificationSettingsTarget("com.tencent.mm")
+    fun `appDetailsTarget - data uri carries the package`() {
         assertEquals(
-            android.provider.Settings.EXTRA_APP_PACKAGE,
-            target.packageExtraKey
-        )
-    }
-
-    @Test
-    fun `notificationSettingsTarget - package passes through`() {
-        assertEquals(
-            "com.tencent.mm",
-            notificationSettingsTarget("com.tencent.mm").packageName
+            "package:com.tencent.mm",
+            appDetailsTarget("com.tencent.mm").dataUri
         )
     }
 }

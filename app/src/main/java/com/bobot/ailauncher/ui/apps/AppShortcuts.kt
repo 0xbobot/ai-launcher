@@ -59,51 +59,39 @@ internal fun launchAppShortcut(context: Context, packageName: String, shortcutId
     }
 }
 
-/** 打开系统应用信息页 */
+/**
+ * 应用信息页的打开目标（纯数据，单测锁死在 UnreadSwipeTest）：
+ * action 与 data Uri 都是 Settings 的编译期常量。
+ */
+internal data class AppDetailsTarget(
+    val action: String,
+    val dataUri: String
+)
+
+/** 未读组右滑「关闭通知」的打开目标：该应用的应用信息页。 */
+internal fun appDetailsTarget(packageName: String): AppDetailsTarget =
+    AppDetailsTarget(
+        action = android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        dataUri = "package:$packageName"
+    )
+
+/**
+ * 打开系统应用信息页（未读组右滑「关闭通知」用，Bob 2026-11-14 09:55
+ * 亲定右滑；2026-11-15 改走这页：直接跳通知设置页
+ * ACTION_APP_NOTIFICATION_SETTINGS 在 Bob 的中兴机上对微信白屏闪退
+ * （页打开了、"允许通知"开关可见，随后白屏退回），应用信息页能正常
+ * 打开，而且"允许推送通知"开关就直接在那页上，用户一 tap 就能关，
+ * 目标不变。打不开时 toast 兜底。
+ */
 internal fun openAppDetailsPage(context: Context, packageName: String) {
     try {
+        val target = appDetailsTarget(packageName)
         val intent = Intent(
-            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-            android.net.Uri.parse("package:$packageName")
+            target.action,
+            android.net.Uri.parse(target.dataUri)
         ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
         context.startActivity(intent)
     } catch (_: Exception) {
         IslandToasts.show("应用信息打不开，稍后再试试吧")
-    }
-}
-
-/**
- * 系统通知设置页的打开目标（纯数据，单测锁死在 UnreadSwipeTest）：
- * action 与 extra key 都是 Settings 的编译期常量。
- */
-internal data class AppNotificationSettingsTarget(
-    val action: String,
-    val packageExtraKey: String,
-    val packageName: String
-)
-
-/** 未读组右滑「关闭通知」的打开目标：该应用的系统通知设置页。 */
-internal fun notificationSettingsTarget(packageName: String): AppNotificationSettingsTarget =
-    AppNotificationSettingsTarget(
-        action = android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
-        packageExtraKey = android.provider.Settings.EXTRA_APP_PACKAGE,
-        packageName = packageName
-    )
-
-/**
- * 打开系统通知设置页（未读组右滑「关闭通知」用，Bob 2026-11-14 09:55 亲定右滑）：
- * 第三方应用关不掉别的 App 的通知权限，只能跳到系统页由用户拨开关。
- * 打不开时退到应用详情页（与 openAppDetailsPage 同款兜底）。
- */
-internal fun openAppNotificationSettings(context: Context, packageName: String) {
-    try {
-        val target = notificationSettingsTarget(packageName)
-        val intent = Intent(target.action).apply {
-            putExtra(target.packageExtraKey, target.packageName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-    } catch (_: Exception) {
-        openAppDetailsPage(context, packageName)
     }
 }
