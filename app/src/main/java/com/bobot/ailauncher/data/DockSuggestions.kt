@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.BuildConfig
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -695,7 +696,7 @@ suspend fun analyzeSuggestions(
         return@withContext AnalysisOutcome.Ready(cached, fromCache = true)
     }
     if (!LlmConfig.hasKey(context)) {
-        Log.d(TAG, "analyze: no key, skip call")
+        if (BuildConfig.DEBUG) Log.d(TAG, "analyze: no key, skip call")
         return@withContext AnalysisOutcome.Failed
     }
     val rawBody = try {
@@ -710,16 +711,16 @@ suspend fun analyzeSuggestions(
             tag = TAG,
         )
         if (r.networkError != null || r.httpCode !in 200..299) {
-            Log.d(TAG, "analyze: http=${r.httpCode} err=${r.networkError}")
+            if (BuildConfig.DEBUG) Log.d(TAG, "analyze: http=${r.httpCode} err=${r.networkError}")
             return@withContext AnalysisOutcome.Failed
         }
         r.rawBody
     } catch (e: Exception) {
-        Log.d(TAG, "analyze: call failed (${e.javaClass.simpleName})")
+        if (BuildConfig.DEBUG) Log.d(TAG, "analyze: call failed (${e.javaClass.simpleName})")
         return@withContext AnalysisOutcome.Failed
     }
     val parsed = parseSuggestionsResponse(rawBody) ?: run {
-        Log.d(TAG, "analyze: parse failed")
+        if (BuildConfig.DEBUG) Log.d(TAG, "analyze: parse failed")
         return@withContext AnalysisOutcome.Failed
     }
     val verified = verifySuggestions(
@@ -729,10 +730,10 @@ suspend fun analyzeSuggestions(
         ignoredKeys = store.ignoredKeys(),
     )
     if (verified.isEmpty()) {
-        Log.d(TAG, "analyze: verify dropped all (${parsed.size} parsed)")
+        if (BuildConfig.DEBUG) Log.d(TAG, "analyze: verify dropped all (${parsed.size} parsed)")
         return@withContext AnalysisOutcome.Failed
     }
-    Log.d(TAG, "analyze: parsed=${parsed.size} verified=${verified.size}")
+    if (BuildConfig.DEBUG) Log.d(TAG, "analyze: parsed=${parsed.size} verified=${verified.size}")
     store.saveResult(verified, payloadJson, fingerprint)
     AnalysisOutcome.Ready(verified, fromCache = false)
 }

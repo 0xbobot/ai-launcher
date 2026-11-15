@@ -386,7 +386,7 @@ object OtaUpdater {
      */
     fun promptInstall(context: Context, apkFile: File): Boolean {
         if (!context.packageManager.canRequestPackageInstalls()) {
-            IslandToasts.show("请允许安装未知应用，开完回来会自动弹出安装")
+            IslandToasts.show("要先去设置里打开「安装未知应用」，开完回来我会自动弹出安装")
             val intent = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:${context.packageName}")

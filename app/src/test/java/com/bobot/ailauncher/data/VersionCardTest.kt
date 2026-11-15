@@ -36,7 +36,7 @@ class VersionCardTest {
     @Test
     fun `checking title`() {
         assertEquals(
-            "正在检查...",
+            "正在帮你检查…",
             versionUpdateTitle(
                 checking = true, downloading = false,
                 downloadDone = false, downloadFailed = false,
@@ -60,7 +60,7 @@ class VersionCardTest {
     @Test
     fun `downloaded title`() {
         assertEquals(
-            "下载完成",
+            "已经下载好了",
             versionUpdateTitle(
                 checking = false, downloading = false,
                 downloadDone = true, downloadFailed = false,
@@ -72,7 +72,7 @@ class VersionCardTest {
     @Test
     fun `failed title`() {
         assertEquals(
-            "下载失败",
+            "这次没下载下来",
             versionUpdateTitle(
                 checking = false, downloading = false,
                 downloadDone = false, downloadFailed = true,
@@ -84,7 +84,7 @@ class VersionCardTest {
     @Test
     fun `update available title carries version`() {
         assertEquals(
-            "发现新版本 v1.3.54",
+            "有新版本 v1.3.54，可以更新了",
             versionUpdateTitle(
                 checking = false, downloading = false,
                 downloadDone = false, downloadFailed = false,
@@ -110,7 +110,7 @@ class VersionCardTest {
     @Test
     fun `downloaded hint is tap to install`() {
         assertEquals(
-            "点击安装 v1.3.54",
+            "点这里安装 v1.3.54",
             versionUpdateHint(
                 downloading = false, downloadDone = true, downloadFailed = false,
                 updateVersionName = "1.3.54", changelog = "修复若干问题",
@@ -122,7 +122,7 @@ class VersionCardTest {
     @Test
     fun `failed hint is tap to retry`() {
         assertEquals(
-            "点击重试",
+            "点这里再试一次",
             versionUpdateHint(
                 downloading = false, downloadDone = false, downloadFailed = true,
                 updateVersionName = "1.3.54", changelog = "修复若干问题",

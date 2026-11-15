@@ -483,8 +483,8 @@ fun AppCenterHeaderSection(
                 // 应用中心升级：catalog 为空时不显示"0 款"空列表，改弱提示
                 // Bob 2026-11-03：数字跟当前列表走——搜索态显示过滤后条数
                 // 反馈闭环：LLM 重试出结果后，当前列表是 displayResults。
-                text = if (catalog == null) "正在加载…"
-                    else "${displayResults?.size ?: azApps.size} 款 · 右侧滑字母直达",
+                text = if (catalog == null) "正在帮你找应用…"
+                    else "共 ${displayResults?.size ?: azApps.size} 个 · 右边滑字母就能找到",
                 fontSize = AILauncherType.Caption.fontSize,
                 color = AILauncherColors.current.Hint,
                 modifier = Modifier.padding(top = 8.dp)
@@ -622,8 +622,8 @@ fun LazyListScope.AppCenterSearchResultsSection(
                     // 去掉跟随应用行的 72/64dp 大缩进，改全宽居中、
                     // maxLines=1+省略号；文案略缩（“相关的”→“相关”）
                 // 以求一行放得下。字号不变（Callout）。
-                text = if (catalog == null) "应用列表还没准备好，请稍后再试"
-                    else "没有找到「${filterQuery.trim()}」相关应用",
+                text = if (catalog == null) "应用列表还没加载好，稍后再试试吧"
+                    else "没找到「${filterQuery.trim()}」相关的应用，换个词再试试吧",
                 fontSize = AILauncherType.Callout.fontSize,
                 color = AILauncherColors.current.Hint,
                 textAlign = TextAlign.Center,
@@ -1273,7 +1273,7 @@ fun LazyListScope.AppCenterFoldSection(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "这些应用 90 天没打开，已折起来",
+                        text = "这些应用 90 天没打开了，先收在这里",
                         fontSize = AILauncherType.Footnote.fontSize,
                         color = AILauncherColors.current.Hint,
                         modifier = Modifier.weight(1f)
@@ -1285,7 +1285,7 @@ fun LazyListScope.AppCenterFoldSection(
                         UiPrefs.setFoldExpanded(actions.context, false)
                     }) {
                         Text(
-                            text = "取消折叠",
+                            text = "都展开",
                             color = AILauncherColors.current.Body,
                             fontWeight = FontWeight.Medium
                         )
@@ -1483,7 +1483,7 @@ fun LazyListScope.AppCenterHiddenSection(
                             .height(56.dp)
                     ) {
                         Text(
-                            text = "一键隐藏 90 天不活跃的应用（${inactiveTargets.size} 个）",
+                            text = "把 90 天没打开的应用（${inactiveTargets.size} 个）藏起来",
                             fontSize = AILauncherType.BodyLarge.fontSize,
                             color = Color.White
                         )
@@ -1835,7 +1835,7 @@ fun AppCenterChooserSheet(
                 .padding(bottom = 24.dp)
         ) {
             Text(
-                text = "这个场景要用什么应用去响应？",
+                text = "这个场景，你想用哪个应用来做？",
                 fontSize = AILauncherType.BodyLarge.fontSize,
                 fontWeight = FontWeight.Bold,
                 color = AILauncherColors.current.Title,

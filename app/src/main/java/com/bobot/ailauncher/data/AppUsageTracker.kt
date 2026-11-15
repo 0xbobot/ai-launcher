@@ -637,7 +637,7 @@ object AppUsageTracker {
      * Dock 说明页理由（纯函数）：与排序同源——时段聚合 ≥3、转移占主导
      * （≥5 且占比 ≥0.6）、近 7 天窗口计数 >0。
      * “常开”分支的触发与显示都用窗口计数 [recent]，不再用衰减后总量：
-     * recent > 0 →“常开 · 近 7 天 X 次”。
+     * recent > 0 →“近 7 天常开 X 次”。
      * “最近没怎么开”只在窗口记满（[windowMature]）时才说：窗口没满时
      * recent == 0 证明不了“7 天没开”（刚开始记，前面几天根本没观测），
      * 只能落到“以前常开”——以前用得多是累计用量诚实支撑的，不对最近
@@ -658,7 +658,7 @@ object AppUsageTracker {
         windowMature: Boolean,
     ): String {
         return when {
-            pinned -> "你固定在 Dock 上"
+            pinned -> "你固定在程序坞上"
             hwDayType >= 3 -> {
                 val weekday = when (dow) {
                     6 -> "周六"
@@ -675,10 +675,10 @@ object AppUsageTracker {
                 "$weekday$period $hour 点常开"
             }
             prevRecent && prevLabel != null && transferDominant(transfer, total) -> "打开 $prevLabel 后常接着开"
-            recent > 0 -> "常开 · 近 ${RECENT_WINDOW_DAYS} 天 $recent 次"
+            recent > 0 -> "近 ${RECENT_WINDOW_DAYS} 天常开 $recent 次"
             windowMature && total > 0 -> "最近没怎么开"
             total > 0 -> "以前常开"
-            else -> "热门应用（暂无你的使用记录）"
+            else -> "你还没用过，先看看大家常用的"
         }
     }
 

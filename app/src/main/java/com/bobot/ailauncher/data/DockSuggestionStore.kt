@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.BuildConfig
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -269,7 +270,7 @@ class DockSuggestionStore(private val context: Context) {
                     val kept = (lines + obj.toString()).takeLast(200)
                     file.writeText(kept.joinToString("\n") + "\n")
                 }
-                Log.i("DockSuggestions", "feedback wrong id=${suggestion.dedupeKey}")
+                if (BuildConfig.DEBUG) Log.i("DockSuggestions", "feedback wrong id=${suggestion.dedupeKey}")
             }
         }
         markDismissed(suggestion.dedupeKey)

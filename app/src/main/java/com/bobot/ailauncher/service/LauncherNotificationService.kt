@@ -170,7 +170,7 @@ class LauncherNotificationService : NotificationListenerService() {
             }
             badgeReceiver = receiver
         } catch (_: Exception) {
-            // 注册失败不影响通知通道（探针收不到广播，诊断行会如实显示“未收到”）
+            // 注册失败不影响通知通道（探针收不到广播）
         }
     }
 

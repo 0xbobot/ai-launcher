@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.util.Log
+import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.core.event.LauncherEvent
 import kotlinx.coroutines.CoroutineScope
@@ -74,7 +75,7 @@ object ContextEngine {
                 }
             )
         } catch (t: Throwable) {
-            Log.w("ContextEngine", "registerReceiver failed", t)
+            if (BuildConfig.DEBUG) Log.w("ContextEngine", "registerReceiver failed", t)
         }
 
         // v0.67.6：删除 60 秒前台轮询（省电原则；事件无订阅者，零功能损失）
@@ -108,7 +109,7 @@ object ContextEngine {
         } catch (_: SecurityException) {
             // 未授权用量访问：静默跳过（AppDiscovery 同策略）
         } catch (t: Throwable) {
-            Log.w("ContextEngine", "pollForeground failed", t)
+            if (BuildConfig.DEBUG) Log.w("ContextEngine", "pollForeground failed", t)
         }
     }
 }

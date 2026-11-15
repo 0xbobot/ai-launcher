@@ -86,7 +86,7 @@ fun JumpLogScreen() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "未读跳转日志",
+                    text = "未读打开记录",
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
                     fontSize = AILauncherType.Display.fontSize,
@@ -99,20 +99,20 @@ fun JumpLogScreen() {
                         view.tickHaptic()
                         val text = UnreadJumpLog.shareText(context)
                         if (text.isBlank()) {
-                            IslandToasts.show("暂无日志可分享")
+                            IslandToasts.show("现在还没有记录可以分享")
                             return@TextButton
                         }
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "AI桌面未读跳转日志")
+                            putExtra(Intent.EXTRA_SUBJECT, "AI 桌面未读打开记录")
                             putExtra(Intent.EXTRA_TEXT, text)
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         runCatching {
                             context.startActivity(
-                                Intent.createChooser(send, "分享跳转日志")
+                                Intent.createChooser(send, "分享这份记录")
                             )
-                        }.onFailure { IslandToasts.show("没有可用的分享方式") }
+                        }.onFailure { IslandToasts.show("没有能分享的应用，换个方式试试吧") }
                     },
                     enabled = entries.isNotEmpty()
                 ) {
@@ -143,7 +143,7 @@ fun JumpLogScreen() {
                 ) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         Text(
-                            text = "暂无记录",
+                            text = "这里还是空的",
                             fontSize = AILauncherType.BodyLarge.fontSize,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.current.Title,
@@ -151,7 +151,7 @@ fun JumpLogScreen() {
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "点一行未读行，就会记下来。",
+                            text = "点开一行未读消息，我就记下来。",
                             fontSize = AILauncherType.Body.fontSize,
                             color = AILauncherColors.current.Body,
                             lineHeight = 22.sp

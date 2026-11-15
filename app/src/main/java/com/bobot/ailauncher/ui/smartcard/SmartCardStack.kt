@@ -145,7 +145,7 @@ import kotlin.math.sin
  * 第十一批 Bob 2026-11-09 定文案）：我知道了（卡片消失、不再出现、不追问）
  * 与下一步（按卡片定义的下一步跟进）。引导卡的下一步＝去连接对应的来源
  * （走 §5 已有流程）；真卡片的下一步＝卡片定义的下一步动作（去还款 / 回拨 /
- * 看预约 / 查看，走已有的深链/启动路径直接执行；预约卡是“帮我建提醒”，
+ * 看预约 / 打开看看，走已有的深链/启动路径直接执行；预约卡是“帮我建提醒”，
  * 先拿 WRITE_CALENDAR 授权再写系统日历）。我知道了真卡片即记处理完
  * （截止点前不再出现）；我知道了引导卡即被拒一次（放队尾，第十四批
  * 轮换推），不是永久记下。
@@ -160,7 +160,7 @@ import kotlin.math.sin
  * 定）：一次只推一张，接上一个来源后继续推下一张；点「我知道了」
  * ＝被拒一次（横滑已取消，第三十三批），放队尾、其他来源推完后再回来一次，再拒就本版不再推（等引
  * 导换版）；点“连接”走 §5 流程（消息先显著披露再弹系统框，日历直接弹，
- * 通知跳系统设置页）；接上某个权限后对应卡先显示“已连接”＋接下来会发生
+ * 通知跳系统设置页）；接上某个权限后对应卡先显示“已经连上了”＋接下来会发生
  * 什么（3 秒）再消失，其他引导卡留着；有真事项时真卡片顶掉整叠引导卡。
  * 文案 v3：每张讲三件事——这是什么、为什么要连、连上之后会发生什么。
  */
@@ -235,7 +235,7 @@ fun SmartCardStackHost() {
         if (created) {
             SmartCardRepository.markReminderCreated(context, card)
         } else {
-            IslandToasts.show("没能建提醒")
+            IslandToasts.show("这次没建上提醒，稍后再试试吧")
         }
     }
     fun viewAppointment(card: SmartCard) {
@@ -247,7 +247,7 @@ fun SmartCardStackHost() {
         } else {
             SmartCardActions.performAction(context, card)
         }
-        if (!opened) IslandToasts.show("没能打开")
+        if (!opened) IslandToasts.show("这次没打开，稍后再试试吧")
     }
     val openWriteCalendar = rememberWriteCalendarPermissionOpener(
         writeCalendarGranted,
@@ -340,7 +340,7 @@ fun SmartCardStackHost() {
                         true
                     } else {
                         val opened = SmartCardActions.performAction(context, card)
-                        if (!opened) IslandToasts.show("没能打开")
+                        if (!opened) IslandToasts.show("这次没打开，稍后再试试吧")
                         opened
                     }
                 },
@@ -354,7 +354,7 @@ fun SmartCardStackHost() {
                     // 内按 kind＋deadlineMs 判），只有「我知道了」或过了截止点才摘。
                     if (card.kind == SmartCardKind.CALENDAR) {
                         val opened = SmartCardActions.performAction(context, card)
-                        if (!opened) IslandToasts.show("没能打开")
+                        if (!opened) IslandToasts.show("这次没打开，稍后再试试吧")
                     }
                 }
             )
@@ -379,20 +379,20 @@ fun SmartCardStackHost() {
     // 显著披露要针对哪个连接器（消息先讲清再弹系统框，日历直接弹、
     // 通知/电话拨号器跳系统设置页）；null＝没在弹。
     var disclosureConnector by remember { mutableStateOf<String?>(null) }
-    // 用户在叠层里点了右按钮（连接＋来源名）的卡（等授权结果）；接上后先显示“已连接”
+    // 用户在叠层里点了右按钮（按来源给动作起名）的卡（等授权结果）；接上后先显示“已经连上了”
     // 反馈再离开。只对在叠层里点了右按钮的卡给反馈；在设置里接上
     // 的权限，其卡片直接消失、不补反馈。
     var pendingConnectIds by remember { mutableStateOf(setOf<String>()) }
     // 用户点右按钮那一刻的真实已接源个数（457 的 connectedSourceCount，
     // 同一处计数）：接上后拿它跟新个数一减，就是本次智能涨了多少。
     var pendingConnectLevels by remember { mutableStateOf(mapOf<String, Int>()) }
-    // 正在显示“已连接”庆祝反馈的卡（3 秒后离开）：状态里带动效触发标志
+    // 正在显示“已经连上了”庆祝反馈的卡（3 秒后离开）：状态里带动效触发标志
     // celebrate 与等级增量 levelDelta（见 ConnectedFeedback），不是光一个 id。
     var connectedFeedbacks by remember {
         mutableStateOf(mapOf<String, ConnectedFeedback>())
     }
     val connectedIds: Set<String> = connectedFeedbacks.keys
-    // 接上某个权限后，对应引导卡先显示“已连接”＋接下来会发生什么（3 秒），
+    // 接上某个权限后，对应引导卡先显示“已经连上了”＋接下来会发生什么（3 秒），
     // 再消失——用户点了连接不能是懵的（设计稿 §4.7 v3）。
     LaunchedEffect(
         smsGranted.value, notificationGranted.value,
@@ -420,7 +420,7 @@ fun SmartCardStackHost() {
             pendingConnectLevels -= newly.toSet()
         }
     }
-    // “已连接”反馈停留 3 秒后离开（记永久忽略，不再出现）。
+    // “已经连上了”反馈停留 3 秒后离开（记永久忽略，不再出现）。
     LaunchedEffect(connectedIds) {
         if (connectedIds.isNotEmpty()) {
             delay(CONNECTED_FEEDBACK_MS)
@@ -502,7 +502,7 @@ fun SmartCardStackHost() {
     }
     // 显著披露（§5.4，同设置页原文）：先讲清要什么、为什么，用户点
     // “同意”后再弹系统框；不要另起一套。点“取消”或划掉＝这次不连，
-    // 对应卡片留在叠层里（pending 清掉，不给“已连接”反馈）。
+    // 对应卡片留在叠层里（pending 清掉，不给“已经连上了”反馈）。
     fun cancelDisclosure(key: String) {
         disclosureConnector = null
         val ids = guideIdsForConnector(key).toSet()
@@ -514,7 +514,7 @@ fun SmartCardStackHost() {
             onDismissRequest = { cancelDisclosure(UiPrefs.CONNECTOR_MESSAGE) },
             title = {
                 Text(
-                    text = "接上消息",
+                    text = "让我读读你的短信",
                     fontSize = AILauncherType.BodyLarge.fontSize,
                     fontWeight = FontWeight.Medium,
                     color = AILauncherColors.current.Title
@@ -522,7 +522,7 @@ fun SmartCardStackHost() {
             },
             text = {
                 Text(
-                    text = "要读短信里的账单和体检预约提醒。只读近 7 天的短信，只解析账单、预约这两类，解析完不存原文、不发到别处。",
+                    text = "我要读短信里的账单和体检预约提醒。只看最近 7 天的短信，只找账单和预约这两类，看完不留原文，也不会发到别处。",
                     fontSize = AILauncherType.Body.fontSize,
                     color = AILauncherColors.current.Body
                 )
@@ -700,8 +700,8 @@ fun SmartCardStack(
     // 点卡片正文（除按钮外）——第十一批：预约卡看原文（短信会话/通知跳转）；
     // 其他卡没有正文动作，默认空实现。
     onBodyClick: (SmartCard) -> Unit = {},
-    // 正在显示“已连接”庆祝反馈的卡（第八批）：不画动作行（没有“连接”可点），
-    // 只显示“已连接”＋接下来会发生什么，外加庆祝形态（对勾弹入＋金色等级行
+    // 正在显示“已经连上了”庆祝反馈的卡（第八批）：不画动作行（没有“连接”可点），
+    // 只显示“已经连上了”＋接下来会发生什么，外加庆祝形态（对勾弹入＋金色等级行
     // ＋整卡轻弹，见 SmartCardView）。反馈卡顶掉的是它自己的引导卡，不多占
     // 一张待办（cards.size 本就是替换后的张数）。
     connectedFeedbacks: Map<String, ConnectedFeedback> = emptyMap(),
@@ -922,8 +922,8 @@ internal fun carouselWaitMs(intervalMs: Long, resumeAtMillis: Long, nowMillis: L
  * 单张卡片（第三十三批：单卡槽位，一次只画一张卡）：
  * 来源标签＋一句话事实（含截止点）＋（可选）一行准备清单＋
  * 一行两个响应：我知道了（左）与右按钮（右，第十二批 Bob 定：显示下一步
- * 的意图，去还款 / 帮我建提醒 / 看预约 / 回拨 / 查看 / 加入会议 / 看日程 /
- * 连接＋来源名；动作含义由事实文案＋右下方应用小标补充）。
+ * 的意图，去还款 / 帮我建提醒 / 看预约 / 回拨 / 打开看看 / 加入会议 / 看日程 /
+ * 按来源给动作起名；动作含义由事实文案＋右下方应用小标补充）。
  * 右下方应用小标（第十一批）：只画在真卡上，独立一行贴右下角——16dp
  * 应用图标＋应用名（Caption 12sp，次要色；字阶最小档就是 12sp，11sp
  * 中文可读性不足、token 规则禁用的下限，取 Bob 给的 11–12sp 的上限），
@@ -952,11 +952,11 @@ private fun SmartCardView(
     modifier: Modifier = Modifier,
     // 点卡片正文（除按钮外）——第十一批：预约卡看原文；null＝没有正文动作。
     onBodyClick: (() -> Unit)? = null,
-    // “已连接”反馈卡：不画动作行（忽略/连接两个按钮与露边提示都不画），
-    // 只留来源标签＋“已连接”＋接下来会发生什么。
+    // “已经连上了”反馈卡：不画动作行（忽略/连接两个按钮与露边提示都不画），
+    // 只留来源标签＋“已经连上了”＋接下来会发生什么。
     hideActionRow: Boolean = false,
-    // “已连接”庆祝反馈（第八批，设计稿 §4.7）：非空时卡片换成庆祝形态——
-    // 金色对勾弹入＋金色等级行（“智能 +1 · 已接 3/4 个源”）＋整卡轻弹。
+    // “已经连上了”庆祝反馈（第八批，设计稿 §4.7）：非空时卡片换成庆祝形态——
+    // 金色对勾弹入＋金色等级行（“智能又强了一点，已接上 3/4 个来源”）＋整卡轻弹。
     // 颜色只用已有的主操作金 Accent / AccentSoft，不引新色；图标是线性
     // Check，不用 emoji；尺寸走 8dp 网格（40dp 圆、8dp 间距）；减动效时
     // 直接落到终态，不播动画。文案仍按 Bob 的两条写。
@@ -1044,7 +1044,7 @@ private fun SmartCardView(
         // 小标本身不变（次要色、无底色无边框、只展示不可点、最宽 160dp），
         // 只是换位置、不丢信息；右端再向内收 SmartCardSubtitleEndInset
         // （第二十七批：角标已删，内收只作右端留白）。引导卡没有小标
-        // （下一步是去连接来源、不是打开某个应用），只有卡内 ×；“已连接”反馈卡也不画
+        // （下一步是去连接来源、不是打开某个应用），只有卡内 ×；“已经连上了”反馈卡也不画
         // （hideActionRow 时不画，见下）。× 落在卡片内部、48dp 触控；
         // 448 的 × 是卡外单独一行、悬在壁纸上（实拍右上角卡外），改掉。
         Row(
@@ -1083,7 +1083,7 @@ private fun SmartCardView(
                 }
             }
         }
-        // 庆祝行（第八批）：金色对勾＋等级变化。只在“已连接”反馈卡上画，
+        // 庆祝行（第八批）：金色对勾＋等级变化。只在“已经连上了”反馈卡上画，
         // 引导卡与真卡片一律没有——一眼就能看出这张不一样。
         if (celebration != null) {
             Row(
@@ -1104,7 +1104,7 @@ private fun SmartCardView(
                 ) {
                     Icon(
                         Icons.Filled.Check,
-                        contentDescription = "已连接",
+                        contentDescription = "已经连上了",
                         tint = AILauncherColors.current.Accent,
                         modifier = Modifier.size(24.dp)
                     )
@@ -1200,8 +1200,8 @@ private fun SmartCardView(
                     )
                 }
                 // 右按钮（第十二批 Bob 定）：显示下一步的意图（actionLabel：
-                // 去还款 / 帮我建提醒 / 看预约 / 回拨 / 查看 / 加入会议 /
-                // 看日程 / 连接＋来源名），不再写“下一步”几个字。
+                // 去还款 / 帮我建提醒 / 看预约 / 回拨 / 打开看看 / 加入会议 /
+                // 看日程 / 按来源给动作起名），不再写“下一步”几个字。
                 // 金色只留主操作（去 AI 味四条）。
                 TextButton(
                     onClick = onActionClick,
@@ -1306,7 +1306,7 @@ private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
 
 /**
  * 应用小标（第十一批，Bob 定“要小、要优雅”）：只画在真卡上——引导卡的
- * 下一步是去连接来源、不是打开某个应用，不画；“已连接”反馈卡也不画
+ * 下一步是去连接来源、不是打开某个应用，不画；“已经连上了”反馈卡也不画
  * （hideActionRow）。16dp 应用图标＋应用名（Caption 12sp，次要色），
  * 无底色、无边框，只做展示、不可点（没有 clickable，点右按钮才是动作）；
  * 名字过长截断（最多 160dp）。图标按包名取真实应用图标；包被卸了、

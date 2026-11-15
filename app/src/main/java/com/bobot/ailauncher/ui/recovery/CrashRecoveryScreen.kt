@@ -114,7 +114,7 @@ fun CrashRecoveryScreen(
             Spacer(modifier = Modifier.height(16.dp))
             if (latestRecord == null) {
                 Text(
-                    text = "暂无崩溃记录",
+                    text = "现在还没有崩溃记录",
                     fontSize = AILauncherType.Body.fontSize,
                     color = AILauncherColors.current.Body
                 )

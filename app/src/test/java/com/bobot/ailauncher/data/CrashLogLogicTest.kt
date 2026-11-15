@@ -68,8 +68,8 @@ class CrashLogLogicTest {
     @Test
     fun `title falls back to first non blank line without separator`() {
         assertEquals("第一行", CrashLogLogic.titleOf("\n  \n第一行\n第二行"))
-        assertEquals("未知异常", CrashLogLogic.titleOf(""))
-        assertEquals("未知异常", CrashLogLogic.titleOf("---\n"))
+        assertEquals("不知道出了什么问题", CrashLogLogic.titleOf(""))
+        assertEquals("不知道出了什么问题", CrashLogLogic.titleOf("---\n"))
     }
 
     @Test

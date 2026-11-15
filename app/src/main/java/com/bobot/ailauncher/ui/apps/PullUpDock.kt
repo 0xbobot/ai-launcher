@@ -319,9 +319,9 @@ fun PullUpDock(
                 // 探针数同款清掉（Bob 2026-11-09 12:20 ①：启动=去读消息了）。
                 BadgeStickyStore.clearForPackage(context, app.packageName)
                 BadgeProbe.clearForPackage(context, app.packageName)
-            } else IslandToasts.show("无法打开「${app.label}」")
+            } else IslandToasts.show("「${app.label}」现在打不开，稍后再试试吧")
         } catch (_: Exception) {
-            IslandToasts.show("无法打开「${app.label}」")
+            IslandToasts.show("「${app.label}」现在打不开，稍后再试试吧")
         }
     }
 
@@ -835,7 +835,7 @@ private fun DockSuggestionsSection(
     }
     if (hasLlmKey) {
         Text(
-            text = "建议",
+            text = "给你的建议",
             fontSize = AILauncherType.Title.fontSize,
             fontWeight = FontWeight.Bold,
             color = AILauncherColors.current.Title
@@ -875,7 +875,7 @@ private fun DockSuggestionsSection(
                 .fillMaxWidth()
                 .padding(vertical = 8.dp)
         ) {
-            Text(text = if (analyzing) "分析中…" else "分析一下")
+            Text(text = if (analyzing) "正在分析，稍等一下" else "分析一下")
         }
         suggestionStatus?.let { status ->
             Text(
@@ -917,7 +917,7 @@ private fun DockSuggestionsSection(
                 SuggestionKind.entries.forEach { kind ->
                     val muted = kind in suggestionsUi.mutedKinds
                     Text(
-                        text = suggestionKindLabel(kind) + if (muted) "（已关）" else "",
+                        text = suggestionKindLabel(kind) + if (muted) "（已经关了）" else "",
                         fontSize = AILauncherType.Footnote.fontSize,
                         color = if (muted) AILauncherColors.current.Hint
                         else AILauncherColors.current.Title,
@@ -940,7 +940,7 @@ private fun DockSuggestionsSection(
  * 大模型建议行（说明页「建议」区）：标题 + 带数字的理由 + 动作行。
  * pin/unpin 显示应用图标，observe 显示灯泡（不改任何东西）。
  * 采纳：固定/取消固定走 UiPrefs（Dock 立即重排）；observe 只有
- * 「知道了」。已采纳的行显示「已采纳 · 撤销」（7 天内可撤销）。
+ * 「知道了」。已采纳的行显示「采纳了 · 撤销」（7 天内可撤销）。
  */
 @Composable
 private fun SuggestionRow(
@@ -989,7 +989,7 @@ private fun SuggestionRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (suggestion.state == SuggestionState.APPLIED) {
                     Text(
-                        text = "已采纳 · ",
+                        text = "采纳了 · ",
                         fontSize = AILauncherType.Footnote.fontSize,
                         color = AILauncherColors.current.Hint
                     )
@@ -1011,7 +1011,7 @@ private fun SuggestionRow(
                         )
                     }
                     Text(
-                        text = "忽略",
+                        text = "先放一边",
                         fontSize = AILauncherType.Footnote.fontSize,
                         color = AILauncherColors.current.Hint,
                         modifier = Modifier

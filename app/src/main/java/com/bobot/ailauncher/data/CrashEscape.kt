@@ -73,7 +73,7 @@ object CrashEscapeLogic {
 
 /**
  * 崩溃逃生通道（核心版）的存储与动作：启动评估、计数清零、
- * 切回系统桌面、测试入口。所有读写都包在 runCatching 里，
+ * 切回系统桌面。所有读写都包在 runCatching 里，
  * 坏值/IO 异常不抛、不挡启动——逃生通道本身绝不能成为新的崩溃源。
  */
 object CrashEscape {

@@ -130,7 +130,7 @@ class AppUsageTrackerTest {
     @Test
     fun `pinned reason wins`() {
         assertEquals(
-            "你固定在 Dock 上",
+            "你固定在程序坞上",
             AppUsageTracker.dockReason(true, 5, 5, 8, "微信", true, 5, 100, 60, true)
         )
     }
@@ -160,24 +160,24 @@ class AppUsageTrackerTest {
         )
         // 转移 2 / 总量 4 → 次数不够（要 ≥5 次），小样本不硬说，落到“常开”
         assertEquals(
-            "常开 · 近 7 天 4 次",
+            "近 7 天常开 4 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 2, 4, 4, true)
         )
         // 转移 5 / 总量 17 → 占比 0.29，枢纽噪音，被占比拦下后落到“常开”
         assertEquals(
-            "常开 · 近 7 天 17 次",
+            "近 7 天常开 17 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 5, 17, 17, true)
         )
         assertEquals(
-            "常开 · 近 7 天 10 次",
+            "近 7 天常开 10 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, "微信", false, 5, 10, 10, true)
         )
         assertEquals(
-            "常开 · 近 7 天 10 次",
+            "近 7 天常开 10 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, "微信", true, 1, 10, 10, true)
         )
         assertEquals(
-            "常开 · 近 7 天 10 次",
+            "近 7 天常开 10 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, null, true, 5, 10, 10, true)
         )
     }
@@ -185,7 +185,7 @@ class AppUsageTrackerTest {
     @Test
     fun `frequent reason carries the 7 day count`() {
         assertEquals(
-            "常开 · 近 7 天 42 次",
+            "近 7 天常开 42 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 42, true)
         )
     }
@@ -206,14 +206,14 @@ class AppUsageTrackerTest {
             "以前常开",
             AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 0, false)
         )
-        // 窗口没满但 recent > 0：正数是下限，照实说“近 7 天 X 次”
+        // 窗口没满但 recent > 0：正数是下限，照实说“近 7 天常开 X 次”
         assertEquals(
-            "常开 · 近 7 天 3 次",
+            "近 7 天常开 3 次",
             AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 42, 3, false)
         )
         // 窗口没满且总量为 0：还是“暂无你的使用记录”
         assertEquals(
-            "热门应用（暂无你的使用记录）",
+            "你还没用过，先看看大家常用的",
             AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 0, 0, false)
         )
     }
@@ -221,7 +221,7 @@ class AppUsageTrackerTest {
     @Test
     fun `no record falls back to hot apps`() {
         assertEquals(
-            "热门应用（暂无你的使用记录）",
+            "你还没用过，先看看大家常用的",
             AppUsageTracker.dockReason(false, 0, 5, 8, null, false, 0, 0, 0, true)
         )
     }

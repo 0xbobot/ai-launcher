@@ -83,6 +83,7 @@ import com.bobot.ailauncher.ui.pet.QuickActionsPrefs
 import com.bobot.ailauncher.ui.settings.isNotificationAccessGranted
 import com.bobot.ailauncher.ui.home.HomeScreen
 import com.bobot.ailauncher.ui.settings.JumpLogScreen
+import com.bobot.ailauncher.ui.settings.CrashLogScreen
 import com.bobot.ailauncher.ui.settings.SettingsScreen
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.island.IslandToasts
@@ -179,11 +180,15 @@ fun MainScreen() {
             // 返回箭头已删（Bob 2026-11-07）：系统返回键/手势由 NavController
             // 自动退回（NavHost 目的地），不再经 onBack 参数。
             SettingsScreen(
-                onOpenJumpLog = { navController.navigate("settings/jump-log") }
+                onOpenJumpLog = { navController.navigate("settings/jump-log") },
+                onOpenCrashLog = { navController.navigate("settings/crash-log") }
             )
         }
         composable("settings/jump-log") {
             JumpLogScreen()
+        }
+        composable("settings/crash-log") {
+            CrashLogScreen()
         }
     }
     // v0.68.51（Bob）：灵动岛 Toast 宿主——移到 NavHost 外，最顶层

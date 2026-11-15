@@ -135,7 +135,7 @@ class MainActivity : FragmentActivity() {
                                         Intent.createChooser(send, "分享崩溃记录")
                                     )
                                 }.onFailure {
-                                    IslandToasts.show("没有可用的分享方式")
+                                    IslandToasts.show("没有能分享的应用，换个方式试试吧")
                                 }
                             }
                         )
@@ -218,10 +218,10 @@ class MainActivity : FragmentActivity() {
                     // 简单起见，发一个本地事件让 MainScreen 显示
                     checkUpdateResult.value = info
                 } else {
-                    IslandToasts.show("已经是最新版本了")
+                    IslandToasts.show("你用的已经是最新版本了")
                 }
             } catch (_: Exception) {
-                IslandToasts.show("检查失败，请稍后再试")
+                IslandToasts.show("这次没检查成，稍后再试试吧")
             }
         }
     }

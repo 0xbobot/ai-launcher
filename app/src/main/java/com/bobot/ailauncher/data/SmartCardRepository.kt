@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.BuildConfig
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -65,7 +66,7 @@ object SmartCardRepository {
      * 只做迁移（true 视为已看 v2），不再写。 */
     private const val KEY_GUIDE_SEEN_VERSION = "guide_seen_version"
     /** 引导卡片已处理完（第十四批起的口径，设计稿 §4.7 轮换推）：接上某个
-     * 来源后“已连接”反馈给完、或反馈卡被横滑走，就当即永久记下这张，
+     * 来源后“已经连上了”反馈给完、或反馈卡被横滑走，就当即永久记下这张，
      * 不再出现。点「我知道了」/横滑一张引导卡不再走这里——那是轮换推
      * 的“被拒一次”（放队尾，见 rejectGuideCard），不是永久记下。 */
     private const val KEY_GUIDE_DISMISSED = "guide_dismissed"
@@ -226,7 +227,7 @@ object SmartCardRepository {
         prefs(context).getStringSet(KEY_GUIDE_DISMISSED, emptySet())
             ?.toSet() ?: emptySet()
 
-    /** 一张引导卡处理完了（接上后“已连接”反馈已给完、或反馈卡被横滑
+    /** 一张引导卡处理完了（接上后“已经连上了”反馈已给完、或反馈卡被横滑
      * 走）：当即永久记下，不再出现。点「我知道了」/横滑一张引导卡不
      * 走这里——那是轮换推的“被拒一次”（见 rejectGuideCard）。 */
     fun dismissGuideCard(context: Context, card: SmartCard) {
@@ -465,7 +466,7 @@ object SmartCardRepository {
         // 第十三批：卡片跟着权限走——短信卡只认 READ_SMS，不再查开关
         // （开关当初是第二道关；简报已经在用数据了，它管不住数据用不用）。
         if (!SmsRepository.hasSmsPermission(context)) {
-            Log.d(TAG, "buildSmsCards: no READ_SMS permission, 0 cards")
+            if (BuildConfig.DEBUG) Log.d(TAG, "buildSmsCards: no READ_SMS permission, 0 cards")
             return emptyList()
         }
         val out = mutableListOf<SmartCard>()
@@ -488,7 +489,7 @@ object SmartCardRepository {
         }
         // 仅调试可见：下次“卡片没出现”先看这行——读到 N 条、解析出 M 张，
         // 不用再靠猜是短信没读到、解析灭了还是显示门拦了（448）。
-        Log.d(TAG, "buildSmsCards: read=${smsList.size} sms, bills=$billCount, appts=$apptCount")
+        if (BuildConfig.DEBUG) Log.d(TAG, "buildSmsCards: read=${smsList.size} sms, bills=$billCount, appts=$apptCount")
         return out
     }
 
@@ -575,11 +576,11 @@ object SmartCardRepository {
         // （短信卡有 5 分钟节流缓存，开始那一刻靠 refresh 翻过来）。
         val fact = withInProgressPrefix(
             buildString {
-                append("短信里有一条$kindWord，")
                 append(relativeDayLabel(appt.dayStartMs, nowMs))
                 append(" ")
                 append(formatTimeRange(appt.startMin, appt.endMin))
-                if (appt.place != null) append("，${appt.place}")
+                append("，你有个$kindWord")
+                if (appt.place != null) append("，在${appt.place}")
             },
             startMs, endMs, nowMs
         )
@@ -693,11 +694,11 @@ object SmartCardRepository {
         // （短信卡有 5 分钟节流缓存，开始那一刻靠 refresh 翻过来）。
         val fact = withInProgressPrefix(
             buildString {
-                append("短信里有一条$kindWord，")
                 append(relativeDayLabel(appt.dayStartMs, nowMs))
                 append(" ")
                 append(formatTimeRange(appt.startMin, appt.endMin))
-                if (appt.place != null) append("，${appt.place}")
+                append("，你有个$kindWord")
+                if (appt.place != null) append("，在${appt.place}")
             },
             startMs, endMs, nowMs
         )
@@ -779,7 +780,7 @@ object SmartCardRepository {
             sourceLabel = "通知",
             fact = fact,
             prep = null,
-            actionLabel = "查看",
+            actionLabel = "打开看看",
             sortMs = n.time,
             deadlineMs = n.time + 12 * HOUR_MS,
             action = SmartCardActions.notificationAction(n),
@@ -1033,11 +1034,13 @@ object SmartCardRepository {
         if (visible.isEmpty() && prevCards.isNotEmpty()) {
             // 第二十二批：空重建只记数量与哪一步空，不记内容。
             val unexplained = hasUnexplainedCardLoss(prevCards, doneIds, nowMs)
-            Log.d(TAG, "refresh: empty rebuild prev=${prevCards.size} " +
-                "candidates=${candidates.size} sms=$smsCount(smsPerm=$smsPerm) " +
-                "calEvents=${calEvents.size} calCards=$calCount(calPerm=$calPerm) " +
-                "notif=$notifCount(notifGranted=$notifGranted) " +
-                "unexplained=$unexplained allowRetry=$allowRetry")
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "refresh: empty rebuild prev=${prevCards.size} " +
+                    "candidates=${candidates.size} sms=$smsCount(smsPerm=$smsPerm) " +
+                    "calEvents=${calEvents.size} calCards=$calCount(calPerm=$calPerm) " +
+                    "notif=$notifCount(notifGranted=$notifGranted) " +
+                    "unexplained=$unexplained allowRetry=$allowRetry")
+            }
             if (unexplained && allowRetry) {
                 // 丢的卡解释不通（不是已处理、不是已过期）：先保留上一轮、
                 // 不清空；300ms 后重试一次日历查询（走 prepScope 的 IO
@@ -1051,8 +1054,10 @@ object SmartCardRepository {
                                 appContext, lastNotifications,
                                 System.currentTimeMillis(), allowRetry = false
                             )
-                            Log.d(TAG, "refresh: retry done, " +
-                                "visible=${_cards.value.size}")
+                            if (BuildConfig.DEBUG) {
+                                Log.d(TAG, "refresh: retry done, " +
+                                    "visible=${_cards.value.size}")
+                            }
                         } finally {
                             retryInFlight.set(false)
                         }
@@ -1062,7 +1067,7 @@ object SmartCardRepository {
                 return
             }
             // 解释得通的空（都已处理/已过期），或重试本身仍空：真正清空。
-            Log.d(TAG, "refresh: clearing stack, prev=${prevCards.size}")
+            if (BuildConfig.DEBUG) Log.d(TAG, "refresh: clearing stack, prev=${prevCards.size}")
         }
         _cards.value = visible
         recordLastUsed(context, visible, nowMs)
@@ -1132,13 +1137,13 @@ data class ConnectorState(
 )
 
 /**
- * 提醒来源状态行文案（只做展示、不可点）：未接上 / 已接上·最后使用。
+ * 提醒来源状态行文案（只做展示、不可点）：还没接上 / 已经接上了·最后使用。
  * 纯函数，单测锁死。第十三批：“已关闭”分支随开关一起删掉——没有开关
  * 可关，只有权限给了没给。
  */
 fun connectorStatusText(state: ConnectorState): String = when {
-    !state.granted -> "未接上"
-    else -> "已接上 · ${state.lastUsedLabel}"
+    !state.granted -> "还没接上"
+    else -> "已经接上了 · ${state.lastUsedLabel}"
 }
 
 /**
@@ -1162,10 +1167,10 @@ val SMART_SOURCE_ORDER: List<String> = listOf(
  * 按“接上后智能会什么”写，不只写提供什么提醒。纯函数，单测逐字锁死。
  */
 fun connectorDescription(key: String): String = when (key) {
-    UiPrefs.CONNECTOR_MESSAGE -> "接上后，智能会提前提醒你账单到期、体检预约。"
-    UiPrefs.CONNECTOR_NOTIFICATION -> "接上后，智能会提醒你待办、未接来电、包裹和航班。"
-    UiPrefs.CONNECTOR_CALENDAR -> "接上后，智能知道你今天的会。"
-    UiPrefs.CONNECTOR_PHONE -> "接上后，未接来电点一下就能回拨。"
+    UiPrefs.CONNECTOR_MESSAGE -> "接上之后，账单快到期、体检预约快到了，我会提前提醒你。"
+    UiPrefs.CONNECTOR_NOTIFICATION -> "接上之后，有待办、没接到的电话、包裹到了、航班要飞了，我会提醒你。"
+    UiPrefs.CONNECTOR_CALENDAR -> "接上之后，你今天的会我都知道了。"
+    UiPrefs.CONNECTOR_PHONE -> "接上之后，没接到的电话点一下就能回拨。"
     else -> ""
 }
 

@@ -222,12 +222,12 @@ val text: String
 /**
 * v0.63.0：生成 TODAY 卡片的 AI 总结标题。
 * 纯规则拼接，不调 LLM。
-* 例："2 条要回，1 个会要开" / "3 条要回" / "1 个会要开" / "难得清闲"
+* 例："2 条消息要回，1 个会要开" / "3 条消息要回" / "1 个会要开" / "难得清闲"
 */
 fun buildSummary(replyCount: Int, meetingCount: Int): String {
 return when {
-replyCount > 0 && meetingCount > 0 -> "$replyCount 条要回，$meetingCount 个会要开"
-replyCount > 0 -> "$replyCount 条要回"
+replyCount > 0 && meetingCount > 0 -> "$replyCount 条消息要回，$meetingCount 个会要开"
+replyCount > 0 -> "$replyCount 条消息要回"
 meetingCount > 0 -> "$meetingCount 个会要开"
 else -> "难得清闲"
 }

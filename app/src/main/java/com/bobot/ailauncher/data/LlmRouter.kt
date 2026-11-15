@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.BuildConfig
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -96,8 +97,7 @@ object LlmConfig {
      * Key 一次性迁入新格式；[LlmKeyStore] 的读/写/probe 逻辑零改，仍以
      * 本组合为「加密层」。Keystore 不可用时其读写抛异常 → LlmKeyStore 按
      * 既有契约回退明文、设置页明示（v0.68.100 行为，不静默）。
-     * 迁移事件记事件名进诊断日志（绝不带 Key 本身）；失败额外带异常类名
-     * （仅类名、无 message）供定因，失败只记一次。
+     * 迁移失败用标志位记一次（防重复写）；失败原因不记 message、不带 Key 本身。
      */
     private fun secureStore(context: Context): LlmKeyStore.Store {
         secureStoreCache?.let { return it }
@@ -110,21 +110,11 @@ object LlmConfig {
             legacyStore = securePrefs(appContext)?.asStore(),
             onMigrated = {
                 prefs(appContext).edit().remove(KEY_MIG_FAIL_LOGGED).apply()
-                CrashLog.diag(
-                    appContext,
-                    "keystore_migrated: api key moved to android-keystore aes-gcm store"
-                )
             },
-            onMigrationFailed = { failure ->
+            onMigrationFailed = {
                 val p = prefs(appContext)
                 if (!p.getBoolean(KEY_MIG_FAIL_LOGGED, false)) {
                     p.edit().putBoolean(KEY_MIG_FAIL_LOGGED, true).apply()
-                    // 只记异常类名（定因用）：不带 message、不带任何 Key 材料
-                    val cause = failure?.javaClass?.simpleName ?: "verify-mismatch"
-                    CrashLog.diag(
-                        appContext,
-                        "keystore_migration_failed: $cause; legacy key kept in place, will retry"
-                    )
                 }
             }
         )
@@ -138,7 +128,7 @@ object LlmConfig {
             secureStore(context)
         )
         // v0.68.100（卫生批）：顺手做一次存放形态记账——降级/恢复的时点
-        // 不能只靠用户打开设置页才发现，诊断日志要在事件发生时就留行
+        // 不能只靠用户打开设置页才发现，存放形态要在事件发生时就记账
         runCatching { keyStorageStatus(context) }
         return key
     }
@@ -153,7 +143,7 @@ object LlmConfig {
 
     /**
      * 探测 Key 存放形态，并记账状态迁移：
-     * 首次发现明文降级 → 记起始时间 + 诊断日志一行（只有事件名，绝不带 Key）；
+     * 首次发现明文降级 → 记起始时间；
      * 恢复加密（或 Key 已清空）→ 清掉起始时间。幂等，重复调用不重复记账。
      */
     fun keyStorageStatus(context: Context): KeyStorageStatus {
@@ -167,12 +157,8 @@ object LlmConfig {
             mode == LlmKeyStore.StorageMode.PLAIN_FALLBACK && since == 0L -> {
                 since = System.currentTimeMillis()
                 p.edit().putLong(KEY_FALLBACK_SINCE, since).apply()
-                CrashLog.diag(context, "keystore_fallback: api key stored in plaintext")
             }
             mode != LlmKeyStore.StorageMode.PLAIN_FALLBACK && since != 0L -> {
-                if (mode == LlmKeyStore.StorageMode.ENCRYPTED) {
-                    CrashLog.diag(context, "keystore_recovered: api key encrypted again")
-                }
                 p.edit().remove(KEY_FALLBACK_SINCE).apply()
                 since = 0L
             }
@@ -259,11 +245,13 @@ object LlmRouter {
                 .put("max_tokens", maxTokens)
             if (safetyCheck) bodyJson.put("safety_check", JSONObject().put("level", "high"))
             val bodyStr = bodyJson.toString()
-            android.util.Log.d(
-                tag,
-                "POST $url model=$model temp=$temperature maxTokens=$maxTokens " +
-                    "bodyBytes=${bodyStr.toByteArray().size}"
-            )
+            if (BuildConfig.DEBUG) {
+                android.util.Log.d(
+                    tag,
+                    "POST $url model=$model temp=$temperature maxTokens=$maxTokens " +
+                        "bodyBytes=${bodyStr.toByteArray().size}"
+                )
+            }
             val request = Request.Builder()
                 .url(url)
                 .addHeader("Authorization", "Bearer $apiKey")
@@ -273,15 +261,17 @@ object LlmRouter {
             client().newCall(request).execute().use { resp ->
                 // body 只读一次：ResponseBody 读第二次会是空串
                 val rawBody = try { resp.body?.string().orEmpty() } catch (_: Exception) { "" }
-                android.util.Log.d(
-                    tag,
-                    "HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
-                        "toolCalls=${countToolCalls(rawBody)}"
-                )
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.d(
+                        tag,
+                        "HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
+                            "toolCalls=${countToolCalls(rawBody)}"
+                    )
+                }
                 RawChatResult(resp.code, rawBody, null)
             }
         } catch (e: IOException) {
-            android.util.Log.d(tag, "network error: ${e.message}")
+            if (BuildConfig.DEBUG) android.util.Log.d(tag, "network error: ${e.message}")
             RawChatResult(-1, "", e.message ?: "网络异常")
         }
     }
@@ -496,7 +486,7 @@ object LlmRouter {
         } catch (e: IOException) {
             LlmCallResult.Err("网络超时，请检查网络")
         } catch (e: Exception) {
-            android.util.Log.w("LlmRouter", "llm call failed", e)
+            if (BuildConfig.DEBUG) android.util.Log.w("LlmRouter", "llm call failed", e)
             LlmCallResult.Err("请求失败，请稍后再试")
         }
     }
@@ -555,7 +545,7 @@ object LlmRouter {
             if (text.isBlank()) LlmChatResult.Err("没回话，请重试")
             else LlmChatResult.Ok(text)
         } catch (e: Exception) {
-            android.util.Log.w("LlmRouter", "llm chat failed", e)
+            if (BuildConfig.DEBUG) android.util.Log.w("LlmRouter", "llm chat failed", e)
             LlmChatResult.Err("请求失败，请稍后再试")
         }
     }
@@ -684,7 +674,7 @@ object LlmRouter {
                 PlanResult.Err("没听懂，换个说法再试")
             }
         } catch (e: Exception) {
-            android.util.Log.w("LlmRouter", "plan failed", e)
+            if (BuildConfig.DEBUG) android.util.Log.w("LlmRouter", "plan failed", e)
             PlanResult.Err("请求失败，请稍后再试")
         }
     }

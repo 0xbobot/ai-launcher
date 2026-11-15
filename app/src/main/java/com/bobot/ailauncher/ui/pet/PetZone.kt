@@ -502,7 +502,7 @@ fun joinCalendarEvent(context: android.content.Context, e: CalEvent) {
         context, e.eventId, extractMeetingUrl(e)
     )
     if (!opened) {
-        IslandToasts.show("没找到日历应用")
+        IslandToasts.show("日历应用找不到了，会议打不开")
     }
 }
 
