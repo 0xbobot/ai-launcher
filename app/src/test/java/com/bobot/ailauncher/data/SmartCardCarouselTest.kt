@@ -12,6 +12,9 @@ import com.bobot.ailauncher.ui.smartcard.carouselDragOffsetClamp
 import com.bobot.ailauncher.ui.smartcard.carouselNextIndex
 import com.bobot.ailauncher.ui.smartcard.carouselReleaseDecision
 import com.bobot.ailauncher.ui.smartcard.carouselShouldAutoRotate
+import com.bobot.ailauncher.ui.smartcard.carouselSlideInOffset
+import com.bobot.ailauncher.ui.smartcard.carouselSlideOutAlpha
+import com.bobot.ailauncher.ui.smartcard.carouselSlideOutOffset
 import com.bobot.ailauncher.ui.smartcard.carouselWaitMs
 import com.bobot.ailauncher.ui.smartcard.crossfadeDurationMs
 import org.junit.Assert.assertEquals
@@ -40,6 +43,9 @@ import org.junit.Test
  * （pointerInput＋VelocityTracker→jumpTo）与点按／竖翻
  * 的互不抢占是 Compose 运行时，JVM 测不到，靠代码走查＋Bob 真机验
  * （拖动跟手、松手换卡／回弹、滑完暂停 8 秒、按钮照常可点、长文竖翻照常）。
+ * 第三十九批：松手判定距离线由 1/3 放宽到 1/4 卡宽；滑出／滑入位移
+ * （carouselSlideOutOffset／carouselSlideInOffset）与滑出透明度
+ * （carouselSlideOutAlpha）是纯函数，单测锁死。
  */
 class SmartCardCarouselTest {
 
@@ -198,27 +204,32 @@ class SmartCardCarouselTest {
     // ---------- 第三十八批：跟手拖动（拖动跟随＋松手判定） ----------
     // 第三十七批的 48dp 触发作废：拖动过程中顶卡横向位移跟手指走
     // （1:1，夹到半张卡宽内）；松手判定（carouselReleaseDecision）——
-    // 位移超 1/3 卡宽或松手速度够就换卡（左滑＝下一张、右滑＝上一张），
-    // 否则回弹；换卡走 jumpTo（carouselNextIndex 改下标＋暂停 8 秒）＋
-    // Crossfade，与点圆点同一条链。不做飞出／滑动／揭示。
-    // 卡宽取 300f（阈值：1/3＝100f、半张＝150f）、速度线取 500f。
+    // 位移超 1/4 卡宽或松手速度够就换卡（左滑＝下一张、右滑＝上一张），
+    // 否则回弹；换卡一张接一张（第三十九批：出卡继续滑出、进卡从反方向
+    // 滑入，收尾 jumpTo 与点圆点同一条链）。不做飞出／揭示。
+    // 卡宽取 300f（阈值：1/4＝75f、半张＝150f）、速度线取 500f。
+    // 第三十九批：滑出／滑入位移（carouselSlideOutOffset／
+    // carouselSlideInOffset）与滑出透明度（carouselSlideOutAlpha）
+    // 是纯函数，单测锁死；滑动切换的接线（startSlideSwitch＋
+    // suppressCrossfade）是 Compose 运行时，JVM 测不到，靠代码走查＋
+    // Bob 真机验（一张接一张、松手换卡／回弹、滑完暂停 8 秒）。
 
     @Test
-    fun releaseDecision_distancePastThird_isNext() {
-        assertEquals(+1, carouselReleaseDecision(-100f, 300f, 0f, 500f))
+    fun releaseDecision_distancePastQuarter_isNext() {
+        assertEquals(+1, carouselReleaseDecision(-76f, 300f, 0f, 500f))
         assertEquals(+1, carouselReleaseDecision(-150f, 300f, 0f, 500f))
     }
 
     @Test
-    fun releaseDecision_distancePastThird_isPrevious() {
-        assertEquals(-1, carouselReleaseDecision(100f, 300f, 0f, 500f))
+    fun releaseDecision_distancePastQuarter_isPrevious() {
+        assertEquals(-1, carouselReleaseDecision(76f, 300f, 0f, 500f))
         assertEquals(-1, carouselReleaseDecision(150f, 300f, 0f, 500f))
     }
 
     @Test
-    fun releaseDecision_belowThirdLowVelocity_isSpringBack() {
-        assertEquals(0, carouselReleaseDecision(-99f, 300f, 0f, 500f))
-        assertEquals(0, carouselReleaseDecision(99f, 300f, 0f, 500f))
+    fun releaseDecision_belowQuarterLowVelocity_isSpringBack() {
+        assertEquals(0, carouselReleaseDecision(-74f, 300f, 0f, 500f))
+        assertEquals(0, carouselReleaseDecision(74f, 300f, 0f, 500f))
         assertEquals(0, carouselReleaseDecision(0f, 300f, 0f, 500f))
     }
 
@@ -233,7 +244,7 @@ class SmartCardCarouselTest {
 
     @Test
     fun releaseDecision_distanceBeatsConflictingVelocity() {
-        // 距离优先：拖过 1/3 后松手往反方向带，仍按位移方向换卡。
+        // 距离优先：拖过 1/4 后松手往反方向带，仍按位移方向换卡。
         assertEquals(+1, carouselReleaseDecision(-150f, 300f, 900f, 500f))
         assertEquals(-1, carouselReleaseDecision(150f, 300f, -900f, 500f))
     }
@@ -273,9 +284,75 @@ class SmartCardCarouselTest {
 
     @Test
     fun dragConstants_matchDesign() {
-        // 距离线 1/3 卡宽、夹子半张卡宽、速度线 500dp/s。
-        assertEquals(1f / 3f, SMART_CARD_DRAG_RELEASE_FRACTION, 0.001f)
+        // 距离线 1/4 卡宽（第三十九批由 1/3 放宽）、夹子半张卡宽、速度线 500dp/s。
+        assertEquals(1f / 4f, SMART_CARD_DRAG_RELEASE_FRACTION, 0.001f)
         assertEquals(0.5f, SMART_CARD_DRAG_MAX_FRACTION, 0.001f)
         assertEquals(500, SMART_CARD_FLING_VELOCITY_DP_PER_SEC)
+    }
+
+    // ---------- 第三十九批：一张接一张（滑出／滑入位移＋滑出透明度） ----------
+    // 出卡从松手位移出发、沿滑动方向滑到 ±1 卡宽外（轻微淡出 1→0.6），
+    // 进卡从反方向 ±1 卡宽外滑入到中心；两张同一条 300ms 时间线。
+    // 卡宽取 300f：左滑（dir +1）出卡终点 −300f、进卡起点 ＋300f；
+    // 右滑（dir −1）出卡终点 ＋300f、进卡起点 −300f。
+
+    @Test
+    fun slideOutOffset_leftSwipe_goesToMinusOneWidth() {
+        // 左滑：松手位移 −100f → 进度 0 在松手处、进度 1 到 −300f。
+        assertEquals(-100f, carouselSlideOutOffset(0f, -100f, +1, 300f), 0.001f)
+        assertEquals(-200f, carouselSlideOutOffset(0.5f, -100f, +1, 300f), 0.001f)
+        assertEquals(-300f, carouselSlideOutOffset(1f, -100f, +1, 300f), 0.001f)
+    }
+
+    @Test
+    fun slideOutOffset_rightSwipe_goesToPlusOneWidth() {
+        // 右滑：松手位移 ＋100f → 进度 0 在松手处、进度 1 到 ＋300f。
+        assertEquals(100f, carouselSlideOutOffset(0f, 100f, -1, 300f), 0.001f)
+        assertEquals(200f, carouselSlideOutOffset(0.5f, 100f, -1, 300f), 0.001f)
+        assertEquals(300f, carouselSlideOutOffset(1f, 100f, -1, 300f), 0.001f)
+    }
+
+    @Test
+    fun slideOutOffset_zeroWidth_staysAtReleaseOffset() {
+        // 卡宽没量到就不滑（不动，等收尾 snapTo 0）。
+        assertEquals(-100f, carouselSlideOutOffset(1f, -100f, +1, 0f), 0.001f)
+    }
+
+    @Test
+    fun slideInOffset_leftSwipe_comesFromPlusOneWidth() {
+        // 左滑：进卡从右侧 ＋300f 处进来，进度 1 到中心 0。
+        assertEquals(300f, carouselSlideInOffset(0f, +1, 300f), 0.001f)
+        assertEquals(150f, carouselSlideInOffset(0.5f, +1, 300f), 0.001f)
+        assertEquals(0f, carouselSlideInOffset(1f, +1, 300f), 0.001f)
+    }
+
+    @Test
+    fun slideInOffset_rightSwipe_comesFromMinusOneWidth() {
+        // 右滑：进卡从左侧 −300f 处进来，进度 1 到中心 0。
+        assertEquals(-300f, carouselSlideInOffset(0f, -1, 300f), 0.001f)
+        assertEquals(-150f, carouselSlideInOffset(0.5f, -1, 300f), 0.001f)
+        assertEquals(0f, carouselSlideInOffset(1f, -1, 300f), 0.001f)
+    }
+
+    @Test
+    fun slideInOffset_zeroWidth_isZero() {
+        assertEquals(0f, carouselSlideInOffset(1f, +1, 0f), 0.001f)
+    }
+
+    @Test
+    fun slideOutAlpha_slightFadeOnly() {
+        // 轻微淡出：起点 1、终点 0.6，淡出是配角、位移是主角。
+        assertEquals(1f, carouselSlideOutAlpha(0f), 0.001f)
+        assertEquals(0.8f, carouselSlideOutAlpha(0.5f), 0.001f)
+        assertEquals(0.6f, carouselSlideOutAlpha(1f), 0.001f)
+    }
+
+    @Test
+    fun slideOffsets_outAndInDoNotOverlap() {
+        // 同一进度下出卡右缘始终在进卡左缘左侧（左滑）：两张不重叠，
+        // 一张接一张走。进度 0.5 时出卡占 [−200, 100]、进卡占 [150, 450]。
+        val outAtHalf = carouselSlideOutOffset(0.5f, -100f, +1, 300f)
+        val inAtHalf = carouselSlideInOffset(0.5f, +1, 300f)
+        assertTrue(outAtHalf + 300f <= inAtHalf)
     }
 }
