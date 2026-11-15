@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import android.app.AppOpsManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -342,6 +343,108 @@ class BadgeCountsTest {
         )
         assertEquals(
             mapOf("com.example.chat" to 8, "com.ss.android.lark" to 125),
+            combined
+        )
+    }
+
+    // ---------- 通知权限门控（Bob 2026-11-15：通知关了，角标里的通知那份就清掉） ----------
+
+    @Test
+    fun `postNotificationAllowed - allowed is on`() {
+        assertTrue(postNotificationAllowed(AppOpsManager.MODE_ALLOWED, false))
+        assertTrue(postNotificationAllowed(AppOpsManager.MODE_ALLOWED, true))
+    }
+
+    @Test
+    fun `postNotificationAllowed - ignored and errored are off`() {
+        assertTrue(!postNotificationAllowed(AppOpsManager.MODE_IGNORED, true))
+        assertTrue(!postNotificationAllowed(AppOpsManager.MODE_ERRORED, true))
+    }
+
+    @Test
+    fun `postNotificationAllowed - default falls back to permission`() {
+        // MODE_DEFAULT 是“没记过明确决定”：持有权限算开，没持有算关。
+        assertTrue(postNotificationAllowed(AppOpsManager.MODE_DEFAULT, true))
+        assertTrue(!postNotificationAllowed(AppOpsManager.MODE_DEFAULT, false))
+    }
+
+    @Test
+    fun `postNotificationAllowed - unknown mode fails safe to on`() {
+        assertTrue(postNotificationAllowed(99, false))
+    }
+
+    @Test
+    fun `combineBadgeCounts - notif off package drops sticky only`() {
+        // Bob 真机：抖音通知权限关着、粘性数 2——门控后角标归零、离开未读组。
+        val combined = combineBadgeCounts(
+            notifCounts = emptyMap(),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            stickyCounts = mapOf("com.example.douyin" to 2),
+            notifOffPackages = setOf("com.example.douyin")
+        )
+        assertTrue(combined.isEmpty())
+    }
+
+    @Test
+    fun `combineBadgeCounts - notif off package drops live notif signals too`() {
+        // 权限刚关、旧的在用通知/number 还没刷新走时，同样不计。
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.douyin" to 3),
+            numberMax = mapOf("com.example.douyin" to 5),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            stickyCounts = mapOf("com.example.douyin" to 2),
+            notifOffPackages = setOf("com.example.douyin")
+        )
+        assertTrue(combined.isEmpty())
+    }
+
+    @Test
+    fun `combineBadgeCounts - notif off package keeps probe counts`() {
+        // 探针是独立通道（应用自己发的角标广播 / 系统桌面自己的角标库），
+        // 不走我们的通知监听，权限关了也不动它。
+        val combined = combineBadgeCounts(
+            notifCounts = emptyMap(),
+            numberMax = emptyMap(),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            extraCounts = mapOf("com.example.douyin" to 4),
+            stickyCounts = mapOf("com.example.douyin" to 2),
+            notifOffPackages = setOf("com.example.douyin")
+        )
+        assertEquals(mapOf("com.example.douyin" to 4), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - notif off sms package keeps sms unread`() {
+        // 短信数与通知无关：短信应用就算通知关了，短信未读照常显示。
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.sms" to 2),
+            numberMax = emptyMap(),
+            smsUnread = 15,
+            smsPackages = listOf("com.example.sms"),
+            stickyCounts = mapOf("com.example.sms" to 3),
+            notifOffPackages = setOf("com.example.sms")
+        )
+        assertEquals(mapOf("com.example.sms" to 15), combined)
+    }
+
+    @Test
+    fun `combineBadgeCounts - notif off only affects listed packages`() {
+        // 一个包关、一个包开：开的包三路信号照常，关的包只剩探针。
+        val combined = combineBadgeCounts(
+            notifCounts = mapOf("com.example.off" to 2, "com.example.on" to 3),
+            numberMax = mapOf("com.example.on" to 7),
+            smsUnread = 0,
+            smsPackages = emptyList(),
+            extraCounts = mapOf("com.example.off" to 1),
+            stickyCounts = mapOf("com.example.off" to 5),
+            notifOffPackages = setOf("com.example.off")
+        )
+        assertEquals(
+            mapOf("com.example.off" to 1, "com.example.on" to 7),
             combined
         )
     }

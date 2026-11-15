@@ -1,9 +1,12 @@
 package com.bobot.ailauncher.service
 
+import android.Manifest
+import android.app.AppOpsManager
 import android.app.Notification
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.os.Build
 import android.os.Handler
@@ -23,6 +26,7 @@ import com.bobot.ailauncher.data.aggregateBadgeCounts
 import com.bobot.ailauncher.data.aggregateNumberMax
 import com.bobot.ailauncher.data.combineBadgeCounts
 import com.bobot.ailauncher.data.latestNotificationByPackage
+import com.bobot.ailauncher.data.postNotificationAllowed
 
 /**
  * 通知监听服务：通知事件的生产者。
@@ -33,6 +37,13 @@ import com.bobot.ailauncher.data.latestNotificationByPackage
 class LauncherNotificationService : NotificationListenerService() {
 
     companion object {
+        /**
+         * 通知 AppOp 的 op 串：AppOpsManager.OPSTR_POST_NOTIFICATION 是
+         * @SystemApi，不在公开 SDK 里（见 isPostNotificationAllowed 的注释），
+         * 这里按 AOSP 源码写字面量 "android:post_notification"。
+         */
+        private const val OPSTR_POST_NOTIFICATION = "android:post_notification"
+
         /** 正在连接的服务实例（未读组左滑清理用）：未连接时为 null，取消静默无-op。 */
         @Volatile
         private var instance: LauncherNotificationService? = null
@@ -339,13 +350,55 @@ class LauncherNotificationService : NotificationListenerService() {
             Log.e("LauncherNotifSvc", "loadNumbers failed, sticky=empty", e)
             emptyMap()
         }
+        // 通知权限门控（Bob 2026-11-15：通知关了，角标里的通知那份就清掉）：
+        // 权限关着的包，其通知派生信号（在用通知条数、通知 number、粘性数）不
+        // 参与取最大。只查三路信号里出现过的包（集合很小）；权限随时能改，不缓
+        // 存，每次重算现查。存量粘性数不删（读时门控）：重开通知后新通知到了自
+        // 然覆盖；查权限万一误判为关，存量还在，不丢数。
+        val notifOffPackages = try {
+            (notifCounts.keys + numberMax.keys + stickyCounts.keys)
+                .filter { !isPostNotificationAllowed(it) }
+                .toSet()
+        } catch (e: Exception) {
+            Log.e("LauncherNotifSvc", "notif permission check failed, gate off", e)
+            emptySet()
+        }
         NotificationRepository.updateBadgeCounts(
             combineBadgeCounts(
                 notifCounts, numberMax, smsUnread, smsPackages,
                 extraCounts = BadgeProbe.currentProbeCounts(),
-                stickyCounts = stickyCounts
+                stickyCounts = stickyCounts,
+                notifOffPackages = notifOffPackages
             )
         )
+    }
+
+    /**
+     * 别家应用的通知权限是否开（薄壳，判据见 data 层纯函数
+     * [postNotificationAllowed]；只用公开 API，不用隐藏 API、不反射）：
+     * AppOpsManager.checkOpNoThrow(OPSTR_POST_NOTIFICATION, uid, pkg) 查 mode，
+     * MODE_DEFAULT 时再按是否持有 POST_NOTIFICATIONS 权限兜底。
+     * 查不到 uid / 抛任何异常 → 按开处理（fail safe，保角标、不误删）。
+     */
+    private fun isPostNotificationAllowed(pkg: String): Boolean {
+        return try {
+            val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+            val uid = packageManager.getPackageUid(pkg, 0)
+            // 注意：OPSTR_POST_NOTIFICATION 是 @SystemApi，不在公开 SDK 里
+            // （本地 android-34 android.jar 用 javap 查过：AppOpsManager 公开
+            // API 里没有 OP_POST_NOTIFICATION / OPSTR_POST_NOTIFICATION，
+            // 只有 MODE_* 与 checkOpNoThrow(String, int, String)）。
+            // 用字面量 op 串调公开的 String 重载，不用反射、不碰隐藏 API；
+            // 串值按 AOSP 源码核实过：OPSTR_POST_NOTIFICATION =
+            // "android:post_notification"（另见 cmd appops 的 POST_NOTIFICATION）。
+            val mode = appOps.checkOpNoThrow(OPSTR_POST_NOTIFICATION, uid, pkg)
+            val permissionGranted = packageManager.checkPermission(
+                Manifest.permission.POST_NOTIFICATIONS, pkg
+            ) == PackageManager.PERMISSION_GRANTED
+            postNotificationAllowed(mode, permissionGranted)
+        } catch (_: Exception) {
+            true
+        }
     }
 
     private fun StatusBarNotification.toSimpleNotification(): SimpleNotification? {

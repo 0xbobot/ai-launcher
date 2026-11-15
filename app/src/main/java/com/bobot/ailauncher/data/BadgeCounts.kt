@@ -1,5 +1,7 @@
 package com.bobot.ailauncher.data
 
+import android.app.AppOpsManager
+
 /**
  * 未读角标计数（Bob 2026-11-07 晚：Dock + 应用中心显示消息数量；
  * 同晚 Bob 修正口径：角标要的是应用的未读数据，不是通知栏的消息数，
@@ -20,6 +22,29 @@ package com.bobot.ailauncher.data
  * 局限（Bob 已知）：Feishu/微信没有公开的未读数接口，number 是它们唯一
  * 能上报的信号——若某应用不设 number 且通知栏已清，角标仍会是 0。
  */
+
+/**
+ * 通知权限是否开（纯函数，判 AppOpsManager 的 POST_NOTIFICATION mode；Bob
+ * 2026-11-15：通知关了，角标里的通知那份就清掉）。
+ *
+ * - MODE_ALLOWED → 开；
+ * - MODE_IGNORED / MODE_ERRORED → 关（明确拒绝）；
+ * - MODE_DEFAULT → 不确定（系统没记过明确决定），按权限兜底：持有
+ *   POST_NOTIFICATIONS 权限算开、没持有算关（目标 33 以下的老应用权限
+ *   安装即授予，走这条不会被误删）；
+ * - 其他未知 mode → 开（fail safe，保角标、不误删）。
+ *
+ * 本函数只用 AppOpsManager 的 mode 常量（static final int，编译期
+ * 内联，JVM 单测不加载 AppOpsManager 类）；真正的 mode 查询
+ * （checkOpNoThrow + 取 uid）在调用方（通知监听服务）做，查不到
+ * uid / 抛异常时调用方一律按开处理。
+ */
+fun postNotificationAllowed(mode: Int, permissionGranted: Boolean): Boolean = when (mode) {
+    AppOpsManager.MODE_ALLOWED -> true
+    AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED -> false
+    AppOpsManager.MODE_DEFAULT -> permissionGranted
+    else -> true
+}
 
 /** 按包名汇总未读条数（纯函数）：输入为完整在用通知列表，不截断、不排序。 */
 fun aggregateBadgeCounts(notifications: List<SimpleNotification>): Map<String, Int> =
@@ -68,6 +93,10 @@ fun combineBadgeCounts(
  *   为空时等价于旧的三路合并。探针失败时调用方传空 map，角标行为一字不变。
  * - stickyCounts：粘性数第五路（Bob 2026-11-08：应用最后一次上报的 number，
  *   通知栏清掉后仍粘住；启动应用或新通知 number=0 时清掉）；为空时不影响旧行为。
+ * - notifOffPackages：通知权限关着的包（Bob 2026-11-15：通知关了，角标里的
+ *   通知那份就清掉）——这些包的通知派生信号（在用通知条数、通知 number 最大值、
+ *   粘性数）不参与取最大；探针第四路（角标广播 + ZTE provider，应用自己报数 /
+ *   系统桌面自己的通道，不走我们的通知监听）与短信数不受影响。
  */
 fun combineBadgeCounts(
     notifCounts: Map<String, Int>,
@@ -75,15 +104,17 @@ fun combineBadgeCounts(
     smsUnread: Int,
     smsPackages: Collection<String>,
     extraCounts: Map<String, Int> = emptyMap(),
-    stickyCounts: Map<String, Int> = emptyMap()
+    stickyCounts: Map<String, Int> = emptyMap(),
+    notifOffPackages: Set<String> = emptySet()
 ): Map<String, Int> {
     val out = mutableMapOf<String, Int>()
     for (pkg in notifCounts.keys + numberMax.keys + extraCounts.keys + stickyCounts.keys) {
+        val notifOff = pkg in notifOffPackages
         val v = maxOf(
-            notifCounts[pkg] ?: 0,
-            numberMax[pkg] ?: 0,
+            if (notifOff) 0 else notifCounts[pkg] ?: 0,
+            if (notifOff) 0 else numberMax[pkg] ?: 0,
             extraCounts[pkg] ?: 0,
-            stickyCounts[pkg] ?: 0
+            if (notifOff) 0 else stickyCounts[pkg] ?: 0
         )
         if (v > 0) out[pkg] = v
     }
