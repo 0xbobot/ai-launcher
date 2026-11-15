@@ -1051,18 +1051,23 @@ fun LazyListScope.AppCenterUnreadSection(
                                 actions.onExpandedActionsChange(if (expanded) app.packageName else if (actions.expandedActionsPkg == app.packageName) null else actions.expandedActionsPkg)
                             }
                         )
-                        AnimatedVisibility(
-                            visible = isPopupExpandedX,
-                            enter = expandVertically() +
-                                fadeIn(),
-                            exit = shrinkVertically() +
-                                fadeOut()
-                        ) {
-                            AppShortcutInline(
-                                app = app,
-                                onDismiss = { actions.onPopupAppChange(null) }
-                            )
-                        }
+                    }
+                    // 2026-11-15（Bob 报未读长按弹窗头重影）：长按弹窗必须挂在
+                    // 卡片 Column 下、不能放进 ClearableUnreadRow 里——后者是
+                    // Box，内容会叠在行头上：弹窗首行（飞书的「扫一扫」）盖住
+                    // 图标+标题，看着像重影；其余段（字母/搜索/Dock/折叠/
+                    // 隐藏）都是 Column 下并排挂法，这里跟它们统一。
+                    AnimatedVisibility(
+                        visible = isPopupExpandedX,
+                        enter = expandVertically() +
+                            fadeIn(),
+                        exit = shrinkVertically() +
+                            fadeOut()
+                    ) {
+                        AppShortcutInline(
+                            app = app,
+                            onDismiss = { actions.onPopupAppChange(null) }
+                        )
                     }
                 }
             }
