@@ -1,12 +1,15 @@
 package com.bobot.ailauncher.data
 
+import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CAROUSEL_INTERVAL_MS
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CROSSFADE_MS
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CROSSFADE_REDUCED_MS
+import com.bobot.ailauncher.ui.smartcard.SmartCardSwipeThreshold
 import com.bobot.ailauncher.ui.smartcard.carouselClampIndex
 import com.bobot.ailauncher.ui.smartcard.carouselNextIndex
 import com.bobot.ailauncher.ui.smartcard.carouselShouldAutoRotate
+import com.bobot.ailauncher.ui.smartcard.carouselSwipeDirection
 import com.bobot.ailauncher.ui.smartcard.carouselWaitMs
 import com.bobot.ailauncher.ui.smartcard.crossfadeDurationMs
 import org.junit.Assert.assertEquals
@@ -30,6 +33,11 @@ import org.junit.Test
  * 本身是 Compose 运行时，JVM 测不到，靠代码走查＋Bob 真机验（自动轮换
  * 5 秒、圆点点按跳卡、「我知道了」摘卡进下一张、1 张不轮、0 张清空、
  * 淡入淡出不闪）。
+ * 第三十七批：手动滑动切卡的方向判定（carouselSwipeDirection）与触发
+ * 阈值（SmartCardSwipeThreshold）是纯函数，单测锁死；手势接线
+ * （pointerInput＋detectHorizontalDragGestures→jumpTo）与点按／竖翻
+ * 的互不抢占是 Compose 运行时，JVM 测不到，靠代码走查＋Bob 真机验
+ * （左滑下一张、右滑上一张、滑完暂停 8 秒、按钮照常可点、长文竖翻照常）。
  */
 class SmartCardCarouselTest {
 
@@ -183,5 +191,43 @@ class SmartCardCarouselTest {
         val reduced = crossfadeDurationMs(true)
         assertTrue(reduced > 0)
         assertTrue(reduced < crossfadeDurationMs(false))
+    }
+
+    // ---------- 第三十七批：手动滑动切卡（只做手势触发） ----------
+    // 左滑＝下一张、右滑＝上一张，累计横向位移过 48dp 触发一次；
+    // 触发后走 jumpTo（carouselNextIndex 改下标＋暂停 8 秒）＋Crossfade，
+    // 与点圆点同一条链。不看峰值、不看速度、不做飞出／滑动／揭示。
+
+    @Test
+    fun swipeThreshold_is48dp() {
+        assertEquals(48.dp, SmartCardSwipeThreshold)
+    }
+
+    @Test
+    fun swipeDirection_leftPastThreshold_isNext() {
+        assertEquals(+1, carouselSwipeDirection(-50f, 48f))
+        assertEquals(+1, carouselSwipeDirection(-48f, 48f))
+    }
+
+    @Test
+    fun swipeDirection_rightPastThreshold_isPrevious() {
+        assertEquals(-1, carouselSwipeDirection(50f, 48f))
+        assertEquals(-1, carouselSwipeDirection(48f, 48f))
+    }
+
+    @Test
+    fun swipeDirection_belowThreshold_isZero() {
+        assertEquals(0, carouselSwipeDirection(-47f, 48f))
+        assertEquals(0, carouselSwipeDirection(47f, 48f))
+        assertEquals(0, carouselSwipeDirection(0f, 48f))
+    }
+
+    @Test
+    fun swipeDirection_usesSameNextIndexAsDotTap() {
+        // 滑动触发后走 carouselNextIndex：左滑 +1、右滑 −1，首尾循环，
+        // 与点圆点跳卡同一条换卡链（jumpTo）。
+        assertEquals(1, carouselNextIndex(0, 3, carouselSwipeDirection(-50f, 48f)))
+        assertEquals(2, carouselNextIndex(0, 3, carouselSwipeDirection(50f, 48f)))
+        assertEquals(0, carouselNextIndex(2, 3, carouselSwipeDirection(-50f, 48f)))
     }
 }

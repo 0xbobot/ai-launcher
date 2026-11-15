@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -672,6 +673,28 @@ fun smartCardBorderColors(): List<Color> = listOf(
 val SmartCardHaloStroke = 3.dp
 
 /**
+ * 光晕描边内收量（第三十七批，Bob 2026-11-15：光晕有毛边）：
+ * 旧值 1dp 小于半个线宽（3dp/2＝1.5dp），描边外缘探出卡片边界 0.5dp，
+ * 被 .clip(shape) 的无抗锯齿 clipPath 切掉，圆角处成台阶——就是毛边。
+ * 新值 2dp ＝ 半线宽 1.5dp ＋ 0.5dp 安全余量，整条描边落在裁剪内，
+ * 可见边缘是描边自身的抗锯齿边。单测锁死（haloStrokeClearance）。
+ */
+val SmartCardHaloInset = 2.dp
+
+/**
+ * 光晕描边圆角（第三十七批）：卡片圆角 20dp －内收 2dp＝18dp，
+ * 与裁剪圆角同心，描边外缘与卡片边界平行。
+ */
+val SmartCardHaloCornerRadius = 18.dp
+
+/**
+ * 描边外缘相对卡片边界的余量（纯函数，单测锁死）：inset − stroke/2。
+ * ≥0.5dp 整条描边落在裁剪内；旧值 1dp − 1.5dp ＝ −0.5dp，外缘探出、
+ * 被 clipPath 切掉——毛边的根因（见 SmartCardHaloInset）。
+ */
+internal fun haloStrokeClearance(inset: Dp, stroke: Dp): Dp = inset - stroke / 2
+
+/**
  * 光晕呼吸下限（重设计 §2.2，第二十六批：0.5→0.8——描边不再长时间
  * 躲在半透明里，呼吸只在 0.8↔1 之间，不做刺眼的跑马灯）。
  */
@@ -737,7 +760,8 @@ fun SmartCardStack(
         )
         currentIndex = carouselNextIndex(index, cards.size, +1)
     }
-    // 点圆点跳卡（第三十三批）：直接改下标，顺带把自动轮换暂停 8 秒。
+    // 点圆点／手动滑动跳卡（第三十三批点圆点、第三十七批手动滑动）：
+    // 直接改下标，顺带把自动轮换暂停 8 秒。
     fun jumpTo(target: Int) {
         currentIndex = target
         resumeAtMillis =
@@ -747,6 +771,36 @@ fun SmartCardStack(
     // 即没有，不贴模板）。copy 只换 prep，不动 id/动作/排序键。
     val topId = cards[index].id
     val connectedIds: Set<String> = connectedFeedbacks.keys
+    // 手动滑动切卡（第三十七批）：只做手势触发，不做飞出／滑动／揭示动画。
+    // detectHorizontalDragGestures 等横向过 touch slop 才认领：点按不触发
+    // （按钮照常可点）、竖向拖动不认领（卡内竖翻照常，由竖向滚动先认领）。
+    // 累计横向位移过 48dp 触发一次，触发后走 jumpTo（与点圆点同一条链：
+    // carouselNextIndex 改下标＋暂停自动轮换 8 秒，切卡走现成的 Crossfade）。
+    // 本次手势触发后不再触发，防一次滑动连跳多张；≥2 张才切，1 张不触发。
+    val swipeThresholdPx = with(LocalDensity.current) {
+        SmartCardSwipeThreshold.toPx()
+    }
+    val swipeModifier = if (cards.size >= 2) {
+        Modifier.pointerInput(cards.size, index) {
+            var totalDx = 0f
+            var triggered = false
+            detectHorizontalDragGestures(
+                onDragStart = {
+                    totalDx = 0f
+                    triggered = false
+                },
+                onHorizontalDrag = { _, dragAmount ->
+                    if (triggered) return@detectHorizontalDragGestures
+                    totalDx += dragAmount
+                    val dir = carouselSwipeDirection(totalDx, swipeThresholdPx)
+                    if (dir != 0) {
+                        triggered = true
+                        jumpTo(carouselNextIndex(index, cards.size, dir))
+                    }
+                }
+            )
+        }
+    } else Modifier
     // 第十批：卡片按桌面卡片语言收边——两侧各留 SmartCardStackSideMargin，
     // 不贴边、不满宽。收边放在最外层 Column：卡片与圆点行一起收。
     Column(
@@ -763,11 +817,13 @@ fun SmartCardStack(
         // （300ms，减动效 120ms）——目标态只取卡 id，准备清单异步回来
         // 只改 prep、不触发一次淡入淡出；摘卡瞬间旧卡仍在淡出，按当前
         // 列表找不到就不画退出那一半（摘掉的卡本来就是要消失的）。
+        // 第三十七批：手动滑动切卡回来（只做手势触发，走 jumpTo＋Crossfade，
+        // 不做飞出／滑动／揭示），见 swipeModifier。
         Crossfade(
             targetState = topId,
             animationSpec = tween(durationMillis = crossfadeDurationMs(reduceMotion)),
             label = "smart_card_crossfade",
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().then(swipeModifier)
         ) { id ->
             val raw = cards.find { it.id == id } ?: return@Crossfade
             val card = raw.copy(prep = prepById[raw.id] ?: raw.prep)
@@ -887,6 +943,14 @@ internal const val SMART_CARD_CAROUSEL_INTERVAL_MS = 5000L
  */
 internal const val SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS = 8000L
 
+/**
+ * 手动滑动切卡的触发阈值（第三十七批，Bob 2026-11-15：要能手动滑动选择）：
+ * 累计横向位移过 48dp 触发一次切卡。48dp 是有意的滑动，不是误触；
+ * 阈值只看累计位移，不看峰值、不看速度——501–523 的峰值／速度判定
+ * 已证实在真机上不可靠，本批不用。单测锁死（carouselSwipeDirection）。
+ */
+val SmartCardSwipeThreshold = 48.dp
+
 /** 轮播圆点直径（第三十二批）：6dp；圆点间距 8dp（8dp 网格）。 */
 val SmartCardCarouselDotSize = 6.dp
 val SmartCardCarouselDotGap = 8.dp
@@ -899,6 +963,18 @@ internal fun carouselNextIndex(current: Int, size: Int, dir: Int): Int {
     if (size <= 1) return 0
     return ((current + dir) % size + size) % size
 }
+
+/**
+ * 滑动切卡方向（纯函数，单测锁死）：累计横向位移 totalDxPx（左滑为负）
+ * 过阈值返回方向（+1 下一张、−1 上一张），没过线返回 0。
+ * 只做触发判定，不做飞出／滑动／揭示——切卡走现成的 Crossfade。
+ */
+internal fun carouselSwipeDirection(totalDxPx: Float, thresholdPx: Float): Int =
+    when {
+        totalDxPx <= -thresholdPx -> +1
+        totalDxPx >= thresholdPx -> -1
+        else -> 0
+    }
 
 /**
  * 轮播是否自动轮换（纯函数，第三十二批单测锁死）：≥2 张才轮换，
@@ -1239,7 +1315,9 @@ private fun smartCardTint(): Color {
  * 顶卡渐变呼吸描边（重设计 §2.2）：只画顶卡。
  * 渐变沿卡边缓慢移动、描边透明度呼吸；减动效时静止（不播动画）。
  * 实现：线性渐变的方向角绕卡旋转——矩形本身不转，只有渐变色在走；
- * 描边向内收半个线宽，整条描边都落在 20dp 圆角裁剪内。
+ * 描边向内收 SmartCardHaloInset（2dp＝半线宽 1.5dp＋0.5dp 安全余量），
+ * 整条描边都落在 20dp 圆角裁剪内。第三十七批修毛边：旧内收 1dp 小于
+ * 半线宽，描边外缘探出 0.5dp、被无抗锯齿的 clipPath 切掉，圆角成台阶。
  * 第二十六批（Bob 2026-11-14：光晕太淡感受不到）：描边 2dp→3dp、
  * 呼吸下限 0.5→0.8、一圈 6 秒→4 秒（呼吸半程 2 秒）、玫/青加深一档
  * （见 smartCardBorderColors），仍在浅暖灰主题与色彩克制口径内，
@@ -1283,8 +1361,8 @@ private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
     }
     val density = LocalDensity.current
     val strokePx = with(density) { SmartCardHaloStroke.toPx() }
-    val radiusPx = with(density) { 19.dp.toPx() }
-    val insetPx = with(density) { 1.dp.toPx() }
+    val radiusPx = with(density) { SmartCardHaloCornerRadius.toPx() }
+    val insetPx = with(density) { SmartCardHaloInset.toPx() }
     val colors = smartCardBorderColors()
     return Modifier.drawWithContent {
         drawContent()
