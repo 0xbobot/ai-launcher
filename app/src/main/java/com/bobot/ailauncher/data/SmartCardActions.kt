@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import com.bobot.ailauncher.ui.settings.openHomeSettings
 
 /**
  * 智能卡片的下一步动作执行（第一阶段，447/v1.2.0）：
@@ -25,6 +26,9 @@ import android.net.Uri
  * - 帮我建提醒：不走这里（要先拿 WRITE_CALENDAR 授权），宿主拦截执行。
  * - 加入会议 / 看日程（第十二批，日历卡）：有会议链接直开链接，无链接
  *   打开日历应用（再兜底事件详情）。
+ * - 去设置（设默认卡，Bob 2026-11-14 07:33 亲令）：走设置页「默认桌面」
+ *   行同一套 openHomeSettings（系统默认桌面设置），成功发出才 markDone
+ *   （问过即关，成功与否都关），失败不摘卡、不记已问过。
  */
 object SmartCardActions {
 
@@ -297,6 +301,17 @@ object SmartCardActions {
                 // 授权）、走 CalendarReminderWriter 执行，永不进这里；
                 // 万一漏网也不 markDone、不写日历。
                 is SmartCardAction.CreateReminder -> false
+                // 设默认卡的「去设置」（Bob 2026-11-14 07:33 亲令）：与设置
+                // 页「默认桌面」行同一套 openHomeSettings（系统默认桌面
+                // 设置，Settings.ACTION_HOME_SETTINGS），不另发明入口。
+                // 成功发出即返回 true，下面的 markDone 记已问过、卡片关闭
+                // （成功设为默认、或退出来没设，都关）；发不出去抛异常时
+                // 外层 catch 返回 false，不 markDone、不记已问过，卡片留着
+                // （用户可重试或取消）。
+                is SmartCardAction.OpenHomeSettings -> {
+                    openHomeSettings(context)
+                    true
+                }
                 // 日历卡（第十二批）：有会议链接直开链接，无链接打开日历
                 // 应用（再兜底事件详情），与 PetZone 的
                 // joinCalendarEvent 同一条链（CalendarMeeting）。
