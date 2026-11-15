@@ -1,6 +1,6 @@
 package com.bobot.ailauncher.ui.smartcard
 
-import androidx.compose.animation.Crossfade
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Spring
@@ -82,6 +82,9 @@ import com.bobot.ailauncher.data.connectedSourceCount
 import com.bobot.ailauncher.data.connectorKeyForGuideId
 import com.bobot.ailauncher.data.createCalendarReminder
 import com.bobot.ailauncher.data.guideCards
+import com.bobot.ailauncher.data.CalEvent
+import com.bobot.ailauncher.data.CalendarRepository
+import com.bobot.ailauncher.data.calendarEventDetailLines
 import com.bobot.ailauncher.data.guideIdsForConnector
 import com.bobot.ailauncher.data.isGuideConnectorGranted
 import com.bobot.ailauncher.data.NotificationRepository
@@ -236,6 +239,10 @@ fun SmartCardStackHost() {
     val writeCalendarGranted = rememberPermissionState { isWriteCalendarGranted(context) }
     var pendingReminderCard by remember { mutableStateOf<SmartCard?>(null) }
     var reminderDisclosureCard by remember { mutableStateOf<SmartCard?>(null) }
+    // 本地日程详情 Dialog 的状态（第四十批，「看日程」退路）：机上没有能
+    // 打开事件详情的日历应用时，在这里看日程（标题＋时间＋地点＋说明＋
+    // 日历名）；null＝不弹。
+    var localEventDetail by remember { mutableStateOf<CalEvent?>(null) }
     fun createReminderFor(card: SmartCard) {
         val action = card.action as? SmartCardAction.CreateReminder ?: return
         val created = createCalendarReminder(context, action)
@@ -255,6 +262,23 @@ fun SmartCardStackHost() {
             SmartCardActions.performAction(context, card)
         }
         if (!opened) IslandToasts.show("这次没打开，稍后再试试吧")
+    }
+    // 「看日程」退路（第四十批）：performAction 返回 false（机上没有能
+    // 打开事件详情的日历应用：包名解析与无包意图都解析不到，Bob 机上
+    // 就是这种情况——只有谷歌 APP、没有事件详情 Activity），不弹死胡同
+    // toast，改按事件 id 从系统日历 provider 查一场、在本地 Dialog 里
+    // 看日程（标题＋时间＋地点＋说明＋日历名；用户主动触发，合规）。
+    // 查不到事件（已被删）才退回原 toast。卡片不摘（performAction 失败
+    // 本来就不记 markDone）。
+    fun showLocalEventDetail(card: SmartCard) {
+        val eventId = (card.action as? SmartCardAction.CalendarEvent)?.eventId
+            ?: return
+        val event = CalendarRepository.loadEventById(context, eventId)
+        if (event != null) {
+            localEventDetail = event
+        } else {
+            IslandToasts.show("这次没打开，稍后再试试吧")
+        }
     }
     val openWriteCalendar = rememberWriteCalendarPermissionOpener(
         writeCalendarGranted,
@@ -326,6 +350,46 @@ fun SmartCardStackHost() {
             }
         )
     }
+    // 本地日程详情 Dialog（第四十批，「看日程」退路）：机上没有能打开事件
+    // 详情的日历应用时，在这里看日程。标题＝事件标题（空标题时退回
+    // 「日程详情」），正文＝时间＋地点＋说明＋日历名
+    // （calendarEventDetailLines）；点「知道了」或划掉关掉，卡片不摘。
+    if (localEventDetail != null) {
+        val event = localEventDetail!!
+        AlertDialog(
+            onDismissRequest = { localEventDetail = null },
+            title = {
+                Text(
+                    text = event.title.ifBlank { "日程详情" },
+                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    calendarEventDetailLines(event, System.currentTimeMillis())
+                        .forEach { line ->
+                            Text(
+                                text = line,
+                                fontSize = AILauncherType.Body.fontSize,
+                                color = AILauncherColors.current.Body
+                            )
+                        }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { localEventDetail = null }) {
+                    Text(
+                        text = "知道了",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Accent,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        )
+    }
     if (cards.isNotEmpty()) {
         // 就绪门（第二十五批，问题 1）：首帧没齐之前不画叠层——有真卡也
         // 先等着，不在空桌面上单独先蹦；门开后（catalog 到位）与 Dock
@@ -347,7 +411,16 @@ fun SmartCardStackHost() {
                         true
                     } else {
                         val opened = SmartCardActions.performAction(context, card)
-                        if (!opened) IslandToasts.show("这次没打开，稍后再试试吧")
+                        // 第四十批：日历卡「看日程」打不开时（机上没有能打开事件
+                        // 详情的日历应用），弹本地日程详情 Dialog，不弹死胡同
+                        // toast；其他卡仍弹原 toast。
+                        if (!opened) {
+                            if (card.action is SmartCardAction.CalendarEvent) {
+                                showLocalEventDetail(card)
+                            } else {
+                                IslandToasts.show("这次没打开，稍后再试试吧")
+                            }
+                        }
                         opened
                     }
                 },
@@ -365,7 +438,16 @@ fun SmartCardStackHost() {
                         card.kind == SmartCardKind.DAY_OVERVIEW
                     ) {
                         val opened = SmartCardActions.performAction(context, card)
-                        if (!opened) IslandToasts.show("这次没打开，稍后再试试吧")
+                        // 第四十批：日历卡「看日程」打不开时弹本地日程详情
+                        // Dialog（见 onAction 同款注释）；总览卡不是
+                        // CalendarEvent 动作，仍弹原 toast。
+                        if (!opened) {
+                            if (card.action is SmartCardAction.CalendarEvent) {
+                                showLocalEventDetail(card)
+                            } else {
+                                IslandToasts.show("这次没打开，稍后再试试吧")
+                            }
+                        }
                     }
                 }
             )
@@ -571,17 +653,18 @@ fun SmartCardStackHost() {
  * 自动轮播，无划走——划卡线全部作废）：
  * 一次只显示一张卡（当前最紧急的那张），不叠放、不露边、不画下一张
  * 的边。自动定时轮换（5 秒一档，≥2 张才轮，1 张不轮、0 张不画）；
- * 点圆点／自动轮换切卡只用淡入淡出（Crossfade，300ms，减动效 120ms），
- * 不飞出、不揭示——动效只有透明度一路；手动滑动一张接一张（第三十九批，
- * 见 startSlideSwitch）。卡片下方圆点指示（当前张实心金、其余空心淡，
+ * 切卡一律一张接一张滑动（第四十批：点圆点／自动轮换也走 startSlideSwitch，
+ * 与手动滑动同一条 300ms 时间线，减动效 120ms）——Crossfade 已撤：
+ * 淡入淡出会在同一位置重叠两张相似卡的文字（Bob 2026-11-15 录屏：
+ * 自动轮换的 Crossfade 在滑动前 300ms 重影，滑动时又闪），滑动不重叠、
+ * 不重影。卡片下方圆点指示（当前张实心金、其余空心淡，
  * 点圆点跳到那一张，点后自动轮换暂停 8 秒再恢复）。
  * 卡片上挂手动滑动。点「我知道了」才摘卡（真卡 markDone／引导卡
  * 轮换推），摘完自动进下一张、圆点更新；摘完 1 张停轮、无圆点；
  * 摘完 0 张区域清空。0 张时提前返回（见函数头）。
  *
  * 切卡目标态只取卡 id（不是整张卡）：准备清单异步回来只改 prep，
- * 不触发一次淡入淡出；摘卡瞬间旧卡仍在淡出，按当前列表找不到就不画
- * 退出那一半（摘掉的卡本来就是要消失的）。
+ * 不触发一次切换；摘卡／列表变化时内容直接换（单帧，无重影）。
  * 圆点行与卡片同宽（两侧各 24dp 收边内），圆点居中。
  * 待办数角标已删（第二十七批）——叠层右上角不再画红 pill 计数。
  *
@@ -767,15 +850,15 @@ fun SmartCardStack(
     var settleJob by remember { mutableStateOf<Job?>(null) }
     // 一张接一张的滑动切换状态（第三十九批）：出卡 id（null＝没在切换）、
     // 进卡下标、滑动方向（＋1 左滑下一张、−1 右滑上一张）、松手时位移、
-    // 切换进度（0→1，300ms／减动效 120ms，与淡入淡出同口径）、切换任务、
-    // 压住 Crossfade 的标志（见 startSlideSwitch 收尾）。
+    // 切换进度（0→1，300ms／减动效 120ms，与淡入淡出同口径）、切换任务。
+    // 第四十批：suppressCrossfade 已删——Crossfade 已撤，切卡收尾不再
+    // 需要压住它（见 startSlideSwitch）。
     val slideProgress = remember { Animatable(0f) }
     var slideOutgoingId by remember { mutableStateOf<String?>(null) }
     var slideIncomingIndex by remember { mutableIntStateOf(0) }
     var slideDir by remember { mutableIntStateOf(0) }
     var slideReleaseOffset by remember { mutableFloatStateOf(0f) }
     var slideJob by remember { mutableStateOf<Job?>(null) }
-    var suppressCrossfade by remember { mutableStateOf(false) }
     val isSliding = slideOutgoingId != null
     // 松手回弹（第三十九批）：只留给没过线的拖动——弹簧回弹到 0
     // （减动效时短 tween、不做弹簧过冲）。换卡不再走这里（见
@@ -799,6 +882,56 @@ fun SmartCardStack(
             }
         }
     }
+    // 点圆点／手动滑动跳卡（第三十三批点圆点、第三十七批手动滑动）：
+    // 直接改下标，顺带把自动轮换暂停 8 秒。第四十批：自动轮换也走
+    // startSlideSwitch（见下面的自动轮换计时），这里只留给点圆点／
+    // 手动滑动的收尾（startSlideSwitch 里 manual=true 时调它）。
+    fun jumpTo(target: Int) {
+        currentIndex = target
+        resumeAtMillis =
+            System.currentTimeMillis() + SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS
+    }
+    // 准备清单覆盖：大模型回来了就显示，没回来显示构建时的 prep（null
+    // 即没有，不贴模板）。copy 只换 prep，不动 id/动作/排序键。
+    val connectedIds: Set<String> = connectedFeedbacks.keys
+    // 一张接一张的滑动切换（第三十九批，Bob 2026-11-15：不要直接弹回来，
+    // 要一个接一个的效果——536 换卡是位移 150ms 回 0，新卡从拖动位置沉回
+    // 原位，用户看来就是卡直接弹回来）。松手判定换卡后：出卡不回 0，继续
+    // 顺滑动方向滑到 ±1 卡宽外（轻微淡出），进卡从反方向滑入到中心；两张
+    // 同一条 300ms 时间线（减动效 120ms，与淡入淡出同口径）。不回 521 的
+    // 1600px 飞出。收尾才提交下标。
+    // 第四十批：切卡一律走这里——点圆点／自动轮换也不再直接改下标
+    // （直接改下标会触发 Crossfade；Crossfade 已撤，见文件头 KDoc：
+    // 淡入淡出会在同一位置重叠两张相似卡的文字，自动轮换时重影、滑动时
+    // 又闪）。manual=true（点圆点／手动滑动）时收尾走 jumpTo（改下标＋
+    // 暂停自动轮换 8 秒）；manual=false（自动轮换）时收尾只改下标、不碰
+    // resumeAtMillis（自动轮换保持 5 秒一档，不被 8 秒暂停拖慢）。
+    // 收尾时滑入的卡已在中心、满不透明，直接换内容即可（单帧，无重影），
+    // 不再需要压住 Crossfade（suppressCrossfade 已删）。
+    fun startSlideSwitch(
+        dir: Int,
+        releaseOffset: Float,
+        fromIndex: Int,
+        targetIndex: Int,
+        manual: Boolean
+    ) {
+        slideOutgoingId = cards[fromIndex].id
+        slideIncomingIndex = targetIndex
+        slideDir = dir
+        slideReleaseOffset = releaseOffset
+        slideJob?.cancel()
+        slideJob = dragScope.launch {
+            slideProgress.snapTo(0f)
+            slideProgress.animateTo(
+                1f,
+                tween(durationMillis = crossfadeDurationMs(reduceMotion))
+            )
+            if (manual) jumpTo(targetIndex) else currentIndex = targetIndex
+            slideOutgoingId = null
+            dragOffsetX.snapTo(0f)
+            slideProgress.snapTo(0f)
+        }
+    }
     // 自动轮换计时（第三十三批）：下标／张数／恢复时刻任一变就重计时；
     // 只有 ≥2 张才轮（carouselShouldAutoRotate），1 张不轮、0 张不画。
     // 第三十八批：isDragging 也进键——拖动一开始计时就重算，5 秒档
@@ -806,6 +939,9 @@ fun SmartCardStack(
     // 拖完（换卡）走 jumpTo 的 8 秒暂停。
     // 第三十九批：isSliding 也进键——一张接一张滑出／滑入的 300ms 里
     // 不自动切卡；滑完 jumpTo 的 8 秒暂停接手。
+    // 第四十批：到时也走 startSlideSwitch（manual=false：只改下标，
+    // 不碰 resumeAtMillis，自动轮换保持 5 秒一档）——不再直接改下标
+    // 触发 Crossfade（Crossfade 已撤，见文件头 KDoc）。
     LaunchedEffect(index, cards.size, resumeAtMillis, isDragging, isSliding) {
         if (isSliding) return@LaunchedEffect
         if (!carouselShouldAutoRotate(cards.size)) return@LaunchedEffect
@@ -816,51 +952,9 @@ fun SmartCardStack(
                 System.currentTimeMillis()
             )
         )
-        currentIndex = carouselNextIndex(index, cards.size, +1)
-    }
-    // 点圆点／手动滑动跳卡（第三十三批点圆点、第三十七批手动滑动）：
-    // 直接改下标，顺带把自动轮换暂停 8 秒。
-    fun jumpTo(target: Int) {
-        currentIndex = target
-        resumeAtMillis =
-            System.currentTimeMillis() + SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS
-    }
-    // 准备清单覆盖：大模型回来了就显示，没回来显示构建时的 prep（null
-    // 即没有，不贴模板）。copy 只换 prep，不动 id/动作/排序键。
-    val topId = cards[index].id
-    val connectedIds: Set<String> = connectedFeedbacks.keys
-    // 压住 Crossfade 的标志复位（第三十九批）：startSlideSwitch 收尾时
-    // 先置 suppressCrossfade＝true 再 jumpTo，Crossfade 用 0ms 瞬切
-    // （滑入的卡已在中心、满不透明，瞬切不可见）；下标一变这里就复位，
-    // 下一次点圆点／自动轮换仍走正常 300ms 淡入淡出。
-    LaunchedEffect(topId) { suppressCrossfade = false }
-    // 一张接一张的滑动切换（第三十九批，Bob 2026-11-15：不要直接弹回来，
-    // 要一个接一个的效果——536 换卡是位移 150ms 回 0，新卡从拖动位置沉回
-    // 原位，用户看来就是卡直接弹回来）。松手判定换卡后：出卡不回 0，继续
-    // 顺滑动方向滑到 ±1 卡宽外（轻微淡出），进卡从反方向滑入到中心；两张
-    // 同一条 300ms 时间线（减动效 120ms，与淡入淡出同口径）。不回 521 的
-    // 1600px 飞出。收尾才提交下标：滑完 jumpTo（与点圆点同一条链：改下标
-    // ＋暂停自动轮换 8 秒），同时压住 Crossfade（0ms 瞬切，不重复淡一次）、
-    // 清滑动状态、拖动位移 snapTo 0。
-    fun startSlideSwitch(dir: Int, releaseOffset: Float, fromIndex: Int) {
-        val incoming = carouselNextIndex(fromIndex, cards.size, dir)
-        slideOutgoingId = cards[fromIndex].id
-        slideIncomingIndex = incoming
-        slideDir = dir
-        slideReleaseOffset = releaseOffset
-        slideJob?.cancel()
-        slideJob = dragScope.launch {
-            slideProgress.snapTo(0f)
-            slideProgress.animateTo(
-                1f,
-                tween(durationMillis = crossfadeDurationMs(reduceMotion))
-            )
-            suppressCrossfade = true
-            jumpTo(incoming)
-            slideOutgoingId = null
-            dragOffsetX.snapTo(0f)
-            slideProgress.snapTo(0f)
-        }
+        startSlideSwitch(
+            +1, 0f, index, carouselNextIndex(index, cards.size, +1), false
+        )
     }
     // 手动滑动切卡（第三十八批跟手、第三十九批一张接一张，Bob 2026-11-15：
     // 536 的位移 150ms 回 0 像直接弹回来，要一个接一个的效果）。
@@ -920,7 +1014,13 @@ fun SmartCardStack(
                     if (dir != 0) {
                         // 一张接一张（第三十九批）：出卡继续滑出、进卡从反
                         // 方向滑入，不 tween 回 0、不直接弹回来。
-                        startSlideSwitch(dir, dragOffsetX.value, index)
+                        startSlideSwitch(
+                            dir,
+                            dragOffsetX.value,
+                            index,
+                            carouselNextIndex(index, cards.size, dir),
+                            true
+                        )
                     } else {
                         settleDragOffsetToZero()
                     }
@@ -951,23 +1051,26 @@ fun SmartCardStack(
         // 约 56dp。× 不再占这一行（448 的 × 行在卡外、悬在壁纸上）；× 进卡内表头（见 SmartCardView），
         // 这里两模式统一只留段间距。
         Spacer(modifier = Modifier.height(SmartCardStackTopGap))
-        // 单卡槽位（第三十三批）：只画当前下标那一张。非滑动时走 Crossfade
-        // 淡入淡出（300ms，减动效 120ms）——目标态只取卡 id，准备清单异步
-        // 回来只改 prep、不触发一次淡入淡出；摘卡瞬间旧卡仍在淡出，按当前
-        // 列表找不到就不画退出那一半（摘掉的卡本来就是要消失的）。
+        // 单卡槽位（第三十三批）：只画当前下标那一张。第四十批：Crossfade
+        // 已撤——非滑动时也只直画当前卡，不再淡入淡出（Crossfade 在同一
+        // 位置以互补透明度同画两张相似卡，文字重叠成鬼影，见文件头 KDoc）。
+        // 摘卡／列表变化时内容直接换（单帧，无重影）。
         // 第三十八批：手动滑动改跟手（拖动位移跟手指走、松手判定换卡／回弹，
-        // 见 dragModifier），切卡收尾仍走 Crossfade 淡入淡出；第三十七批
-        // “只做手势触发、不做动画”就此作废。
+        // 见 dragModifier）；第三十七批“只做手势触发、不做动画”就此作废。
         // 第三十九批：手动滑动松手换卡改一张接一张——出卡继续顺滑动方向
         // 滑出（到 ±1 卡宽外、轻微淡出），进卡从反方向滑入到中心，同一条
         // 300ms 时间线（见 slide layers）；拖动跟手与松手判定不动；536
-        // 「换卡位移 150ms 回 0」就此作废。
-        // 手势与量宽挂在外层 Box 上（不在 Crossfade 上）：Crossfade 与滑动层
-        // 互换时 Box 不动，pointerInput 不重启，触发滑动的那条手势协程
-        // 不会被滑动状态的变更取消。
+        // 「换卡位移 150ms 回 0」就此作废。第四十批：点圆点／自动轮换也
+        // 走 startSlideSwitch（同一条滑动时间线），不再直接改下标。
+        // 手势与量宽挂在外层 Box 上（不在切换层上）：切换层互换时 Box 不动，
+        // pointerInput 不重启，触发滑动的那条手势协程不会被滑动状态的
+        // 变更取消。第四十批：外层 Box 加 clipToBounds——出卡滑到 ±1 卡宽
+        // 时右缘还剩 24dp 侧边距的一条边露在屏上，滑完切回单卡渲染时这条
+        // 边一帧消失（小 pop）；在槽位边裁掉，p=1 时出卡完全不可见。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .clipToBounds()
                 .onSizeChanged { cardWidthPx = it.width.toFloat() }
                 .then(dragModifier)
         ) {
@@ -1022,30 +1125,23 @@ fun SmartCardStack(
                     )
                 }
             } else {
-                Crossfade(
-                    targetState = topId,
-                    animationSpec = tween(
-                        durationMillis = if (suppressCrossfade) 0
-                        else crossfadeDurationMs(reduceMotion)
-                    ),
-                    label = "smart_card_crossfade",
+                // 第四十批：直画当前卡——准备清单异步回来只改 prep，不触发
+                // 一次切换；摘卡／列表变化时内容直接换（单帧，无重影）。
+                // 跟手位移仍挂在这里（拖动时整张卡跟手指走）。
+                val raw = cards[index]
+                val card = raw.copy(prep = prepById[raw.id] ?: raw.prep)
+                SmartCardView(
+                    card = card,
+                    onActionClick = { onAction(card) },
+                    onIgnoreClick = { onIgnore(card) },
+                    onCloseClick = onClose,
+                    onBodyClick = { onBodyClick(card) },
+                    hideActionRow = card.id in connectedIds,
+                    celebration = connectedFeedbacks[card.id],
                     modifier = Modifier
                         .fillMaxWidth()
                         .graphicsLayer { translationX = dragOffsetX.value }
-                ) { id ->
-                    val raw = cards.find { it.id == id } ?: return@Crossfade
-                    val card = raw.copy(prep = prepById[raw.id] ?: raw.prep)
-                    SmartCardView(
-                        card = card,
-                        onActionClick = { onAction(card) },
-                        onIgnoreClick = { onIgnore(card) },
-                        onCloseClick = onClose,
-                        onBodyClick = { onBodyClick(card) },
-                        hideActionRow = card.id in connectedIds,
-                        celebration = connectedFeedbacks[card.id],
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+                )
             }
         }
         // 圆点指示（第三十二批，第三十三批沿用样式与点按）：≥2 张才画——
@@ -1058,7 +1154,18 @@ fun SmartCardStack(
                 current = index,
                 onDotClick = { target ->
                     // 滑动切换进行中不响应点圆点（300ms，等这一张滑完）。
-                    if (slideOutgoingId == null && target != index) jumpTo(target)
+                    // 第四十批：点圆点也走 startSlideSwitch（一张接一张滑入），
+                    // 不再直接 jumpTo（直接改下标会触发 Crossfade；Crossfade
+                    // 已撤）。方向取最短环向（见 carouselDotTapDir）。
+                    if (slideOutgoingId == null && target != index) {
+                        startSlideSwitch(
+                            carouselDotTapDir(index, target, cards.size),
+                            0f,
+                            index,
+                            target,
+                            true
+                        )
+                    }
                 },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -1129,16 +1236,19 @@ private fun CarouselDots(
 }
 
 /**
- * 切卡淡入淡出时长（毫秒，第三十三批）：点圆点／自动轮换切卡只用淡入淡出
+ * 切卡滑动时长（毫秒，第三十三批）：点圆点／自动轮换切卡只用淡入淡出
  * （Crossfade），不飞出、不揭示——动效只有透明度一路。第三十九批起
  * 一张接一张的滑动切换也用同一档（300ms／减动效 120ms）。
+ * 第四十批：Crossfade 已撤，切卡一律一张接一张滑动，300ms／120ms
+ * 现为滑动时长；函数名与常量名沿用（不改名、不动测试 import）。
  * 300ms——看得见切换、又不拖沓；减动效时 120ms，缩短但不硬切。
  * 纯函数 crossfadeDurationMs 选档，单测锁死。
  */
 internal const val SMART_CARD_CROSSFADE_MS = 300
 internal const val SMART_CARD_CROSSFADE_REDUCED_MS = 120
 
-/** 淡入淡出时长选档（纯函数，单测锁死）：正常 300ms，减动效 120ms。 */
+/** 淡入淡出时长选档（纯函数，单测锁死）：正常 300ms，减动效 120ms。第四十批：
+ * Crossfade 已撤，现为切卡滑动时长（函数名与常量名沿用）。 */
 internal fun crossfadeDurationMs(reduceMotion: Boolean): Int =
     if (reduceMotion) SMART_CARD_CROSSFADE_REDUCED_MS else SMART_CARD_CROSSFADE_MS
 
@@ -1206,6 +1316,17 @@ val SmartCardCarouselDotGap = 8.dp
 internal fun carouselNextIndex(current: Int, size: Int, dir: Int): Int {
     if (size <= 1) return 0
     return ((current + dir) % size + size) % size
+}
+
+/**
+ * 点圆点跳卡的滑动方向（纯函数，第四十批，单测锁死）：点的那张是循环
+ * 下一张就 +1（左滑入），否则 −1（右滑入）——取最短环向。2 张时点的
+ * 那张一定是循环下一张（+1）；3 张以上点非相邻的圆点时按环向最短的
+ * 一边滑（不跨两张）。size<2 时返回 0（没有下一张可切，调用方不调）。
+ */
+internal fun carouselDotTapDir(current: Int, target: Int, size: Int): Int {
+    if (size < 2) return 0
+    return if (target == carouselNextIndex(current, size, +1)) +1 else -1
 }
 
 /**

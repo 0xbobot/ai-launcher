@@ -136,6 +136,59 @@ object CalendarRepository {
     }
 
     /**
+     * 按 id 查单场日历事件（第四十批，「看日程」退路）：机上没有能打开事件
+     * 详情的日历应用时，宿主用它在本地 Dialog 里看日程（标题＋时间＋地点
+     * ＋说明＋日历名）。查 Events 表（不是 Instances 表：按 _ID 精确查
+     * 一场，不用窗口）。查不到或异常返回 null（调用方退回原 toast）。
+     */
+    fun loadEventById(context: Context, eventId: Long): CalEvent? {
+        return try {
+            val cursor = context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                arrayOf(
+                    CalendarContract.Events.TITLE,
+                    CalendarContract.Events.DTSTART,
+                    CalendarContract.Events.DTEND,
+                    CalendarContract.Events.EVENT_LOCATION,
+                    CalendarContract.Events.DESCRIPTION,
+                    CalendarContract.Events.ALL_DAY,
+                    CalendarContract.Events.CALENDAR_ID
+                ),
+                "${CalendarContract.Events._ID} = ?",
+                arrayOf(eventId.toString()),
+                null
+            )
+            var event: CalEvent? = null
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val ti = it.getColumnIndex(CalendarContract.Events.TITLE)
+                    val bi = it.getColumnIndex(CalendarContract.Events.DTSTART)
+                    val ei = it.getColumnIndex(CalendarContract.Events.DTEND)
+                    val li = it.getColumnIndex(CalendarContract.Events.EVENT_LOCATION)
+                    val di = it.getColumnIndex(CalendarContract.Events.DESCRIPTION)
+                    val ai = it.getColumnIndex(CalendarContract.Events.ALL_DAY)
+                    val cidi = it.getColumnIndex(CalendarContract.Events.CALENDAR_ID)
+                    val calId = if (cidi >= 0) it.getLong(cidi) else 0L
+                    event = CalEvent(
+                        title = if (ti >= 0) it.getString(ti).orEmpty() else "",
+                        begin = if (bi >= 0) it.getLong(bi) else 0L,
+                        end = if (ei >= 0) it.getLong(ei) else 0L,
+                        location = if (li >= 0) it.getString(li).orEmpty() else "",
+                        description = if (di >= 0) it.getString(di).orEmpty() else "",
+                        allDay = if (ai >= 0) it.getInt(ai) == 1 else false,
+                        eventId = eventId,
+                        calendarName =
+                            calendarDisplayNames(context, setOf(calId))[calId].orEmpty()
+                    )
+                }
+            }
+            event
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * 批量查日历账户显示名（第二十五批，问题 3）：按 calendarId 取
      * Calendars 表的 CALENDAR_DISPLAY_NAME（如“豆包日历”）。日历数
      * 很少，直接全表读出再按 id 过滤，不拼 IN 子句。查不到或异常返回

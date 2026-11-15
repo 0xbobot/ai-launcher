@@ -8,6 +8,7 @@ import com.bobot.ailauncher.ui.smartcard.SMART_CARD_DRAG_MAX_FRACTION
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_DRAG_RELEASE_FRACTION
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_FLING_VELOCITY_DP_PER_SEC
 import com.bobot.ailauncher.ui.smartcard.carouselClampIndex
+import com.bobot.ailauncher.ui.smartcard.carouselDotTapDir
 import com.bobot.ailauncher.ui.smartcard.carouselDragOffsetClamp
 import com.bobot.ailauncher.ui.smartcard.carouselNextIndex
 import com.bobot.ailauncher.ui.smartcard.carouselReleaseDecision
@@ -26,18 +27,21 @@ import org.junit.Test
  * 单卡槽位自动轮播纯函数单测（第三十二批 Hero 轮播立、第三十三批
  * Bob 2026-11-14 22:44 定单卡槽位自动轮播、无划走重做）。
  *
- * 锁死的是轮播下标／自动轮换／等待时长／淡入淡出四组纯函数：
+ * 锁死的是轮播下标／自动轮换／等待时长／切卡滑动时长四组纯函数：
  * - carouselNextIndex：自动轮换下一张，首尾相接循环；
  * - carouselShouldAutoRotate／carouselClampIndex：≥2 张才轮换、摘卡后下标钳制；
  * - carouselWaitMs：正常一档间隔，点圆点后等到恢复时刻；
- * - crossfadeDurationMs：淡入淡出时长选档（正常 300ms、减动效 120ms）。
+ * - crossfadeDurationMs：切卡滑动时长选档（正常 300ms、减动效 120ms；
+ *   第四十批起 Crossfade 已撤，现为滑动时长，函数名与常量名沿用）。
  * 划走判定（shouldSkipCard／resolveSwipeRelease）、飞出时长
  * （flyOutDurationMs）、拖动揭示（swipeRevealProgress）已随第三十三批
  * 一并删掉（SmartCardSwipeTest 整个文件已删）。
- * 自动轮换计时（LaunchedEffect＋delay）、点圆点跳卡的接线、Crossfade
+ * 自动轮换计时（LaunchedEffect＋delay）、点圆点跳卡的接线、切卡滑动
  * 本身是 Compose 运行时，JVM 测不到，靠代码走查＋Bob 真机验（自动轮换
  * 5 秒、圆点点按跳卡、「我知道了」摘卡进下一张、1 张不轮、0 张清空、
- * 淡入淡出不闪）。
+ * 切卡滑动不闪）。第四十批：Crossfade 已撤——点圆点／自动轮换也不再
+ * 直接改下标触发淡入淡出，一律走 startSlideSwitch 一张接一张滑动；
+ * 点圆点方向（carouselDotTapDir）是纯函数，单测锁死。
  * 第三十八批：跟手拖动的松手判定（carouselReleaseDecision）与位移夹子
  * （carouselDragOffsetClamp）是纯函数，单测锁死；手势接线
  * （pointerInput＋VelocityTracker→jumpTo）与点按／竖翻
@@ -92,6 +96,46 @@ class SmartCardCarouselTest {
     fun nextIndex_empty_staysAtZero() {
         assertEquals(0, carouselNextIndex(0, 0, +1))
         assertEquals(0, carouselNextIndex(0, 0, -1))
+    }
+
+    // ---------- 第四十批：点圆点跳卡的滑动方向（carouselDotTapDir） ----------
+
+    @Test
+    fun dotTapDir_twoCards_alwaysForward() {
+        // 2 张时点的那张一定是循环下一张（+1，左滑入）。
+        assertEquals(+1, carouselDotTapDir(0, 1, 2))
+        assertEquals(+1, carouselDotTapDir(1, 0, 2))
+    }
+
+    @Test
+    fun dotTapDir_nextCard_forward() {
+        // 3 张：点循环下一张就 +1（左滑入）。
+        assertEquals(+1, carouselDotTapDir(0, 1, 3))
+        assertEquals(+1, carouselDotTapDir(2, 0, 3))
+    }
+
+    @Test
+    fun dotTapDir_previousCard_backward() {
+        // 3 张：点循环上一张就 −1（右滑入）。
+        assertEquals(-1, carouselDotTapDir(1, 0, 3))
+        assertEquals(-1, carouselDotTapDir(0, 2, 3))
+    }
+
+    @Test
+    fun dotTapDir_nonAdjacent_takesShortestRingDirection() {
+        // 4 张：第 0 张点第 2 张——顺时针两步、逆时针两步一样远，
+        // 按规则取 −1（不是循环下一张就 −1）；第 0 张点第 3 张是
+        // 循环上一张，−1。
+        assertEquals(-1, carouselDotTapDir(0, 2, 4))
+        assertEquals(-1, carouselDotTapDir(0, 3, 4))
+        assertEquals(+1, carouselDotTapDir(0, 1, 4))
+    }
+
+    @Test
+    fun dotTapDir_singleCard_returnsZero() {
+        // 只有 0／1 张时没有下一张可切，返回 0（调用方不调）。
+        assertEquals(0, carouselDotTapDir(0, 0, 1))
+        assertEquals(0, carouselDotTapDir(0, 0, 0))
     }
 
     // ---------- 自动轮换：≥2 张才轮 ----------
@@ -177,9 +221,10 @@ class SmartCardCarouselTest {
         assertEquals(0, carouselClampIndex(0, 2))
     }
 
-    // ---------- 第三十三批：淡入淡出时长选档（crossfadeDurationMs） ----------
+    // ---------- 第三十三批：切卡滑动时长选档（crossfadeDurationMs） ----------
     // 单卡槽位切卡只用淡入淡出：正常 300ms 看得见切换、不拖沓；
-    // 减动效 120ms 缩短但不硬切。
+    // 减动效 120ms 缩短但不硬切。第四十批：Crossfade 已撤，现为一张接一张
+    // 的滑动时长；函数名与常量名沿用。
 
     @Test
     fun crossfadeDuration_normal_is300ms() {
