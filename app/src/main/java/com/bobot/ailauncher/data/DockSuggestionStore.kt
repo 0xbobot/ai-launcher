@@ -22,7 +22,7 @@ import java.io.File
  * 上次结果，不重新调模型）。
  * suppressed_keys：已忽略建议的 dedupeKey + "pin:<pkg>" /
  * "unpin:<pkg>"（采纳或忽略后该包不再被同一动作提名）。
- * muted_kinds：被「不再提示」关掉的种类（pin/unpin/observe），关了
+ * muted_kinds：被静默关掉的种类（pin/unpin/observe），关了
  * 的种类不进候选。
  * applied：已采纳记录（dedupeKey → {"kind","pkg","appliedAtMs"}，
  * 单独存——新一轮分析会覆盖 last_result，但 7 天撤销窗口要活过
@@ -222,7 +222,7 @@ class DockSuggestionStore(private val context: Context) {
         refreshUiState()
     }
 
-    /** 「不再提示」：关一类（关了的种类不进候选）；再点一次恢复。 */
+    /** 静默一类：关一类（关了的种类不进候选）；再点一次恢复。 */
     fun setKindMuted(kind: SuggestionKind, muted: Boolean) {
         val cur = mutedKinds().toMutableSet()
         if (muted) cur += kind else cur -= kind
