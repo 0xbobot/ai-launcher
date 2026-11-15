@@ -229,7 +229,12 @@ object LlmRouter {
      * 底层请求链路（意图框 chat 与 AI 智能分类共用，同一套已验证的写法）：
      * 同一个 URL 拼法、同一个请求体构造风格、同一个 OkHttpClient 配置、同一个 header。
      * 注意：不发 response_format 参数（部分中转端点不支持，会回 200 空 body）。
-     * 每次调用打 Log.d（TAG 可指定）：请求体字节数、HTTP code、响应体字节数 + 前 500 字符。
+     * 每次调用打 Log.d（TAG 可指定）：请求体字节数、HTTP code、响应体字节数＋
+     * 工具调用次数——只记数量，绝不记响应体原文（正式版审计点名；查证结果
+     * 进日志就泄漏了）。[safetyCheck] 为真时加 safety_check=high（DeepSeek
+     * 全家桶 API，官方文档）：服务端做基础风控（审输入输出），同时忽略客户端
+     * 传的 temperature 等采样参数；输入不合规返回 HTTP 400、输出违规返回
+     * refusal 标记（调用方的 validatePrepLines 会把含「无法/抱歉」的整段丢弃）。
      */
     suspend fun postChatCompletions(
         baseUrl: String,
@@ -239,11 +244,12 @@ object LlmRouter {
         userContent: String,
         temperature: Double,
         maxTokens: Int,
-        tag: String = "LlmRouter"
+        tag: String = "LlmRouter",
+        safetyCheck: Boolean = false
     ): RawChatResult = withContext(Dispatchers.IO) {
         try {
             val url = "${LlmConfig.normalizeBaseUrl(baseUrl)}/chat/completions"
-            val bodyStr = JSONObject()
+            val bodyJson = JSONObject()
                 .put("model", model)
                 .put("messages", JSONArray().apply {
                     put(JSONObject().put("role", "system").put("content", systemPrompt))
@@ -251,7 +257,8 @@ object LlmRouter {
                 })
                 .put("temperature", temperature)
                 .put("max_tokens", maxTokens)
-                .toString()
+            if (safetyCheck) bodyJson.put("safety_check", JSONObject().put("level", "high"))
+            val bodyStr = bodyJson.toString()
             android.util.Log.d(
                 tag,
                 "POST $url model=$model temp=$temperature maxTokens=$maxTokens " +
@@ -269,7 +276,7 @@ object LlmRouter {
                 android.util.Log.d(
                     tag,
                     "HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
-                        "head=${rawBody.take(500)}"
+                        "toolCalls=${countToolCalls(rawBody)}"
                 )
                 RawChatResult(resp.code, rawBody, null)
             }
@@ -277,6 +284,148 @@ object LlmRouter {
             android.util.Log.d(tag, "network error: ${e.message}")
             RawChatResult(-1, "", e.message ?: "网络异常")
         }
+    }
+
+    /** 数响应里的工具调用次数（只记数量，供日志用；解析失败记 0） */
+    private fun countToolCalls(rawBody: String): Int = try {
+        JSONObject(rawBody)
+            .optJSONArray("choices")?.optJSONObject(0)
+            ?.optJSONObject("message")?.optJSONArray("tool_calls")?.length() ?: 0
+    } catch (_: Exception) {
+        0
+    }
+
+    // ---------- DeepSeek 独立搜索／抓取（智能卡片试点 B 路线，Bob 2026-11-15 批） ----------
+
+    /** 独立搜索接口返回的一条结果（官方 Search & Fetch 指南：标题／链接／摘要／正文／发布时间） */
+    data class SearchResultItem(
+        val title: String,
+        val url: String,
+        val snippet: String,
+        val summary: String,
+        val rerankScore: Double,
+        val authority: Int,
+        val date: String?
+    )
+
+    /** 独立抓取接口返回的一页（标题＋Markdown 正文） */
+    data class FetchResult(val title: String, val content: String)
+
+    /** 搜索／抓取专用 client：各 10 秒超时（试点方案 5.4），与模型调用的 15 秒分开算 */
+    private fun toolClient(): OkHttpClient = OkHttpClient.Builder()
+        .callTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .build()
+
+    /**
+     * 独立搜索：POST {baseUrl}/v1/tools/search（官方文档）。
+     * query 须 1–128 字符（不合规不发请求）；count 1–50，默认 5。
+     * 只记数量（httpCode＋字节数＋命中条数），不记搜索词原文、不记返回正文。
+     * 非 2xx／异常／空结果返回 null（调用方静默处理、不重试）。
+     */
+    suspend fun search(
+        baseUrl: String,
+        apiKey: String,
+        query: String,
+        count: Int = 5
+    ): List<SearchResultItem>? = withContext(Dispatchers.IO) {
+        if (query.isBlank() || query.length > 128 || count !in 1..50) return@withContext null
+        try {
+            val url = "${LlmConfig.normalizeBaseUrl(baseUrl)}/v1/tools/search"
+            val bodyStr = JSONObject()
+                .put("query", query)
+                .put("count", count)
+                .toString()
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(bodyStr.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            toolClient().newCall(request).execute().use { resp ->
+                val rawBody = try { resp.body?.string().orEmpty() } catch (_: Exception) { "" }
+                val items = if (resp.code in 200..299) parseSearchResults(rawBody) else null
+                android.util.Log.d(
+                    "LlmRouter",
+                    "search HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
+                        "results=${items?.size ?: -1}"
+                )
+                items?.ifEmpty { null }
+            }
+        } catch (_: IOException) {
+            null
+        }
+    }
+
+    /** 解析搜索响应里的 results 数组（字段缺失按空值处理，整段解析失败返回 null） */
+    private fun parseSearchResults(rawBody: String): List<SearchResultItem>? = try {
+        val arr = JSONObject(rawBody).optJSONArray("results") ?: return null
+        List(arr.length()) { i ->
+            val o = arr.getJSONObject(i)
+            SearchResultItem(
+                title = o.optString("title"),
+                url = o.optString("url"),
+                snippet = o.optString("snippet"),
+                summary = o.optString("summary"),
+                rerankScore = o.optDouble("rerank_score", 0.0),
+                authority = o.optInt("authority", -1),
+                date = o.optString("date").ifBlank { null }
+            )
+        }.filter { it.url.isNotBlank() }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * 独立抓取：POST {baseUrl}/v1/tools/fetch（官方文档）。
+     * url 须 ≤8192 字符、http(s) 带 host、不含用户名密码（不合规不发请求）。
+     * 只记数量（httpCode＋字节数），不记 URL、不记抓回来的正文。
+     * 非 2xx／异常／空内容返回 null（调用方静默处理、不重试）。
+     */
+    suspend fun fetch(baseUrl: String, apiKey: String, url: String): FetchResult? =
+        withContext(Dispatchers.IO) {
+            if (!isFetchableUrl(url)) return@withContext null
+            try {
+                val endpoint = "${LlmConfig.normalizeBaseUrl(baseUrl)}/v1/tools/fetch"
+                val bodyStr = JSONObject().put("url", url).toString()
+                val request = Request.Builder()
+                    .url(endpoint)
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
+                    .post(bodyStr.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+                toolClient().newCall(request).execute().use { resp ->
+                    val rawBody = try { resp.body?.string().orEmpty() } catch (_: Exception) { "" }
+                    val result = if (resp.code in 200..299) parseFetchResult(rawBody) else null
+                    android.util.Log.d(
+                        "LlmRouter",
+                        "fetch HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
+                            "contentBytes=${result?.content?.toByteArray()?.size ?: -1}"
+                    )
+                    result
+                }
+            } catch (_: IOException) {
+                null
+            }
+        }
+
+    /** 抓取 URL 准入：≤8192 字符、http(s)、带 host、不含用户名密码（官方文档原样） */
+    private fun isFetchableUrl(url: String): Boolean {
+        if (url.isBlank() || url.length > 8192) return false
+        val lower = url.lowercase()
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) return false
+        val host = url.substringAfter("://").substringBefore("/")
+            .substringBefore("?").substringBefore("#")
+        return host.isNotBlank() && "@" !in host
+    }
+
+    /** 解析抓取响应：title＋content（Markdown）；空内容返回 null */
+    private fun parseFetchResult(rawBody: String): FetchResult? = try {
+        val o = JSONObject(rawBody)
+        val content = o.optString("content")
+        if (content.isBlank()) null else FetchResult(o.optString("title"), content)
+    } catch (_: Exception) {
+        null
     }
 
     /** 把 HTTP 错误拼成 "状态码: 服务端 error.message" 的可读文案（body 已预读传入） */
