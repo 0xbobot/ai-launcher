@@ -356,14 +356,19 @@ internal fun AppRow(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览，不抢应用名；
-                // 无预览时只留应用名。ⓘ/「直达」在行尾时名字列占满剩余宽（与原来单 Text
-                // 的 weight 口径一致），预览跟名字同宽、单行省略；拖动弱化时跟内容一起淡。
+                // 无预览时只留应用名。名字列恒占满剩余宽（Bob 2026-11-15 未读行标题重叠：
+                // 此前无 ⓘ/「直达」时列无 weight、宽随内容定，长按展开出 ⓘ 时列宽突变、
+                // 标题重排重截；恒 weight(1f) 后列宽只随 ⓘ 有无变、与有 ⓘ 时同口径），
+                // 预览跟名字同宽、单行省略；拖动弱化时跟内容一起淡。
+                // 标题行高显式取 BodyLarge 行高（24sp，此前只给字号、行高靠
+                // LocalTextStyle 继承——与预览的显式 18sp 行高不对仗，两行叠放无锚点）。
                 Column(
-                    modifier = if ((showInfoIcon && onInfoClick != null) || showDeepLinkBadge) Modifier.weight(1f) else Modifier
+                    modifier = Modifier.weight(1f)
                 ) {
                     Text(
                         text = displayLabel ?: app.label.toString(),
                         fontSize = AILauncherType.BodyLarge.fontSize,
+                        lineHeight = AILauncherType.BodyLarge.lineHeight,
                         color = AILauncherColors.current.Title.copy(alpha = contentAlpha),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
