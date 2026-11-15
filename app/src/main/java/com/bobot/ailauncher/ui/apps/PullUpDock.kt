@@ -170,7 +170,9 @@ enum class DockState { Hidden, D1, D2, D3 }
 /**
  * 说明页「建议」区文案（Bob 2026-11-15 亲定新版：放顶、加白话、类别
  * 改名；同日真机 verdict 精炼：一句话介绍删了，只留标题 + 按钮 + 状态
- * + 静音 chip）：纯函数/常量，JVM 单测锁死。仓库没有 Compose UI 测试
+ * + 静音 chip；2026-11-16 Bob 追加 refinement：语言精炼但核心信息要
+ * 传达清楚——标题下加回一句极简引导语，AI 分析使用行为、给程序坞提
+ * 调整建议，三点一句说完）：纯函数/常量，JVM 单测锁死。仓库没有 Compose UI 测试
  * harness；区段排布（建议区在应用行之上）靠代码结构——建议区已抽成
  * DockSuggestionsSection，说明页 Column 里它在 top10 应用行之前调用
  * ——+ 真机验收。类别名只改展示，SuggestionKind 键名、持久化、反馈
@@ -186,6 +188,11 @@ fun suggestionAnalyzeButtonText(analyzing: Boolean): String =
 /** 静音行行首标签（常量，JVM 单测锁死）：不可点，只说明后面三个词
  * 是「不想看的建议类别」，点一下关、再点恢复。 */
 const val SUGGESTION_MUTE_LABEL = "不想看的："
+
+/** 建议区引导语（常量，JVM 单测锁死；Bob 2026-11-16 追加 refinement：
+ * 语言精炼但核心信息要传达清楚——用 AI、智能分析使用行为、给程序坞
+ * 提调整建议，三点一句说完，不展开解释）。 */
+const val SUGGESTION_AI_INTRO = "AI 分析你的使用行为，给程序坞提调整建议。"
 
 /** 建议类别展示名：OBSERVE 叫「习惯提醒」，不是「模式观察」。 */
 fun suggestionKindLabel(kind: SuggestionKind): String = when (kind) {
@@ -865,6 +872,12 @@ private fun DockSuggestionsSection(
             fontSize = AILauncherType.Title.fontSize,
             fontWeight = FontWeight.Bold,
             color = AILauncherColors.current.Title
+        )
+        Text(
+            text = SUGGESTION_AI_INTRO,
+            fontSize = AILauncherType.Footnote.fontSize,
+            color = AILauncherColors.current.Hint,
+            modifier = Modifier.padding(top = 8.dp)
         )
         Button(
             onClick = {

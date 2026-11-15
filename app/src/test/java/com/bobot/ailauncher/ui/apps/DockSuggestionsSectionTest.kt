@@ -52,6 +52,11 @@ class DockSuggestionsSectionTest {
         assertEquals("不想看的：", SUGGESTION_MUTE_LABEL)
     }
 
+    @Test
+    fun `ai intro says ai analyzes usage and advises dock changes`() {
+        assertEquals("AI 分析你的使用行为，给程序坞提调整建议。", SUGGESTION_AI_INTRO)
+    }
+
     // ---------- 失败文案（每种原因各一句话） ----------
 
     @Test
