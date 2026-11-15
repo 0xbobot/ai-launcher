@@ -1,8 +1,12 @@
 package com.bobot.ailauncher.data
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.bobot.ailauncher.ui.smartcard.SmartCardHaloColor
 import com.bobot.ailauncher.ui.smartcard.SmartCardHaloCornerRadius
 import com.bobot.ailauncher.ui.smartcard.SmartCardHaloInset
+import com.bobot.ailauncher.ui.smartcard.SmartCardHaloMaxAlpha
+import com.bobot.ailauncher.ui.smartcard.SmartCardHaloMinAlpha
 import com.bobot.ailauncher.ui.smartcard.SmartCardHaloStroke
 import com.bobot.ailauncher.ui.smartcard.haloStrokeClearance
 import org.junit.Assert.assertEquals
@@ -10,44 +14,60 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 光晕描边几何单测（第三十七批，Bob 2026-11-15：光晕有毛边）。
+ * 光晕描边几何单测（第三十八批，Bob 2026-11-15：光晕显土——收敛）。
  *
- * 根因（见 SmartCardHaloInset）：旧内收 1dp 小于半个线宽（3dp/2＝1.5dp），
- * 描边外缘探出卡片边界 0.5dp，被 .clip(shape) 的无抗锯齿 clipPath 切掉，
- * 圆角处成台阶。修法：内收 2dp（半线宽＋0.5dp 安全余量）、圆角 18dp
- * （卡片圆角 20dp－内收 2dp，同心）。描边宽度／颜色／呼吸下限／一圈时长
- * 不动（SmartCardRedesignTest 已锁死）。
- * 描边本身的抗锯齿渲染与 clipPath 的裁剪是 Compose／Android 运行时，
- * JVM 测不到，靠几何算式＋Bob 真机验（边缘顺滑、无台阶）。
+ * 选①极淡单色：三色渐变整条删掉，只留一色暖金、1dp 发丝边、透明度
+ * 0.15↔0.35 轻呼吸。几何仍守第三十七批修毛边的同一条规则：内收＝
+ * 半线宽＋0.5dp 安全余量（1dp ＝ 0.5dp＋0.5dp）、圆角 19dp（卡片圆角
+ * 20dp－内收 1dp，同心）。描边本身的抗锯齿渲染是 Compose／Android
+ * 运行时，JVM 测不到，靠几何算式＋Bob 真机验（边缘顺滑、不显土）。
  */
 class SmartCardHaloTest {
 
     @Test
-    fun haloInset_is2dp() {
-        assertEquals(2.dp, SmartCardHaloInset)
+    fun haloColor_isSingleGold() {
+        assertEquals(Color(0xFFD4A24E), SmartCardHaloColor)
     }
 
     @Test
-    fun haloCornerRadius_is18dp() {
-        assertEquals(18.dp, SmartCardHaloCornerRadius)
+    fun haloStroke_is1dp() {
+        assertEquals(1.dp, SmartCardHaloStroke)
+    }
+
+    @Test
+    fun haloInset_is1dp() {
+        assertEquals(1.dp, SmartCardHaloInset)
+    }
+
+    @Test
+    fun haloCornerRadius_is19dp() {
+        assertEquals(19.dp, SmartCardHaloCornerRadius)
     }
 
     @Test
     fun haloStrokeClearance_newGeometry_isHalfDp() {
-        // 新几何：2dp − 3dp/2 ＝ 0.5dp，整条描边落在裁剪内。
+        // 新几何：1dp − 1dp/2 ＝ 0.5dp，整条描边落在裁剪内。
         assertEquals(0.5.dp, haloStrokeClearance(SmartCardHaloInset, SmartCardHaloStroke))
     }
 
     @Test
-    fun haloStrokeClearance_oldGeometry_wasNegative() {
-        // 旧几何：1dp − 3dp/2 ＝ −0.5dp，外缘探出裁剪外——毛边的根因。
-        // 锁死这个算式，防有人把内收改回 1dp。
-        assertTrue(haloStrokeClearance(1.dp, 3.dp) < 0.dp)
+    fun haloStrokeClearance_insetBelowHalfStroke_isNegative() {
+        // 规则锁死：内收小于半线宽时外缘探出裁剪外（第三十七批毛边的根因）——
+        // 内收 0dp、线宽 1dp 时余量 −0.5dp。内收必须 ≥ 半线宽＋0.5dp。
+        assertTrue(haloStrokeClearance(0.dp, 1.dp) < 0.dp)
     }
 
     @Test
     fun haloCornerRadius_plusInset_equalsCardRadius() {
-        // 描边圆角与裁剪圆角同心：18dp ＋ 2dp ＝ 卡片圆角 20dp。
+        // 描边圆角与裁剪圆角同心：19dp ＋ 1dp ＝ 卡片圆角 20dp。
         assertEquals(20.dp, SmartCardHaloCornerRadius + SmartCardHaloInset)
+    }
+
+    @Test
+    fun haloAlphaRange_isFaint() {
+        // 极淡：下限 0.15、上限 0.35，峰值也只有三分之一不透明。
+        assertEquals(0.15f, SmartCardHaloMinAlpha, 0.001f)
+        assertEquals(0.35f, SmartCardHaloMaxAlpha, 0.001f)
+        assertTrue(SmartCardHaloMinAlpha < SmartCardHaloMaxAlpha)
     }
 }

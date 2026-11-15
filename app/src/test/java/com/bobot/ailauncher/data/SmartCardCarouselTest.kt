@@ -1,15 +1,17 @@
 package com.bobot.ailauncher.data
 
-import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CAROUSEL_INTERVAL_MS
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CROSSFADE_MS
 import com.bobot.ailauncher.ui.smartcard.SMART_CARD_CROSSFADE_REDUCED_MS
-import com.bobot.ailauncher.ui.smartcard.SmartCardSwipeThreshold
+import com.bobot.ailauncher.ui.smartcard.SMART_CARD_DRAG_MAX_FRACTION
+import com.bobot.ailauncher.ui.smartcard.SMART_CARD_DRAG_RELEASE_FRACTION
+import com.bobot.ailauncher.ui.smartcard.SMART_CARD_FLING_VELOCITY_DP_PER_SEC
 import com.bobot.ailauncher.ui.smartcard.carouselClampIndex
+import com.bobot.ailauncher.ui.smartcard.carouselDragOffsetClamp
 import com.bobot.ailauncher.ui.smartcard.carouselNextIndex
+import com.bobot.ailauncher.ui.smartcard.carouselReleaseDecision
 import com.bobot.ailauncher.ui.smartcard.carouselShouldAutoRotate
-import com.bobot.ailauncher.ui.smartcard.carouselSwipeDirection
 import com.bobot.ailauncher.ui.smartcard.carouselWaitMs
 import com.bobot.ailauncher.ui.smartcard.crossfadeDurationMs
 import org.junit.Assert.assertEquals
@@ -33,11 +35,11 @@ import org.junit.Test
  * 本身是 Compose 运行时，JVM 测不到，靠代码走查＋Bob 真机验（自动轮换
  * 5 秒、圆点点按跳卡、「我知道了」摘卡进下一张、1 张不轮、0 张清空、
  * 淡入淡出不闪）。
- * 第三十七批：手动滑动切卡的方向判定（carouselSwipeDirection）与触发
- * 阈值（SmartCardSwipeThreshold）是纯函数，单测锁死；手势接线
- * （pointerInput＋detectHorizontalDragGestures→jumpTo）与点按／竖翻
+ * 第三十八批：跟手拖动的松手判定（carouselReleaseDecision）与位移夹子
+ * （carouselDragOffsetClamp）是纯函数，单测锁死；手势接线
+ * （pointerInput＋VelocityTracker→jumpTo）与点按／竖翻
  * 的互不抢占是 Compose 运行时，JVM 测不到，靠代码走查＋Bob 真机验
- * （左滑下一张、右滑上一张、滑完暂停 8 秒、按钮照常可点、长文竖翻照常）。
+ * （拖动跟手、松手换卡／回弹、滑完暂停 8 秒、按钮照常可点、长文竖翻照常）。
  */
 class SmartCardCarouselTest {
 
@@ -193,41 +195,87 @@ class SmartCardCarouselTest {
         assertTrue(reduced < crossfadeDurationMs(false))
     }
 
-    // ---------- 第三十七批：手动滑动切卡（只做手势触发） ----------
-    // 左滑＝下一张、右滑＝上一张，累计横向位移过 48dp 触发一次；
-    // 触发后走 jumpTo（carouselNextIndex 改下标＋暂停 8 秒）＋Crossfade，
-    // 与点圆点同一条链。不看峰值、不看速度、不做飞出／滑动／揭示。
+    // ---------- 第三十八批：跟手拖动（拖动跟随＋松手判定） ----------
+    // 第三十七批的 48dp 触发作废：拖动过程中顶卡横向位移跟手指走
+    // （1:1，夹到半张卡宽内）；松手判定（carouselReleaseDecision）——
+    // 位移超 1/3 卡宽或松手速度够就换卡（左滑＝下一张、右滑＝上一张），
+    // 否则回弹；换卡走 jumpTo（carouselNextIndex 改下标＋暂停 8 秒）＋
+    // Crossfade，与点圆点同一条链。不做飞出／滑动／揭示。
+    // 卡宽取 300f（阈值：1/3＝100f、半张＝150f）、速度线取 500f。
 
     @Test
-    fun swipeThreshold_is48dp() {
-        assertEquals(48.dp, SmartCardSwipeThreshold)
+    fun releaseDecision_distancePastThird_isNext() {
+        assertEquals(+1, carouselReleaseDecision(-100f, 300f, 0f, 500f))
+        assertEquals(+1, carouselReleaseDecision(-150f, 300f, 0f, 500f))
     }
 
     @Test
-    fun swipeDirection_leftPastThreshold_isNext() {
-        assertEquals(+1, carouselSwipeDirection(-50f, 48f))
-        assertEquals(+1, carouselSwipeDirection(-48f, 48f))
+    fun releaseDecision_distancePastThird_isPrevious() {
+        assertEquals(-1, carouselReleaseDecision(100f, 300f, 0f, 500f))
+        assertEquals(-1, carouselReleaseDecision(150f, 300f, 0f, 500f))
     }
 
     @Test
-    fun swipeDirection_rightPastThreshold_isPrevious() {
-        assertEquals(-1, carouselSwipeDirection(50f, 48f))
-        assertEquals(-1, carouselSwipeDirection(48f, 48f))
+    fun releaseDecision_belowThirdLowVelocity_isSpringBack() {
+        assertEquals(0, carouselReleaseDecision(-99f, 300f, 0f, 500f))
+        assertEquals(0, carouselReleaseDecision(99f, 300f, 0f, 500f))
+        assertEquals(0, carouselReleaseDecision(0f, 300f, 0f, 500f))
     }
 
     @Test
-    fun swipeDirection_belowThreshold_isZero() {
-        assertEquals(0, carouselSwipeDirection(-47f, 48f))
-        assertEquals(0, carouselSwipeDirection(47f, 48f))
-        assertEquals(0, carouselSwipeDirection(0f, 48f))
+    fun releaseDecision_fastFling_switchesWithoutDistance() {
+        // 轻扫：位移没过线、速度过线也换卡；速度刚好在线下不换。
+        assertEquals(+1, carouselReleaseDecision(-10f, 300f, -500f, 500f))
+        assertEquals(-1, carouselReleaseDecision(10f, 300f, 500f, 500f))
+        assertEquals(0, carouselReleaseDecision(0f, 300f, -499f, 500f))
+        assertEquals(0, carouselReleaseDecision(0f, 300f, 499f, 500f))
     }
 
     @Test
-    fun swipeDirection_usesSameNextIndexAsDotTap() {
-        // 滑动触发后走 carouselNextIndex：左滑 +1、右滑 −1，首尾循环，
+    fun releaseDecision_distanceBeatsConflictingVelocity() {
+        // 距离优先：拖过 1/3 后松手往反方向带，仍按位移方向换卡。
+        assertEquals(+1, carouselReleaseDecision(-150f, 300f, 900f, 500f))
+        assertEquals(-1, carouselReleaseDecision(150f, 300f, -900f, 500f))
+    }
+
+    @Test
+    fun releaseDecision_zeroWidth_isSpringBack() {
+        // 卡宽没量到就不换卡（不除零、不误判）。
+        assertEquals(0, carouselReleaseDecision(-150f, 0f, 0f, 500f))
+    }
+
+    @Test
+    fun releaseDecision_usesSameNextIndexAsDotTap() {
+        // 松手换卡后走 carouselNextIndex：左滑 +1、右滑 −1，首尾循环，
         // 与点圆点跳卡同一条换卡链（jumpTo）。
-        assertEquals(1, carouselNextIndex(0, 3, carouselSwipeDirection(-50f, 48f)))
-        assertEquals(2, carouselNextIndex(0, 3, carouselSwipeDirection(50f, 48f)))
-        assertEquals(0, carouselNextIndex(2, 3, carouselSwipeDirection(-50f, 48f)))
+        assertEquals(1, carouselNextIndex(0, 3, carouselReleaseDecision(-150f, 300f, 0f, 500f)))
+        assertEquals(2, carouselNextIndex(0, 3, carouselReleaseDecision(150f, 300f, 0f, 500f)))
+        assertEquals(0, carouselNextIndex(2, 3, carouselReleaseDecision(-150f, 300f, 0f, 500f)))
+    }
+
+    @Test
+    fun dragOffsetClamp_withinHalfWidth_unchanged() {
+        assertEquals(100f, carouselDragOffsetClamp(100f, 300f), 0.001f)
+        assertEquals(-100f, carouselDragOffsetClamp(-100f, 300f), 0.001f)
+    }
+
+    @Test
+    fun dragOffsetClamp_beyondHalfWidth_clamped() {
+        // 拖过半张卡宽：卡停在半张处，不飞出屏。
+        assertEquals(150f, carouselDragOffsetClamp(200f, 300f), 0.001f)
+        assertEquals(-150f, carouselDragOffsetClamp(-200f, 300f), 0.001f)
+    }
+
+    @Test
+    fun dragOffsetClamp_zeroWidth_isZero() {
+        assertEquals(0f, carouselDragOffsetClamp(100f, 0f), 0.001f)
+    }
+
+    @Test
+    fun dragConstants_matchDesign() {
+        // 距离线 1/3 卡宽、夹子半张卡宽、速度线 500dp/s。
+        assertEquals(1f / 3f, SMART_CARD_DRAG_RELEASE_FRACTION, 0.001f)
+        assertEquals(0.5f, SMART_CARD_DRAG_MAX_FRACTION, 0.001f)
+        assertEquals(500, SMART_CARD_FLING_VELOCITY_DP_PER_SEC)
     }
 }
