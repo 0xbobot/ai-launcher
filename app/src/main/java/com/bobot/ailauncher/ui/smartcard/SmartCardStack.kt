@@ -1078,6 +1078,8 @@ fun SmartCardStack(
                 // 一张接一张（第三十九批）：出卡与进卡各一层，同向走——
                 // 出卡从松手位移继续滑到 ±1 卡宽外（轻微淡出），进卡从反方向
                 // ±1 卡宽外滑入到中心；两张不重叠（同向差一整张卡宽）。
+                // 第四十一批：进卡起点带上松手位移（见 carouselSlideInOffset），
+                // 否则手动滑动时两张在起点拉开 |松手位移| 的蓝底缝（538 闪）。
                 // 摘卡／过期让某张中途没了就空着那一层（find／getOrNull 兜底），
                 // 收尾 jumpTo 会钳制下标，不崩。
                 val progress = slideProgress.value
@@ -1119,7 +1121,7 @@ fun SmartCardStack(
                             .fillMaxWidth()
                             .graphicsLayer {
                                 translationX = carouselSlideInOffset(
-                                    progress, slideDir, cardWidthPx
+                                    progress, slideDir, cardWidthPx, slideReleaseOffset
                                 )
                             }
                     )
@@ -1392,14 +1394,22 @@ internal fun carouselSlideOutOffset(
  * ±1 张卡宽外滑入到中心。dir +1＝左滑（进卡从右侧＋卡宽处进来）、
  * −1＝右滑（进卡从左侧 −卡宽处进来）。progress 0→1。卡宽没量到
  * （≤0）时返回 0。
+ * 第四十一批：进卡起点要带上松手位移 releaseOffsetPx——出卡从松手位移
+ * 出发（见 carouselSlideOutOffset），进卡若仍从 ±卡宽起步，两张在
+ * 滑动起点就拉开 |releaseOffset| 的蓝底缝（538 闪的根因：Bob 录屏里
+ * 手动滑动时出卡与进卡之间闪过 250–306px 蓝底带，缝宽＝松手位移量，
+ * 随进度收到 0）；起点改成 dir×卡宽＋松手位移，两张全程恰好差一整张
+ * 卡宽、无缝无重叠（单测 slideOffsets_withReleaseOffset_stayExactlyOneWidthApart
+ * 锁死）。自动轮换／点圆点松手位移为 0，行为与原来一致。
  */
 internal fun carouselSlideInOffset(
     progress: Float,
     dir: Int,
-    cardWidthPx: Float
+    cardWidthPx: Float,
+    releaseOffsetPx: Float = 0f
 ): Float {
     if (cardWidthPx <= 0f) return 0f
-    val start = dir * cardWidthPx
+    val start = dir * cardWidthPx + releaseOffsetPx
     return start + (0f - start) * progress
 }
 

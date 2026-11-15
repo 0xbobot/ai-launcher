@@ -393,11 +393,48 @@ class SmartCardCarouselTest {
     }
 
     @Test
+    fun slideInOffset_withReleaseOffset_startsShiftedByReleaseOffset() {
+        // 第四十一批：手动滑动时进卡起点带上松手位移——左滑松手位移 −100f，
+        // 进卡从 300−100＝200f 处进来；右滑松手位移 ＋100f，从 −300＋100＝−200f 处进来。
+        assertEquals(200f, carouselSlideInOffset(0f, +1, 300f, -100f), 0.001f)
+        assertEquals(100f, carouselSlideInOffset(0.5f, +1, 300f, -100f), 0.001f)
+        assertEquals(0f, carouselSlideInOffset(1f, +1, 300f, -100f), 0.001f)
+        assertEquals(-200f, carouselSlideInOffset(0f, -1, 300f, 100f), 0.001f)
+        assertEquals(-100f, carouselSlideInOffset(0.5f, -1, 300f, 100f), 0.001f)
+        assertEquals(0f, carouselSlideInOffset(1f, -1, 300f, 100f), 0.001f)
+        // 松手位移为 0（自动轮换／点圆点）时行为与原来一致。
+        assertEquals(300f, carouselSlideInOffset(0f, +1, 300f, 0f), 0.001f)
+    }
+
+    @Test
+    fun slideOffsets_withReleaseOffset_stayExactlyOneWidthApart() {
+        // 第四十一批（538 闪的根因锁死）：带松手位移时，出卡与进卡在滑动
+        // 全程恰好差一整张卡宽——左滑时进卡左缘 − 出卡右缘恒为 0，右滑时
+        // 出卡左缘 − 进卡右缘恒为 0；既无重叠、也无蓝底缝。旧版进卡起点
+        // 不带松手位移，起点缝宽＝|松手位移|（Bob 录屏 250–306px），随进度收到 0。
+        val width = 300f
+        for (progress in listOf(0f, 0.25f, 0.5f, 0.75f, 1f)) {
+            for (release in listOf(-150f, -100f, -75f)) {
+                val out = carouselSlideOutOffset(progress, release, +1, width)
+                val inn = carouselSlideInOffset(progress, +1, width, release)
+                assertEquals(0f, inn - (out + width), 0.001f)
+            }
+            for (release in listOf(75f, 100f, 150f)) {
+                val out = carouselSlideOutOffset(progress, release, -1, width)
+                val inn = carouselSlideInOffset(progress, -1, width, release)
+                assertEquals(0f, out - (inn + width), 0.001f)
+            }
+        }
+    }
+
+    @Test
     fun slideOffsets_outAndInDoNotOverlap() {
         // 同一进度下出卡右缘始终在进卡左缘左侧（左滑）：两张不重叠，
-        // 一张接一张走。进度 0.5 时出卡占 [−200, 100]、进卡占 [150, 450]。
+        // 一张接一张走。进度 0.5、松手位移 −100f 时出卡占 [−200, 100]、
+        // 进卡占 [100, 400]（带上松手位移后恰好贴住，缝宽 0）。
         val outAtHalf = carouselSlideOutOffset(0.5f, -100f, +1, 300f)
-        val inAtHalf = carouselSlideInOffset(0.5f, +1, 300f)
+        val inAtHalf = carouselSlideInOffset(0.5f, +1, 300f, -100f)
         assertTrue(outAtHalf + 300f <= inAtHalf)
+        assertEquals(0f, inAtHalf - (outAtHalf + 300f), 0.001f)
     }
 }
