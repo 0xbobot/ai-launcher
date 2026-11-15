@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -1007,7 +1008,11 @@ private fun LandscapeAppRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .height(if (compact) 56.dp else LandscapeRowH)
+            // Bob 2026-11-15 未读行标题重叠：此前定高 56dp 无纵向内边距，标题
+            // （14sp 字、继承 bodyLarge 行高 24sp）＋预览（12sp/18sp）＝42sp，
+            // 字号 1.3 时 54.6dp 只剩 1.4dp 余量、1.5 时 63dp 直接溢出定高、
+            // 两行被夹裁进彼此；改 min 高、行随字长，不再硬裁。
+            .heightIn(min = if (compact) 56.dp else LandscapeRowH)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onLaunch(app) }
             .padding(horizontal = 8.dp)
@@ -1039,6 +1044,10 @@ private fun LandscapeAppRow(
             Text(
                 text = displayLabel ?: app.label.toString(),
                 fontSize = AILauncherType.Callout.fontSize,
+                // 标题行高显式取 Callout 行高（22sp，此前只给字号、行高继承
+                // bodyLarge 的 24sp——14sp 字配 24sp 行高，比 Callout 自身高 2sp，
+                // 两行 42sp 挤进 56dp 定高是重叠的另一半）。
+                lineHeight = AILauncherType.Callout.lineHeight,
                 color = AILauncherColors.current.Title,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
