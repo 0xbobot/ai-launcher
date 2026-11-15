@@ -9,7 +9,9 @@ import org.junit.Test
 /**
  * 说明页「建议」区文案单测（Bob 2026-11-15 亲定新版：放顶、加白话、
  * 类别改名；同日真机 verdict 精炼：一句话介绍删了，只留标题 + 按钮 +
- * 状态 + 静音 chip；点完失败要说清是哪种原因、不是一句「没分析出来」）。
+ * 状态 + 静音 chip；点完失败要说清是哪种原因、不是一句「没分析出来」；
+ * 2026-11-16 真机 verdict：用户看不懂要做什么——按钮说结果不说机制，
+ * 静音行加「不想看的：」标签）。
  * 仓库没有 Compose UI 测试 harness，这里锁死驱动文案的纯函数；区段排布
  * （建议区在应用行之上）靠代码结构——建议区已抽成 DockSuggestionsSection，
  * 说明页 Column 里它在 top10 应用行之前调用——+ 真机验收。
@@ -30,6 +32,24 @@ class DockSuggestionsSectionTest {
         SuggestionKind.entries.forEach { kind ->
             assertFalse(suggestionKindLabel(kind).contains("模式观察"))
         }
+    }
+
+    // ---------- 按钮文案与静音行标签（Bob 2026-11-16 真机 verdict：
+    // 用户看不懂要做什么——按钮要说出点了能得到什么，静音行要有标签） ----------
+
+    @Test
+    fun `analyze button says what you get not the mechanism`() {
+        assertEquals("看看固定哪个、拿下哪个", suggestionAnalyzeButtonText(false))
+    }
+
+    @Test
+    fun `analyze button keeps in-progress text`() {
+        assertEquals("正在分析，稍等一下", suggestionAnalyzeButtonText(true))
+    }
+
+    @Test
+    fun `mute row label says which kinds it turns off`() {
+        assertEquals("不想看的：", SUGGESTION_MUTE_LABEL)
     }
 
     // ---------- 失败文案（每种原因各一句话） ----------

@@ -177,6 +177,16 @@ enum class DockState { Hidden, D1, D2, D3 }
  * JSONL 原样不动。
  */
 
+/** 分析按钮文案（纯函数，JVM 单测锁死）：按钮要说出点了能得到什么
+ * （哪个值得固定、哪个可以拿下去），不说机制——「分析」是机制，
+ * 不是结果。进行中状态不动。 */
+fun suggestionAnalyzeButtonText(analyzing: Boolean): String =
+    if (analyzing) "正在分析，稍等一下" else "看看固定哪个、拿下哪个"
+
+/** 静音行行首标签（常量，JVM 单测锁死）：不可点，只说明后面三个词
+ * 是「不想看的建议类别」，点一下关、再点恢复。 */
+const val SUGGESTION_MUTE_LABEL = "不想看的："
+
 /** 建议类别展示名：OBSERVE 叫「习惯提醒」，不是「模式观察」。 */
 fun suggestionKindLabel(kind: SuggestionKind): String = when (kind) {
     SuggestionKind.PIN -> "固定"
@@ -757,7 +767,7 @@ fun PullUpDock(
                         modifier = Modifier.padding(vertical = 16.dp)
                     )
                     // 大模型建议（Bob 2026-11-15 亲定新版）：说明页顶部
-                    // 「建议」区，打开说明页直接看到「分析一下」按钮，
+                    // 「建议」区，打开说明页直接看到「看看固定哪个、拿下哪个」按钮，
                     // 不用滑到底；应用行在它下面。
                     DockSuggestionsSection(
                         allApps = allApps,
@@ -885,7 +895,7 @@ private fun DockSuggestionsSection(
                 .fillMaxWidth()
                 .padding(vertical = 8.dp)
         ) {
-            Text(text = if (analyzing) "正在分析，稍等一下" else "分析一下")
+            Text(text = suggestionAnalyzeButtonText(analyzing))
         }
         suggestionStatus?.let { status ->
             Text(
@@ -907,13 +917,21 @@ private fun DockSuggestionsSection(
             )
         }
         // 静默类别（Bob 2026-11-15 精炼：引导语删了，三个类别紧凑排一行；
-        // 点一下关、再点恢复；类别展示名、键名、持久化、反馈 JSONL 不动）。
+        // 点一下关、再点恢复；类别展示名、键名、持久化、反馈 JSONL 不动。
+        // 2026-11-16 Bob 真机 verdict：三个词光秃秃看不懂是干什么的，行首
+        // 加不可点标签「不想看的：」，只说明这行是关掉哪类建议）。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Text(
+                text = SUGGESTION_MUTE_LABEL,
+                fontSize = AILauncherType.Footnote.fontSize,
+                color = AILauncherColors.current.Hint,
+                modifier = Modifier.padding(end = 4.dp)
+            )
             SuggestionKind.entries.forEach { kind ->
                 val muted = kind in suggestionsUi.mutedKinds
                 Text(
