@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.BuildConfig
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -41,7 +42,7 @@ object SmsRepository {
 
     /**
      * 读近期短信（最新在前）。任何异常（无权限、提供程序不可用）都吞成空表，
-     * 调用方按“未接上”处理，不报错、不弹占位条。读到的条数只记 Log.d
+     * 调用方按“还没接上”处理，不报错、不弹占位条。读到的条数只记 Log.d
      * （448：下次“卡片没出现”先看 logcat，读到几条一目了然）。
      */
     fun loadRecentSms(
@@ -50,7 +51,7 @@ object SmsRepository {
         limit: Int = DEFAULT_LIMIT
     ): List<SmsMessage> {
         if (!hasSmsPermission(context)) {
-            Log.d(TAG, "loadRecentSms: no READ_SMS permission, 0 sms")
+            if (BuildConfig.DEBUG) Log.d(TAG, "loadRecentSms: no READ_SMS permission, 0 sms")
             return emptyList()
         }
         return try {
@@ -78,10 +79,10 @@ object SmsRepository {
                     if (body.isNotBlank()) out += SmsMessage(address, body, date)
                 }
             }
-            Log.d(TAG, "loadRecentSms: read=${out.size} sms")
+            if (BuildConfig.DEBUG) Log.d(TAG, "loadRecentSms: read=${out.size} sms")
             out
         } catch (e: Exception) {
-            Log.d(TAG, "loadRecentSms failed, 0 sms", e)
+            if (BuildConfig.DEBUG) Log.d(TAG, "loadRecentSms failed, 0 sms", e)
             emptyList()
         }
     }
@@ -92,7 +93,7 @@ object SmsRepository {
      */
     fun countUnreadSms(context: Context): Int {
         if (!hasSmsPermission(context)) {
-            Log.d(TAG, "countUnreadSms: no READ_SMS permission, 0")
+            if (BuildConfig.DEBUG) Log.d(TAG, "countUnreadSms: no READ_SMS permission, 0")
             return 0
         }
         return try {
@@ -103,7 +104,7 @@ object SmsRepository {
                 null, null
             )?.use { cursor -> cursor.count } ?: 0
         } catch (e: Exception) {
-            Log.d(TAG, "countUnreadSms failed, 0", e)
+            if (BuildConfig.DEBUG) Log.d(TAG, "countUnreadSms failed, 0", e)
             0
         }
     }
@@ -128,7 +129,7 @@ object SmsRepository {
                 } else null
             }
         } catch (e: Exception) {
-            Log.d(TAG, "latestUnreadSmsBody failed", e)
+            if (BuildConfig.DEBUG) Log.d(TAG, "latestUnreadSmsBody failed", e)
             null
         }
     }

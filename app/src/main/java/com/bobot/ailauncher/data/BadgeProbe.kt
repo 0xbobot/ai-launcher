@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.service.LauncherNotificationService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,7 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
  *    - android.intent.action.BADGE_COUNT_UPDATE
  *    - me.leolin.shortcutbadger.BADGE_COUNT_UPDATE（Oreo 版，见
  *      /tmp/ShortcutBadger 的 IntentConstants）
- *    只收不发。收到后记下包名+数字，供角标第四路信号与诊断行展示。
+ *    只收不发。收到后记下包名+数字，供角标第四路信号展示。
  *    注意：ShortcutBadger 发广播前用 queryBroadcastReceivers 找接收方，
  *    只找得到 manifest 里声明的 receiver，所以除了服务里的运行时注册，
  *    AndroidManifest 里也声明了 BadgeBroadcastReceiver（exported=true）。
@@ -48,7 +49,7 @@ object BadgeProbe {
     private const val EXTRA_COUNT = "badge_count"
     private const val EXTRA_PACKAGE = "badge_count_package_name"
 
-    /** 飞书包名（诊断行“飞书数”用；优先按应用名“飞书”解析，解析不到才用它兜底）。 */
+    /** 飞书包名（优先按应用名“飞书”解析，解析不到才用它兜底）。 */
     const val FEISHU_PACKAGE = "com.ss.android.lark"
 
     // ---------- 广播状态 ----------
@@ -175,7 +176,7 @@ object BadgeProbe {
         } catch (_: Exception) {
             // 存盘失败不影响内存里的数（下次广播再写穿）
         }
-        Log.d(TAG, "badge broadcast: $pkg=$count")
+        if (BuildConfig.DEBUG) Log.d(TAG, "badge broadcast: $pkg=$count")
         return true
     }
 
@@ -232,7 +233,7 @@ object BadgeProbe {
             } ?: run { queryDetail = "query 返回 null" }
         } catch (e: Exception) {
             queryDetail = "query 抛异常：${e.javaClass.simpleName}: ${e.message}"
-            Log.d(TAG, "probeZteProvider query failed", e)
+            if (BuildConfig.DEBUG) Log.d(TAG, "probeZteProvider query failed", e)
         }
 
         // ② 对候选包逐个 call getAppUnreadCount
@@ -261,7 +262,7 @@ object BadgeProbe {
                 }
             } catch (e: Exception) {
                 callNotes += "$pkg: 抛异常 ${e.javaClass.simpleName}"
-                Log.d(TAG, "probeZteProvider call failed for $pkg", e)
+                if (BuildConfig.DEBUG) Log.d(TAG, "probeZteProvider call failed for $pkg", e)
             }
         }
 
@@ -274,13 +275,13 @@ object BadgeProbe {
             probedAt = System.currentTimeMillis()
         )
         _zteResult.value = result
-        Log.d(TAG, "probeZteProvider: $result")
+        if (BuildConfig.DEBUG) Log.d(TAG, "probeZteProvider: $result")
         return result
     }
 
     /**
      * 飞书包名：先按应用名“飞书”解析（不写死包名），解析不到再用已知包名兜底
-     * （且确实装了才认）。找不到返回 null（诊断行显示“—”）。
+     * （且确实装了才认）。找不到返回 null。
      */
     fun resolveFeishuPackage(context: Context): String? {
         val pm = context.packageManager

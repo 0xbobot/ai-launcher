@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.ConnectorState
+import com.bobot.ailauncher.data.CrashLog
 import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.SMART_SOURCE_ORDER
@@ -157,7 +158,7 @@ fun smartSectionRowsVisible(
 /**
  * 版本卡上行（更新行）主文案（纯函数，2026-11-14 Bob 定：检查更新 +
  * 加入测试计划合成一张卡）：检查中 / 下载中 / 下完 / 失败 / 有新版 /
- * 平时六态，与原来检查更新卡逐字一致；合并后行内复用。
+ * 平时六态，逐字锁死；合并后行内复用。
  */
 fun versionUpdateTitle(
     checking: Boolean,
@@ -166,18 +167,18 @@ fun versionUpdateTitle(
     downloadFailed: Boolean,
     updateVersionName: String?,
 ): String = when {
-    checking -> "正在检查..."
+    checking -> "正在帮你检查…"
     downloading -> "正在下载 v${updateVersionName ?: ""}"
-    downloadDone -> "下载完成"
-    downloadFailed -> "下载失败"
-    updateVersionName != null -> "发现新版本 v$updateVersionName"
+    downloadDone -> "已经下载好了"
+    downloadFailed -> "这次没下载下来"
+    updateVersionName != null -> "有新版本 v$updateVersionName，可以更新了"
     else -> "检查更新"
 }
 
 /**
  * 版本卡上行副文案（纯函数）：下完「点按安装 vX」/ 失败「点按重试」/
  * 有新版更新说明 / 平时「当前版本 vX」。下载中返回 null——下载中副文
- * 是进度条 + downloadStatusText，不走这里。与原来检查更新卡逐字一致。
+ * 是进度条 + downloadStatusText，不走这里。逐字锁死。
  */
 fun versionUpdateHint(
     downloading: Boolean,
@@ -188,8 +189,8 @@ fun versionUpdateHint(
     currentVersionName: String,
 ): String? = when {
     downloading -> null
-    downloadDone -> "点击安装 v${updateVersionName ?: ""}"
-    downloadFailed -> "点击重试"
+    downloadDone -> "点这里安装 v${updateVersionName ?: ""}"
+    downloadFailed -> "点这里再试一次"
     updateVersionName != null -> changelog
     else -> "当前版本 v$currentVersionName"
 }
@@ -241,7 +242,8 @@ fun betaPlanHint(
  */
 @Composable
 fun SettingsScreen(
-    onOpenJumpLog: () -> Unit = {}
+    onOpenJumpLog: () -> Unit = {},
+    onOpenCrashLog: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -255,6 +257,9 @@ fun SettingsScreen(
     // 智能区来源卡用户点过的收起态（2026-11-14 Bob 定：4/4 默认收起）；
     // null 表从未点过——首次接满 4/4 时默认收起。进设置页重读 prefs。
     var sourcesCollapsedOverride by remember { mutableStateOf(UiPrefs.getSourcesCardCollapsed(context)) }
+    // 崩溃记录未读数（正式版审计 ②-1）：设置页行上动态提示；进崩溃记录页
+    // 标记已读后，返回时重建重读。
+    val crashUnreadCount by remember { mutableStateOf(CrashLog.unreadCount(context)) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val hideOnBlur = Modifier.onFocusChanged { if (!it.isFocused) keyboardController?.hide() }
     val focusManager = LocalFocusManager.current
@@ -396,7 +401,7 @@ fun SettingsScreen(
                                 OtaUpdater.markInstallPrompted(context)
                             }
                         } else {
-                            IslandToasts.show("安装包不完整，重新下载")
+                            IslandToasts.show("安装包不完整，我再重新下载一次")
                             OtaDownloader.resetIfNotDownloading()
                             updateInfo?.let { OtaDownloader.start(context, it) }
                         }
@@ -413,7 +418,7 @@ fun SettingsScreen(
                                             updateInfo = r.info
                                             OtaDownloader.start(context, r.info)
                                         }
-                                        else -> IslandToasts.show("检查失败，请稍后再试")
+                                        else -> IslandToasts.show("这次没检查成，稍后再试试吧")
                                     }
                                     checking = false
                                 }
@@ -430,9 +435,9 @@ fun SettingsScreen(
                             when (val r = OtaUpdater.checkForUpdateResult(context)) {
                                 is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
                                 OtaCheckResult.UpToDate ->
-                                    IslandToasts.show("已经是最新版本了")
+                                    IslandToasts.show("你用的已经是最新版本了")
                                 OtaCheckResult.Failed ->
-                                    IslandToasts.show("检查失败，请稍后再试")
+                                    IslandToasts.show("这次没检查成，稍后再试试吧")
                             }
                             checking = false
                         }
@@ -519,13 +524,13 @@ fun SettingsScreen(
                                                     ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                                                     context.startActivity(intent)
                                                 } catch (_: Exception) {
-                                                    IslandToasts.show("无法打开浏览器")
+                                                    IslandToasts.show("浏览器打不开，换个方式试试吧")
                                                 }
                                             },
                                             contentPadding = PaddingValues(0.dp)
                                         ) {
                                             Text(
-                                                text = "手动下载（浏览器打开）",
+                                                text = "用浏览器自己下载",
                                                 fontSize = AILauncherType.Footnote.fontSize,
                                                 color = AILauncherColors.current.Accent
                                             )
@@ -841,7 +846,7 @@ fun SettingsScreen(
                         if (llmExpanded) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "填上大模型 API Key，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
+                                text = "填上大模型密钥，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
                                 fontSize = AILauncherType.Footnote.fontSize,
                                 color = AILauncherColors.current.Hint,
                                 lineHeight = 18.sp
@@ -850,7 +855,7 @@ fun SettingsScreen(
                             OutlinedTextField(
                                 value = apiKey,
                                 onValueChange = { apiKey = it; persist() },
-                                label = { Text("大模型 API Key") },
+                                label = { Text("大模型密钥") },
                                 placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
@@ -879,7 +884,7 @@ fun SettingsScreen(
                             OutlinedTextField(
                                 value = baseUrl,
                                 onValueChange = { baseUrl = it; persist() },
-                                label = { Text("接口地址") },
+                                label = { Text("服务器地址") },
                                 placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
@@ -900,7 +905,7 @@ fun SettingsScreen(
                                 modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
                             )
                             Text(
-                                text = "填你 API Key 对应的模型名，比如 deepseek-flash",
+                                text = "填你申请时选的那个名字，比如 deepseek-flash",
                                 fontSize = AILauncherType.Caption.fontSize,
                                 color = AILauncherColors.current.Hint,
                                 modifier = Modifier.padding(top = 8.dp)
@@ -913,7 +918,7 @@ fun SettingsScreen(
                                     view.confirmHaptic()
                                     persist()
                                     if (apiKey.isBlank()) {
-                                        IslandToasts.show("请先填写大模型 API Key")
+                                        IslandToasts.show("先把大模型密钥填上吧")
                                         return@Button
                                     }
                                     testing = true
@@ -924,19 +929,19 @@ fun SettingsScreen(
                                             model.ifBlank { LlmConfig.DEFAULT_MODEL }
                                         )
                                         testing = false
-                                        IslandToasts.show(err ?: "连接成功")
+                                        IslandToasts.show(err ?: "连上了，没问题")
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
                             ) {
-                                Text(if (testing) "测试中…" else "测试连接")
+                                Text(if (testing) "正在试，稍等一下" else "试试能不能连上")
                             }
                             // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
                             // 明文降级时醒目提示 + 给得出下一步，不再静默回退
                             when (keyStatus.mode) {
                                 LlmKeyStore.StorageMode.ENCRYPTED -> Text(
-                                    text = "✓ API Key 已加密存储在本机",
+                                    text = "✓ 你的密钥已经安全地存在这台手机上了",
                                     fontSize = AILauncherType.Caption.fontSize,
                                     color = AILauncherColors.current.Hint,
                                     modifier = Modifier.padding(top = 8.dp)
@@ -945,14 +950,14 @@ fun SettingsScreen(
                                     modifier = Modifier.padding(top = 8.dp)
                                 ) {
                                     Text(
-                                        text = "加密出了点问题，你的 Key 现在没有加密保存",
+                                        text = "出了点问题，你的密钥现在没加上保护就存着了",
                                         fontSize = AILauncherType.Footnote.fontSize,
                                         fontWeight = FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.error
                                     )
                                     Text(
-                                        text = "重启手机后回到这里，Key 会自动尝试恢复加密；" +
-                                            "仍不行的话，删掉 API Key 重新粘贴保存一次。",
+                                        text = "重启手机后再回到这里，我会再试一次给它加上保护；" +
+                                            "还不行的话，就删掉重新粘贴保存一次。",
                                         fontSize = AILauncherType.Caption.fontSize,
                                         color = AILauncherColors.current.Hint,
                                         lineHeight = 17.sp,
@@ -971,7 +976,7 @@ fun SettingsScreen(
                     onDismissRequest = { disclosure = null },
                     title = {
                         Text(
-                            text = "接上消息",
+                            text = "让我读读你的短信",
                             fontSize = AILauncherType.BodyLarge.fontSize,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.current.Title
@@ -979,7 +984,7 @@ fun SettingsScreen(
                     },
                     text = {
                         Text(
-                            text = "要读短信里的账单和体检预约提醒。只读近 7 天的短信，只解析账单、预约这两类，解析完不存原文、不发到别处。",
+                            text = "我要读短信里的账单和体检预约提醒。只看最近 7 天的短信，只找账单和预约这两类，看完不留原文，也不会发到别处。",
                             fontSize = AILauncherType.Body.fontSize,
                             color = AILauncherColors.current.Body
                         )
@@ -1026,8 +1031,8 @@ fun SettingsScreen(
                         title = "默认桌面",
                         desc = "按 Home 键回到 AI 桌面",
                         granted = defaultGranted.value,
-                        doneText = "已设为默认",
-                        todoText = "尚未设为默认",
+                        doneText = "已经设为默认",
+                        todoText = "还没设为默认",
                         actionText = "去设置",
                         onOpen = { openHomeSettings(context) }
                     )
@@ -1067,7 +1072,7 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "未读跳转日志",
+                            text = "未读打开记录",
                             fontSize = AILauncherType.BodyLarge.fontSize,
                             fontWeight = FontWeight.Medium,
                             color = AILauncherColors.current.Title,
@@ -1075,7 +1080,61 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "点未读行后有没有打开应用、为什么没打开，记在这里",
+                            text = "点开未读消息后有没有打开应用、卡在哪一步，都记在这里",
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Hint,
+                            lineHeight = 18.sp
+                        )
+                    }
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = AILauncherColors.current.Hint,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+
+        // 崩溃记录（正式版审计 ②-1）：冷启动 toast 承诺的入口——
+        // 闪退过几次、为什么闪退，都记在这里；点开看全文、可分享、可清空。
+        // 放在“关于”区“未读打开记录”旁边，同样的只读列表入口。
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .shadow(
+                        8.dp,
+                        RoundedCornerShape(20.dp),
+                        spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f)
+                    ),
+                onClick = {
+                    view.tickHaptic()
+                    onOpenCrashLog()
+                }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "崩溃记录",
+                            fontSize = AILauncherType.BodyLarge.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Title,
+                            lineHeight = 22.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = if (crashUnreadCount > 0) {
+                                "$crashUnreadCount 条还没看过，点开看看"
+                            } else {
+                                "闪退过几次、为什么闪退，都记在这里"
+                            },
                             fontSize = AILauncherType.Footnote.fontSize,
                             color = AILauncherColors.current.Hint,
                             lineHeight = 18.sp
@@ -1115,7 +1174,7 @@ fun SettingsScreen(
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         runCatching { context.startActivity(mail) }
-                            .onFailure { IslandToasts.show("没有可用的邮箱应用") }
+                            .onFailure { IslandToasts.show("没有能发邮件的应用，换个方式试试吧") }
                     },
                     contentPadding = PaddingValues(0.dp)
                 ) {
@@ -1135,7 +1194,7 @@ fun SettingsScreen(
 /**
  * 设置 → 智能区的一行（447；2026-11-08 Bob 真机 verdict 后改：每行只有一个控件）。
  * 标题＋它提供什么＋开关＋状态行。开关只显示接没接上（第十三批：接上＝权限给了，
- * 开关不再是一道关；不许出现“开关开着、状态写着未接上”）；状态文字只做展示、
+ * 开关不再是一道关；不许出现“开关开着、状态写着还没接上”）；状态文字只做展示、
  * 不可点，不再有“去开启/接上”文字按钮。点没接上的开关走该来源的接上流程，
  * 点已接上的开关跳系统设置页（在那里可以关掉这个权限）。电话拨号器无权限：
  * 开关反映通知的状态，通知没接上时行变灰点不动（见 isDialerRowEnabled），

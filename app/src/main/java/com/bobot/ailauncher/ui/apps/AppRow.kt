@@ -139,16 +139,16 @@ internal fun AppRow(
         if (app.packageName in cur) {
             cur.remove(app.packageName)
             UiPrefs.setDockPinned(context, cur)
-            IslandToasts.show("已从 Dock 移出")
+            IslandToasts.show("已经帮你从程序坞上移出来了")
         } else {
             if (cur.size >= 10) {
-                IslandToasts.show("Dock 最多置顶 10 个")
+                IslandToasts.show("程序坞满了，最多放 10 个")
                 return
             }
             cur.add(app.packageName)
             UiPrefs.setDockPinned(context, cur)
             UiPrefs.flashRail("star")
-            IslandToasts.show("已加到 Dock")
+            IslandToasts.show("已经帮你加到程序坞上了")
         }
     }
 
@@ -516,7 +516,7 @@ internal fun AppRow(
                                 )
                                 Icon(
                                     imageVector = Icons.Filled.Star,
-                                    contentDescription = if (isPinned) "移出 Dock" else "加到 Dock",
+                                    contentDescription = if (isPinned) "移出程序坞" else "加到程序坞",
                                     // 未收藏用半透明金（线条感），已收藏用实金
                                     tint = AILauncherColors.current.Accent.copy(alpha = if (isPinned) 1f else 0.45f),
                                     modifier = Modifier.size(26.dp)

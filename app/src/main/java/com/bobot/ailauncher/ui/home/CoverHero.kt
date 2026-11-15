@@ -346,7 +346,7 @@ fun CoverHeroHeadline(
             // 横屏：左右双栏
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    TrackedText(text = "TODAY · 今日简报", fontSize = AILauncherType.Caption.fontSize, tracking = 4.dp,
+                    TrackedText(text = "今日简报", fontSize = AILauncherType.Caption.fontSize, tracking = 4.dp,
                         color = accent)
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(style = briefingTextShadowStyle, text = summary, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
@@ -363,7 +363,7 @@ fun CoverHeroHeadline(
         } else {
             Box(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    TrackedText(text = "TODAY · 今日简报", fontSize = AILauncherType.Caption.fontSize, tracking = 4.dp,
+                    TrackedText(text = "今日简报", fontSize = AILauncherType.Caption.fontSize, tracking = 4.dp,
                         color = accent)
                     Spacer(modifier = Modifier.height(16.dp))
                     Box(modifier = Modifier.width(44.dp).height(3.dp)
@@ -548,9 +548,9 @@ fun BriefMeetingRow(
     // ENDED 分支仅作防御（仍渲染“接下来”文案，不擅自改语义）。
     val status = com.bobot.ailauncher.ui.pet.meetingStatus(event.begin, event.end, nowMillis)
     val labelText = if (status == com.bobot.ailauncher.ui.pet.MeetingStatus.ONGOING) {
-        "进行中 · $timeText–$endTimeText"
+        "正在开 · $timeText–$endTimeText"
     } else {
-        "接下来 · $timeText"
+        "下一场 · $timeText"
     }
     val title = event.title.ifBlank { "日程" }
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 32.dp)) {

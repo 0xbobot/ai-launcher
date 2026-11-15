@@ -86,7 +86,7 @@ class BatteryOverlayService : Service() {
         nm.createNotificationChannel(
             android.app.NotificationChannel(
                 channelId,
-                "低电量悬浮窗",
+                "低电量提醒",
                 android.app.NotificationManager.IMPORTANCE_MIN
             )
         )

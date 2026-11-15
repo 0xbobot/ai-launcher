@@ -43,7 +43,7 @@ class ConnectorSwitchTest {
     @Test
     fun statusText_notGranted() {
         assertEquals(
-            "未接上",
+            "还没接上",
             connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = false))
         )
     }
@@ -51,7 +51,7 @@ class ConnectorSwitchTest {
     @Test
     fun statusText_connected() {
         assertEquals(
-            "已接上 · 今天用过",
+            "已经接上了 · 今天用过",
             connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = true))
         )
     }
@@ -61,11 +61,11 @@ class ConnectorSwitchTest {
         // 旧文案“已关闭”（权限给了、开关关了）已随开关一起删掉；
         // 两个分支之外没有第三种文案。
         assertEquals(
-            "未接上",
+            "还没接上",
             connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = false))
         )
         assertEquals(
-            "已接上 · 今天用过",
+            "已经接上了 · 今天用过",
             connectorStatusText(state(UiPrefs.CONNECTOR_MESSAGE, granted = true))
         )
     }
@@ -91,19 +91,19 @@ class ConnectorSwitchTest {
     @Test
     fun descriptions_v1() {
         assertEquals(
-            "接上后，智能会提前提醒你账单到期、体检预约。",
+            "接上之后，账单快到期、体检预约快到了，我会提前提醒你。",
             connectorDescription(UiPrefs.CONNECTOR_MESSAGE)
         )
         assertEquals(
-            "接上后，智能会提醒你待办、未接来电、包裹和航班。",
+            "接上之后，有待办、没接到的电话、包裹到了、航班要飞了，我会提醒你。",
             connectorDescription(UiPrefs.CONNECTOR_NOTIFICATION)
         )
         assertEquals(
-            "接上后，智能知道你今天的会。",
+            "接上之后，你今天的会我都知道了。",
             connectorDescription(UiPrefs.CONNECTOR_CALENDAR)
         )
         assertEquals(
-            "接上后，未接来电点一下就能回拨。",
+            "接上之后，没接到的电话点一下就能回拨。",
             connectorDescription(UiPrefs.CONNECTOR_PHONE)
         )
         assertEquals("", connectorDescription("unknown"))

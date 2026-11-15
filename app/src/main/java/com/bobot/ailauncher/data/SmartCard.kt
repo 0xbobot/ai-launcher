@@ -111,7 +111,7 @@ sealed class SmartCardAction {
 /** 卡片两个响应的按钮文案（设计稿 §4.2；第十二批 Bob 2026-11-09 定）：
  * 左“我知道了”不动；右按钮不再写“下一步”几个字（第十一批通用文案作废），
  * 显示该卡 [SmartCard.actionLabel]——下一步的意图（去还款 / 帮我建提醒 /
- * 看预约 / 回拨 / 查看 / 加入会议 / 看日程 / 连接＋来源名）。
+ * 看预约 / 回拨 / 打开看看 / 加入会议 / 看日程 / 按来源给动作起名）。
  * 单测逐字锁死（SmartCardButtonCopyTest）。 */
 const val SMART_CARD_DISMISS_LABEL = "我知道了"
 
@@ -166,7 +166,7 @@ data class SmartCard(
     val prepSource: String? = null,
     /**
      * 动作含义（第十二批起也是右按钮的文案来源）：去还款 / 帮我建提醒 /
-     * 看预约 / 回拨 / 查看 / 加入会议 / 看日程 / 连接＋来源名。
+     * 看预约 / 回拨 / 打开看看 / 加入会议 / 看日程 / 按来源给动作起名。
      * 预约卡没建过提醒时是“帮我建提醒”，建完提醒后变回“看预约”。
      */
     val actionLabel: String,
@@ -190,7 +190,7 @@ data class SmartCard(
      * 前缀的分段判断用，不改去重键、排序、截止点、prepSource。
      */
     val windowStartMs: Long = 0L,
-    /** 右下方应用小标的目标应用（第十一批；引导卡与“已连接”反馈卡没有） */
+    /** 右下方应用小标的目标应用（第十一批；引导卡与“已经连上了”反馈卡没有） */
     val targetApp: TargetApp? = null,
     /** 预约卡已建过提醒（第十一批）：卡上显示“已建提醒”，动作已换回
      * 看预约（防重复建）。只对 APPOINTMENT 卡有意义。 */

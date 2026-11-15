@@ -49,7 +49,7 @@ object CrashLogLogic {
         val sep = lines.indexOf("---")
         val body = if (sep >= 0) lines.drop(sep + 1) else lines
         return body.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
-            .ifBlank { "未知异常" }
+            .ifBlank { "不知道出了什么问题" }
     }
 
     /** 未读时间戳集合：晚于已读水位 [readUpTo] 的记录 */
@@ -86,7 +86,6 @@ object CrashLog {
     private const val KEY_READ_UP_TO = "read_up_to"
     private const val KEY_PROMPTED_UP_TO = "prompted_up_to"
     private const val DIR_NAME = "crashes"
-    private const val DIAG_FILE = "diagnostics.log"
 
     private fun dir(context: Context): File =
         File(context.filesDir, DIR_NAME).apply { mkdirs() }
@@ -145,17 +144,6 @@ object CrashLog {
         }
     }
 
-    /**
-     * 诊断事件留一行（与崩溃记录同目录的 diagnostics.log）。
-     * 只许传事件名与非敏感参数——任何时候都不许把 API Key 等敏感值写进来。
-     */
-    fun diag(context: Context, event: String) {
-        runCatching {
-            File(dir(context), DIAG_FILE)
-                .appendText("${formatTime(System.currentTimeMillis())} $event\n")
-        }
-    }
-
     /** 全部记录，最新在前；读不了的文件跳过，不让坏文件打死列表 */
     fun list(context: Context): List<CrashRecord> =
         dir(context).listFiles().orEmpty()
@@ -178,7 +166,7 @@ object CrashLog {
         prefs(context).edit().putLong(KEY_READ_UP_TO, maxTs).apply()
     }
 
-    /** 删除全部崩溃记录（诊断日志保留，不属于崩溃记录） */
+    /** 删除全部崩溃记录 */
     fun deleteAll(context: Context) {
         dir(context).listFiles().orEmpty()
             .filter { CrashLogLogic.parseEpochMillis(it.name) != null }

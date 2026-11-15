@@ -18,7 +18,9 @@ class AppBackgroundLatchTest {
 
     @Before
     fun resetLatch() {
-        AppBackgroundLatch.resetForTest()
+        // 隔离用：把门闩复位到“从没切过后台”（走公开的 markBackgrounded，
+        // 正式版清理时删掉了仅供单测的 resetForTest）。
+        AppBackgroundLatch.markBackgrounded(Long.MIN_VALUE)
     }
 
     @Test

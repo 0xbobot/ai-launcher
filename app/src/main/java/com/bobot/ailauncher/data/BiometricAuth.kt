@@ -47,7 +47,7 @@ object BiometricAuth {
         val prompt = BiometricPrompt(activity, executor, callback)
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("查看已隐藏应用")
-            .setSubtitle("请验证身份")
+            .setSubtitle("验证一下是你本人")
             .setNegativeButtonText("取消")
             .build()
         prompt.authenticate(promptInfo)

@@ -170,10 +170,10 @@ internal fun launchQuickAction(context: Context, item: QuickActionItem) {
                 .getLaunchIntentForPackage(item.packageName)
                 ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             if (intent != null) context.startActivity(intent)
-            else IslandToasts.show("打不开这个应用，可能已卸载")
+            else IslandToasts.show("这个应用打不开了，可能已经卸载了")
         }
     } catch (_: Exception) {
-        IslandToasts.show("打不开这个应用，可能已卸载")
+        IslandToasts.show("这个应用打不开了，可能已经卸载了")
     }
 }
 
@@ -240,7 +240,7 @@ internal fun QuickActionAddFlow(
                 0 -> {
                     val all = apps
                     Column {
-                        Text("选择应用", fontSize = AILauncherType.BodyLarge.fontSize, color = AILauncherColors.current.Title)
+                        Text("选一个应用", fontSize = AILauncherType.BodyLarge.fontSize, color = AILauncherColors.current.Title)
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = search,
@@ -292,7 +292,7 @@ internal fun QuickActionAddFlow(
                 1 -> {
                     val app = pickedApp
                     Column {
-                        Text("选择快捷方式", fontSize = AILauncherType.BodyLarge.fontSize, color = AILauncherColors.current.Title)
+                        Text("选一个快捷方式", fontSize = AILauncherType.BodyLarge.fontSize, color = AILauncherColors.current.Title)
                         Spacer(Modifier.height(8.dp))
                         Text(
                             text = app?.label?.toString().orEmpty(),
@@ -338,7 +338,7 @@ internal fun QuickActionAddFlow(
                                                 )
                                             }
                                         },
-                                        title = "打开主应用",
+                                        title = "直接打开这个应用",
                                         subtitle = app.label.toString(),
                                         onClick = {
                                             pickedShortcut = null
@@ -367,12 +367,12 @@ internal fun QuickActionAddFlow(
                                                         shortcuts = null
                                                         shortcutReload++
                                                     }) {
-                                                        Text("重新加载")
+                                                        Text("再加载一次")
                                                     }
                                                 }
                                             } else {
                                                 Text(
-                                                    text = "这个应用没有快捷操作，只能打开主应用。",
+                                                    text = "这个应用没有现成的快捷方式，只能直接打开它了",
                                                     fontSize = AILauncherType.Footnote.fontSize,
                                                     color = AILauncherColors.current.Hint,
                                                     lineHeight = 18.sp

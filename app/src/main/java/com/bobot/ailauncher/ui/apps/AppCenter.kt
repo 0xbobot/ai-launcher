@@ -709,7 +709,7 @@ fun AppCenterContent(
                     true
                 } else false
             } catch (_: Exception) {
-                IslandToasts.show("无法打开「${app.label}」")
+                IslandToasts.show("「${app.label}」现在打不开，稍后再试试吧")
                 false
             }
         }
@@ -958,7 +958,7 @@ fun AppCenterContent(
     fun onMarketGuideClick() {
         val term = marketGuideTerm ?: return
         if (!MarketGuide.openMarketSearch(context, term)) {
-            IslandToasts.show("打不开应用市场")
+            IslandToasts.show("应用市场打不开了，稍后再试试吧")
         }
     }
 
@@ -981,29 +981,29 @@ fun AppCenterContent(
     fun hideApp(app: AppInfo) {
         HiddenApps.hide(context, app.packageName)
         UiPrefs.flashRail("eye")
-        IslandToasts.show("已隐藏「${app.label}」")
+        IslandToasts.show("「${app.label}」已经藏起来了")
     }
     // v0.41.18：从隐藏分组恢复显示
     fun unhideApp(app: AppInfo) {
         HiddenApps.unhide(context, app.packageName)
-        IslandToasts.show("「${app.label}」已恢复显示")
+        IslandToasts.show("「${app.label}」又能看到了")
     }
     // v0.41.18：解锁隐藏分组——触发面部/指纹，通过后展开
     fun unlockHiddenApps() {
         val activity = context as? FragmentActivity
         if (activity == null) {
-            IslandToasts.show("无法启动身份验证")
+            IslandToasts.show("验证打不开，稍后再试试吧")
             return
         }
         if (!BiometricAuth.canAuthenticate(context)) {
-            IslandToasts.show("请先在系统设置中录入指纹或面容")
+            IslandToasts.show("还没录指纹或面容，去系统设置里录一个再来吧")
             return
         }
         BiometricAuth.authenticate(
             activity = activity,
             onSuccess = { hiddenUnlocked = true },
             onFail = {
-                IslandToasts.show("验证未通过")
+                IslandToasts.show("没验证通过，再试一次吧")
             }
         )
     }
@@ -1272,7 +1272,7 @@ fun AppCenterContent(
                 if (catalog == null) {
                     item(key = "catalog-loading") {
                         Text(
-                            text = "正在加载应用…",
+                            text = "正在帮你找应用…",
                             fontSize = AILauncherType.Callout.fontSize,
                             color = AILauncherColors.current.Hint,
                             modifier = Modifier.padding(
@@ -1440,7 +1440,7 @@ internal fun FeedbackRetryRow(
         horizontalArrangement = Arrangement.Center
     ) {
         Text(
-            text = if (loading) "正在确认…" else "有应用能打开，重试",
+            text = if (loading) "正在确认…" else "好像有应用能帮你，再确认一次",
             fontSize = AILauncherType.Footnote.fontSize,
             color = AILauncherColors.current.Title.copy(alpha = 0.75f),
             fontWeight = FontWeight.Medium
@@ -1484,7 +1484,7 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
             ) {
                 // v0.57.2（Bob）：更新为新手势说明
                 Text(
-                    text = "滑动快捷操作",
+                    text = "滑一滑，应用随你放",
                     fontSize = AILauncherType.BodyLarge.fontSize,
                     fontWeight = FontWeight.SemiBold,
                     color = AILauncherColors.current.Title
@@ -1492,14 +1492,14 @@ private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
                 GuideRow(
                     icon = Icons.Filled.Star,
                     tint = AILauncherColors.current.Accent,
-                    title = "左滑：收藏",
-                    desc = "把应用加到 Dock 收藏区，再滑一次取消"
+                    title = "往左滑，就收进程序坞",
+                    desc = "把应用放进程序坞，再滑一次就拿出来"
                 )
                 GuideRow(
                     icon = Icons.Filled.VisibilityOff,
                     tint = Color(0xFF8A8478),
-                    title = "右滑：隐藏",
-                    desc = "把应用藏到隐藏区，再滑一次恢复"
+                    title = "往右滑，就藏起来",
+                    desc = "把应用藏起来，再滑一次就放回来"
                 )
                 Text(
                     text = "点任意处关闭",

@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.BuildConfig
 import android.content.Context
 import android.util.Log
 import java.io.File
@@ -175,35 +176,35 @@ object UnreadJumpLogLogic {
         val tap = entry.tap
         val out = entry.outcome
         val head = when {
-            tap == null -> "点按记录丢了，只留了结果"
+            tap == null -> "这次点按没记下来，只留了结果"
             tap.path == "launch_app" && tap.sendResult?.startsWith("error:") == true ->
-                if (tap.launchOk == true) "通知跳转发送失败，改走直接打开成功"
-                else "通知跳转发送失败，改走直接打开也失败"
+                if (tap.launchOk == true) "通知本身没能把你带过去，我直接帮你打开了应用"
+                else "通知没能带过去，直接打开也没打开"
             tap.path == "launch_app" && tap.sendResult == "no_intent" ->
-                if (tap.launchOk == true) "这条通知没有跳转目标，直接打开了应用"
-                else "这条通知没有跳转目标，直接打开也失败"
+                if (tap.launchOk == true) "这条通知没说要去哪儿，我直接帮你打开了应用"
+                else "这条通知没说要去哪儿，直接打开也没打开"
             tap.path == "launch_app" ->
-                if (tap.launchOk == true) "直接打开了应用" else "直接打开失败"
-            else -> "通知跳转已发出"
+                if (tap.launchOk == true) "已经帮你打开了应用" else "没能帮你打开应用"
+            else -> "已经按通知说的去打开了"
         }
         val openPart = when {
-            out == null -> "等确认"
-            out.fallbackFired == true && out.fallbackOpened == true -> "回退打开了应用"
-            out.fallbackFired == true && out.fallbackOpened == false -> "回退了，还是没打开"
+            out == null -> "还在确认有没有打开"
+            out.fallbackFired == true && out.fallbackOpened == true -> "换了个方式打开了应用"
+            out.fallbackFired == true && out.fallbackOpened == false -> "换了个方式，还是没打开"
             out.latchBg == true || out.fallbackFg == "CONFIRMED" || out.cancelFg == "CONFIRMED" ->
-                "已打开"
+                "已经打开了"
             out.fallbackFg == "UNKNOWN" || out.cancelFg == "UNKNOWN" -> "没法确认有没有打开"
             else -> "还没打开"
         }
         val cancelPart = when (val c = out?.cancel) {
-            "cancelled" -> "通知已清"
+            "cancelled" -> "这条通知已经清掉了"
             "kept" -> "通知留着"
             null -> null
-            else -> if (c.startsWith("cancel_error:")) "取消时出错" else "通知留着"
+            else -> if (c.startsWith("cancel_error:")) "取消的时候出了点问题" else "通知留着"
         }
         val parts = listOfNotNull(head, openPart, cancelPart)
         return parts.joinToString(" · ") +
-            if (out?.partial == true) "（结果不全）" else ""
+            if (out?.partial == true) "（这次的结果记不全）" else ""
     }
 
     // ---------- 待定合并（纯函数，事件写出逻辑在 UnreadJumpLog 里） ----------
@@ -418,7 +419,7 @@ object UnreadJumpLog {
     private fun appendLocked(context: Context, record: UnreadJumpLogLogic.Record) {
         try {
             val json = UnreadJumpLogLogic.toJson(record)
-            Log.i(UnreadJumpLogLogic.LOG_TAG, json)
+            if (BuildConfig.DEBUG) Log.i(UnreadJumpLogLogic.LOG_TAG, json)
             val file = File(context.filesDir, UnreadJumpLogLogic.LOG_FILE_NAME)
             file.appendText(json + "\n")
             val lines = file.readLines()

@@ -29,7 +29,7 @@ object IslandNotification {
                     "顶部提示",
                     NotificationManager.IMPORTANCE_HIGH  // HIGH 才能 heads-up 弹出
                 ).apply {
-                    description = "提示以顶部横条形式显示"
+                    description = "提醒会从屏幕顶部弹出来"
                     setShowBadge(false)
                 }
                 manager.createNotificationChannel(channel)

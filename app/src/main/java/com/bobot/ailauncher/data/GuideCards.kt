@@ -24,7 +24,7 @@ package com.bobot.ailauncher.data
  * （队列＋被拒次数）存在 SmartCardRepository 里、按 GUIDE_VERSION 存，
  * 换版自动重来。
  *
- * 接上某个权限后，对应引导卡先显示“已连接”＋接下来会发生什么（3 秒），
+ * 接上某个权限后，对应引导卡先显示“已经连上了”＋接下来会发生什么（3 秒），
  * 再消失；其他权限的引导卡留着（452 的问题：连一个权限整叠全消失，
  * 根因在 SmartCardStackHost：已接上的权限被静默过滤＋guide_seen 在
  * 引导列表一空就记下，全程没有任何反馈）。有真事项时真卡片顶掉整叠
@@ -71,7 +71,12 @@ private fun guideCard(
     sourceLabel = sourceLabel,
     fact = fact,
     prep = prep,
-    actionLabel = "连接$sourceLabel",
+    actionLabel = when (sourceLabel) {
+        "消息" -> "打开短信提醒"
+        "通知" -> "打开通知提醒"
+        "日历" -> "打开日历提醒"
+        else -> "打开电话回拨"
+    },
     sortMs = 0L,
     deadlineMs = Long.MAX_VALUE,
     action = SmartCardAction.Connect(connectorKey),
@@ -91,29 +96,29 @@ private fun guideCardFor(connectorKey: String): SmartCard = when (connectorKey) 
     UiPrefs.CONNECTOR_MESSAGE -> guideCard(
         id = "guide|message",
         sourceLabel = "消息",
-        fact = "连接消息后：信用卡快到期、体检预约快到了，我会提前提醒你。",
-        prep = "读短信里的账单和预约，只在本地处理",
+        fact = "把短信提醒打开后，信用卡快到期、体检预约快到了，我会提前提醒你。",
+        prep = "只读短信里的账单和预约，不会发到别处",
         connectorKey = UiPrefs.CONNECTOR_MESSAGE
     )
     UiPrefs.CONNECTOR_NOTIFICATION -> guideCard(
         id = "guide|notification",
         sourceLabel = "通知",
-        fact = "连接通知后：没接到的电话、包裹到了、航班要飞了，我会给你一张卡片，点一下就能处理。",
-        prep = "只读通知内容，只在本地处理",
+        fact = "把通知提醒打开后，没接到的电话、包裹到了、航班要飞了，我会给你一张卡片，点一下就能处理。",
+        prep = "只读通知内容，不会发到别处",
         connectorKey = UiPrefs.CONNECTOR_NOTIFICATION
     )
     UiPrefs.CONNECTOR_CALENDAR -> guideCard(
         id = "guide|calendar",
         sourceLabel = "日历",
-        fact = "连接日历后：会议会出现在简报里，到时间提醒你。",
-        prep = "只读当天的日程，只在本地处理",
+        fact = "把日历接上后，你的会议会出现在简报里，到时间我会提醒你。",
+        prep = "只读当天的日程，不会发到别处",
         connectorKey = UiPrefs.CONNECTOR_CALENDAR
     )
     UiPrefs.CONNECTOR_PHONE -> guideCard(
         id = "guide|phone",
         sourceLabel = "电话拨号器",
-        fact = "回拨只进拨号盘，不会直接拨出去。",
-        prep = "随通知一起开，不另要权限",
+        fact = "没接到的电话，点一下就能回拨，只会打开拨号盘，不会直接拨出去。",
+        prep = "跟着通知一起开，不用再单独开",
         connectorKey = UiPrefs.CONNECTOR_NOTIFICATION
     )
     else -> error("guideCards: SMART_SOURCE_ORDER 里有没配引导卡的来源 $connectorKey")
@@ -197,24 +202,24 @@ fun isGuideConnectorGranted(
     else -> true
 }
 
-/** 接上某个权限后，接下来会发生什么（一句话，写进“已连接”反馈卡）。 */
+/** 接上某个权限后，接下来会发生什么（一句话，写进“已经连上了”反馈卡）。 */
 fun connectedNextStep(connectorKey: String): String = when (connectorKey) {
     UiPrefs.CONNECTOR_MESSAGE -> "有账单或预约短信时，这里会提前提醒你"
     UiPrefs.CONNECTOR_NOTIFICATION -> "有未接来电、包裹或航班提醒时，这里会出现一张卡片，点一下就能处理"
     UiPrefs.CONNECTOR_CALENDAR -> "会议会出现在简报里，到时间提醒你"
-    UiPrefs.CONNECTOR_PHONE -> "回拨只进拨号盘，不会直接拨出去"
+    UiPrefs.CONNECTOR_PHONE -> "没接到的电话，点一下就能回拨，只会打开拨号盘，不会直接拨出去"
     else -> ""
 }
 
 /**
- * “已连接”反馈停留时长（设计稿 §4.7 v3，455/v1.2.8 起：3 秒后离开；
+ * “已经连上了”反馈停留时长（设计稿 §4.7 v3，455/v1.2.8 起：3 秒后离开；
  * 第八批不改时长，只改这一刻的样子）。宿主 delay 用这个常量，单测锁死。
  */
 const val CONNECTED_FEEDBACK_MS = 3000L
 
 /**
- * “已连接”庆祝反馈的状态（设计稿 §4.7，第八批 2026-11-08 Bob verdict：
- * “已连接”那一刻要让人振奋，不只是换文案）。
+ * “已经连上了”庆祝反馈的状态（设计稿 §4.7，第八批 2026-11-08 Bob verdict：
+ * “已经连上了”那一刻要让人振奋，不只是换文案）。
  *
  * 动效本身 JVM 单测测不到，锁死方式是状态机：反馈状态必须携带
  * [celebrate]（动效触发标志）与等级增量（[levelDelta]，由真实已接源
@@ -225,7 +230,7 @@ const val CONNECTED_FEEDBACK_MS = 3000L
  * 不许另写一套、更不许写死。
  */
 data class ConnectedFeedback(
-    /** 已按 connectedGuideCard 换成“已连接”文案的那张卡 */
+    /** 已按 connectedGuideCard 换成“已经连上了”文案的那张卡 */
     val card: SmartCard,
     /** 接上之后真实已接源个数（connectedSourceCount） */
     val level: Int,
@@ -239,18 +244,16 @@ data class ConnectedFeedback(
 }
 
 /**
- * 等级行文案（纯函数，单测逐字锁死）：“智能 +1 · 已接 3/4 个源”。
+ * 等级行文案（纯函数，单测逐字锁死）：“智能又强了一点，已接上 3/4 个来源”。
  * total 默认取 SMART_SOURCE_ORDER 的个数（四个源），不写死 4。
+ * 涨没涨都同一句（正式版审计 §5 #84 两形态合并）：这行只在接上权限
+ * 的庆祝反馈里出现，出现时等级一定涨了。
  */
 fun celebrationLevelText(
     level: Int,
     previousLevel: Int,
     total: Int = SMART_SOURCE_ORDER.size
-): String = if (level > previousLevel) {
-    "智能 +${level - previousLevel} · 已接 $level/$total 个源"
-} else {
-    "已接 $level/$total 个源"
-}
+): String = "智能又强了一点，已接上 $level/$total 个来源"
 
 /** 由一张引导卡＋接上前后的真实等级，造出带庆祝标志的反馈状态。 */
 fun connectedFeedback(
@@ -264,15 +267,15 @@ fun connectedFeedback(
 )
 
 /**
- * 接上权限后显示的“已连接”反馈卡：同一张卡（id 不变），只换文案——
- * fact 是“已连接”，prep 是一句接下来会发生什么。没有动作按钮，
+ * 接上权限后显示的“已经连上了”反馈卡：同一张卡（id 不变），只换文案——
+ * fact 是“已经连上了”，prep 是一句接下来会发生什么。没有动作按钮，
  * 3 秒后自动离开（宿主负责记永久忽略）。第八批：文案不变，庆祝感由
  * [ConnectedFeedback]（对勾弹入＋金色等级行＋整卡轻弹）给，不换文案。
  */
 fun connectedGuideCard(card: SmartCard): SmartCard {
     val key = (card.action as? SmartCardAction.Connect)?.connectorKey
         ?: return card
-    // 电话拨号器卡随通知一起开（action key 是通知），但“已连接”反馈要讲
+    // 电话拨号器卡随通知一起开（action key 是通知），但“已经连上了”反馈要讲
     // 电话拨号器自己的下一步——按卡片 id 分，不是按 action key 分。
     val step = if (card.id == "guide|phone") {
         connectedNextStep(UiPrefs.CONNECTOR_PHONE)
@@ -280,7 +283,7 @@ fun connectedGuideCard(card: SmartCard): SmartCard {
         connectedNextStep(key)
     }
     return card.copy(
-        fact = "已连接",
+        fact = "已经连上了",
         prep = step
     )
 }

@@ -186,7 +186,7 @@ fun AppPopupMenu(
                     ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                     context.startActivity(intent)
                 } catch (_: Exception) {
-                    IslandToasts.show("无法卸载")
+                    IslandToasts.show("这个应用卸不掉，稍后再试试吧")
                 }
                 onDismiss()
             },
@@ -271,7 +271,7 @@ fun AppShortcutInline(
                         ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                         context.startActivity(intent)
                     } catch (_: Exception) {
-                        IslandToasts.show("无法卸载")
+                        IslandToasts.show("这个应用卸不掉，稍后再试试吧")
                     }
                     onDismiss()
                 }

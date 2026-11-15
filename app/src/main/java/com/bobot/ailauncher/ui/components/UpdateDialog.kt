@@ -64,15 +64,15 @@ fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
         title = {
             Text(
                 when {
-                    failed -> "下载失败"
+                    failed -> "这次没下载下来"
                     downloading -> "正在下载 v${info.versionName}"
-                    else -> "发现新版本 v${info.versionName}"
+                    else -> "有新版本 v${info.versionName}，可以更新了"
                 }
             )
         },
         text = {
             when {
-                failed -> Text("请检查网络后重试")
+                failed -> Text("检查一下网络，再试一次吧")
                 downloading -> Column(modifier = Modifier.fillMaxWidth()) {
                     Text(info.changelog)
                     Spacer(modifier = Modifier.height(16.dp))
@@ -117,7 +117,7 @@ fun UpdateDialog(info: OtaInfo, onDismiss: () -> Unit) {
                     OtaDownloader.resetIfNotDownloading()
                     onDismiss()
                 }) {
-                    Text(if (downloading) "后台下载" else "稍后")
+                    Text(if (downloading) "收起来继续下" else "稍后")
                 }
             }
         }

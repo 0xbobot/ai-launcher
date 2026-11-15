@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.core.event.LauncherEvent
 import com.bobot.ailauncher.data.CapabilityRegistry
@@ -53,7 +54,7 @@ object ActionEngine {
                     CapabilityRegistry.launchCapability(context, cap, request.params)
             }
         } catch (t: Throwable) {
-            Log.w("ActionEngine", "execute failed: ${cap.id}", t)
+            if (BuildConfig.DEBUG) Log.w("ActionEngine", "execute failed: ${cap.id}", t)
             CapabilityRegistry.LaunchOutcome.Failed
         }
 

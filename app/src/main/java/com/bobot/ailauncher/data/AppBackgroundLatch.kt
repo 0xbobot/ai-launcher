@@ -58,11 +58,6 @@ object AppBackgroundLatch {
     fun backgroundedSince(sinceMillis: Long): Boolean =
         lastBackgroundedAtMillis >= sinceMillis
 
-    /** 单测隔离用：把门闩复位到“从没切过后台”。 */
-    fun resetForTest() {
-        lastBackgroundedAtMillis = Long.MIN_VALUE
-    }
-
     /**
      * 门闩回退调度器（只在没用量统计权限时排——有权限时已有
      * ForegroundConfirm.scheduleFallbackIfNotForeground 在管，一次点按只走

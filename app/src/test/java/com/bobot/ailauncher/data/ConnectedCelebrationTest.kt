@@ -5,8 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * “已连接”庆祝反馈单测（第八批，设计稿 §4.7；2026-11-08 Bob verdict：
- * “已连接”那一刻要让人振奋，不只是换文案）。
+ * “已经连上了”庆祝反馈单测（第八批，设计稿 §4.7；2026-11-08 Bob verdict：
+ * “已经连上了”那一刻要让人振奋，不只是换文案）。
  *
  * 动效本身 JVM 单测测不到，锁死的是状态机：反馈状态必须携带动效触发
  * 标志 celebrate 与等级增量 levelDelta；等级数必须复用 457 的
@@ -75,15 +75,15 @@ class ConnectedCelebrationTest {
         val card = guideCards().first { it.id == "guide|notification" }
         val feedback = connectedFeedback(card, level = 2, previousLevel = 0)
         assertEquals(2, feedback.levelDelta)
-        assertEquals("智能 +2 · 已接 2/4 个源", celebrationLevelText(2, 0))
+        assertEquals("智能又强了一点，已接上 2/4 个来源", celebrationLevelText(2, 0))
     }
 
     @Test
     fun feedback_cardKeepsConnectedCopy() {
-        // 反馈卡本身还是 455 的那张“已连接”卡：fact 是“已连接”，
+        // 反馈卡本身还是 455 的那张“已经连上了”卡：fact 是“已经连上了”，
         // prep 是一句接下来会发生什么；庆祝感由形态给，不换文案。
         val feedback = connectedFeedback(messageCard(), level = 3, previousLevel = 2)
-        assertEquals("已连接", feedback.card.fact)
+        assertEquals("已经连上了", feedback.card.fact)
         assertEquals(
             "有账单或预约短信时，这里会提前提醒你",
             feedback.card.prep
@@ -95,19 +95,19 @@ class ConnectedCelebrationTest {
     fun feedback_phoneCardKeepsPhoneNextStep() {
         val card = guideCards().first { it.id == "guide|phone" }
         val feedback = connectedFeedback(card, level = 2, previousLevel = 1)
-        assertEquals("回拨只进拨号盘，不会直接拨出去", feedback.card.prep)
+        assertEquals("没接到的电话，点一下就能回拨，只会打开拨号盘，不会直接拨出去", feedback.card.prep)
     }
 
     @Test
     fun levelText_plusOneAndCount() {
-        assertEquals("智能 +1 · 已接 3/4 个源", celebrationLevelText(3, 2))
-        assertEquals("智能 +1 · 已接 1/4 个源", celebrationLevelText(1, 0))
-        assertEquals("智能 +1 · 已接 4/4 个源", celebrationLevelText(4, 3))
+        assertEquals("智能又强了一点，已接上 3/4 个来源", celebrationLevelText(3, 2))
+        assertEquals("智能又强了一点，已接上 1/4 个来源", celebrationLevelText(1, 0))
+        assertEquals("智能又强了一点，已接上 4/4 个来源", celebrationLevelText(4, 3))
     }
 
     @Test
-    fun levelText_noDeltaShowsCountOnly() {
-        assertEquals("已接 2/4 个源", celebrationLevelText(2, 2))
+    fun levelText_noDeltaShowsSameText() {
+        assertEquals("智能又强了一点，已接上 2/4 个来源", celebrationLevelText(2, 2))
     }
 
     @Test

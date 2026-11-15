@@ -55,7 +55,7 @@ internal fun launchAppShortcut(context: Context, packageName: String, shortcutId
         val lm = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
         lm.startShortcut(packageName, shortcutId, null, null, Process.myUserHandle())
     } catch (_: Exception) {
-        IslandToasts.show("无法启动快捷方式")
+        IslandToasts.show("这个快捷方式打不开，稍后再试试吧")
     }
 }
 
@@ -68,7 +68,7 @@ internal fun openAppDetailsPage(context: Context, packageName: String) {
         ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
         context.startActivity(intent)
     } catch (_: Exception) {
-        IslandToasts.show("无法打开应用信息")
+        IslandToasts.show("应用信息打不开，稍后再试试吧")
     }
 }
 

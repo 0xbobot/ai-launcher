@@ -149,8 +149,8 @@ class UnreadJumpLogTest {
             outcome = outcome.copy(cancel = "cancelled", cancelFg = "CONFIRMED", cancelFgMs = 600L),
         )
         val text = UnreadJumpLogLogic.summarize(entry)
-        assertTrue(text.contains("已打开"))
-        assertTrue(text.contains("通知已清"))
+        assertTrue(text.contains("已经打开了"))
+        assertTrue(text.contains("这条通知已经清掉了"))
     }
 
     @Test
@@ -162,7 +162,7 @@ class UnreadJumpLogTest {
                 fallbackMs = 2_000L, latchBg = false,
             ),
         )
-        assertTrue(UnreadJumpLogLogic.summarize(entry).contains("回退打开了应用"))
+        assertTrue(UnreadJumpLogLogic.summarize(entry).contains("换了个方式打开了应用"))
     }
 
     @Test
@@ -175,8 +175,8 @@ class UnreadJumpLogTest {
             tapTs = 1_000L, pkg = "com.example.chat", tap = failedTap, outcome = null,
         )
         val text = UnreadJumpLogLogic.summarize(entry)
-        assertTrue(text.contains("通知跳转发送失败"))
-        assertTrue(text.contains("直接打开也失败"))
+        assertTrue(text.contains("通知没能带过去"))
+        assertTrue(text.contains("直接打开也没打开"))
     }
 
     @Test
@@ -184,6 +184,6 @@ class UnreadJumpLogTest {
         val entry = UnreadJumpLogLogic.GroupedEntry(
             tapTs = 1_000L, pkg = "com.example.chat", tap = tap, outcome = null,
         )
-        assertTrue(UnreadJumpLogLogic.summarize(entry).contains("等确认"))
+        assertTrue(UnreadJumpLogLogic.summarize(entry).contains("还在确认有没有打开"))
     }
 }

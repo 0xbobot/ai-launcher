@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.data
 
+import com.bobot.ailauncher.BuildConfig
 import android.util.Log
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -123,7 +124,7 @@ object WeatherRepository {
             }
             return WeatherInfo(temp, desc, city, high, low, feelsLike, humidity, windSpeed, hourly)
         } catch (e: Exception) {
-            Log.d(TAG, "weather failed: ${e.message}")
+            if (BuildConfig.DEBUG) Log.d(TAG, "weather failed: ${e.message}")
             return null
         }
     }

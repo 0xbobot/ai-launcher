@@ -255,7 +255,7 @@ fun AppCenterLandscape(
             // 收藏区（★头）
             if (favApps.isNotEmpty()) {
                 flush()
-                cur.add(FlowItem.SectionHeader("★ 收藏"))
+                cur.add(FlowItem.SectionHeader("收藏"))
                 var cap = colCap() - 1
                 var count = 0
                 favApps.forEach { app ->
@@ -325,7 +325,7 @@ fun AppCenterLandscape(
             // 触发指纹/面部），解锁后才列出隐藏应用、可直接打开。
             if (hiddenApps.isNotEmpty()) {
                 flush()
-                cur.add(FlowItem.SectionHeader("👁 隐藏"))
+                cur.add(FlowItem.SectionHeader("已隐藏的应用"))
                 if (!hiddenUnlocked) {
                     cur.add(FlowItem.LockPlaceholder)
                 } else {
@@ -562,8 +562,8 @@ fun AppCenterLandscape(
                                         // 搜索同义词批（Bob 2026-11-05）：空态居中、一行——
                                         // 全宽居中、maxLines=1+省略号；文案略缩（同竖屏）。
                                         // 列本身已有 16dp 横向边距，Text 不再另加左右边距。
-                                        text = if (indexLoading) "应用列表还没准备好，请稍后再试"
-                                            else "没有找到「${searchFieldValue.text.trim()}」相关应用",
+                                        text = if (indexLoading) "应用列表还没加载好，稍后再试试吧"
+                                            else "没找到「${searchFieldValue.text.trim()}」相关的应用，换个词再试试吧",
                                         fontSize = AILauncherType.Callout.fontSize,
                                         color = AILauncherColors.current.Hint,
                                         textAlign = TextAlign.Center,
@@ -706,14 +706,14 @@ fun AppCenterLandscape(
                                                 .padding(start = 16.dp, end = 8.dp)
                                         ) {
                                             Text(
-                                                text = "这些应用 90 天没打开，已折起来",
+                                                text = "这些应用 90 天没打开了，先收在这里",
                                                 fontSize = AILauncherType.Footnote.fontSize,
                                                 color = AILauncherColors.current.Hint,
                                                 modifier = Modifier.weight(1f)
                                             )
                                             TextButton(onClick = { onUnfold() }) {
                                                 Text(
-                                                    text = "取消折叠",
+                                                    text = "都展开",
                                                     color = AILauncherColors.current.Body,
                                                     fontWeight = FontWeight.Medium
                                                 )

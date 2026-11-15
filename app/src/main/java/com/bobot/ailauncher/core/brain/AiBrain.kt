@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.core.brain
 
 import android.content.Context
+import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.core.event.LauncherEvent
 import com.bobot.ailauncher.data.FiledMessages
 
@@ -27,16 +28,12 @@ object AiBrain {
         try {
             // TODO(Phase 3): ContextEngine.update(event, context)
             if (!shouldThink(event)) return
-            when (val decision = decide(event, context)) {
-                is Decision.ActionRequest -> {
-                    // TODO(Phase 2): ActionEngine.submit(decision)
-                    android.util.Log.d("AiBrain", "ActionRequest queued: ${decision.intent}")
-                }
-                Decision.Nothing -> Unit
-            }
+            // TODO(Phase 2): ActionRequest 接入 ActionEngine（decide() 目前只返回 Nothing，
+            // 旧的 ActionRequest 分支是死分支，正式版清理时删掉）。
+            decide(event, context)
         } catch (t: Throwable) {
             // Brain 永远不能拖垮 Launcher
-            android.util.Log.w("AiBrain", "onEvent failed, ignored", t)
+            if (BuildConfig.DEBUG) android.util.Log.w("AiBrain", "onEvent failed, ignored", t)
         }
     }
 
