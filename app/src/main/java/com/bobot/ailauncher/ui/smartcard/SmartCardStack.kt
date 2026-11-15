@@ -52,8 +52,6 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1582,21 +1580,13 @@ private fun SmartCardView(
     // 暖灰半透明衬底（重设计 §2.1）：见 smartCardTintAlpha——有纹理壁纸 0.55，
     // 低对比环境 0.75 兜底；颜色取主题暖灰底（浅色 #F4F2EE／深色 #1A1815）。
     val tint = smartCardTint()
-    // 正文滚动：事实＋准备清单＋已建提醒一起在卡内滚动；翻到底渐隐消失。
+    // 正文滚动：事实＋准备清单＋已建提醒一起在卡内滚动。
+    // 第四十三批（2026-11-15）：正文底部渐隐（factFade）已删——它用
+    // BlendMode.DstIn 在正文区底部 25% 画垂直渐变，DstIn 会把同一画布上
+    // 已画的卡片衬底也擦掉；切卡收尾换分支那一帧它瞬时激活一次，衬底被擦
+    // 掉就透出蓝天壁纸，成一道横着的蓝底条（闪的根因）。长文改底部裁切，
+    // 竖翻照常。
     val factScrollState = rememberScrollState()
-    val factFade = if (factScrollState.canScrollForward) {
-        Modifier.drawWithContent {
-            drawContent()
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0f to Color.Black,
-                    0.75f to Color.Black,
-                    1f to Color.Transparent
-                ),
-                blendMode = BlendMode.DstIn
-            )
-        }
-    } else Modifier
     Column(
         modifier = modifier
             .clip(shape)
@@ -1702,7 +1692,8 @@ private fun SmartCardView(
         // 正文区（重设计 §2.6，第十六批）：事实＋准备清单＋已建提醒一起在
         // 卡内滚动；至少 3 行高（80dp，3.3 行，见 smartCardFactAreaHeight），
         // 来源行／按钮行固定不动（小标已搬到标题行，不再占一行）。全文都在，
-        // 不是截断——maxLines=3＋Ellipsis 已删；翻到底渐隐消失（见 factFade）。
+        // 不是截断——maxLines=3＋Ellipsis 已删；长文底部直接裁切（第四十三批
+        // 删了 factFade 渐隐，见上）。
         // 高度就是 weight(1f) 撑满卡高减去其余行（不另加 min/max 钳制——
         // min 会顶穿引导卡的 48dp × 表头、max 会把按钮顶离底边留白）。
         // 正文竖翻（第三十三批：卡片上不再有横滑手势，竖向滚动不再与
@@ -1713,7 +1704,6 @@ private fun SmartCardView(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(factScrollState)
-                .then(factFade)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
