@@ -410,4 +410,75 @@ class DockSuggestionsTest {
             dockSuggestionDedupeKey(SuggestionKind.PIN, action, ev3),
         )
     }
+
+    // ---------- 失败原因判定（纯函数）：调用失败分得清是哪种 ----------
+
+    private fun rawResult(httpCode: Int, networkError: String? = null) =
+        LlmRouter.RawChatResult(httpCode = httpCode, rawBody = "", networkError = networkError)
+
+    @Test
+    fun `network error maps to Network even with http code minus one`() {
+        assertEquals(AnalysisFailure.Network, failureFromLlmResult(rawResult(-1, "timeout")))
+    }
+
+    @Test
+    fun `401 maps to Unauthorized`() {
+        assertEquals(AnalysisFailure.Unauthorized, failureFromLlmResult(rawResult(401)))
+    }
+
+    @Test
+    fun `402 maps to InsufficientBalance`() {
+        assertEquals(AnalysisFailure.InsufficientBalance, failureFromLlmResult(rawResult(402)))
+    }
+
+    @Test
+    fun `429 maps to RateLimited`() {
+        assertEquals(AnalysisFailure.RateLimited, failureFromLlmResult(rawResult(429)))
+    }
+
+    @Test
+    fun `other non-2xx maps to Generic`() {
+        assertEquals(AnalysisFailure.Generic, failureFromLlmResult(rawResult(500)))
+        assertEquals(AnalysisFailure.Generic, failureFromLlmResult(rawResult(403)))
+    }
+
+    private fun oneParsed() = ParsedSuggestion(
+        id = "1",
+        kind = "pin",
+        title = "t",
+        body = "b",
+        evidence = listOf(SuggestionEvidence("total7", "com.example.chat", intValue = 5)),
+        action = SuggestionAction("pin", "com.example.chat"),
+    )
+
+    private fun oneVerified() = DockSuggestion(
+        id = "1",
+        kind = SuggestionKind.PIN,
+        title = "t",
+        body = "b",
+        evidence = emptyList(),
+        action = SuggestionAction("pin", "com.example.chat"),
+        dedupeKey = "x",
+    )
+
+    @Test
+    fun `null parsed maps to ParseFailed`() {
+        assertEquals(
+            AnalysisFailure.ParseFailed,
+            failureForPostCallOutcome(null, emptyList()),
+        )
+    }
+
+    @Test
+    fun `parsed but nothing verified maps to VerifiedEmpty`() {
+        assertEquals(
+            AnalysisFailure.VerifiedEmpty,
+            failureForPostCallOutcome(listOf(oneParsed()), emptyList()),
+        )
+    }
+
+    @Test
+    fun `parsed and verified maps to no failure`() {
+        assertNull(failureForPostCallOutcome(listOf(oneParsed()), listOf(oneVerified())))
+    }
 }

@@ -169,15 +169,13 @@ enum class DockState { Hidden, D1, D2, D3 }
 
 /**
  * 说明页「建议」区文案（Bob 2026-11-15 亲定新版：放顶、加白话、类别
- * 改名；同日真机 verdict 精炼：一句话介绍、静默引导语删了）：纯函数/
- * 常量，JVM 单测锁死。仓库没有 Compose UI 测试 harness；区段排布
- * （建议区在应用行之上）靠代码结构——建议区已抽成
+ * 改名；同日真机 verdict 精炼：一句话介绍删了，只留标题 + 按钮 + 状态
+ * + 静音 chip）：纯函数/常量，JVM 单测锁死。仓库没有 Compose UI 测试
+ * harness；区段排布（建议区在应用行之上）靠代码结构——建议区已抽成
  * DockSuggestionsSection，说明页 Column 里它在 top10 应用行之前调用
  * ——+ 真机验收。类别名只改展示，SuggestionKind 键名、持久化、反馈
  * JSONL 原样不动。
  */
-const val SUGGESTION_PLAIN_INTRO =
-    "看看你最近怎么用这些应用，告诉你哪个值得固定、哪个可以拿下去。"
 
 /** 建议类别展示名：OBSERVE 叫「习惯提醒」，不是「模式观察」。 */
 fun suggestionKindLabel(kind: SuggestionKind): String = when (kind) {
@@ -187,12 +185,18 @@ fun suggestionKindLabel(kind: SuggestionKind): String = when (kind) {
 }
 
 /**
- * 分析失败文案（大白话，JVM 单测锁死）：连不上就直说连不上；别的
- * 原因不展开实现术语，只说没分析出来、再点一次。
+ * 分析失败文案（大白话，JVM 单测锁死）：每种原因各一句话，用户一看就
+ * 知道是哪一步出了问题、该怎么办；不写实现术语、不出现 HTTP 状态码数字。
  */
 fun analysisFailureText(failure: AnalysisFailure): String = when (failure) {
-    AnalysisFailure.NETWORK -> "没连上，检查一下网络再点一次"
-    AnalysisFailure.OTHER -> "这次没分析出来，稍后再试"
+    AnalysisFailure.Network -> "没连上，检查一下网络再点一次"
+    AnalysisFailure.Unauthorized -> "大模型 Key 不对，去设置里重新填一下"
+    AnalysisFailure.InsufficientBalance -> "大模型余额不足，充一点再试"
+    AnalysisFailure.RateLimited -> "调用太频繁，稍后再试"
+    AnalysisFailure.Generic -> "这次没分析出来，稍后再试"
+    AnalysisFailure.ParseFailed -> "模型没回有效结果，稍后再试"
+    AnalysisFailure.VerifiedEmpty -> "模型给的建议对不上你的使用记录，稍后再试"
+    AnalysisFailure.NoKey -> "去设置里填好大模型 Key 再试"
 }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -820,8 +824,8 @@ fun PullUpDock(
  * 改名）：一个按钮，用户主动点才分析；无 Key 时整区不出现（静默，
  * 不引导配 Key）。建议只提议，不改 Dock 排序分数；采纳固定/取消固定
  * 走 UiPrefs 固定位。区段末尾一条分隔线，与下面的应用行分开。
- * 文案走本文件顶部的纯函数/常量（suggestionKindLabel、
- * SUGGESTION_PLAIN_INTRO、analysisFailureText），JVM 单测锁死。
+ * 文案走本文件顶部的纯函数（suggestionKindLabel、
+ * analysisFailureText），JVM 单测锁死。
  * 点完的状态（失败/无候选）用 Callout + Title 色一行醒目展示，不再
  * 是 Footnote + Hint 小字；按钮本身就是重试入口，不另加重试按钮。
  */
@@ -851,12 +855,6 @@ private fun DockSuggestionsSection(
             fontSize = AILauncherType.Title.fontSize,
             fontWeight = FontWeight.Bold,
             color = AILauncherColors.current.Title
-        )
-        Text(
-            text = SUGGESTION_PLAIN_INTRO,
-            fontSize = AILauncherType.Footnote.fontSize,
-            color = AILauncherColors.current.Hint,
-            modifier = Modifier.padding(top = 8.dp)
         )
         Button(
             onClick = {

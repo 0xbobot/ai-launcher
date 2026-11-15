@@ -649,14 +649,60 @@ fun buildSnapshot(
 // ---------- 运行器 ----------
 
 /**
- * 分析失败原因——只区分用户能感知、能行动的两种（UI 用大白话写清，
- * 不写实现术语）。
+ * 分析失败原因（密封类型，每种原因各一个对象，UI 按原因给一句话大白话，
+ * 不写实现术语、不出现 HTTP 状态码数字）。原因只分用户能感知、能行动的：
+ * 网络、Key、余额、频繁、别的非 2xx、解析、复核全丢、无 Key。
  */
-enum class AnalysisFailure {
+sealed interface AnalysisFailure {
     /** 连不上：网络层失败（超时/断网）或调用抛异常。 */
-    NETWORK,
-    /** 调通了但没出结果：非 2xx、解析失败、复核后 0 条、无 Key。 */
-    OTHER,
+    data object Network : AnalysisFailure
+
+    /** 401：Key 不对。 */
+    data object Unauthorized : AnalysisFailure
+
+    /** 402：余额不足。 */
+    data object InsufficientBalance : AnalysisFailure
+
+    /** 429：调用太频繁。 */
+    data object RateLimited : AnalysisFailure
+
+    /** 别的非 2xx。 */
+    data object Generic : AnalysisFailure
+
+    /** 模型没回有效 JSON（解析失败）。 */
+    data object ParseFailed : AnalysisFailure
+
+    /** 模型回了建议，但数字全没通过复核（0 条可用）。 */
+    data object VerifiedEmpty : AnalysisFailure
+
+    /** 无 Key（防御分支：建议区只在有 Key 时才显示，正常走不到）。 */
+    data object NoKey : AnalysisFailure
+}
+
+/**
+ * 模型调用失败 → 失败原因（纯函数）：只看 networkError 与 http 码。
+ * 调用方保证只在调用失败时调它（networkError 非空或 http 码不在 2xx）。
+ */
+fun failureFromLlmResult(result: LlmRouter.RawChatResult): AnalysisFailure = when {
+    result.networkError != null -> AnalysisFailure.Network
+    result.httpCode == 401 -> AnalysisFailure.Unauthorized
+    result.httpCode == 402 -> AnalysisFailure.InsufficientBalance
+    result.httpCode == 429 -> AnalysisFailure.RateLimited
+    else -> AnalysisFailure.Generic
+}
+
+/**
+ * 解析/复核结果 → 失败原因（纯函数）：解析失败与复核全丢是两种不同的
+ * 失败，文案分开写，用户才知道是模型没回有效结果、还是建议对不上记录。
+ * 返回 null 表示没失败（有可用的建议）。
+ */
+fun failureForPostCallOutcome(
+    parsed: List<ParsedSuggestion>?,
+    verified: List<DockSuggestion>,
+): AnalysisFailure? = when {
+    parsed == null -> AnalysisFailure.ParseFailed
+    verified.isEmpty() -> AnalysisFailure.VerifiedEmpty
+    else -> null
 }
 
 sealed interface AnalysisOutcome {
@@ -708,7 +754,7 @@ suspend fun analyzeSuggestions(
     }
     if (!LlmConfig.hasKey(context)) {
         if (BuildConfig.DEBUG) Log.d(TAG, "analyze: no key, skip call")
-        return@withContext AnalysisOutcome.Failed(AnalysisFailure.OTHER)
+        return@withContext AnalysisOutcome.Failed(AnalysisFailure.NoKey)
     }
     val rawBody = try {
         val r = LlmRouter.postChatCompletions(
@@ -723,18 +769,16 @@ suspend fun analyzeSuggestions(
         )
         if (r.networkError != null || r.httpCode !in 200..299) {
             if (BuildConfig.DEBUG) Log.d(TAG, "analyze: http=${r.httpCode} err=${r.networkError}")
-            val failure = if (r.networkError != null) AnalysisFailure.NETWORK
-            else AnalysisFailure.OTHER
-            return@withContext AnalysisOutcome.Failed(failure)
+            return@withContext AnalysisOutcome.Failed(failureFromLlmResult(r))
         }
         r.rawBody
     } catch (e: Exception) {
         if (BuildConfig.DEBUG) Log.d(TAG, "analyze: call failed (${e.javaClass.simpleName})")
-        return@withContext AnalysisOutcome.Failed(AnalysisFailure.NETWORK)
+        return@withContext AnalysisOutcome.Failed(AnalysisFailure.Network)
     }
     val parsed = parseSuggestionsResponse(rawBody) ?: run {
         if (BuildConfig.DEBUG) Log.d(TAG, "analyze: parse failed")
-        return@withContext AnalysisOutcome.Failed(AnalysisFailure.OTHER)
+        return@withContext AnalysisOutcome.Failed(AnalysisFailure.ParseFailed)
     }
     val verified = verifySuggestions(
         parsed = parsed,
@@ -742,9 +786,9 @@ suspend fun analyzeSuggestions(
         mutedKinds = store.mutedKinds(),
         ignoredKeys = store.ignoredKeys(),
     )
-    if (verified.isEmpty()) {
+    failureForPostCallOutcome(parsed, verified)?.let { failure ->
         if (BuildConfig.DEBUG) Log.d(TAG, "analyze: verify dropped all (${parsed.size} parsed)")
-        return@withContext AnalysisOutcome.Failed(AnalysisFailure.OTHER)
+        return@withContext AnalysisOutcome.Failed(failure)
     }
     if (BuildConfig.DEBUG) Log.d(TAG, "analyze: parsed=${parsed.size} verified=${verified.size}")
     store.saveResult(verified, payloadJson, fingerprint)
