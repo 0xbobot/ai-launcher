@@ -166,6 +166,25 @@ enum class DockState { Hidden, D1, D2, D3 }
  * 宠物一并删除，不再为面板顶缘留任何拱形或拱光影。
  */
 
+/**
+ * 说明页「建议」区文案（Bob 2026-11-15 亲定新版：放顶、加白话、类别
+ * 改名）：纯函数/常量，JVM 单测锁死。仓库没有 Compose UI 测试
+ * harness；区段排布（建议区在应用行之上）靠代码结构——建议区已抽成
+ * DockSuggestionsSection，说明页 Column 里它在 top10 应用行之前调用
+ * ——+ 真机验收。类别名只改展示，SuggestionKind 键名、持久化、反馈
+ * JSONL 原样不动。
+ */
+const val SUGGESTION_PLAIN_INTRO =
+    "点一下，我看看你最近怎么用这些应用，告诉你哪个值得固定上来、哪个可以拿下去，采不采纳你说了算。"
+const val SUGGESTION_MUTE_LEAD = "点一下，这类建议以后就不出现了，再点恢复。"
+
+/** 建议类别展示名：OBSERVE 叫「习惯提醒」，不是「模式观察」。 */
+fun suggestionKindLabel(kind: SuggestionKind): String = when (kind) {
+    SuggestionKind.PIN -> "固定"
+    SuggestionKind.UNPIN -> "取消固定"
+    SuggestionKind.OBSERVE -> "习惯提醒"
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PullUpDock(
@@ -723,6 +742,13 @@ fun PullUpDock(
                         color = AILauncherColors.current.Title,
                         modifier = Modifier.padding(vertical = 16.dp)
                     )
+                    // 大模型建议（Bob 2026-11-15 亲定新版）：说明页顶部
+                    // 「建议」区，打开说明页直接看到「分析一下」按钮，
+                    // 不用滑到底；应用行在它下面。
+                    DockSuggestionsSection(
+                        allApps = allApps,
+                        top10Pkgs = top10.map { it.packageName }
+                    )
                     top10.forEach { app ->
                         val reason = AppUsageTracker.dockReason(
                             pinned = app.packageName in pinnedPkgs,
@@ -773,120 +799,140 @@ fun PullUpDock(
                         }
                     }
 
-                    // 大模型建议第一批（Bob 2026-11-13 23:18 亲定）：说明页底部
-                    // 「建议」区 + 一个按钮，用户主动点才分析；无 Key 时整区
-                    // 不出现（静默，不引导配 Key）。建议只提议，不改 Dock
-                    // 排序分数；采纳固定/取消固定走 UiPrefs 固定位。
-                    val suggestionStore = remember {
-                        DockSuggestionStore(context.applicationContext)
-                    }
-                    val suggestionsUi by suggestionStore.uiState.collectAsState()
-                    val suggestionScope = rememberCoroutineScope()
-                    var hasLlmKey by remember { mutableStateOf(false) }
-                    var analyzing by remember { mutableStateOf(false) }
-                    var suggestionStatus by remember { mutableStateOf<String?>(null) }
-                    LaunchedEffect(Unit) {
-                        suggestionStore.refreshUiState()
-                        hasLlmKey = withContext(Dispatchers.IO) {
-                            LlmConfig.hasKey(context.applicationContext)
-                        }
-                    }
-                    if (hasLlmKey) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-                        )
-                        Text(
-                            text = "建议",
-                            fontSize = AILauncherType.Title.fontSize,
-                            fontWeight = FontWeight.Bold,
-                            color = AILauncherColors.current.Title
-                        )
-                        Button(
-                            onClick = {
-                                suggestionScope.launch {
-                                    analyzing = true
-                                    suggestionStatus = null
-                                    val outcome = analyzeSuggestions(
-                                        context,
-                                        allApps,
-                                        top10.map { it.packageName },
-                                        suggestionStore
-                                    )
-                                    analyzing = false
-                                    when (outcome) {
-                                        AnalysisOutcome.NoCandidates ->
-                                            suggestionStatus = "最近没什么值得说的变化"
-                                        is AnalysisOutcome.Ready -> {
-                                            suggestionStatus = null
-                                            suggestionStore.refreshUiState()
-                                        }
-                                        AnalysisOutcome.Failed ->
-                                            suggestionStatus = "这次没分析出来，稍后再试"
-                                    }
-                                }
-                            },
-                            enabled = !analyzing,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp)
-                        ) {
-                            Text(text = if (analyzing) "分析中…" else "分析一下")
-                        }
-                        suggestionStatus?.let { status ->
-                            Text(
-                                text = status,
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                modifier = Modifier.padding(vertical = 4.dp)
-                            )
-                        }
-                        suggestionsUi.suggestions.forEach { suggestion ->
-                            val icon = if (suggestion.kind == SuggestionKind.OBSERVE) null
-                            else allApps.find {
-                                it.packageName == suggestion.action.pkg
-                            }?.icon
-                            SuggestionRow(
-                                suggestion = suggestion,
-                                icon = icon,
-                                store = suggestionStore
-                            )
-                        }
-                        // 「不再提示」：按类别关，关了的类别不进候选；再点恢复。
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "不再提示：",
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint
-                            )
-                            SuggestionKind.entries.forEach { kind ->
-                                val label = when (kind) {
-                                    SuggestionKind.PIN -> "固定"
-                                    SuggestionKind.UNPIN -> "取消固定"
-                                    SuggestionKind.OBSERVE -> "模式观察"
-                                }
-                                val muted = kind in suggestionsUi.mutedKinds
-                                Text(
-                                    text = label + if (muted) "（已关）" else "",
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    color = if (muted) AILauncherColors.current.Hint
-                                    else AILauncherColors.current.Title,
-                                    modifier = Modifier
-                                        .clickable {
-                                            suggestionStore.setKindMuted(kind, !muted)
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                    }
                 }
             }
         }
+    }
+}
+
+/**
+ * 说明页顶部「建议」区（Bob 2026-11-15 亲定新版：放顶、加白话、类别
+ * 改名）：一个按钮，用户主动点才分析；无 Key 时整区不出现（静默，
+ * 不引导配 Key）。建议只提议，不改 Dock 排序分数；采纳固定/取消固定
+ * 走 UiPrefs 固定位。区段末尾一条分隔线，与下面的应用行分开。
+ * 文案走本文件顶部的纯函数/常量（suggestionKindLabel、
+ * SUGGESTION_PLAIN_INTRO、SUGGESTION_MUTE_LEAD），JVM 单测锁死。
+ */
+@Composable
+private fun DockSuggestionsSection(
+    allApps: List<com.bobot.ailauncher.data.AppInfo>,
+    top10Pkgs: List<String>
+) {
+    val context = LocalContext.current
+    val suggestionStore = remember {
+        DockSuggestionStore(context.applicationContext)
+    }
+    val suggestionsUi by suggestionStore.uiState.collectAsState()
+    val suggestionScope = rememberCoroutineScope()
+    var hasLlmKey by remember { mutableStateOf(false) }
+    var analyzing by remember { mutableStateOf(false) }
+    var suggestionStatus by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        suggestionStore.refreshUiState()
+        hasLlmKey = withContext(Dispatchers.IO) {
+            LlmConfig.hasKey(context.applicationContext)
+        }
+    }
+    if (hasLlmKey) {
+        Text(
+            text = "建议",
+            fontSize = AILauncherType.Title.fontSize,
+            fontWeight = FontWeight.Bold,
+            color = AILauncherColors.current.Title
+        )
+        Text(
+            text = SUGGESTION_PLAIN_INTRO,
+            fontSize = AILauncherType.Footnote.fontSize,
+            color = AILauncherColors.current.Hint,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+        Button(
+            onClick = {
+                suggestionScope.launch {
+                    analyzing = true
+                    suggestionStatus = null
+                    val outcome = analyzeSuggestions(
+                        context,
+                        allApps,
+                        top10Pkgs,
+                        suggestionStore
+                    )
+                    analyzing = false
+                    when (outcome) {
+                        AnalysisOutcome.NoCandidates ->
+                            suggestionStatus = "最近没什么值得说的变化"
+                        is AnalysisOutcome.Ready -> {
+                            suggestionStatus = null
+                            suggestionStore.refreshUiState()
+                        }
+                        AnalysisOutcome.Failed ->
+                            suggestionStatus = "这次没分析出来，稍后再试"
+                    }
+                }
+            },
+            enabled = !analyzing,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            Text(text = if (analyzing) "分析中…" else "分析一下")
+        }
+        suggestionStatus?.let { status ->
+            Text(
+                text = status,
+                fontSize = AILauncherType.Footnote.fontSize,
+                color = AILauncherColors.current.Hint,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        }
+        suggestionsUi.suggestions.forEach { suggestion ->
+            val icon = if (suggestion.kind == SuggestionKind.OBSERVE) null
+            else allApps.find {
+                it.packageName == suggestion.action.pkg
+            }?.icon
+            SuggestionRow(
+                suggestion = suggestion,
+                icon = icon,
+                store = suggestionStore
+            )
+        }
+        // 静默类别：按类别关，关了的类别不进候选；再点恢复。
+        // 引导语变长了，放一行、类别放下一行，横排一行装不下。
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            Text(
+                text = SUGGESTION_MUTE_LEAD,
+                fontSize = AILauncherType.Footnote.fontSize,
+                color = AILauncherColors.current.Hint
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SuggestionKind.entries.forEach { kind ->
+                    val muted = kind in suggestionsUi.mutedKinds
+                    Text(
+                        text = suggestionKindLabel(kind) + if (muted) "（已关）" else "",
+                        fontSize = AILauncherType.Footnote.fontSize,
+                        color = if (muted) AILauncherColors.current.Hint
+                        else AILauncherColors.current.Title,
+                        modifier = Modifier
+                            .clickable {
+                                suggestionStore.setKindMuted(kind, !muted)
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+        HorizontalDivider(
+            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+        )
     }
 }
 
