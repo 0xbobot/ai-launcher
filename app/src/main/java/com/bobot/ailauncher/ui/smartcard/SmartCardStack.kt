@@ -127,11 +127,13 @@ import kotlinx.coroutines.launch
  * 揭示、轮播切卡）全部作废）：
  * 单卡槽位：一次只显示一张卡（当前最紧急的那张），不叠放、不露边、
  * 不画下一张的边。自动定时轮换（5 秒一档，≥2 张才轮，1 张不轮）；
- * 切卡只用淡入淡出（300ms，减动效 120ms），不飞出、不滑、不揭示；
+ * 切卡只用淡入淡出（300ms，减动效 120ms），不飞出、不揭示（点圆点／
+ * 自动轮换；手动滑动一张接一张见下）；
  * 卡片下方圆点指示（当前张实心金、其余空心淡，点圆点跳到那一张，
  * 点后自动轮换暂停 8 秒再恢复）；卡片上挂手动滑动（第三十七批回来、
- * 第三十八批改跟手）：拖动位移跟手指走，松手位移超 1/3 卡宽或速度
- * 够就换卡（走 jumpTo＋淡入淡出收尾）、否则回弹；滑动只切卡、不摘卡。
+ * 第三十八批改跟手、第三十九批改一张接一张）：拖动位移跟手指走，松手
+ * 位移超 1/4 卡宽或速度够就换卡（出卡继续滑出、进卡从反方向滑入，一张
+ * 接一张，300ms 同一条时间线）、否则回弹；滑动只切卡、不摘卡。
  * 扇形仲裁不受影响：HomeScreen 的盲操触发区按叠层实测 bounds 排除
  * （纵向 fallback 同样排除），卡片区的手势本来就不走盲操／应用中心。
  * 只有点「我知道了」才摘卡（真卡 markDone／引导卡轮换推，走原有口径），
@@ -569,10 +571,11 @@ fun SmartCardStackHost() {
  * 自动轮播，无划走——划卡线全部作废）：
  * 一次只显示一张卡（当前最紧急的那张），不叠放、不露边、不画下一张
  * 的边。自动定时轮换（5 秒一档，≥2 张才轮，1 张不轮、0 张不画）；
- * 切卡只用淡入淡出（Crossfade，300ms，减动效 120ms），不飞出、
- * 不滑、不揭示——动效只有透明度一路。卡片下方圆点指示（当前张实心
- * 金、其余空心淡，点圆点跳到那一张，点后自动轮换暂停 8 秒再恢复）。
- * 卡片上不再挂横滑手势。点「我知道了」才摘卡（真卡 markDone／引导卡
+ * 点圆点／自动轮换切卡只用淡入淡出（Crossfade，300ms，减动效 120ms），
+ * 不飞出、不揭示——动效只有透明度一路；手动滑动一张接一张（第三十九批，
+ * 见 startSlideSwitch）。卡片下方圆点指示（当前张实心金、其余空心淡，
+ * 点圆点跳到那一张，点后自动轮换暂停 8 秒再恢复）。
+ * 卡片上挂手动滑动。点「我知道了」才摘卡（真卡 markDone／引导卡
  * 轮换推），摘完自动进下一张、圆点更新；摘完 1 张停轮、无圆点；
  * 摘完 0 张区域清空。0 张时提前返回（见函数头）。
  *
@@ -752,25 +755,38 @@ fun SmartCardStack(
     var resumeAtMillis by remember { mutableLongStateOf(0L) }
     val reduceMotion = rememberReduceMotion()
     // 跟手拖动状态（第三十八批）：拖动位移（Animatable，纯视觉，跟手指走）、
-    // 卡宽（松手判定用 1/3 卡宽）、拖动中（自动轮换暂停）、收尾任务。
-    // 位移只走这一个 Animatable：拖动时 snapTo（1:1 跟手）、松手后
-    // animateTo 回 0（换卡 150ms tween、回弹弹簧），不另设 Float 状态
-    // 抢写——顶层 animate(初值, 终值, …) 在本工程 Compose 版本重载
-    // 解析失败（CI 实证），不用。
+    // 卡宽（松手判定用 1/4 卡宽）、拖动中（自动轮换暂停）、收尾任务。
+    // 位移只走这一个 Animatable：拖动时 snapTo（1:1 跟手）、松手回弹
+    // 时 animateTo 回 0（弹簧；减动效短 tween），不另设 Float 状态抢写——
+    // 顶层 animate(初值, 终值, …) 在本工程 Compose 版本重载解析失败
+    // （CI 实证），不用。换卡不再 tween 回 0（见 startSlideSwitch）。
     val dragScope = rememberCoroutineScope()
     val dragOffsetX = remember { Animatable(0f) }
     var cardWidthPx by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
     var settleJob by remember { mutableStateOf<Job?>(null) }
-    // 松手收尾（第三十八批）：唯一写 dragOffsetX 的收尾动画入口——
-    // 先取消上一次收尾，保证同一时刻只有一个写者（手势中途被取消、
-    // pointerInput 重启时 finally 里也会调这里，不会与拖动打架）。
-    // springBack＝true：没过线，弹簧回弹（减动效时短 tween、不做弹簧过冲）；
-    // springBack＝false：换卡，150ms tween 回 0，与淡入淡出同步收尾。
-    fun settleDragOffsetToZero(springBack: Boolean) {
+    // 一张接一张的滑动切换状态（第三十九批）：出卡 id（null＝没在切换）、
+    // 进卡下标、滑动方向（＋1 左滑下一张、−1 右滑上一张）、松手时位移、
+    // 切换进度（0→1，300ms／减动效 120ms，与淡入淡出同口径）、切换任务、
+    // 压住 Crossfade 的标志（见 startSlideSwitch 收尾）。
+    val slideProgress = remember { Animatable(0f) }
+    var slideOutgoingId by remember { mutableStateOf<String?>(null) }
+    var slideIncomingIndex by remember { mutableIntStateOf(0) }
+    var slideDir by remember { mutableIntStateOf(0) }
+    var slideReleaseOffset by remember { mutableFloatStateOf(0f) }
+    var slideJob by remember { mutableStateOf<Job?>(null) }
+    var suppressCrossfade by remember { mutableStateOf(false) }
+    val isSliding = slideOutgoingId != null
+    // 松手回弹（第三十九批）：只留给没过线的拖动——弹簧回弹到 0
+    // （减动效时短 tween、不做弹簧过冲）。换卡不再走这里（见
+    // startSlideSwitch：一张接一张滑出／滑入）。唯一写 dragOffsetX
+    // 的收尾动画入口——先取消上一次收尾，保证同一时刻只有一个写者
+    // （手势中途被取消、pointerInput 重启时 finally 里也会调这里，
+    // 不会与拖动打架）。
+    fun settleDragOffsetToZero() {
         settleJob?.cancel()
         settleJob = dragScope.launch {
-            if (springBack && !reduceMotion) {
+            if (!reduceMotion) {
                 dragOffsetX.animateTo(
                     0f,
                     spring(
@@ -788,7 +804,10 @@ fun SmartCardStack(
     // 第三十八批：isDragging 也进键——拖动一开始计时就重算，5 秒档
     // 不会半路切卡、把用户手里的卡换掉；拖完（回弹）重计时满 5 秒，
     // 拖完（换卡）走 jumpTo 的 8 秒暂停。
-    LaunchedEffect(index, cards.size, resumeAtMillis, isDragging) {
+    // 第三十九批：isSliding 也进键——一张接一张滑出／滑入的 300ms 里
+    // 不自动切卡；滑完 jumpTo 的 8 秒暂停接手。
+    LaunchedEffect(index, cards.size, resumeAtMillis, isDragging, isSliding) {
+        if (isSliding) return@LaunchedEffect
         if (!carouselShouldAutoRotate(cards.size)) return@LaunchedEffect
         delay(
             carouselWaitMs(
@@ -810,19 +829,54 @@ fun SmartCardStack(
     // 即没有，不贴模板）。copy 只换 prep，不动 id/动作/排序键。
     val topId = cards[index].id
     val connectedIds: Set<String> = connectedFeedbacks.keys
-    // 手动滑动切卡（第三十八批，Bob 2026-11-15：切换要有跟手动画——
-    // 535 的触发后立刻跳卡，用户感觉“在背后就切换了、完全没有”）。
+    // 压住 Crossfade 的标志复位（第三十九批）：startSlideSwitch 收尾时
+    // 先置 suppressCrossfade＝true 再 jumpTo，Crossfade 用 0ms 瞬切
+    // （滑入的卡已在中心、满不透明，瞬切不可见）；下标一变这里就复位，
+    // 下一次点圆点／自动轮换仍走正常 300ms 淡入淡出。
+    LaunchedEffect(topId) { suppressCrossfade = false }
+    // 一张接一张的滑动切换（第三十九批，Bob 2026-11-15：不要直接弹回来，
+    // 要一个接一个的效果——536 换卡是位移 150ms 回 0，新卡从拖动位置沉回
+    // 原位，用户看来就是卡直接弹回来）。松手判定换卡后：出卡不回 0，继续
+    // 顺滑动方向滑到 ±1 卡宽外（轻微淡出），进卡从反方向滑入到中心；两张
+    // 同一条 300ms 时间线（减动效 120ms，与淡入淡出同口径）。不回 521 的
+    // 1600px 飞出。收尾才提交下标：滑完 jumpTo（与点圆点同一条链：改下标
+    // ＋暂停自动轮换 8 秒），同时压住 Crossfade（0ms 瞬切，不重复淡一次）、
+    // 清滑动状态、拖动位移 snapTo 0。
+    fun startSlideSwitch(dir: Int, releaseOffset: Float, fromIndex: Int) {
+        val incoming = carouselNextIndex(fromIndex, cards.size, dir)
+        slideOutgoingId = cards[fromIndex].id
+        slideIncomingIndex = incoming
+        slideDir = dir
+        slideReleaseOffset = releaseOffset
+        slideJob?.cancel()
+        slideJob = dragScope.launch {
+            slideProgress.snapTo(0f)
+            slideProgress.animateTo(
+                1f,
+                tween(durationMillis = crossfadeDurationMs(reduceMotion))
+            )
+            suppressCrossfade = true
+            jumpTo(incoming)
+            slideOutgoingId = null
+            dragOffsetX.snapTo(0f)
+            slideProgress.snapTo(0f)
+        }
+    }
+    // 手动滑动切卡（第三十八批跟手、第三十九批一张接一张，Bob 2026-11-15：
+    // 536 的位移 150ms 回 0 像直接弹回来，要一个接一个的效果）。
     // 跟手：拖动过程中顶卡横向位移跟手指走（1:1，夹到半张卡宽内）；
-    // 松手判定（纯函数 carouselReleaseDecision）：位移超 1/3 卡宽或松手
-    // 速度够就换卡（走 jumpTo＋现成的 Crossfade 淡入淡出收尾，位移 150ms
-    // 回到 0——新卡从拖动位置沉回原位），否则弹簧回弹到 0。
+    // 松手判定（纯函数 carouselReleaseDecision）：位移超 1/4 卡宽或松手
+    // 速度够就换卡（出卡继续滑出、进卡从反方向滑入，一张接一张，见
+    // startSlideSwitch），否则弹簧回弹到 0。
     // 不要回 521 的飞出（1600px 大位移）、不要回 523 的左右滑切卡整套；
     // 跟手只做拖动跟随＋松手判定。位移是纯视觉的：拖动不改下标、不调仓库，
-    // 换卡只在松手判定后走 jumpTo（与点圆点同一条链：改下标＋暂停自动
-    // 轮换 8 秒）。点按与竖翻由 Compose 手势仲裁保证互不抢占：横向先过
-    // slop 才认领（点按不触发，按钮照常可点）；竖向先过 slop 就被卡内
-    // verticalScroll 认领，本次手势直接返回（awaitHorizontalTouchSlop-
-    // OrCancellation 返回 null），卡片原地不动。≥2 张才挂，1 张不触发。
+    // 换卡只在松手判定后走 startSlideSwitch（收尾 jumpTo，与点圆点同一条
+    // 链：改下标＋暂停自动轮换 8 秒）。点按与竖翻由 Compose 手势仲裁保证
+    // 互不抢占：横向先过 slop 才认领（点按不触发，按钮照常可点）；竖向先过
+    // slop 就被卡内 verticalScroll 认领，本次手势直接返回
+    // （awaitHorizontalTouchSlopOrCancellation 返回 null），卡片原地不动。
+    // 滑动切换进行中（300ms）不认领新手势，等这一张滑完再滑。≥2 张才挂，
+    // 1 张不触发。
     val flingThresholdPx = with(LocalDensity.current) {
         SMART_CARD_FLING_VELOCITY_DP_PER_SEC.dp.toPx()
     }
@@ -835,6 +889,8 @@ fun SmartCardStack(
                     val slopChange = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
                         change.consume()
                     } ?: return@awaitEachGesture
+                    // 滑动切换进行中不认领新手势（300ms，等这一张滑完再滑）。
+                    if (slideOutgoingId != null) return@awaitEachGesture
                     // 上一次收尾没跑完就再拖：先停掉它，从当前位置跟手。
                     settleJob?.cancel()
                     isDragging = true
@@ -862,21 +918,23 @@ fun SmartCardStack(
                         dragOffsetX.value, cardWidthPx, velocity, flingThresholdPx
                     )
                     if (dir != 0) {
-                        // 换卡仍走淡入淡出收尾：jumpTo 立即触发 Crossfade，
-                        // 位移 150ms 回到 0——新卡从拖动位置沉回原位，不飞出。
-                        settleDragOffsetToZero(springBack = false)
-                        jumpTo(carouselNextIndex(index, cards.size, dir))
+                        // 一张接一张（第三十九批）：出卡继续滑出、进卡从反
+                        // 方向滑入，不 tween 回 0、不直接弹回来。
+                        startSlideSwitch(dir, dragOffsetX.value, index)
                     } else {
-                        settleDragOffsetToZero(springBack = true)
+                        settleDragOffsetToZero()
                     }
                 }
             } finally {
                 // 手势中途被取消（如下标／张数变了、pointerInput 重启）：
                 // 位移可能停在半路，收尾回 0，不留一张歪卡；已在收尾的
                 // 不重复启动（settleDragOffsetToZero 自己会取消上一个）。
+                // 滑动切换进行中不管（拖动位移冻在松手位，滑完 snapTo 0）。
                 isDragging = false
-                if (dragOffsetX.value != 0f && settleJob?.isActive != true) {
-                    settleDragOffsetToZero(springBack = true)
+                if (slideOutgoingId == null && dragOffsetX.value != 0f &&
+                    settleJob?.isActive != true
+                ) {
+                    settleDragOffsetToZero()
                 }
             }
         }
@@ -893,35 +951,102 @@ fun SmartCardStack(
         // 约 56dp。× 不再占这一行（448 的 × 行在卡外、悬在壁纸上）；× 进卡内表头（见 SmartCardView），
         // 这里两模式统一只留段间距。
         Spacer(modifier = Modifier.height(SmartCardStackTopGap))
-        // 单卡槽位（第三十三批）：只画当前下标那一张。Crossfade 淡入淡出
-        // （300ms，减动效 120ms）——目标态只取卡 id，准备清单异步回来
-        // 只改 prep、不触发一次淡入淡出；摘卡瞬间旧卡仍在淡出，按当前
+        // 单卡槽位（第三十三批）：只画当前下标那一张。非滑动时走 Crossfade
+        // 淡入淡出（300ms，减动效 120ms）——目标态只取卡 id，准备清单异步
+        // 回来只改 prep、不触发一次淡入淡出；摘卡瞬间旧卡仍在淡出，按当前
         // 列表找不到就不画退出那一半（摘掉的卡本来就是要消失的）。
         // 第三十八批：手动滑动改跟手（拖动位移跟手指走、松手判定换卡／回弹，
         // 见 dragModifier），切卡收尾仍走 Crossfade 淡入淡出；第三十七批
         // “只做手势触发、不做动画”就此作废。
-        Crossfade(
-            targetState = topId,
-            animationSpec = tween(durationMillis = crossfadeDurationMs(reduceMotion)),
-            label = "smart_card_crossfade",
+        // 第三十九批：手动滑动松手换卡改一张接一张——出卡继续顺滑动方向
+        // 滑出（到 ±1 卡宽外、轻微淡出），进卡从反方向滑入到中心，同一条
+        // 300ms 时间线（见 slide layers）；拖动跟手与松手判定不动；536
+        // 「换卡位移 150ms 回 0」就此作废。
+        // 手势与量宽挂在外层 Box 上（不在 Crossfade 上）：Crossfade 与滑动层
+        // 互换时 Box 不动，pointerInput 不重启，触发滑动的那条手势协程
+        // 不会被滑动状态的变更取消。
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .onSizeChanged { cardWidthPx = it.width.toFloat() }
-                .graphicsLayer { translationX = dragOffsetX.value }
                 .then(dragModifier)
-        ) { id ->
-            val raw = cards.find { it.id == id } ?: return@Crossfade
-            val card = raw.copy(prep = prepById[raw.id] ?: raw.prep)
-            SmartCardView(
-                card = card,
-                onActionClick = { onAction(card) },
-                onIgnoreClick = { onIgnore(card) },
-                onCloseClick = onClose,
-                onBodyClick = { onBodyClick(card) },
-                hideActionRow = card.id in connectedIds,
-                celebration = connectedFeedbacks[card.id],
-                modifier = Modifier.fillMaxWidth()
-            )
+        ) {
+            if (slideOutgoingId != null) {
+                // 一张接一张（第三十九批）：出卡与进卡各一层，同向走——
+                // 出卡从松手位移继续滑到 ±1 卡宽外（轻微淡出），进卡从反方向
+                // ±1 卡宽外滑入到中心；两张不重叠（同向差一整张卡宽）。
+                // 摘卡／过期让某张中途没了就空着那一层（find／getOrNull 兜底），
+                // 收尾 jumpTo 会钳制下标，不崩。
+                val progress = slideProgress.value
+                val outRaw = cards.find { it.id == slideOutgoingId }
+                val inRaw = cards.getOrNull(
+                    carouselClampIndex(slideIncomingIndex, cards.size)
+                )
+                if (outRaw != null) {
+                    val outCard = outRaw.copy(prep = prepById[outRaw.id] ?: outRaw.prep)
+                    SmartCardView(
+                        card = outCard,
+                        onActionClick = { onAction(outCard) },
+                        onIgnoreClick = { onIgnore(outCard) },
+                        onCloseClick = onClose,
+                        onBodyClick = { onBodyClick(outCard) },
+                        hideActionRow = outCard.id in connectedIds,
+                        celebration = connectedFeedbacks[outCard.id],
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                translationX = carouselSlideOutOffset(
+                                    progress, slideReleaseOffset, slideDir, cardWidthPx
+                                )
+                                alpha = carouselSlideOutAlpha(progress)
+                            }
+                    )
+                }
+                if (inRaw != null) {
+                    val inCard = inRaw.copy(prep = prepById[inRaw.id] ?: inRaw.prep)
+                    SmartCardView(
+                        card = inCard,
+                        onActionClick = { onAction(inCard) },
+                        onIgnoreClick = { onIgnore(inCard) },
+                        onCloseClick = onClose,
+                        onBodyClick = { onBodyClick(inCard) },
+                        hideActionRow = inCard.id in connectedIds,
+                        celebration = connectedFeedbacks[inCard.id],
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                translationX = carouselSlideInOffset(
+                                    progress, slideDir, cardWidthPx
+                                )
+                            }
+                    )
+                }
+            } else {
+                Crossfade(
+                    targetState = topId,
+                    animationSpec = tween(
+                        durationMillis = if (suppressCrossfade) 0
+                        else crossfadeDurationMs(reduceMotion)
+                    ),
+                    label = "smart_card_crossfade",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer { translationX = dragOffsetX.value }
+                ) { id ->
+                    val raw = cards.find { it.id == id } ?: return@Crossfade
+                    val card = raw.copy(prep = prepById[raw.id] ?: raw.prep)
+                    SmartCardView(
+                        card = card,
+                        onActionClick = { onAction(card) },
+                        onIgnoreClick = { onIgnore(card) },
+                        onCloseClick = onClose,
+                        onBodyClick = { onBodyClick(card) },
+                        hideActionRow = card.id in connectedIds,
+                        celebration = connectedFeedbacks[card.id],
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
         }
         // 圆点指示（第三十二批，第三十三批沿用样式与点按）：≥2 张才画——
         // 当前张实心金、其余空心淡；点圆点跳到那一张（点后自动轮换暂停
@@ -932,7 +1057,8 @@ fun SmartCardStack(
                 count = cards.size,
                 current = index,
                 onDotClick = { target ->
-                    if (target != index) jumpTo(target)
+                    // 滑动切换进行中不响应点圆点（300ms，等这一张滑完）。
+                    if (slideOutgoingId == null && target != index) jumpTo(target)
                 },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -1003,8 +1129,9 @@ private fun CarouselDots(
 }
 
 /**
- * 切卡淡入淡出时长（毫秒，第三十三批）：单卡槽位切卡只用淡入淡出
- * （Crossfade），不飞出、不滑、不揭示——动效只有透明度一路。
+ * 切卡淡入淡出时长（毫秒，第三十三批）：点圆点／自动轮换切卡只用淡入淡出
+ * （Crossfade），不飞出、不揭示——动效只有透明度一路。第三十九批起
+ * 一张接一张的滑动切换也用同一档（300ms／减动效 120ms）。
  * 300ms——看得见切换、又不拖沓；减动效时 120ms，缩短但不硬切。
  * 纯函数 crossfadeDurationMs 选档，单测锁死。
  */
@@ -1029,11 +1156,15 @@ internal const val SMART_CARD_CAROUSEL_INTERVAL_MS = 5000L
 internal const val SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS = 8000L
 
 /**
- * 跟手拖动松手判定的距离线（第三十八批，Bob 2026-11-15：切换要有跟手动画）：
- * 松手时 |位移| 超 1/3 卡宽就换卡（方向＝位移方向：左滑下一张、右滑上一张）。
+ * 跟手拖动松手判定的距离线（第三十八批立 1/3，第三十九批放宽到 1/4）：
+ * 松手时 |位移| 超 1/4 卡宽就换卡（方向＝位移方向：左滑下一张、右滑上一张）。
+ * 放宽原因（第三十九批复核，Bob 2026-11-15：正常一滑要可靠触发换卡，
+ * 不要滑了还弹回来）：卡宽约 363dp 时 1/3 ≈ 121dp 是一记很长的拖动，
+ * 正常一滑容易没过线就回弹；1/4 ≈ 91dp 是一记正常滑动的距离。只许往
+ * 更灵敏调。速度线 500dp/s 不动（轻扫的速度远超此线，距离线才是决定项）。
  * 纯函数 carouselReleaseDecision 的一部分，单测锁死。
  */
-internal const val SMART_CARD_DRAG_RELEASE_FRACTION = 1f / 3f
+internal const val SMART_CARD_DRAG_RELEASE_FRACTION = 1f / 4f
 
 /**
  * 跟手拖动位移的夹子（第三十八批）：位移跟手指 1:1 走，但夹到半张卡宽内——
@@ -1044,14 +1175,15 @@ internal const val SMART_CARD_DRAG_MAX_FRACTION = 0.5f
 
 /**
  * 跟手拖动松手判定的速度线（第三十八批）：松手速度（dp/s）够快也换卡——
- * 轻扫一下不用拖满 1/3 卡宽。500dp/s 是一记有意的轻扫，不是慢拖；
+ * 轻扫一下不用拖满 1/4 卡宽。500dp/s 是一记有意的轻扫，不是慢拖；
  * 慢拖靠距离线判定。纯函数 carouselReleaseDecision 的一部分，单测锁死。
  */
 internal const val SMART_CARD_FLING_VELOCITY_DP_PER_SEC = 500
 
 /**
- * 跟手拖动松手换卡时位移回到 0 的时长（毫秒，第三十八批）：150ms——
- * 新卡从拖动位置沉回原位，与 300ms 的淡入淡出同步收尾，不拖沓。
+ * 跟手拖动松手回弹的减动效时长（毫秒，第三十八批）：150ms——减动效时
+ * 不用弹簧、改短 tween 回 0。第三十九批起换卡不再 tween 回 0（改一张
+ * 接一张滑出／滑入），这个值只留给减动效时的回弹。
  */
 internal const val SMART_CARD_DRAG_SETTLE_MS = 150
 
@@ -1090,11 +1222,11 @@ internal fun carouselDragOffsetClamp(offsetPx: Float, cardWidthPx: Float): Float
  * 跟手拖动松手判定（纯函数，单测锁死）：位移 offsetPx（左滑为负）、
  * 卡宽 cardWidthPx、松手速度 velocityPxPerSec（左为负）、速度线
  * velocityThresholdPxPerSec。返回 +1 下一张、−1 上一张、0 回弹。
- * 距离优先：|位移| 超 1/3 卡宽就按位移方向换卡；位移没过线再看速度，
+ * 距离优先：|位移| 超 1/4 卡宽就按位移方向换卡；位移没过线再看速度，
  * 速度过线按速度方向换卡；都没过线回弹。501–523 的教训是判定耦合了
  * 仓库沉底与飞出动画、修一处漏一处；本批判定只看手势物理量，换卡
- * 只走 jumpTo＋Crossfade，两边不耦合——位移是纯视觉，拖动不改下标、
- * 不调仓库。
+ * 只走 startSlideSwitch（收尾 jumpTo），两边不耦合——位移是纯视觉，
+ * 拖动不改下标、不调仓库。
  */
 internal fun carouselReleaseDecision(
     offsetPx: Float,
@@ -1115,6 +1247,48 @@ internal fun carouselReleaseDecision(
         else -> 0
     }
 }
+
+/**
+ * 一张接一张滑出位移（纯函数，第三十九批，单测锁死）：出卡从松手时的位移
+ * releaseOffsetPx 出发，沿滑动方向继续滑到 ±1 张卡宽外。dir +1＝左滑
+ * （下一张，出卡向左、终点 −卡宽）、−1＝右滑（上一张，出卡向右、终点
+ * ＋卡宽）。progress 0→1 与 300ms 动画同步（减动效 120ms）。卡宽没量到
+ * （≤0）时返回松手位移（不动，等收尾 snapTo 0）。
+ */
+internal fun carouselSlideOutOffset(
+    progress: Float,
+    releaseOffsetPx: Float,
+    dir: Int,
+    cardWidthPx: Float
+): Float {
+    if (cardWidthPx <= 0f) return releaseOffsetPx
+    val end = -dir * cardWidthPx
+    return releaseOffsetPx + (end - releaseOffsetPx) * progress
+}
+
+/**
+ * 一张接一张滑入位移（纯函数，第三十九批，单测锁死）：进卡从反方向
+ * ±1 张卡宽外滑入到中心。dir +1＝左滑（进卡从右侧＋卡宽处进来）、
+ * −1＝右滑（进卡从左侧 −卡宽处进来）。progress 0→1。卡宽没量到
+ * （≤0）时返回 0。
+ */
+internal fun carouselSlideInOffset(
+    progress: Float,
+    dir: Int,
+    cardWidthPx: Float
+): Float {
+    if (cardWidthPx <= 0f) return 0f
+    val start = dir * cardWidthPx
+    return start + (0f - start) * progress
+}
+
+/**
+ * 一张接一张滑出透明度（纯函数，第三十九批，单测锁死）：出卡滑出时
+ * 轻微淡出，1→0.6；淡出是配角、位移是主角。进卡不淡出（纯滑入，
+ * 全程不透明）。
+ */
+internal fun carouselSlideOutAlpha(progress: Float): Float =
+    (1f - 0.4f * progress).coerceIn(0f, 1f)
 
 /**
  * 轮播是否自动轮换（纯函数，第三十二批单测锁死）：≥2 张才轮换，
