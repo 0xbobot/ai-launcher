@@ -103,6 +103,10 @@ object SmartCardRepository {
      * 卡片只显示事实＋动作。内存缓存，随进程走。 */
     private val _prepById = MutableStateFlow<Map<String, String>>(emptyMap())
     val prepById: StateFlow<Map<String, String>> = _prepById.asStateFlow()
+    /** 查证结果缓存（试点 B 路线）：随准备清单一起按卡片 id 记，不重复查。
+     * 内存缓存，随进程走；UI 不订阅，只供复核与排障。prepScope 多卡并发写，
+     * 用 ConcurrentHashMap。 */
+    private val _evidenceById = java.util.concurrent.ConcurrentHashMap<String, List<PrepEvidence>>()
     /** 已向大模型请求过准备清单的卡片 id（每卡最多调一次，失败也算一次，
      * 本轮不重试）。内存记，随进程走。 */
     private val prepRequested = mutableSetOf<String>()
@@ -340,12 +344,18 @@ object SmartCardRepository {
     }
 
     /**
-     * 为一张卡请求大模型准备清单（第十二批，宿主在可见卡片变化时调）：
+     * 为一张卡请求大模型准备清单（第十二批，宿主在可见卡片变化时调；
+     * 试点 B 路线：Bob 2026-11-15 批 DeepSeek 全家桶 API 先本地搜/抓、
+     * 再喂模型）：
      * 本地过滤（只有预约卡/日程卡）＋有脱敏原文＋没请求过＋用户配了 Key，
      * 四条全满足才调；否则直接返回（不调、不报错、不追问配 Key）。
-     * 每卡最多调一次（prepRequested 记下，失败也算一次）；结果写进
-     * prepById，UI 订阅后覆盖卡片的 prep；超时/失败/校验不过静默丢弃，
-     * 卡片只显示事实＋动作。走已有通路 LlmRouter.postChatCompletions。
+     * 触发门（方案 5.1）：值得查的才联网（预约卡含检查项目词或机构名、
+     * 日程卡有公开链接或公开场馆名），其余走老路（只喂脱敏原文）。
+     * 每卡最多调一次（prepRequested 记下，失败也算一次）；搜索／抓取
+     * 结果随准备清单一起按卡片 id 缓存（_evidenceById），不重复查；
+     * 结果写进 prepById，UI 订阅后覆盖卡片的 prep；超时/失败/校验不过
+     * 静默丢弃，卡片只显示事实＋动作。模型调用开 safety_check=high
+     * （官方文档：服务端审输入输出，同时忽略客户端 temperature）。
      */
     fun requestPrep(context: Context, card: SmartCard) {
         if (!needsLlmPrep(card)) return
@@ -355,25 +365,87 @@ object SmartCardRepository {
         if (!LlmConfig.hasKey(appContext)) return
         prepRequested += card.id
         prepScope.launch {
+            // 先本地搜/抓一次（各 10 秒超时，失败静默、不重试）；再喂模型。
+            val meetingUrl = (card.action as? SmartCardAction.CalendarEvent)?.meetingUrl
+            val plan = decideEvidencePlan(card.kind, source, meetingUrl)
+            val evidence = runCatching { gatherEvidence(appContext, plan) }.getOrNull()
+                ?: emptyList()
+            if (evidence.isNotEmpty()) {
+                _evidenceById[card.id] = evidence
+            }
+            val userContent = buildString {
+                append(source)
+                if (evidence.isNotEmpty()) {
+                    append("\n查证结果（带出处）：\n")
+                    evidence.forEachIndexed { i, e ->
+                        append("${i + 1}. 《${e.title}》— ${e.url}：${e.text}\n")
+                    }
+                }
+            }
             val prep = runCatching {
                 val r = LlmRouter.postChatCompletions(
                     LlmConfig.getBaseUrl(appContext),
                     LlmConfig.getApiKey(appContext),
                     LlmConfig.getModel(appContext),
                     PREP_SYSTEM_PROMPT,
-                    source,
+                    userContent,
                     temperature = 0.2,
                     maxTokens = 200,
-                    tag = "SmartCardPrep"
+                    tag = "SmartCardPrep",
+                    safetyCheck = true
                 )
                 if (r.networkError != null || r.httpCode !in 200..299) null
                 else parsePrepResponse(r.rawBody)
+                    ?.let { validatePrepWithEvidence(it, source, evidence) }
             }.getOrNull()
             if (prep != null) {
                 _prepById.value = _prepById.value + (card.id to prep)
             }
             // 失败静默：不写 prep、不重试（每卡一次）、不向用户报大模型错误。
         }
+    }
+
+    /**
+     * 按联网计划搜/抓一次（试点 B 路线）：先抓公开链接（用户给的直链最相关，
+     * 给高分优先入选），再搜场馆／项目；入会链接不进抓取（decideEvidencePlan
+     * 已排除；搜索结果里混入的入会链接这里再滤一次）。每卡最多 1 次搜索＋
+     * 1 次抓取；任一步失败返回已拿到的部分（或空），不重试。
+     */
+    private suspend fun gatherEvidence(
+        appContext: Context,
+        plan: EvidencePlan?
+    ): List<PrepEvidence> {
+        if (plan == null) return emptyList()
+        val baseUrl = LlmConfig.getBaseUrl(appContext)
+        val apiKey = LlmConfig.getApiKey(appContext)
+        val candidates = mutableListOf<PrepEvidence>()
+        plan.fetchUrl?.let { url ->
+            LlmRouter.fetch(baseUrl, apiKey, url)?.let { fetched ->
+                if (fetched.content.isNotBlank()) {
+                    candidates += PrepEvidence(
+                        title = fetched.title.ifBlank { url },
+                        url = url,
+                        text = fetched.content.take(EVIDENCE_TEXT_MAX_CHARS),
+                        rankScore = 3.0,
+                        authority = 3
+                    )
+                }
+            }
+        }
+        plan.searchQuery?.let { query ->
+            LlmRouter.search(baseUrl, apiKey, query, count = 5)?.let { results ->
+                results.filter { !isMeetingLink(it.url) }.forEach { r ->
+                    candidates += PrepEvidence(
+                        title = r.title,
+                        url = r.url,
+                        text = r.summary.ifBlank { r.snippet }.take(EVIDENCE_TEXT_MAX_CHARS),
+                        rankScore = r.rerankScore,
+                        authority = r.authority
+                    )
+                }
+            }
+        }
+        return pickEvidence(candidates)
     }
 
     /**

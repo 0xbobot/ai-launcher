@@ -179,4 +179,167 @@ class SmartCardPrepTest {
             )
         )
     }
+
+    // ---------- 试点 B 路线：搜索词（方案 5.1／5.2） ----------
+
+    @Test
+    fun buildSearchQuery_appointmentUsesExamItemsAndPlace() {
+        val source = "体检预约：11月6日 08:00，胃镜检查，空腹，深圳第一健康鼎和分院四楼"
+        val query = buildSearchQuery(source, SmartCardKind.APPOINTMENT)
+        assertTrue(query != null)
+        assertTrue(query!!.contains("胃镜"))
+        assertTrue(query.contains("空腹"))
+        assertTrue(query.contains("分院"))
+        assertTrue(query.length <= SEARCH_QUERY_MAX_CHARS)
+    }
+
+    @Test
+    fun buildSearchQuery_noSensitiveInfoInQuery() {
+        // 脱敏后的占位符与原始敏感信息都不进搜索词（构造方式本身只挑固定词表）
+        val source = "体检预约：××先生，电话 [电话]，身份证 [证件号]，卡号 [卡号]，" +
+            "订单号[单号]，应还 [金额]，联系 [邮箱]，胃镜，空腹"
+        val query = buildSearchQuery(source, SmartCardKind.APPOINTMENT)
+        assertTrue(query != null)
+        assertFalse(query!!.contains("[电话]"))
+        assertFalse(query.contains("[证件号]"))
+        assertFalse(query.contains("[卡号]"))
+        assertFalse(query.contains("[金额]"))
+        assertFalse(query.contains("[邮箱]"))
+        assertFalse(query.contains("[单号]"))
+        assertFalse(query.contains("××"))
+        assertFalse(query.contains("张三"))
+        assertFalse(query.contains("138"))
+    }
+
+    @Test
+    fun buildSearchQuery_returnsNullWithoutKeyword() {
+        // 预约卡没检查项目词、没机构名 → 不搜
+        assertNull(buildSearchQuery("预约：11月6日 08:00，取报告", SmartCardKind.APPOINTMENT))
+        // 日程卡没场馆名 → 不搜
+        assertNull(buildSearchQuery("开会：11月6日 10:00，讨论方案", SmartCardKind.CALENDAR))
+        // 其他卡种不搜
+        assertNull(buildSearchQuery("胃镜，空腹", SmartCardKind.BILL))
+    }
+
+    @Test
+    fun buildSearchQuery_calendarUsesVenueName() {
+        val query = buildSearchQuery(
+            "产品发布会\n深圳湾体育中心\n14:00 入场",
+            SmartCardKind.CALENDAR
+        )
+        assertEquals("深圳湾体育中心", query)
+    }
+
+    // ---------- 试点 B 路线：联网计划（方案 5.1／5.2） ----------
+
+    @Test
+    fun decideEvidencePlan_meetingLinkNotFetched() {
+        val source = "周会\n线上\n描述：加入会议 https://vc.feishu.cn/j/123456789\n资料：https://example.com/guide"
+        // 动作上的入会链接＋描述里的飞书链接都不进抓取，只抓公开资料链接
+        val plan = decideEvidencePlan(
+            SmartCardKind.CALENDAR, source, "https://vc.feishu.cn/j/123456789"
+        )
+        assertEquals("https://example.com/guide", plan?.fetchUrl)
+        // 只有入会链接时不抓
+        val onlyMeeting = decideEvidencePlan(
+            SmartCardKind.CALENDAR,
+            "周会\n线上\n加入会议 https://vc.feishu.cn/j/123456789",
+            "https://vc.feishu.cn/j/123456789"
+        )
+        assertNull(onlyMeeting)
+    }
+
+    @Test
+    fun decideEvidencePlan_privateAddressNotSearched() {
+        // 私人住址（门牌号）不搜、也不抓
+        val plan = decideEvidencePlan(
+            SmartCardKind.CALENDAR,
+            "家访\n深圳市南山区科技南路12号\n15:00",
+            null
+        )
+        assertNull(plan)
+        // 小区地址也不搜
+        assertNull(
+            decideEvidencePlan(
+                SmartCardKind.CALENDAR,
+                "取件\n金地花园3栋2单元501\n",
+                null
+            )
+        )
+    }
+
+    @Test
+    fun decideEvidencePlan_appointmentSearchOnlyNoFetch() {
+        val plan = decideEvidencePlan(
+            SmartCardKind.APPOINTMENT,
+            "体检预约：11月6日 08:00，胃镜，空腹，深圳第一健康鼎和分院",
+            null
+        )
+        assertTrue(plan?.searchQuery != null)
+        assertNull(plan?.fetchUrl)
+    }
+
+    @Test
+    fun extractPublicLinks_excludesMeetingLinks() {
+        val text = "资料 https://example.com/guide，入会 https://vc.feishu.cn/j/123456789，" +
+            "腾讯会议 https://meeting.tencent.com/dm/abc"
+        assertEquals(
+            listOf("https://example.com/guide"),
+            extractPublicLinks(text)
+        )
+        // 链接后直接跟中文（无标点、无空格）也要截断，不能把中文吞进链接
+        assertEquals(
+            listOf("https://example.com/guide"),
+            extractPublicLinks("详情见 https://example.com/guide请提前到场")
+        )
+    }
+
+    // ---------- 试点 B 路线：挑证据（方案 5.2） ----------
+
+    @Test
+    fun pickEvidence_picksTopTwoByAuthorityAndScore() {
+        val low = PrepEvidence("低权威", "https://a.com/1", "摘要", 2.9, 1)
+        val mid = PrepEvidence("中权威", "https://a.com/2", "摘要", 1.0, 3)
+        val high = PrepEvidence("高权威高分", "https://a.com/3", "摘要", 2.5, 4)
+        val dup = PrepEvidence("重复链接", "https://a.com/3", "摘要", 3.0, 4)
+        val picked = pickEvidence(listOf(low, mid, high, dup))
+        assertEquals(listOf(high, mid), picked)
+        assertEquals(emptyList<PrepEvidence>(), pickEvidence(emptyList()))
+    }
+
+    // ---------- 试点 B 路线：出处校验（方案 5.3） ----------
+
+    @Test
+    fun validatePrepWithEvidence_keepsSupportedDropsUnsupported() {
+        val source = "体检预约：11月6日 08:00，胃镜，空腹，深圳第一健康鼎和分院"
+        val evidence = listOf(
+            PrepEvidence(
+                "胃镜检查前准备", "https://example.com/wei",
+                "胃镜检查前需空腹8小时，检查当天穿宽松衣服", 2.5, 3
+            )
+        )
+        // 本地事实支持的留、查证支持的留、都没依据的丢
+        assertEquals(
+            "检查前空腹8小时 · 穿宽松衣服",
+            validatePrepWithEvidence(
+                "检查前空腹8小时 · 穿宽松衣服 · 带防晒霜",
+                source, evidence
+            )
+        )
+        // 全都不支持 → 整段丢
+        assertNull(
+            validatePrepWithEvidence("带防晒霜 · 记得带伞", source, evidence)
+        )
+    }
+
+    @Test
+    fun validatePrepWithEvidence_emptyEvidenceFallsBackToSource() {
+        // 搜/抓失败（证据为空）时退回只按本地事实校验，不重试、不报错
+        val source = "体检预约：11月6日 08:00，胃镜，空腹"
+        assertEquals(
+            "检查前空腹",
+            validatePrepWithEvidence("检查前空腹 · 带防晒霜", source, emptyList())
+        )
+        assertNull(validatePrepWithEvidence("带防晒霜", source, emptyList()))
+    }
 }
