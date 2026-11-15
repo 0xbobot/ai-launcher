@@ -10,6 +10,10 @@
 
 ---
 
+## v1.3.82（versionCode 540）— 2026-11-15
+
+Bob 2026-11-15 17:51 录屏：539「还是一样」。版本判定：Bob 在 539 上（滑动帧两张卡贴住、无缝无重叠，539 的滑入带松手位移修法已生效；录屏只有 2 张卡，金点只在两个 x 位置，不是简报说的 3 张；1.3s、2.6s 两帧是干净稳态单卡、无文字重叠）。闪只在拖动阶段：拖动时槽位只画当前一张，下一张不渲染，手指一拖就露蓝底（帧 012：187px、帧 013：420px、帧 025：106px、帧 035：227px），Bob 拖得快、蓝底 0.2 秒内从 0 长到 420px，看上去就是「还是一样」的闪；539 只堵了松手后的滑动缝，拖动阶段的蓝底没堵。修法：非滑动分支在拖动位移不为 0 时把拖动方向上的下一张／上一张垫在下面一起画（位移＝拖动位移＋dir×卡宽，纯函数 carouselDragUnderOffset），与当前卡全程恰好差一整张卡宽、无缝无重叠；松手换卡时滑入起点与垫卡位置一致，拖动到滑动无跳变；静止时不垫、1 张时不垫。单测：新增 dragUnderOffset_leftDrag_nextCardOnRight、dragUnderOffset_rightDrag_prevCardOnLeft、dragUnderOffset_zeroWidth_returnsDragOffset、dragUnderOffset_underAndCurrentExactlyOneWidthApart（拖动全程缝宽恒 0）、dragUnderOffset_atReleaseMatchesSlideInStart（垫卡位置＝滑入起点）。拖动跟手、松手判定（1/4 卡宽／500dp/s）、圆点、自动轮换 5 秒、滑完暂停 8 秒、光晕不动。真机验收：手动拖动全程露出下一张、不露蓝底不闪、松手换卡无跳变、回弹时垫卡跟着收回；回归：拖动跟手、松手换卡／回弹、轻扫换卡、自动轮换 5 秒、点圆点跳卡、滑完暂停 8 秒、按钮照常可点、长文竖翻照常、「我知道了」才摘卡、扇形淡化、冷启动不闪、小标豆包日历、光晕极淡不显土。
+
 ## v1.3.81（versionCode 539）— 2026-11-15
 
 Bob 2026-11-15 17:25 录屏：538 还是在闪。版本判定：Bob 在 538 上（5.1s 自动轮换是滑动、无手指，clipToBounds 在起作用；全片无 Crossfade 鬼影）。闪的根因是手动滑动的滑入位移漏了松手位移：出卡从松手位移出发，进卡仍从 ±卡宽起步，两张在滑动起点拉开 |松手位移| 的蓝底缝（录屏里 250–306px，缝宽＝松手位移量，随进度收到 0；自动轮换／点圆点松手位移为 0，所以不闪）。修法：carouselSlideInOffset 加 releaseOffsetPx 参数，进卡起点改成 dir×卡宽＋松手位移，两张全程恰好差一整张卡宽、无缝无重叠；自动轮换／点圆点行为不变。单测：新增 slideInOffset_withReleaseOffset_startsShiftedByReleaseOffset、slideOffsets_withReleaseOffset_stayExactlyOneWidthApart（全程缝宽恒 0），旧 slideOffsets_outAndInDoNotOverlap 改按新签名断言贴住。拖动跟手、松手判定（1/4 卡宽／500dp/s）、圆点、自动轮换 5 秒、滑完暂停 8 秒、光晕不动。真机验收：手动滑动一张接一张全程无缝不闪、自动轮换 5 秒不闪、点圆点跳卡不闪、滑完稳态无残边、看日程弹本地详情 Dialog；回归：拖动跟手、松手换卡／回弹、轻扫换卡、滑完暂停 8 秒、按钮照常可点、长文竖翻照常、「我知道了」才摘卡、扇形淡化、冷启动不闪、小标豆包日历、光晕极淡不显土。
