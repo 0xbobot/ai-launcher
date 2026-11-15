@@ -47,9 +47,16 @@ object CalendarRepository {
         ) == PackageManager.PERMISSION_GRANTED
 
     /** 今日 [本地 00:00, 次日 00:00) 窗口——从查询里抽出的纯函数，便于单测。 */
-    internal fun todayWindow(nowMillis: Long): Pair<Long, Long> {
+    internal fun todayWindow(nowMillis: Long): Pair<Long, Long> = dayWindow(nowMillis, 0)
+
+    /**
+     * 某天的窗口（今天向后平移 dayOffset 天）：[当天 00:00, 次日 00:00)。
+     * 节点一「明天一览」用 dayOffset = 1。纯函数，单测锁。
+     */
+    internal fun dayWindow(nowMillis: Long, dayOffset: Int): Pair<Long, Long> {
         val cal = Calendar.getInstance().apply {
             timeInMillis = nowMillis
+            add(Calendar.DAY_OF_YEAR, dayOffset)
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
@@ -62,9 +69,16 @@ object CalendarRepository {
     }
 
     /** 今日全部日历事件（按开始时间升序，最多 20 条）；任何异常吞成空表（与原行为一致）。 */
-    fun loadTodayEvents(context: Context): List<CalEvent> {
+    fun loadTodayEvents(context: Context): List<CalEvent> = loadDayEvents(context, 0)
+
+    /**
+     * 某天的全部日历事件（今天向后平移 dayOffset 天；按开始时间升序，
+     * 最多 20 条）；任何异常吞成空表。节点一「明天一览」用 dayOffset = 1。
+     * 与 loadTodayEvents 同一套查询，只平移窗口。
+     */
+    fun loadDayEvents(context: Context, dayOffset: Int): List<CalEvent> {
         return try {
-            val (start, end) = todayWindow(System.currentTimeMillis())
+            val (start, end) = dayWindow(System.currentTimeMillis(), dayOffset)
             val builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
             ContentUris.appendId(builder, start)
             ContentUris.appendId(builder, end)

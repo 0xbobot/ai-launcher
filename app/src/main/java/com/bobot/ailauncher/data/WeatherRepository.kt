@@ -24,7 +24,11 @@ object WeatherRepository {
         val feelsLike: Int = 0,
         val humidity: Int = 0,
         val windSpeed: Double = 0.0,
-        val hourly: List<HourPoint> = emptyList()
+        val hourly: List<HourPoint> = emptyList(),
+        // 节点一：明天的最高/最低/天气描述（daily 第 1 天；取不到为 0/空串）
+        val tomorrowHigh: Int = 0,
+        val tomorrowLow: Int = 0,
+        val tomorrowDesc: String = ""
     )
 
     data class HourPoint(
@@ -43,6 +47,23 @@ object WeatherRepository {
         71, 73, 75, 77, 85, 86 -> "雪"
         95, 96, 99 -> "雷阵雨"
         else -> "多云"
+    }
+
+    /**
+     * 明天的预报（daily 数组第 1 天）：最高/最低/天气描述；数组不足 2 天
+     * 返回 null（调用方按缺天气处理，该行不显示）。纯函数，单测锁。
+     */
+    data class TomorrowForecast(val high: Int, val low: Int, val desc: String)
+
+    fun tomorrowForecast(
+        maxTemps: List<Double>, minTemps: List<Double>, codes: List<Int>
+    ): TomorrowForecast? {
+        if (maxTemps.size < 2 || minTemps.size < 2 || codes.size < 2) return null
+        return TomorrowForecast(
+            high = maxTemps[1].toInt(),
+            low = minTemps[1].toInt(),
+            desc = codeToDesc(codes[1])
+        )
     }
 
     /** 同步调用，调用方需在后台线程执行 */
@@ -70,7 +91,7 @@ object WeatherRepository {
             val c2 = URL(
                 "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                     "&current=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m" +
-                    "&daily=temperature_2m_max,temperature_2m_min" +
+                    "&daily=temperature_2m_max,temperature_2m_min,weather_code" +
                     "&hourly=temperature_2m,weather_code&forecast_days=2&timezone=auto"
             ).openConnection() as HttpURLConnection
             c2.connectTimeout = 8000
@@ -86,10 +107,20 @@ object WeatherRepository {
             // 今日最高/最低（取 daily 第 0 天）
             var high = temp
             var low = temp
+            // 明天最高/最低＋天气描述（取 daily 第 1 天；节点一「明天一览」用）
+            var tomorrow: TomorrowForecast? = null
             try {
                 val daily = j2.getJSONObject("daily")
                 high = daily.getJSONArray("temperature_2m_max").getDouble(0).toInt()
                 low = daily.getJSONArray("temperature_2m_min").getDouble(0).toInt()
+                val maxArr = daily.getJSONArray("temperature_2m_max")
+                val minArr = daily.getJSONArray("temperature_2m_min")
+                val codeArr = daily.getJSONArray("weather_code")
+                tomorrow = tomorrowForecast(
+                    maxTemps = List(maxArr.length()) { maxArr.getDouble(it) },
+                    minTemps = List(minArr.length()) { minArr.getDouble(it) },
+                    codes = List(codeArr.length()) { codeArr.getInt(it) }
+                )
             } catch (_: Exception) {
             }
             // 未来几小时：从当前小时往后取 3 个点
@@ -122,7 +153,12 @@ object WeatherRepository {
                 }
             } catch (_: Exception) {
             }
-            return WeatherInfo(temp, desc, city, high, low, feelsLike, humidity, windSpeed, hourly)
+            return WeatherInfo(
+                temp, desc, city, high, low, feelsLike, humidity, windSpeed, hourly,
+                tomorrowHigh = tomorrow?.high ?: 0,
+                tomorrowLow = tomorrow?.low ?: 0,
+                tomorrowDesc = tomorrow?.desc ?: ""
+            )
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.d(TAG, "weather failed: ${e.message}")
             return null

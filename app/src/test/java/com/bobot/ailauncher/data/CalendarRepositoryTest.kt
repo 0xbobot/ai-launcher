@@ -41,4 +41,36 @@ class CalendarRepositoryTest {
         }.timeInMillis
         assertEquals(expectedEnd, end)
     }
+
+    @Test
+    fun dayWindowOffsetZeroEqualsTodayWindow() {
+        val now = Calendar.getInstance().apply {
+            set(2026, Calendar.OCTOBER, 22, 15, 43, 12)
+        }.timeInMillis
+        assertEquals(
+            CalendarRepository.todayWindow(now),
+            CalendarRepository.dayWindow(now, 0)
+        )
+    }
+
+    @Test
+    fun dayWindowOffsetOneIsTomorrow() {
+        val now = Calendar.getInstance().apply {
+            set(2026, Calendar.OCTOBER, 22, 15, 43, 12)
+        }.timeInMillis
+        val (start, end) = CalendarRepository.dayWindow(now, 1)
+        val s = Calendar.getInstance().apply { timeInMillis = start }
+        assertEquals(2026, s.get(Calendar.YEAR))
+        assertEquals(Calendar.OCTOBER, s.get(Calendar.MONTH))
+        assertEquals(23, s.get(Calendar.DAY_OF_MONTH))
+        assertEquals(0, s.get(Calendar.HOUR_OF_DAY))
+        val e = Calendar.getInstance().apply { timeInMillis = end }
+        assertEquals(24, e.get(Calendar.DAY_OF_MONTH))
+        // 明天 10:00 落在窗口内，今天 10:00 不在。
+        val tomorrowTen = Calendar.getInstance().apply {
+            set(2026, Calendar.OCTOBER, 23, 10, 0, 0)
+        }.timeInMillis
+        assertTrue(start <= tomorrowTen && tomorrowTen < end)
+        assertTrue(now < start)
+    }
 }

@@ -352,7 +352,11 @@ fun SmartCardStackHost() {
                     // 点日历卡正文：与右按钮同一动作（加入会议 / 看日程）。
                     // 第十九批：时间段内点动作不算处理完、卡片不摘（performAction
                     // 内按 kind＋deadlineMs 判），只有「我知道了」或过了截止点才摘。
-                    if (card.kind == SmartCardKind.CALENDAR) {
+                    // 点总览卡正文：与右按钮同一动作（加入会议 / 看日程 / 打开看看）。
+                    // 总览卡不是时间段卡（windowStartMs=0），点动作成功即摘卡。
+                    if (card.kind == SmartCardKind.CALENDAR ||
+                        card.kind == SmartCardKind.DAY_OVERVIEW
+                    ) {
                         val opened = SmartCardActions.performAction(context, card)
                         if (!opened) IslandToasts.show("这次没打开，稍后再试试吧")
                     }

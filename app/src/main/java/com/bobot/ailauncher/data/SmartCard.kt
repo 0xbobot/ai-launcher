@@ -30,7 +30,11 @@ enum class SmartCardKind {
      * 应用推的；只在首次运行且还不是默认桌面时出现，问一次、答完即关。
      * 无截止点（deadlineMs = Long.MAX_VALUE，永不过期）；排序垫底
      * （sortMs = Long.MAX_VALUE，有时效真卡之后、引导卡之前）。 */
-    DEFAULT_LAUNCHER
+    DEFAULT_LAUNCHER,
+    /** 节点一「今天 / 明天一览」：起床窗出今天一览、睡前窗（21:30）
+     * 出明天一览；三行（天气＋第一场会＋未读），排在有时效真卡之后、
+     * 设默认卡之前；点「我知道了」当天不再出（id 按日拼）。 */
+    DAY_OVERVIEW
 }
 
 /** 卡片的下一步动作：点它就算处理完一张——除了第十九批的有时间段提醒
@@ -211,8 +215,9 @@ internal fun kindRank(kind: SmartCardKind): Int = when (kind) {
     SmartCardKind.CALENDAR -> 2
     SmartCardKind.MISSED_CALL -> 3
     SmartCardKind.NOTIFICATION -> 4
-    SmartCardKind.DEFAULT_LAUNCHER -> 5
-    SmartCardKind.GUIDE -> 6
+    SmartCardKind.DAY_OVERVIEW -> 5
+    SmartCardKind.DEFAULT_LAUNCHER -> 6
+    SmartCardKind.GUIDE -> 7
 }
 
 /**

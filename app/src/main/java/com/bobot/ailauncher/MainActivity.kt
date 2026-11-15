@@ -23,6 +23,7 @@ import com.bobot.ailauncher.core.context.ContextEngine
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.data.CapabilityRegistry
 import com.bobot.ailauncher.data.OtaUpdater
+import com.bobot.ailauncher.data.WakeWindowStore
 import com.bobot.ailauncher.ui.MainScreen
 import com.bobot.ailauncher.ui.theme.AILauncherTheme
 import kotlinx.coroutines.launch
@@ -98,6 +99,9 @@ class MainActivity : FragmentActivity() {
 
         // v0.20（PRD §十八 Context Engine）：前台应用追踪 + 屏幕事件 → EventBus
         ContextEngine.start(this)
+
+        // 节点一：起床窗学习——订阅 ScreenOn，记每天第一次亮屏（只记时间、不记内容）。
+        WakeWindowStore.start(this)
 
         setContent {
             AILauncherTheme {

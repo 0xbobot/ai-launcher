@@ -853,6 +853,63 @@ object SmartCardRepository {
     }
 
     /**
+     * 节点一「今天 / 明天一览」（方案 ac-missing-nodes-plan.md 第一批）：
+     * 起床窗（学出来的，最近 7 天第一次亮屏中位数 ±60 分钟，冷启动
+     * 6:30–8:30）出今天一览；睡前窗（21:30 锚点）出明天一览；窗口外
+     * 返回 null。取数：天气读 WeatherState.full 缓存（不新增拉取）、
+     * 会议按日偏移查日历（今天复用 refresh 已查的 calEvents）、未读
+     * 读 badgeCounts（只用条数＋来源名）；组装与降级在
+     * buildDayOverviewCard（纯函数，单测锁）。
+     */
+    internal fun dayOverviewCard(
+        context: Context, nowMs: Long, calEvents: List<CalEvent>, calPerm: Boolean
+    ): SmartCard? {
+        val wake = WakeWindowStore.wakeWindowFor(context, nowMs)
+        val sleep = WakeWindowStore.sleepWindowMs(nowMs)
+        val (dayOffset, windowStartMs, windowEndMs) = when {
+            nowMs >= wake.first && nowMs < wake.second ->
+                Triple(0, wake.first, wake.second)
+            nowMs >= sleep.first && nowMs < sleep.second ->
+                Triple(1, sleep.first, sleep.second)
+            else -> return null
+        }
+        val events = if (dayOffset == 0) {
+            calEvents
+        } else if (calPerm) {
+            CalendarRepository.loadDayEvents(context, 1)
+        } else {
+            emptyList()
+        }
+        val firstEvent = firstRelevantEvent(events, nowMs)
+        val unread = NotificationRepository.badgeCounts.value
+            .filter { it.value > 0 }
+            .entries.sortedByDescending { it.value }
+            .map { (pkg, count) ->
+                UnreadSource(pkg, SmartCardActions.appLabel(context, pkg) ?: pkg, count)
+            }
+        val calendarPkg = resolveLaunchableCalendarPackage(context)
+        return buildDayOverviewCard(
+            DayOverviewInput(
+                dayOffset = dayOffset,
+                dateKey = dateKeyOf(CalendarRepository.dayWindow(nowMs, dayOffset).first),
+                windowStartMs = windowStartMs,
+                windowEndMs = windowEndMs,
+                weather = WeatherState.full.value,
+                firstEvent = firstEvent,
+                meetingUrl = firstEvent?.let { extractMeetingUrl(it) },
+                meetingTargetApp = firstEvent?.let {
+                    calendarCardTargetApp(it, resolveCalendarApp(context))
+                },
+                unread = unread,
+                calendarAppPackage = calendarPkg,
+                calendarAppTargetApp = calendarPkg?.let { pkg ->
+                    SmartCardActions.appLabel(context, pkg)?.let { TargetApp(pkg, it) }
+                }
+            )
+        )
+    }
+
+    /**
      * 设默认桌面卡（Bob 2026-11-14 07:33 亲令）：首次安装时问用户要不要
      * 把 AI桌面设为默认桌面。出现条件（shouldShowDefaultLauncherCard）：
      * 还没问过（default_launcher_asked 未记）且当前还不是默认桌面。
@@ -967,6 +1024,8 @@ object SmartCardRepository {
         } else emptyList()
         val calCount = calEvents.mapNotNull { calendarCard(it, context, nowMs) }
             .also { candidates += it }.size
+        // 节点一：今天/明天一览（窗口内才出现，排在有时效真卡之后）。
+        dayOverviewCard(context, nowMs, calEvents, calPerm)?.let { candidates += it }
         var notifCount = 0
         for (n in notifications) {
             if (n.packageName == context.packageName) continue
@@ -1080,7 +1139,8 @@ object SmartCardRepository {
             when (card.kind) {
                 SmartCardKind.BILL, SmartCardKind.APPOINTMENT ->
                     used += UiPrefs.CONNECTOR_MESSAGE
-                SmartCardKind.CALENDAR -> used += UiPrefs.CONNECTOR_CALENDAR
+                SmartCardKind.CALENDAR, SmartCardKind.DAY_OVERVIEW ->
+                    used += UiPrefs.CONNECTOR_CALENDAR
                 SmartCardKind.MISSED_CALL -> {
                     used += UiPrefs.CONNECTOR_PHONE
                     used += UiPrefs.CONNECTOR_NOTIFICATION
