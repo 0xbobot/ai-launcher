@@ -10,10 +10,11 @@ import com.bobot.ailauncher.ui.smartcard.SmartCardRowGap
 import com.bobot.ailauncher.ui.smartcard.SmartCardStackTopGap
 import com.bobot.ailauncher.ui.smartcard.SmartCardSubtitleEndInset
 import com.bobot.ailauncher.ui.smartcard.SmartCardTitleRowHeight
+import com.bobot.ailauncher.ui.smartcard.SmartCardHaloColor
+import com.bobot.ailauncher.ui.smartcard.SmartCardHaloMaxAlpha
 import com.bobot.ailauncher.ui.smartcard.SmartCardHaloMinAlpha
 import com.bobot.ailauncher.ui.smartcard.SmartCardHaloPeriodMs
 import com.bobot.ailauncher.ui.smartcard.SmartCardHaloStroke
-import com.bobot.ailauncher.ui.smartcard.smartCardBorderColors
 import com.bobot.ailauncher.ui.smartcard.smartCardFactAreaHeight
 import com.bobot.ailauncher.ui.smartcard.smartCardTintAlpha
 import org.junit.Assert.assertEquals
@@ -27,11 +28,11 @@ import org.junit.Test
  * 布局本身 JVM 测不到（Compose 排版），锁死的是数值一级：
  * ①卡高固定 192dp（8dp 网格）；②正文区至少 3 行高（算式 192－28－20－48－16
  * ＝80dp ≥ 72dp 的 3 行下限）；③小标右端内收 16dp（右缘距卡右缘 30dp）；
- * ④呼吸描边渐变色（暖金→柔玫→冷青→暖金闭环，
- * 玫/青低饱和）；⑤暖灰衬底透明度（有纹理壁纸 0.55、低对比环境 0.75）；
+ * ④呼吸描边单色（第三十八批收敛：只留一色暖金、1dp 发丝边、透明度
+ * 0.15↔0.35；三色渐变已删）；⑤暖灰衬底透明度（有纹理壁纸 0.55、低对比环境 0.75）；
  * ⑥叠层与 hero 的间距 16dp（8dp 网格）。
- * 正文 15sp Medium、去截断、卡内滚动、露边无字、3dp 呼吸描边（第二十六批
- * 由 2dp 加粗）、小标换位本身是 Compose 排版／绘制行为，见收据的 diff 复核
+ * 正文 15sp Medium、去截断、卡内滚动、露边无字、1dp 呼吸描边（第三十八批
+ * 由 3dp 收细）、小标换位本身是 Compose 排版／绘制行为，见收据的 diff 复核
  * ＋Bob 真机验收。
  */
 class SmartCardRedesignTest {
@@ -88,46 +89,27 @@ class SmartCardRedesignTest {
         assertEquals(0, SmartCardSubtitleEndInset.value.toInt() % 8)
     }
 
-    // ---------- 呼吸描边渐变色 ----------
+    // ---------- 呼吸描边单色（第三十八批收敛） ----------
 
     @Test
-    fun borderColors_areGoldRoseCyanGoldLoop() {
-        val colors = smartCardBorderColors()
-        assertEquals(4, colors.size)
-        // 首尾同为 Bob 点名的暖金，绕一圈不断色。
-        assertEquals(Color(0xFFD4A24E), colors[0])
-        assertEquals(Color(0xFFD4A24E), colors[3])
-        assertEquals(Color(0xFFD99B90), colors[1])
-        assertEquals(Color(0xFF6FA8A0), colors[2])
+    fun borderColor_isSingleGold() {
+        // 三色渐变删掉，只留一色暖金（Bob 点名的锚点，不新加颜色）。
+        assertEquals(Color(0xFFD4A24E), SmartCardHaloColor)
+    }
+
+    // ---------- 第三十八批：光晕收敛（Bob 2026-11-15：光晕显土） ----------
+
+    @Test
+    fun halo_strokeIs1dp() {
+        // 描边 3dp→1dp：细线才不土，只做轻提示、不做装饰描边。
+        assertEquals(1.dp, SmartCardHaloStroke)
     }
 
     @Test
-    fun borderColors_roseAndCyanAreLowSaturation() {
-        // 低饱和、贴浅暖灰主题：玫／青的饱和度（(max-min)/max）都低于 0.35；
-        // 金是 Bob 点名的锚点，不锁饱和度。
-        val colors = smartCardBorderColors()
-        listOf(colors[1], colors[2]).forEach { color ->
-            val r = color.red
-            val g = color.green
-            val b = color.blue
-            val max = maxOf(r, g, b)
-            val min = minOf(r, g, b)
-            assertTrue((max - min) / max < 0.35f)
-        }
-    }
-
-    // ---------- 第二十六批：光晕加亮（Bob 2026-11-14：太淡感受不到） ----------
-
-    @Test
-    fun halo_strokeIs3dp() {
-        // 描边 2dp→3dp，只加存在感，不改卡片结构与配色体系。
-        assertEquals(3.dp, SmartCardHaloStroke)
-    }
-
-    @Test
-    fun halo_minAlphaIs08() {
-        // 呼吸下限 0.5→0.8：描边不再长时间躲在半透明里。
-        assertEquals(0.8f, SmartCardHaloMinAlpha, 0.001f)
+    fun halo_alphaRangeIsFaint() {
+        // 呼吸 0.8↔1 → 0.15↔0.35：极淡，峰值也只有三分之一不透明。
+        assertEquals(0.15f, SmartCardHaloMinAlpha, 0.001f)
+        assertEquals(0.35f, SmartCardHaloMaxAlpha, 0.001f)
     }
 
     @Test

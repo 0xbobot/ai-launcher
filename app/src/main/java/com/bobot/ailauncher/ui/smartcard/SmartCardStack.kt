@@ -2,7 +2,6 @@ package com.bobot.ailauncher.ui.smartcard
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -12,7 +11,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,10 +38,12 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +58,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -111,9 +115,8 @@ import kotlinx.coroutines.delay
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.rememberReduceMotion
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
  * 智能卡片叠层宿主（第一阶段，447/v1.2.0，设计稿 §4）：
@@ -126,10 +129,11 @@ import kotlin.math.sin
  * 不画下一张的边。自动定时轮换（5 秒一档，≥2 张才轮，1 张不轮）；
  * 切卡只用淡入淡出（300ms，减动效 120ms），不飞出、不滑、不揭示；
  * 卡片下方圆点指示（当前张实心金、其余空心淡，点圆点跳到那一张，
- * 点后自动轮换暂停 8 秒再恢复）；卡片上不再挂横滑手势——想看下一张
- * 就等自动轮换或点圆点。横滑取消后扇形仲裁不受影响：HomeScreen 的
- * 盲操触发区按叠层实测 bounds 排除（纵向 fallback 同样排除），卡片区
- * 的手势本来就不走盲操／应用中心。
+ * 点后自动轮换暂停 8 秒再恢复）；卡片上挂手动滑动（第三十七批回来、
+ * 第三十八批改跟手）：拖动位移跟手指走，松手位移超 1/3 卡宽或速度
+ * 够就换卡（走 jumpTo＋淡入淡出收尾）、否则回弹；滑动只切卡、不摘卡。
+ * 扇形仲裁不受影响：HomeScreen 的盲操触发区按叠层实测 bounds 排除
+ * （纵向 fallback 同样排除），卡片区的手势本来就不走盲操／应用中心。
  * 只有点「我知道了」才摘卡（真卡 markDone／引导卡轮换推，走原有口径），
  * 摘完自动进下一张、圆点更新。点下一步动作算处理完一张、卡片消失——
  * 除了第十九批的有时间段提醒（日历/预约）：时间段内点动作不摘卡、
@@ -653,56 +657,56 @@ fun smartCardFactAreaHeight(): Dp =
         SmartCardActionRowMinHeight - SmartCardRowGap * 2
 
 /**
- * 呼吸描边渐变色（重设计 §2.2）：暖金 #D4A24E → 柔玫 → 冷青 → 暖金闭环。
- * 金是 Bob 点名的锚点；玫/青低饱和、贴浅暖灰主题；首尾同色，绕一圈不断色。
- * 第二十六批（Bob 2026-11-14：光晕太淡感受不到）：玫/青各加深一档
- * （#D9A5A0→#D99B90、#8FB8B5→#6FA8A0），饱和度仍在 0.35 上限内
- * （玫 0.336、青 0.339，见 SmartCardRedesignTest），金不动。
+ * 光晕描边颜色（第三十八批，Bob 2026-11-15：光晕显土——收敛）：
+ * 只留一色暖金 #D4A24E（Bob 点名的锚点、圆点与主操作同色，不新加颜色）。
+ * 516 加亮的三色渐变（金／玫／青绕圈）就是土的来源，本批整条删掉：
+ * 不再有渐变、不再有旋转、不再加亮，只剩一层极淡的单色呼吸边。
+ * 选①（极淡单色）不选②（直接拿掉）：呼吸边是顶卡“活着”的唯一信号，
+ * 拿掉后顶卡与玻璃底只剩一层实色衬底之隔，轮播时“当前这张”没了轻提示；
+ * 极淡单色保留了这点提示，又去掉了土味——以 Bob 真机截图为准，
+ * 还显土就走②（整条拿掉，见收据已知局限）。
  */
-fun smartCardBorderColors(): List<Color> = listOf(
-    Color(0xFFD4A24E),
-    Color(0xFFD99B90),
-    Color(0xFF6FA8A0),
-    Color(0xFFD4A24E)
-)
+val SmartCardHaloColor = Color(0xFFD4A24E)
 
 /**
- * 光晕描边宽度（重设计 §2.2，第二十六批：Bob 2026-11-14 说光晕太淡、
- * 感受不到——2dp→3dp，只加存在感，不改卡片结构与配色体系）。
+ * 光晕描边宽度（第三十八批收敛：3dp→1dp——细线才不土，1dp 发丝边
+ * 配极淡透明度，只做轻提示，不做装饰描边）。
  */
-val SmartCardHaloStroke = 3.dp
+val SmartCardHaloStroke = 1.dp
 
 /**
- * 光晕描边内收量（第三十七批，Bob 2026-11-15：光晕有毛边）：
- * 旧值 1dp 小于半个线宽（3dp/2＝1.5dp），描边外缘探出卡片边界 0.5dp，
- * 被 .clip(shape) 的无抗锯齿 clipPath 切掉，圆角处成台阶——就是毛边。
- * 新值 2dp ＝ 半线宽 1.5dp ＋ 0.5dp 安全余量，整条描边落在裁剪内，
- * 可见边缘是描边自身的抗锯齿边。单测锁死（haloStrokeClearance）。
+ * 光晕描边内收量（第三十八批：1dp ＝ 半线宽 0.5dp ＋ 0.5dp 安全余量，
+ * 整条描边落在裁剪内，可见边缘是描边自身的抗锯齿边——第三十七批
+ * 修毛边的同一条规则，线宽变了、内收跟着变；单测锁死
+ * （haloStrokeClearance）。
  */
-val SmartCardHaloInset = 2.dp
+val SmartCardHaloInset = 1.dp
 
 /**
- * 光晕描边圆角（第三十七批）：卡片圆角 20dp －内收 2dp＝18dp，
+ * 光晕描边圆角（第三十八批）：卡片圆角 20dp －内收 1dp＝19dp，
  * 与裁剪圆角同心，描边外缘与卡片边界平行。
  */
-val SmartCardHaloCornerRadius = 18.dp
+val SmartCardHaloCornerRadius = 19.dp
 
 /**
  * 描边外缘相对卡片边界的余量（纯函数，单测锁死）：inset − stroke/2。
- * ≥0.5dp 整条描边落在裁剪内；旧值 1dp − 1.5dp ＝ −0.5dp，外缘探出、
- * 被 clipPath 切掉——毛边的根因（见 SmartCardHaloInset）。
+ * ≥0.5dp 整条描边落在裁剪内；第三十七批的教训：旧值 1dp − 1.5dp
+ * ＝ −0.5dp，外缘探出、被 clipPath 切掉，圆角成台阶（毛边）。
  */
 internal fun haloStrokeClearance(inset: Dp, stroke: Dp): Dp = inset - stroke / 2
 
 /**
- * 光晕呼吸下限（重设计 §2.2，第二十六批：0.5→0.8——描边不再长时间
- * 躲在半透明里，呼吸只在 0.8↔1 之间，不做刺眼的跑马灯）。
+ * 光晕呼吸透明度上下限（第三十八批收敛：0.8↔1 → 0.15↔0.35——
+ * 极淡，峰值也只有三分之一不透明；呼吸只在 0.15↔0.35 之间轻脉动，
+ * 不做刺眼的跑马灯、不做加亮。减动效时静止在上限 0.35f。
  */
-const val SmartCardHaloMinAlpha = 0.8f
+const val SmartCardHaloMinAlpha = 0.15f
+const val SmartCardHaloMaxAlpha = 0.35f
 
 /**
- * 光晕一圈时长（重设计 §2.2，第二十六批：6000ms→4000ms——渐变移动与
- * 呼吸都略加快，呼吸半程 2000ms；减动效时仍静止）。
+ * 光晕一圈时长（重设计 §2.2，第二十六批：6000ms→4000ms——呼吸
+ * 半程 2000ms；第三十八批不动，只改颜色与透明度，节奏不变；
+ * 减动效时仍静止）。
  */
 const val SmartCardHaloPeriodMs = 4000L
 
@@ -747,9 +751,44 @@ fun SmartCardStack(
     // 点圆点后安静 8 秒再恢复 5 秒一档。
     var resumeAtMillis by remember { mutableLongStateOf(0L) }
     val reduceMotion = rememberReduceMotion()
+    // 跟手拖动状态（第三十八批）：拖动位移（Animatable，纯视觉，跟手指走）、
+    // 卡宽（松手判定用 1/3 卡宽）、拖动中（自动轮换暂停）、收尾任务。
+    // 位移只走这一个 Animatable：拖动时 snapTo（1:1 跟手）、松手后
+    // animateTo 回 0（换卡 150ms tween、回弹弹簧），不另设 Float 状态
+    // 抢写——顶层 animate(初值, 终值, …) 在本工程 Compose 版本重载
+    // 解析失败（CI 实证），不用。
+    val dragScope = rememberCoroutineScope()
+    val dragOffsetX = remember { Animatable(0f) }
+    var cardWidthPx by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    var settleJob by remember { mutableStateOf<Job?>(null) }
+    // 松手收尾（第三十八批）：唯一写 dragOffsetX 的收尾动画入口——
+    // 先取消上一次收尾，保证同一时刻只有一个写者（手势中途被取消、
+    // pointerInput 重启时 finally 里也会调这里，不会与拖动打架）。
+    // springBack＝true：没过线，弹簧回弹（减动效时短 tween、不做弹簧过冲）；
+    // springBack＝false：换卡，150ms tween 回 0，与淡入淡出同步收尾。
+    fun settleDragOffsetToZero(springBack: Boolean) {
+        settleJob?.cancel()
+        settleJob = dragScope.launch {
+            if (springBack && !reduceMotion) {
+                dragOffsetX.animateTo(
+                    0f,
+                    spring(
+                        dampingRatio = SMART_CARD_DRAG_SPRING_DAMPING,
+                        stiffness = SMART_CARD_DRAG_SPRING_STIFFNESS
+                    )
+                )
+            } else {
+                dragOffsetX.animateTo(0f, tween(SMART_CARD_DRAG_SETTLE_MS))
+            }
+        }
+    }
     // 自动轮换计时（第三十三批）：下标／张数／恢复时刻任一变就重计时；
     // 只有 ≥2 张才轮（carouselShouldAutoRotate），1 张不轮、0 张不画。
-    LaunchedEffect(index, cards.size, resumeAtMillis) {
+    // 第三十八批：isDragging 也进键——拖动一开始计时就重算，5 秒档
+    // 不会半路切卡、把用户手里的卡换掉；拖完（回弹）重计时满 5 秒，
+    // 拖完（换卡）走 jumpTo 的 8 秒暂停。
+    LaunchedEffect(index, cards.size, resumeAtMillis, isDragging) {
         if (!carouselShouldAutoRotate(cards.size)) return@LaunchedEffect
         delay(
             carouselWaitMs(
@@ -771,34 +810,75 @@ fun SmartCardStack(
     // 即没有，不贴模板）。copy 只换 prep，不动 id/动作/排序键。
     val topId = cards[index].id
     val connectedIds: Set<String> = connectedFeedbacks.keys
-    // 手动滑动切卡（第三十七批）：只做手势触发，不做飞出／滑动／揭示动画。
-    // detectHorizontalDragGestures 等横向过 touch slop 才认领：点按不触发
-    // （按钮照常可点）、竖向拖动不认领（卡内竖翻照常，由竖向滚动先认领）。
-    // 累计横向位移过 48dp 触发一次，触发后走 jumpTo（与点圆点同一条链：
-    // carouselNextIndex 改下标＋暂停自动轮换 8 秒，切卡走现成的 Crossfade）。
-    // 本次手势触发后不再触发，防一次滑动连跳多张；≥2 张才切，1 张不触发。
-    val swipeThresholdPx = with(LocalDensity.current) {
-        SmartCardSwipeThreshold.toPx()
+    // 手动滑动切卡（第三十八批，Bob 2026-11-15：切换要有跟手动画——
+    // 535 的触发后立刻跳卡，用户感觉“在背后就切换了、完全没有”）。
+    // 跟手：拖动过程中顶卡横向位移跟手指走（1:1，夹到半张卡宽内）；
+    // 松手判定（纯函数 carouselReleaseDecision）：位移超 1/3 卡宽或松手
+    // 速度够就换卡（走 jumpTo＋现成的 Crossfade 淡入淡出收尾，位移 150ms
+    // 回到 0——新卡从拖动位置沉回原位），否则弹簧回弹到 0。
+    // 不要回 521 的飞出（1600px 大位移）、不要回 523 的左右滑切卡整套；
+    // 跟手只做拖动跟随＋松手判定。位移是纯视觉的：拖动不改下标、不调仓库，
+    // 换卡只在松手判定后走 jumpTo（与点圆点同一条链：改下标＋暂停自动
+    // 轮换 8 秒）。点按与竖翻由 Compose 手势仲裁保证互不抢占：横向先过
+    // slop 才认领（点按不触发，按钮照常可点）；竖向先过 slop 就被卡内
+    // verticalScroll 认领，本次手势直接返回（awaitHorizontalTouchSlop-
+    // OrCancellation 返回 null），卡片原地不动。≥2 张才挂，1 张不触发。
+    val flingThresholdPx = with(LocalDensity.current) {
+        SMART_CARD_FLING_VELOCITY_DP_PER_SEC.dp.toPx()
     }
-    val swipeModifier = if (cards.size >= 2) {
+    val dragModifier = if (cards.size >= 2) {
         Modifier.pointerInput(cards.size, index) {
-            var totalDx = 0f
-            var triggered = false
-            detectHorizontalDragGestures(
-                onDragStart = {
-                    totalDx = 0f
-                    triggered = false
-                },
-                onHorizontalDrag = { _, dragAmount ->
-                    if (triggered) return@detectHorizontalDragGestures
-                    totalDx += dragAmount
-                    val dir = carouselSwipeDirection(totalDx, swipeThresholdPx)
+            try {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    // 横向先过 slop 才认领；竖向先过 slop／点按则返回 null。
+                    val slopChange = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
+                        change.consume()
+                    } ?: return@awaitEachGesture
+                    // 上一次收尾没跑完就再拖：先停掉它，从当前位置跟手。
+                    settleJob?.cancel()
+                    isDragging = true
+                    val tracker = VelocityTracker()
+                    tracker.addPosition(down.uptimeMillis, down.position)
+                    tracker.addPosition(slopChange.uptimeMillis, slopChange.position)
+                    try {
+                        horizontalDrag(down.id) { change ->
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            // 增量＝当前位置减上一位置（positionChange() 在本工程
+                            // Compose 版本未解析，改用属性相减，等价）。
+                            val dx = change.position.x - change.previousPosition.x
+                            val target = carouselDragOffsetClamp(
+                                dragOffsetX.value + dx,
+                                cardWidthPx
+                            )
+                            dragScope.launch { dragOffsetX.snapTo(target) }
+                            change.consume()
+                        }
+                    } finally {
+                        isDragging = false
+                    }
+                    val velocity = tracker.calculateVelocity().x
+                    val dir = carouselReleaseDecision(
+                        dragOffsetX.value, cardWidthPx, velocity, flingThresholdPx
+                    )
                     if (dir != 0) {
-                        triggered = true
+                        // 换卡仍走淡入淡出收尾：jumpTo 立即触发 Crossfade，
+                        // 位移 150ms 回到 0——新卡从拖动位置沉回原位，不飞出。
+                        settleDragOffsetToZero(springBack = false)
                         jumpTo(carouselNextIndex(index, cards.size, dir))
+                    } else {
+                        settleDragOffsetToZero(springBack = true)
                     }
                 }
-            )
+            } finally {
+                // 手势中途被取消（如下标／张数变了、pointerInput 重启）：
+                // 位移可能停在半路，收尾回 0，不留一张歪卡；已在收尾的
+                // 不重复启动（settleDragOffsetToZero 自己会取消上一个）。
+                isDragging = false
+                if (dragOffsetX.value != 0f && settleJob?.isActive != true) {
+                    settleDragOffsetToZero(springBack = true)
+                }
+            }
         }
     } else Modifier
     // 第十批：卡片按桌面卡片语言收边——两侧各留 SmartCardStackSideMargin，
@@ -817,13 +897,18 @@ fun SmartCardStack(
         // （300ms，减动效 120ms）——目标态只取卡 id，准备清单异步回来
         // 只改 prep、不触发一次淡入淡出；摘卡瞬间旧卡仍在淡出，按当前
         // 列表找不到就不画退出那一半（摘掉的卡本来就是要消失的）。
-        // 第三十七批：手动滑动切卡回来（只做手势触发，走 jumpTo＋Crossfade，
-        // 不做飞出／滑动／揭示），见 swipeModifier。
+        // 第三十八批：手动滑动改跟手（拖动位移跟手指走、松手判定换卡／回弹，
+        // 见 dragModifier），切卡收尾仍走 Crossfade 淡入淡出；第三十七批
+        // “只做手势触发、不做动画”就此作废。
         Crossfade(
             targetState = topId,
             animationSpec = tween(durationMillis = crossfadeDurationMs(reduceMotion)),
             label = "smart_card_crossfade",
-            modifier = Modifier.fillMaxWidth().then(swipeModifier)
+            modifier = Modifier
+                .fillMaxWidth()
+                .onSizeChanged { cardWidthPx = it.width.toFloat() }
+                .graphicsLayer { translationX = dragOffsetX.value }
+                .then(dragModifier)
         ) { id ->
             val raw = cards.find { it.id == id } ?: return@Crossfade
             val card = raw.copy(prep = prepById[raw.id] ?: raw.prep)
@@ -944,12 +1029,39 @@ internal const val SMART_CARD_CAROUSEL_INTERVAL_MS = 5000L
 internal const val SMART_CARD_CAROUSEL_MANUAL_PAUSE_MS = 8000L
 
 /**
- * 手动滑动切卡的触发阈值（第三十七批，Bob 2026-11-15：要能手动滑动选择）：
- * 累计横向位移过 48dp 触发一次切卡。48dp 是有意的滑动，不是误触；
- * 阈值只看累计位移，不看峰值、不看速度——501–523 的峰值／速度判定
- * 已证实在真机上不可靠，本批不用。单测锁死（carouselSwipeDirection）。
+ * 跟手拖动松手判定的距离线（第三十八批，Bob 2026-11-15：切换要有跟手动画）：
+ * 松手时 |位移| 超 1/3 卡宽就换卡（方向＝位移方向：左滑下一张、右滑上一张）。
+ * 纯函数 carouselReleaseDecision 的一部分，单测锁死。
  */
-val SmartCardSwipeThreshold = 48.dp
+internal const val SMART_CARD_DRAG_RELEASE_FRACTION = 1f / 3f
+
+/**
+ * 跟手拖动位移的夹子（第三十八批）：位移跟手指 1:1 走，但夹到半张卡宽内——
+ * 卡不飞出屏（不要回 521 的 1600px 飞出），拖过半张再拖手指只走、卡不动
+ * （到墙了）。纯函数 carouselDragOffsetClamp 的一部分，单测锁死。
+ */
+internal const val SMART_CARD_DRAG_MAX_FRACTION = 0.5f
+
+/**
+ * 跟手拖动松手判定的速度线（第三十八批）：松手速度（dp/s）够快也换卡——
+ * 轻扫一下不用拖满 1/3 卡宽。500dp/s 是一记有意的轻扫，不是慢拖；
+ * 慢拖靠距离线判定。纯函数 carouselReleaseDecision 的一部分，单测锁死。
+ */
+internal const val SMART_CARD_FLING_VELOCITY_DP_PER_SEC = 500
+
+/**
+ * 跟手拖动松手换卡时位移回到 0 的时长（毫秒，第三十八批）：150ms——
+ * 新卡从拖动位置沉回原位，与 300ms 的淡入淡出同步收尾，不拖沓。
+ */
+internal const val SMART_CARD_DRAG_SETTLE_MS = 150
+
+/**
+ * 跟手拖动松手回弹的弹簧参数（第三十八批）：没过线时弹簧回弹到 0——
+ * 阻尼 0.8（轻回弹、不来回晃）、刚度 800（约 200ms 内回到位）。
+ * 减动效时不用弹簧、改 150ms 短 tween（见 settleDragOffsetToZero）。
+ */
+internal const val SMART_CARD_DRAG_SPRING_DAMPING = 0.8f
+internal const val SMART_CARD_DRAG_SPRING_STIFFNESS = 800f
 
 /** 轮播圆点直径（第三十二批）：6dp；圆点间距 8dp（8dp 网格）。 */
 val SmartCardCarouselDotSize = 6.dp
@@ -965,16 +1077,44 @@ internal fun carouselNextIndex(current: Int, size: Int, dir: Int): Int {
 }
 
 /**
- * 滑动切卡方向（纯函数，单测锁死）：累计横向位移 totalDxPx（左滑为负）
- * 过阈值返回方向（+1 下一张、−1 上一张），没过线返回 0。
- * 只做触发判定，不做飞出／滑动／揭示——切卡走现成的 Crossfade。
+ * 跟手拖动位移夹子（纯函数，单测锁死）：位移夹到 ±半张卡宽内；
+ * 卡宽没量到（≤0）时返回 0——量不到就不拖。
  */
-internal fun carouselSwipeDirection(totalDxPx: Float, thresholdPx: Float): Int =
-    when {
-        totalDxPx <= -thresholdPx -> +1
-        totalDxPx >= thresholdPx -> -1
+internal fun carouselDragOffsetClamp(offsetPx: Float, cardWidthPx: Float): Float {
+    if (cardWidthPx <= 0f) return 0f
+    val max = cardWidthPx * SMART_CARD_DRAG_MAX_FRACTION
+    return offsetPx.coerceIn(-max, max)
+}
+
+/**
+ * 跟手拖动松手判定（纯函数，单测锁死）：位移 offsetPx（左滑为负）、
+ * 卡宽 cardWidthPx、松手速度 velocityPxPerSec（左为负）、速度线
+ * velocityThresholdPxPerSec。返回 +1 下一张、−1 上一张、0 回弹。
+ * 距离优先：|位移| 超 1/3 卡宽就按位移方向换卡；位移没过线再看速度，
+ * 速度过线按速度方向换卡；都没过线回弹。501–523 的教训是判定耦合了
+ * 仓库沉底与飞出动画、修一处漏一处；本批判定只看手势物理量，换卡
+ * 只走 jumpTo＋Crossfade，两边不耦合——位移是纯视觉，拖动不改下标、
+ * 不调仓库。
+ */
+internal fun carouselReleaseDecision(
+    offsetPx: Float,
+    cardWidthPx: Float,
+    velocityPxPerSec: Float,
+    velocityThresholdPxPerSec: Float
+): Int {
+    if (cardWidthPx <= 0f) return 0
+    val distanceDir = when {
+        offsetPx <= -cardWidthPx * SMART_CARD_DRAG_RELEASE_FRACTION -> +1
+        offsetPx >= cardWidthPx * SMART_CARD_DRAG_RELEASE_FRACTION -> -1
         else -> 0
     }
+    if (distanceDir != 0) return distanceDir
+    return when {
+        velocityPxPerSec <= -velocityThresholdPxPerSec -> +1
+        velocityPxPerSec >= velocityThresholdPxPerSec -> -1
+        else -> 0
+    }
+}
 
 /**
  * 轮播是否自动轮换（纯函数，第三十二批单测锁死）：≥2 张才轮换，
@@ -1312,39 +1452,23 @@ private fun smartCardTint(): Color {
 }
 
 /**
- * 顶卡渐变呼吸描边（重设计 §2.2）：只画顶卡。
- * 渐变沿卡边缓慢移动、描边透明度呼吸；减动效时静止（不播动画）。
- * 实现：线性渐变的方向角绕卡旋转——矩形本身不转，只有渐变色在走；
- * 描边向内收 SmartCardHaloInset（2dp＝半线宽 1.5dp＋0.5dp 安全余量），
- * 整条描边都落在 20dp 圆角裁剪内。第三十七批修毛边：旧内收 1dp 小于
- * 半线宽，描边外缘探出 0.5dp、被无抗锯齿的 clipPath 切掉，圆角成台阶。
- * 第二十六批（Bob 2026-11-14：光晕太淡感受不到）：描边 2dp→3dp、
- * 呼吸下限 0.5→0.8、一圈 6 秒→4 秒（呼吸半程 2 秒）、玫/青加深一档
- * （见 smartCardBorderColors），仍在浅暖灰主题与色彩克制口径内，
- * 不做刺眼的跑马灯；参数见 SmartCardHaloStroke／SmartCardHaloMinAlpha／
- * SmartCardHaloPeriodMs（单测锁死）。
+ * 顶卡单色呼吸描边（重设计 §2.2）：只画顶卡。
+ * 第三十八批收敛（Bob 2026-11-15：光晕显土）：三色渐变整条删掉——
+ * 不再有旋转渐变、不再加亮；只剩一层极淡的单色暖金（SmartCardHaloColor），
+ * 1dp 发丝边、透明度在 0.15↔0.35 之间轻呼吸。减动效时静止在上限 0.35f。
+ * 描边向内收 SmartCardHaloInset（1dp＝半线宽 0.5dp＋0.5dp 安全余量），
+ * 整条描边都落在 20dp 圆角裁剪内（第三十七批修毛边的同一条规则）。
+ * 参数见 SmartCardHaloStroke／SmartCardHaloColor／SmartCardHaloMinAlpha／
+ * SmartCardHaloMaxAlpha／SmartCardHaloPeriodMs（单测锁死）。
+ * 还显土就走②（整条拿掉，只留玻璃卡本身干净的边）。
  */
 @Composable
 private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
-    val angle = remember { Animatable(0f) }
-    val borderAlpha = remember { Animatable(1f) }
+    val borderAlpha = remember { Animatable(SmartCardHaloMaxAlpha) }
     LaunchedEffect(reduceMotion) {
         if (reduceMotion) {
-            angle.snapTo(0f)
-            borderAlpha.snapTo(1f)
+            borderAlpha.snapTo(SmartCardHaloMaxAlpha)
         } else {
-            launch {
-                while (true) {
-                    angle.animateTo(
-                        360f,
-                        tween(
-                            durationMillis = SmartCardHaloPeriodMs.toInt(),
-                            easing = LinearEasing
-                        )
-                    )
-                    angle.snapTo(0f)
-                }
-            }
             launch {
                 while (true) {
                     borderAlpha.animateTo(
@@ -1352,7 +1476,7 @@ private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
                         tween(durationMillis = (SmartCardHaloPeriodMs / 2).toInt())
                     )
                     borderAlpha.animateTo(
-                        1f,
+                        SmartCardHaloMaxAlpha,
                         tween(durationMillis = (SmartCardHaloPeriodMs / 2).toInt())
                     )
                 }
@@ -1363,20 +1487,10 @@ private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
     val strokePx = with(density) { SmartCardHaloStroke.toPx() }
     val radiusPx = with(density) { SmartCardHaloCornerRadius.toPx() }
     val insetPx = with(density) { SmartCardHaloInset.toPx() }
-    val colors = smartCardBorderColors()
     return Modifier.drawWithContent {
         drawContent()
-        val rad = Math.toRadians(angle.value.toDouble())
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val dx = cos(rad).toFloat() * (size.width / 2f)
-        val dy = sin(rad).toFloat() * (size.height / 2f)
         drawRoundRect(
-            brush = Brush.linearGradient(
-                colors = colors,
-                start = Offset(cx - dx, cy - dy),
-                end = Offset(cx + dx, cy + dy)
-            ),
+            color = SmartCardHaloColor,
             topLeft = Offset(insetPx, insetPx),
             size = Size(size.width - 2 * insetPx, size.height - 2 * insetPx),
             cornerRadius = CornerRadius(radiusPx, radiusPx),
