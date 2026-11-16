@@ -335,11 +335,13 @@ object LlmRouter {
             toolClient().newCall(request).execute().use { resp ->
                 val rawBody = try { resp.body?.string().orEmpty() } catch (_: Exception) { "" }
                 val items = if (resp.code in 200..299) parseSearchResults(rawBody) else null
-                android.util.Log.d(
-                    "LlmRouter",
-                    "search HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
-                        "results=${items?.size ?: -1}"
-                )
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.d(
+                        "LlmRouter",
+                        "search HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
+                            "results=${items?.size ?: -1}"
+                    )
+                }
                 items?.ifEmpty { null }
             }
         } catch (_: IOException) {
@@ -387,11 +389,13 @@ object LlmRouter {
                 toolClient().newCall(request).execute().use { resp ->
                     val rawBody = try { resp.body?.string().orEmpty() } catch (_: Exception) { "" }
                     val result = if (resp.code in 200..299) parseFetchResult(rawBody) else null
-                    android.util.Log.d(
-                        "LlmRouter",
-                        "fetch HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
-                            "contentBytes=${result?.content?.toByteArray()?.size ?: -1}"
-                    )
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.d(
+                            "LlmRouter",
+                            "fetch HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
+                                "contentBytes=${result?.content?.toByteArray()?.size ?: -1}"
+                        )
+                    }
                     result
                 }
             } catch (_: IOException) {

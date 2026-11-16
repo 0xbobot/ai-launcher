@@ -168,15 +168,14 @@ enum class DockState { Hidden, D1, D2, D3 }
  */
 
 /**
- * 说明页「建议」区文案（Bob 2026-11-15 亲定新版：放顶、加白话、类别
- * 改名；同日真机 verdict 精炼：一句话介绍删了，只留标题 + 按钮 + 状态
- * + 静音 chip；2026-11-16 Bob 追加 refinement：语言精炼但核心信息要
- * 传达清楚——标题下加回一句极简引导语，AI 分析使用行为、给程序坞提
- * 调整建议，三点一句说完）：纯函数/常量，JVM 单测锁死。仓库没有 Compose UI 测试
- * harness；区段排布（建议区在应用行之上）靠代码结构——建议区已抽成
- * DockSuggestionsSection，说明页 Column 里它在 top10 应用行之前调用
- * ——+ 真机验收。类别名只改展示，SuggestionKind 键名、持久化、反馈
- * JSONL 原样不动。
+ * 说明页「建议」文案与行映射（Bob 2026-11-16 拍板 v6 重设计：建议不再
+ * 单独成卡，直接嵌进各应用行右侧；标题行左「调一调程序坞」右建议按钮；
+ * 「不想看的」静音行从这页拿掉——只删页面展示，底层静音功能不动）：
+ * 纯函数/常量，JVM 单测锁死。仓库没有 Compose UI 测试 harness；
+ * 区段排布靠代码结构——建议按钮在标题行、建议动作在各应用行右侧——
+ * + 真机验收。类别名只改展示，SuggestionKind 键名、持久化、反馈
+ * JSONL 原样不动。待采纳的固定/取消固定建议没有「知道了」按钮
+ * （按稿子做）：用户不采纳就留着，下一次分析刷新时替换。
  */
 
 /** 分析按钮文案（纯函数，JVM 单测锁死）：按钮要说出点了能得到什么
@@ -214,6 +213,78 @@ fun analysisFailureText(failure: AnalysisFailure): String = when (failure) {
     AnalysisFailure.ParseFailed -> "模型没回有效结果，稍后再试"
     AnalysisFailure.VerifiedEmpty -> "模型给的建议对不上你的使用记录，稍后再试"
     AnalysisFailure.NoKey -> "去设置里填好大模型 Key 再试"
+}
+
+/**
+ * 标题行建议按钮文案（纯函数，JVM 单测锁死；v6：按钮在标题行右侧，
+ * 不再是通栏大按钮）：分析前说出点了能得到什么（哪个值得固定、哪个
+ * 可以拿下去），不说机制；分析中沿用旧文案；已有建议可看时是「再分析一次」。
+ */
+fun suggestionTitleButtonText(analyzing: Boolean, hasSuggestions: Boolean): String =
+    if (analyzing) "正在分析，稍等一下"
+    else if (hasSuggestions) "再分析一次"
+    else "看看固定哪个、拿下哪个"
+
+/** 应用行右侧的建议动作（纯函数）：决定该行右侧放什么。 */
+enum class RowSuggestionAction {
+    /** 无建议：右侧留空。 */
+    NONE,
+    /** 待采纳的固定建议：金色实心按钮「固定到 Dock」。 */
+    PIN_ADOPT,
+    /** 待采纳的取消固定建议：金色实心按钮「取消固定」。 */
+    UNPIN_ADOPT,
+    /** 待处理的习惯提醒：文字按钮「知道了」。 */
+    OBSERVE_ACK,
+    /** 已采纳：浅金 chip「✓ 已采纳」+ 金色文字按钮「撤销」。 */
+    APPLIED_UNDO,
+}
+
+/** 行右侧动作判定（纯函数）：按建议种类与状态。 */
+fun rowSuggestionAction(suggestion: DockSuggestion?): RowSuggestionAction = when {
+    suggestion == null -> RowSuggestionAction.NONE
+    suggestion.state == SuggestionState.APPLIED -> RowSuggestionAction.APPLIED_UNDO
+    suggestion.kind == SuggestionKind.PIN -> RowSuggestionAction.PIN_ADOPT
+    suggestion.kind == SuggestionKind.UNPIN -> RowSuggestionAction.UNPIN_ADOPT
+    else -> RowSuggestionAction.OBSERVE_ACK
+}
+
+/**
+ * 行内动作按钮文案（纯函数）：按钮直接写动作本身，不用笼统的「采纳」
+ * （行里没有建议标题可对照，「采纳」不知道采纳什么）。
+ */
+fun rowAdoptButtonText(kind: SuggestionKind): String = when (kind) {
+    SuggestionKind.PIN -> "固定到 Dock"
+    SuggestionKind.UNPIN -> "取消固定"
+    SuggestionKind.OBSERVE -> "知道了"
+}
+
+/**
+ * 行第二行文案（纯函数）：有建议的行写建议的理由（建议为什么提出来），
+ * 没建议的行写原来的 dockReason；每行只留一行灰字，不并列两行。
+ */
+fun rowSecondLine(suggestion: DockSuggestion?, dockReason: String): String =
+    suggestion?.body ?: dockReason
+
+/**
+ * 建议分流行（纯函数）：包名对得上的建议落到该应用行；对不上的放末尾
+ * 兜底行——空包名（OBSERVE 可能没写包）、行外包名（快照里有但不在
+ * top10）、同包第二条建议——保证每条建议都看得见，不静默丢掉。
+ */
+fun splitSuggestionsForRows(
+    suggestions: List<DockSuggestion>,
+    top10Pkgs: List<String>,
+): Pair<Map<String, DockSuggestion>, List<DockSuggestion>> {
+    val mapped = mutableMapOf<String, DockSuggestion>()
+    val unmapped = mutableListOf<DockSuggestion>()
+    for (s in suggestions) {
+        val pkg = s.action.pkg
+        if (pkg.isNotBlank() && pkg in top10Pkgs && pkg !in mapped) {
+            mapped[pkg] = s
+        } else {
+            unmapped += s
+        }
+    }
+    return mapped to unmapped
 }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -753,134 +824,34 @@ fun PullUpDock(
             val sheetPrevLabel = if (sheetPrevRecent) {
                 allApps.find { it.packageName == sheetPrevPkg }?.label?.toString()
             } else null
-            ModalBottomSheet(
-                onDismissRequest = { showWhySheet = false },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = AILauncherColors.current.Card,
-                dragHandle = { BottomSheetDefaults.DragHandle() }
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 24.dp)
-                ) {
-                    Text(
-                        text = "为什么是这几个应用",
-                        fontSize = AILauncherType.BodyLarge.fontSize,
-                        fontWeight = FontWeight.Bold,
-                        color = AILauncherColors.current.Title,
-                        modifier = Modifier.padding(vertical = 16.dp)
-                    )
-                    // 大模型建议（Bob 2026-11-15 亲定新版）：说明页顶部
-                    // 「建议」区，打开说明页直接看到「看看固定哪个、拿下哪个」按钮，
-                    // 不用滑到底；应用行在它下面。
-                    DockSuggestionsSection(
-                        allApps = allApps,
-                        top10Pkgs = top10.map { it.packageName }
-                    )
-                    top10.forEach { app ->
-                        val reason = AppUsageTracker.dockReason(
-                            pinned = app.packageName in pinnedPkgs,
-                            hwDayType = AppUsageTracker.hwDayTypeCount(
-                                context, app.packageName, sheetDow, sheetHour
-                            ),
-                            dow = sheetDow,
-                            hour = sheetHour,
-                            prevLabel = sheetPrevLabel,
-                            prevRecent = sheetPrevRecent,
-                            transfer = AppUsageTracker.transferCount(
-                                context, sheetPrevPkg, app.packageName
-                            ),
-                            total = AppUsageTracker.totalCount(context, app.packageName),
-                            recent = AppUsageTracker.recentCount(context, app.packageName),
-                            windowMature = sheetWindowMature
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AppIconImage(
-                                drawable = app.icon,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = app.label.toString(),
-                                    fontSize = AILauncherType.BodyLarge.fontSize,
-                                    color = AILauncherColors.current.Title,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = reason,
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    color = AILauncherColors.current.Hint,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
+            // v6 建议态（说明页打开时建一次，关页即丢——与旧
+            // DockSuggestionsSection 同生命周期）：store + 订阅 + 分析中 +
+            // 状态行。无 Key 时建议 UI 静默不出现（旧行为：整区不渲染），
+            // 行映射也按无建议算。
+            val top10Pkgs = top10.map { it.packageName }
+            val suggestionStore = remember {
+                DockSuggestionStore(context.applicationContext)
+            }
+            val suggestionsUi by suggestionStore.uiState.collectAsState()
+            val suggestionScope = rememberCoroutineScope()
+            var hasLlmKey by remember { mutableStateOf(false) }
+            var analyzing by remember { mutableStateOf(false) }
+            var suggestionStatus by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(Unit) {
+                suggestionStore.refreshUiState()
+                hasLlmKey = withContext(Dispatchers.IO) {
+                    LlmConfig.hasKey(context.applicationContext)
                 }
             }
-        }
-    }
-}
-
-/**
- * 说明页顶部「建议」区（Bob 2026-11-15 亲定新版：放顶、加白话、类别
- * 改名）：一个按钮，用户主动点才分析；无 Key 时整区不出现（静默，
- * 不引导配 Key）。建议只提议，不改 Dock 排序分数；采纳固定/取消固定
- * 走 UiPrefs 固定位。区段末尾一条分隔线，与下面的应用行分开。
- * 文案走本文件顶部的纯函数（suggestionKindLabel、
- * analysisFailureText），JVM 单测锁死。
- * 点完的状态（失败/无候选）用 Callout + Title 色一行醒目展示，不再
- * 是 Footnote + Hint 小字；按钮本身就是重试入口，不另加重试按钮。
- */
-@Composable
-private fun DockSuggestionsSection(
-    allApps: List<com.bobot.ailauncher.data.AppInfo>,
-    top10Pkgs: List<String>
-) {
-    val context = LocalContext.current
-    val suggestionStore = remember {
-        DockSuggestionStore(context.applicationContext)
-    }
-    val suggestionsUi by suggestionStore.uiState.collectAsState()
-    val suggestionScope = rememberCoroutineScope()
-    var hasLlmKey by remember { mutableStateOf(false) }
-    var analyzing by remember { mutableStateOf(false) }
-    var suggestionStatus by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
-        suggestionStore.refreshUiState()
-        hasLlmKey = withContext(Dispatchers.IO) {
-            LlmConfig.hasKey(context.applicationContext)
-        }
-    }
-    if (hasLlmKey) {
-        Text(
-            text = "给你的建议",
-            fontSize = AILauncherType.Title.fontSize,
-            fontWeight = FontWeight.Bold,
-            color = AILauncherColors.current.Title
-        )
-        Text(
-            text = SUGGESTION_AI_INTRO,
-            fontSize = AILauncherType.Footnote.fontSize,
-            color = AILauncherColors.current.Hint,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        Button(
-            onClick = {
+            val visibleSuggestions =
+                if (hasLlmKey) suggestionsUi.suggestions else emptyList()
+            val hasSuggestions = visibleSuggestions.isNotEmpty()
+            val (rowSuggestions, unmappedSuggestions) = remember(
+                visibleSuggestions, top10Pkgs
+            ) {
+                splitSuggestionsForRows(visibleSuggestions, top10Pkgs)
+            }
+            val runAnalysis: () -> Unit = {
                 suggestionScope.launch {
                     analyzing = true
                     suggestionStatus = null
@@ -902,80 +873,141 @@ private fun DockSuggestionsSection(
                             suggestionStatus = analysisFailureText(outcome.failure)
                     }
                 }
-            },
-            enabled = !analyzing,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp)
-        ) {
-            Text(text = suggestionAnalyzeButtonText(analyzing))
-        }
-        suggestionStatus?.let { status ->
-            Text(
-                text = status,
-                fontSize = AILauncherType.Callout.fontSize,
-                color = AILauncherColors.current.Title,
-                modifier = Modifier.padding(vertical = 4.dp)
-            )
-        }
-        suggestionsUi.suggestions.forEach { suggestion ->
-            val icon = if (suggestion.kind == SuggestionKind.OBSERVE) null
-            else allApps.find {
-                it.packageName == suggestion.action.pkg
-            }?.icon
-            SuggestionRow(
-                suggestion = suggestion,
-                icon = icon,
-                store = suggestionStore
-            )
-        }
-        // 静默类别（Bob 2026-11-15 精炼：引导语删了，三个类别紧凑排一行；
-        // 点一下关、再点恢复；类别展示名、键名、持久化、反馈 JSONL 不动。
-        // 2026-11-16 Bob 真机 verdict：三个词光秃秃看不懂是干什么的，行首
-        // 加不可点标签「不想看的：」，只说明这行是关掉哪类建议）。
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = SUGGESTION_MUTE_LABEL,
-                fontSize = AILauncherType.Footnote.fontSize,
-                color = AILauncherColors.current.Hint,
-                modifier = Modifier.padding(end = 4.dp)
-            )
-            SuggestionKind.entries.forEach { kind ->
-                val muted = kind in suggestionsUi.mutedKinds
-                Text(
-                    text = suggestionKindLabel(kind) + if (muted) "（已经关了）" else "",
-                    fontSize = AILauncherType.Footnote.fontSize,
-                    color = if (muted) AILauncherColors.current.Hint
-                    else AILauncherColors.current.Title,
+            }
+            ModalBottomSheet(
+                onDismissRequest = { showWhySheet = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = AILauncherColors.current.Card,
+                dragHandle = { BottomSheetDefaults.DragHandle() }
+            ) {
+                Column(
                     modifier = Modifier
-                        .clickable {
-                            suggestionStore.setKindMuted(kind, !muted)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp)
+                ) {
+                    // 标题行：左「调一调程序坞」，右建议按钮（v6 稿子；按钮
+                    // 两态：分析前「看看固定哪个、拿下哪个」，有建议后「再分析一次」）。
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "调一调程序坞",
+                            fontSize = AILauncherType.BodyLarge.fontSize,
+                            fontWeight = FontWeight.Bold,
+                            color = AILauncherColors.current.Title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(vertical = 16.dp)
+                        )
+                        if (hasLlmKey) {
+                            Button(
+                                onClick = runAnalysis,
+                                enabled = !analyzing,
+                                contentPadding = PaddingValues(
+                                    horizontal = 16.dp,
+                                    vertical = 8.dp
+                                ),
+                                modifier = Modifier.padding(start = 12.dp)
+                            ) {
+                                Text(
+                                    text = suggestionTitleButtonText(
+                                        analyzing,
+                                        hasSuggestions
+                                    ),
+                                    fontSize = AILauncherType.Callout.fontSize,
+                                    maxLines = 1
+                                )
+                            }
                         }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                )
+                    }
+                    // 副标题 + 状态行（只在有 Key 时出现；状态行只在有内容时出现）。
+                    if (hasLlmKey) {
+                        Text(
+                            text = SUGGESTION_AI_INTRO,
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Hint
+                        )
+                        suggestionStatus?.let { status ->
+                            Text(
+                                text = status,
+                                fontSize = AILauncherType.Callout.fontSize,
+                                color = AILauncherColors.current.Title,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                    // 列表标签（原来是大标题的文字，v6 降格为列表标签）。
+                    Text(
+                        text = "为什么是这几个应用",
+                        fontSize = AILauncherType.Title.fontSize,
+                        fontWeight = FontWeight.Bold,
+                        color = AILauncherColors.current.Title,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                    )
+                    top10.forEach { app ->
+                        val reason = AppUsageTracker.dockReason(
+                            pinned = app.packageName in pinnedPkgs,
+                            hwDayType = AppUsageTracker.hwDayTypeCount(
+                                context, app.packageName, sheetDow, sheetHour
+                            ),
+                            dow = sheetDow,
+                            hour = sheetHour,
+                            prevLabel = sheetPrevLabel,
+                            prevRecent = sheetPrevRecent,
+                            transfer = AppUsageTracker.transferCount(
+                                context, sheetPrevPkg, app.packageName
+                            ),
+                            total = AppUsageTracker.totalCount(context, app.packageName),
+                            recent = AppUsageTracker.recentCount(context, app.packageName),
+                            windowMature = sheetWindowMature
+                        )
+                        WhySheetAppRow(
+                            app = app,
+                            secondLine = rowSecondLine(
+                                rowSuggestions[app.packageName],
+                                reason
+                            ),
+                            suggestion = rowSuggestions[app.packageName],
+                            store = suggestionStore
+                        )
+                    }
+                    // 兜底行：没落到任何应用行的建议（空包名、行外包名、
+                    // 同包第二条），保证每条建议都看得见。
+                    unmappedSuggestions.forEach { suggestion ->
+                        val pkgApp = suggestion.action.pkg
+                            .takeIf { it.isNotEmpty() }
+                            ?.let { pkg ->
+                                allApps.find { it.packageName == pkg }
+                            }
+                        SuggestionFallbackRow(
+                            suggestion = suggestion,
+                            app = pkgApp,
+                            store = suggestionStore
+                        )
+                    }
+
+                }
             }
         }
-        HorizontalDivider(
-            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-        )
     }
 }
 
 /**
- * 大模型建议行（说明页「建议」区）：标题 + 带数字的理由 + 动作行。
- * pin/unpin 显示应用图标，observe 显示灯泡（不改任何东西）。
- * 采纳：固定/取消固定走 UiPrefs（Dock 立即重排）；observe 只有
- * 「知道了」。已采纳的行显示「采纳了 · 撤销」（7 天内可撤销）。
+ * 说明页应用行（v6 稿子）：左侧图标 + 应用名 + 一行灰字（有建议的行写
+ * 建议理由、没建议的行写 dockReason），右侧是该应用的建议动作；
+ * 没建议的应用右侧留空。采纳/撤销/知道了的行为、7 天内可撤销、
+ * 反馈 JSONL 全都不动（走 DockSuggestionStore 原有方法）。
  */
 @Composable
-private fun SuggestionRow(
-    suggestion: DockSuggestion,
-    icon: Drawable?,
+private fun WhySheetAppRow(
+    app: AppInfo,
+    secondLine: String,
+    suggestion: DockSuggestion?,
     store: DockSuggestionStore
 ) {
     Row(
@@ -984,9 +1016,57 @@ private fun SuggestionRow(
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (icon != null) {
+        AppIconImage(
+            drawable = app.icon,
+            contentDescription = null,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = app.label.toString(),
+                fontSize = AILauncherType.BodyLarge.fontSize,
+                color = AILauncherColors.current.Title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = secondLine,
+                fontSize = AILauncherType.Footnote.fontSize,
+                color = AILauncherColors.current.Hint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        SuggestionRowAction(
+            suggestion = suggestion,
+            store = store
+        )
+    }
+}
+
+/**
+ * 兜底行：没落到任何应用行的建议（空包名、行外包名、同包第二条）。
+ * 有对应应用时显示应用图标 + 应用名，否则灯泡图标 + 建议标题；
+ * 第二行一律是建议理由，右侧动作与应用行同一套。
+ */
+@Composable
+private fun SuggestionFallbackRow(
+    suggestion: DockSuggestion,
+    app: AppInfo?,
+    store: DockSuggestionStore
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (app != null) {
             AppIconImage(
-                drawable = icon,
+                drawable = app.icon,
                 contentDescription = null,
                 modifier = Modifier
                     .size(40.dp)
@@ -1003,8 +1083,8 @@ private fun SuggestionRow(
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = suggestion.title,
-                fontSize = AILauncherType.Headline.fontSize,
+                text = app?.label?.toString() ?: suggestion.title,
+                fontSize = AILauncherType.BodyLarge.fontSize,
                 color = AILauncherColors.current.Title,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1013,54 +1093,88 @@ private fun SuggestionRow(
                 text = suggestion.body,
                 fontSize = AILauncherType.Footnote.fontSize,
                 color = AILauncherColors.current.Hint,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+        SuggestionRowAction(
+            suggestion = suggestion,
+            store = store
+        )
+    }
+}
+
+/**
+ * 行右侧建议动作（应用行与兜底行共用）：待采纳的固定/取消固定是金色
+ * 实心按钮（文案直接写动作）；习惯提醒是文字按钮「知道了」；已采纳
+ * 是浅金 chip「✓ 已采纳」+ 金色文字按钮「撤销」；无建议不渲染。
+ * 待采纳的固定/取消固定没有「知道了」按钮（按 v6 稿子）：用户不采纳
+ * 就留着，下一次分析刷新时替换。
+ */
+@Composable
+private fun SuggestionRowAction(
+    suggestion: DockSuggestion?,
+    store: DockSuggestionStore
+) {
+    val s = suggestion ?: return
+    when (rowSuggestionAction(s)) {
+        RowSuggestionAction.NONE -> Unit
+        RowSuggestionAction.PIN_ADOPT,
+        RowSuggestionAction.UNPIN_ADOPT -> {
+            Button(
+                onClick = { store.markApplied(s) },
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.padding(start = 12.dp)
+            ) {
+                Text(
+                    text = rowAdoptButtonText(s.kind),
+                    fontSize = AILauncherType.Callout.fontSize,
+                    maxLines = 1
+                )
+            }
+        }
+        RowSuggestionAction.OBSERVE_ACK -> {
+            TextButton(
+                onClick = { store.markApplied(s) },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(start = 8.dp)
+            ) {
+                Text(
+                    text = "知道了",
+                    fontSize = AILauncherType.Callout.fontSize,
+                    maxLines = 1
+                )
+            }
+        }
+        RowSuggestionAction.APPLIED_UNDO -> {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (suggestion.state == SuggestionState.APPLIED) {
-                    Text(
-                        text = "采纳了 · ",
-                        fontSize = AILauncherType.Footnote.fontSize,
-                        color = AILauncherColors.current.Hint
-                    )
-                    Text(
-                        text = "撤销",
-                        fontSize = AILauncherType.Footnote.fontSize,
-                        color = AILauncherColors.current.Title,
-                        modifier = Modifier.clickable { store.undoApplied(suggestion) }
-                    )
-                } else {
-                    TextButton(
-                        onClick = { store.markApplied(suggestion) },
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text(
-                            text = if (suggestion.kind == SuggestionKind.OBSERVE) "知道了"
-                            else "采纳",
-                            fontSize = AILauncherType.Callout.fontSize
+                Box(
+                    modifier = Modifier
+                        .background(
+                            AILauncherColors.current.AccentSoft,
+                            RoundedCornerShape(50)
                         )
-                    }
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
                     Text(
-                        text = "先放一边",
+                        text = "✓ 已采纳",
                         fontSize = AILauncherType.Footnote.fontSize,
-                        color = AILauncherColors.current.Hint,
-                        modifier = Modifier
-                            .clickable { store.markDismissed(suggestion.dedupeKey) }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                    Text(
-                        text = "这个建议不对",
-                        fontSize = AILauncherType.Footnote.fontSize,
-                        color = AILauncherColors.current.Hint,
-                        modifier = Modifier
-                            .clickable { store.logWrong(suggestion) }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                        color = AILauncherColors.current.Accent
                     )
                 }
+                Text(
+                    text = "撤销",
+                    fontSize = AILauncherType.Footnote.fontSize,
+                    color = AILauncherColors.current.Title,
+                    modifier = Modifier
+                        .clickable { store.undoApplied(s) }
+                        .padding(start = 8.dp, top = 4.dp, bottom = 4.dp)
+                )
             }
         }
     }
 }
+
 
 /**
  * D3 全屏：不透明底色整屏替换，内容为「应用中心」（单列表：分类区在上 + A-Z 在下）。
