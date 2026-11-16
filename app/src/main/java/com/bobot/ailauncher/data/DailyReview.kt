@@ -58,6 +58,13 @@ import org.json.JSONObject
  * 本文件只放纯函数＋轻量本地存储（SharedPreferences＋org.json），
  * 不碰网络；模型调用与编排在 SmartCardRepository.runDailyReview，
  * 调度在 DailyReviewWorker。JVM 单测锁死（DailyReviewTest）。
+ *
+ * 第四十六批（Bob 2026-11-16 19:52 定）：每天的复盘保持和之前的同一个
+ * session，模型要知道过去发生的事；同时不占用太多 token——滚动摘要
+ * （见 [ReviewSessionStore]）：本地只存一份紧凑的 session 摘要（已办完
+ * 什么、还挂着什么、关键日期，约 1000 字以内），每天只发「摘要＋当天
+ * 新增的脱敏消息」，不发全文历史；摘要超限本地压缩（先丢【已办】行，
+ * 再丢最旧的行），不另调模型。摘要里只存脱敏内容（入库前再脱敏一次）。
  */
 
 /** 复盘触发时间：每天晚上 21:30（Bob 2026-11-16 17:31 亲定）。 */
@@ -81,6 +88,17 @@ const val REVIEW_INBOX_MAX_ITEMS = 200
 
 /** 判断缓存最多存的条数（超了丢最旧的）。 */
 const val REVIEW_JUDGMENT_MAX_ITEMS = 500
+
+/** Session 摘要上限：约 1000 字；超过本地压缩，保证每天 token 基本恒定、不随天数膨胀。 */
+const val REVIEW_SESSION_MAX_CHARS = 1000
+
+/** 告诉模型把摘要控制在 800 字以内（给上限留余量）。 */
+const val REVIEW_SESSION_TARGET_CHARS = 800
+
+/** Session 摘要的行标记：已办完 / 还挂着 / 关键日期（一行一条结论）。 */
+const val REVIEW_SESSION_DONE_MARK = "【已办】"
+const val REVIEW_SESSION_TODO_MARK = "【待办】"
+const val REVIEW_SESSION_DATE_MARK = "【日期】"
 
 /**
  * 复盘的一条输入消息：通知或短信。title/text 是原文（只存本地收件箱，
@@ -177,8 +195,10 @@ val REVIEW_SYSTEM_PROMPT = """
 请逐条判断：哪些值得在桌面上推一张智能卡片提醒用户，哪些不值得。
 值得推的：有明确截止点、过期会吃亏的事（账单还款、预约/体检、取件、航班、会议、证件/保单到期、缴费、报名截止等）。
 不值得推的：已经办完了的确认（保单已承保、缴费成功、订单已完成）、纯营销/广告、验证码、系统提示、无明确事项的闲聊。
-只返回 JSON 数组，不要解释、不要寒暄。数组每项格式：
-{"hash":"<消息编号>","push":true/false,"kind":"BILL|APPOINTMENT|NOTIFICATION|CALENDAR","fact":"<一句话事实，含截止点，如：中信信用卡 11 月 24 日到期，应还 [金额]>","actionLabel":"<下一步意图，如：去还款/查看/回拨，不要写下一步>","action":"open_app|open_sms|open_calendar|none","deadlineMs":<截止点毫秒时间戳，没有填 null>,"sourceLabel":"<原应用名>"}
+开头会先给过去的复盘摘要（之前几天的结论）：用它判断哪些事已经办完、不用再推；如有冲突，以今天的消息为准。
+只返回一个 JSON 对象，不要解释、不要寒暄。格式：
+{"suggestions":[{"hash":"<消息编号>","push":true/false,"kind":"BILL|APPOINTMENT|NOTIFICATION|CALENDAR","fact":"<一句话事实，含截止点，如：中信信用卡 11 月 24 日到期，应还 [金额]>","actionLabel":"<下一步意图，如：去还款/查看/回拨，不要写下一步>","action":"open_app|open_sms|open_calendar|none","deadlineMs":<截止点毫秒时间戳，没有填 null>,"sourceLabel":"<原应用名>"}],"sessionSummary":"<更新后的 session 摘要>"}
+sessionSummary 的写法：一行一条结论，每行以【已办】、【待办】或【日期】开头；只写脱敏后的结论（不写名字、电话、金额、车牌、住址）；已办完的写【已办】，还挂着的写【待办】，关键日期写【日期】；总共不超过 ${REVIEW_SESSION_TARGET_CHARS} 字；只写本次复盘确认的事实，不编造；今天没新结论时，原样返回上一次的摘要。
 不知道的字段填空字符串或 null，不编造时间、地点、金额、包名。
 注意：动作的目标（打开哪个应用/哪条短信）由桌面按消息来源定，你只给意图（actionLabel）和动作方向（action），不要写包名、不要写号码。
 """.trimIndent()
@@ -192,11 +212,16 @@ fun reviewTimeText(timeMs: Long, zoneId: ZoneId = ZoneId.systemDefault()): Strin
  * 复盘的用户提示词：消息逐条编号，编号就是内容哈希（模型原样回填）。
  * 时间写可读日期（不写 epoch 毫秒——模型据此算截止点才准），开头先给
  * 复盘时间（模型回填 deadlineMs 时以它为准）。
+ * [sessionSummary] 是过去的复盘摘要（滚动 session）：非空时先给摘要、
+ * 再给今天的新消息，模型才能知道过去的事；摘要在入库时已脱敏一次，
+ * 这里嵌入前再脱敏一次（最后一道防线，摘要里绝无原文敏感信息）。
+ * 每天只发「摘要＋当天新增消息」，不发全文历史（token 基本恒定）。
  */
 fun reviewUserPrompt(
     messages: List<DailyReviewMessage>,
     nowMs: Long,
-    zoneId: ZoneId = ZoneId.systemDefault()
+    zoneId: ZoneId = ZoneId.systemDefault(),
+    sessionSummary: String = ""
 ): String {
     val lines = messages.mapIndexed { index, message ->
         val sanitized = sanitizeForLlm(
@@ -205,32 +230,39 @@ fun reviewUserPrompt(
         val hash = reviewMessageHash(message)
         "[${index + 1}] hash=$hash 来源=${message.appName} 时间=${reviewTimeText(message.timeMs, zoneId)}\n$sanitized"
     }
-    return "现在是：${reviewTimeText(nowMs, zoneId)}（复盘时间）。消息如下（共 ${messages.size} 条）：\n" +
-        lines.joinToString("\n\n")
+    val header = StringBuilder()
+    val summary = sessionSummary.trim()
+    if (summary.isNotEmpty()) {
+        header.append("过去的复盘摘要（之前几天的结论，只供参考；今天的消息为准，如有冲突以今天的消息为准）：\n")
+        header.append(sanitizeForLlm(summary)).append("\n\n")
+    }
+    header.append("现在是：${reviewTimeText(nowMs, zoneId)}（复盘时间）。消息如下（共 ${messages.size} 条）：\n")
+    return header.toString() + lines.joinToString("\n\n")
 }
 
-/**
- * 解析复盘响应（纯函数）：取 choices[0].message.content，去 ```json
- * 围栏，按 JSONArray 解析；单条缺 hash/fact 或 push 不是布尔值就跳过
- * 那条，其余照收。任何解析失败返回空表（调用方静默、不出卡）。
- */
-fun parseReviewResponse(rawBody: String, nowMs: Long): List<ReviewSuggestion> {
+/** 复盘调用的完整返回：建议列表＋更新后的 session 摘要（可能没有）。 */
+data class ReviewResult(
+    val suggestions: List<ReviewSuggestion>,
+    val sessionSummary: String?
+)
+
+/** 取 choices[0].message.content，去 ```json 围栏；取不到/空白返回 null。 */
+private fun reviewResponseContent(rawBody: String): String? {
     val content = try {
         JSONObject(rawBody)
             .getJSONArray("choices").getJSONObject(0)
             .getJSONObject("message").getString("content")
     } catch (_: Exception) {
-        return emptyList()
+        return null
     }
-    if (content.isBlank()) return emptyList()
-    val json = content.trim()
+    if (content.isBlank()) return null
+    return content.trim()
         .removePrefix("```json").removePrefix("```")
         .removeSuffix("```").trim()
-    val array = try {
-        JSONArray(json)
-    } catch (_: Exception) {
-        return emptyList()
-    }
+}
+
+/** JSONArray → 建议列表（纯函数）：单条缺 hash/fact 就跳过那条，其余照收。 */
+private fun parseReviewSuggestions(array: JSONArray, nowMs: Long): List<ReviewSuggestion> {
     val out = mutableListOf<ReviewSuggestion>()
     for (i in 0 until array.length()) {
         val obj = try {
@@ -243,6 +275,70 @@ fun parseReviewResponse(rawBody: String, nowMs: Long): List<ReviewSuggestion> {
     }
     return out
 }
+
+/**
+ * 解析复盘响应（纯函数）：新格式是对象 {"suggestions":[...],"sessionSummary":"..."}；
+ * 兼容 546 的裸数组格式（无摘要，sessionSummary 为 null）。
+ * 任何解析失败返回空建议＋空摘要（调用方静默、不出卡、不动已存摘要）。
+ */
+fun parseReviewResult(rawBody: String, nowMs: Long): ReviewResult {
+    val json = reviewResponseContent(rawBody) ?: return ReviewResult(emptyList(), null)
+    // 对象格式（新）：先试 JSONObject
+    try {
+        val obj = JSONObject(json)
+        if (obj.has("suggestions")) {
+            val array = obj.optJSONArray("suggestions") ?: JSONArray()
+            val summary = obj.optString("sessionSummary", "").trim().ifEmpty { null }
+            return ReviewResult(parseReviewSuggestions(array, nowMs), summary)
+        }
+    } catch (_: Exception) {
+        // 不是对象，往下按数组试
+    }
+    // 裸数组格式（546，兼容）：无摘要
+    return try {
+        ReviewResult(parseReviewSuggestions(JSONArray(json), nowMs), null)
+    } catch (_: Exception) {
+        ReviewResult(emptyList(), null)
+    }
+}
+
+/**
+ * 解析复盘响应里的建议列表（纯函数，兼容入口）：等价于
+ * parseReviewResult(...).suggestions。任何解析失败返回空表。
+ */
+fun parseReviewResponse(rawBody: String, nowMs: Long): List<ReviewSuggestion> =
+    parseReviewResult(rawBody, nowMs).suggestions
+
+/**
+ * 压缩 session 摘要（纯函数）：本地压缩，不另调模型。
+ * 摘要是一行一条结论（【已办】/【待办】/【日期】开头）。长度在上限内原样返回；
+ * 超了先丢【已办】行（最旧的先丢，已办完是历史、最不需要留），还超再从最旧的行
+ * 开始丢；单行本身超长则截断。保证存下的摘要绝不超过上限。
+ */
+fun compressSessionSummary(summary: String, maxChars: Int = REVIEW_SESSION_MAX_CHARS): String {
+    val lines = summary.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    if (lines.isEmpty()) return ""
+    var kept = lines
+    fun joined(ls: List<String>) = ls.joinToString("\n")
+    if (joined(kept).length <= maxChars) return joined(kept)
+    while (joined(kept).length > maxChars) {
+        val doneIdx = kept.indexOfFirst { it.startsWith(REVIEW_SESSION_DONE_MARK) }
+        if (doneIdx < 0) break
+        kept = kept.filterIndexed { i, _ -> i != doneIdx }
+    }
+    while (joined(kept).length > maxChars && kept.size > 1) {
+        kept = kept.drop(1)
+    }
+    val out = joined(kept)
+    return if (out.length > maxChars) out.take(maxChars) else out
+}
+
+/**
+ * Session 摘要入库前再脱敏一次（纯函数）：模型只见过脱敏输入，摘要本应已脱敏；
+ * 这里是最后一道防线，保证入库的摘要绝无原文里的电话、车牌、金额、人名。
+ * 行标记（【已办】/【待办】/【日期】）与日期不受影响。
+ */
+fun sanitizeSessionSummary(summary: String): String = sanitizeForLlm(summary)
 
 /** 单条复盘判断解析（纯函数）：缺 hash/fact 返回 null；其余字段缺了用缺省值。 */
 fun reviewSuggestionFromJson(obj: JSONObject, nowMs: Long): ReviewSuggestion? {
@@ -579,6 +675,43 @@ object ReviewJudgmentStore {
     }
 
     fun contains(context: Context, hash: String): Boolean = load(context, hash) != null
+}
+
+/**
+ * Session 摘要存储（滚动 session，第四十六批）：本地只存一份紧凑的摘要
+ * （已办完什么、还挂着什么、关键日期），每天复盘时随新消息一起发给模型，
+ * 模型回新的摘要再存回来——同一个 session 跨天连续，模型知道过去的事。
+ * 入库时先脱敏、再压缩到上限（[sanitizeSessionSummary]、
+ * [compressSessionSummary]），存下的永远是脱敏后、1000 字以内的摘要。
+ * SharedPreferences＋纯文本，与现有缓存方式一致；全部 try/catch，
+ * 读写失败静默（摘要丢了，明天复盘没有上下文，不崩）。
+ */
+object ReviewSessionStore {
+    private const val PREFS = "daily_review_session"
+    private const val KEY_SUMMARY = "summary_v1"
+    private const val KEY_SAVED_MS = "saved_ms_v1"
+
+    fun save(context: Context, summary: String) {
+        try {
+            val clean = compressSessionSummary(sanitizeSessionSummary(summary))
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_SUMMARY, clean)
+                .putLong(KEY_SAVED_MS, System.currentTimeMillis())
+                .apply()
+        } catch (_: Exception) {
+            // 静默：摘要存不上，明天没有上下文，不崩
+        }
+    }
+
+    /** 存过的摘要；没有/读失败返回空串（调用方当作没有上下文）。 */
+    fun load(context: Context): String {
+        return try {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_SUMMARY, null).orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+    }
 }
 
 /**

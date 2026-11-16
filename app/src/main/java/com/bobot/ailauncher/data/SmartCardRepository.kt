@@ -448,7 +448,9 @@ object SmartCardRepository {
      * 已判过的（判断缓存，推/不推都记）；③没新内容 → 只更新水位、
      * 不调模型（正常一天就是一次调用，没新消息就是零次）；④有新内容 →
      * 一次批量调 DeepSeek（postChatCompletions，deepseek-flash、
-     * temperature 0.2、safetyCheck=true）；⑤判断结果全写判断缓存；
+     * temperature 0.2、safetyCheck=true），同时带上滚动 session 摘要
+     * （≤1000 字，见 ReviewSessionStore），模型回新的摘要存回来；
+     * ⑤判断结果全写判断缓存；
      * ⑥推的变卡片、存本地（替换上一批），refresh() 重算一次让新卡出现。
      * 失败静默、不重试、不出卡：水位在跑之前已更新（失败也算一次，
      * 沿用 requestPrep「每卡一次」的口径），下次触发点再跑。
@@ -468,21 +470,30 @@ object SmartCardRepository {
         }
         if (unjudged.isEmpty()) return true
         val batch = unjudged.takeLast(REVIEW_PROMPT_MAX_ITEMS)
-        val suggestions = runCatching {
+        // 滚动 session：把之前复盘的摘要一起发给模型（只发摘要＋今天的新消息，
+        // 不发全文历史，token 基本恒定）；模型回新的摘要再存回来（见下）。
+        val sessionSummary = ReviewSessionStore.load(appContext)
+        val result = runCatching {
             val r = LlmRouter.postChatCompletions(
                 LlmConfig.getBaseUrl(appContext),
                 LlmConfig.getApiKey(appContext),
                 LlmConfig.getModel(appContext),
                 REVIEW_SYSTEM_PROMPT,
-                reviewUserPrompt(batch, nowMs),
+                reviewUserPrompt(batch, nowMs, sessionSummary = sessionSummary),
                 temperature = 0.2,
                 maxTokens = 2000,
                 tag = "DailyReview",
                 safetyCheck = true
             )
             if (r.networkError != null || r.httpCode !in 200..299) null
-            else parseReviewResponse(r.rawBody, nowMs)
+            else parseReviewResult(r.rawBody, nowMs)
         }.getOrNull() ?: return false
+        val suggestions = result.suggestions
+        // 模型给了新的 session 摘要就存回来（空/没给则保留旧的）；入库时
+        // ReviewSessionStore 内部再脱敏、压缩到上限。
+        result.sessionSummary?.takeIf { it.isNotBlank() }?.let {
+            ReviewSessionStore.save(appContext, it)
+        }
         // 判断落到可执行的动作上（目标以消息来源为准），再全写判断缓存。
         val byHash = batch.associateBy { reviewMessageHash(it) }
         val resolved = suggestions.map { resolveReviewAction(it, byHash[it.hash]) }
