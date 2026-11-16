@@ -1103,6 +1103,58 @@ object SmartCardRepository {
     }
 
     /**
+     * 升级卡（第四十五批，Bob 2026-11-10 定稿，设计见
+     * upgrade-reminder-card-design.md §3）：OtaUpdater.latestAvailable
+     * 非空（自动检查或手动检查发现了新版）且当前 versionCode 小于它
+     * 时出现；一个版本一张卡（id＝update|<versionCode>），不设时间
+     * 过期（deadlineMs＝Long.MAX_VALUE，只随版本走）；不认任何来源
+     * 权限（它问的是启动器自己的版本，哪个来源都没接上时照样出现）。
+     * 下载状态（去更新／下载中／下完／失败）按 OtaDownloader.state
+     * 当下快照算一次（见 buildUpdateCard）；下载中进度每 200ms 变，
+     * UI 层订阅 OtaDownloader.state 后按同一口径覆盖显示（见
+     * overlayUpdateCardDisplay），这里不为进度反复 refresh。
+     * 点「我知道了」按卡片 id 记办完（markDone，deadlineMs 是
+     * Long.MAX_VALUE、永不过期，本版本不再提醒；新版本是新 id，
+     * 照常出卡）。装上新版后 latestAvailable 在 onAppUpgraded 里清掉，
+     * 卡片即消失；办完／跳过记录由 MainActivity 调
+     * clearUpdateCardRecords 清掉，不留脏数据。
+     */
+    private fun updateCard(context: Context): SmartCard? {
+        val info = OtaUpdater.latestAvailable.value ?: return null
+        if (info.versionCode <= BuildConfig.VERSION_CODE) return null
+        return buildUpdateCard(
+            info = info,
+            downloadState = OtaDownloader.state.value,
+            downloadTargetVersion = OtaUpdater.downloadTargetVersion(context),
+            isDownloaded = OtaUpdater.isDownloadedVersion(context, info.versionCode)
+        )
+    }
+
+    /**
+     * 清掉某版本升级卡的办完／跳过记录（第四十五批，设计 §3）：
+     * 装上新版后调（MainActivity.onCreate，onAppUpgraded 之后），
+     * 不留脏数据。只删该版本的三个键（done_/skipped_/skipAt_），
+     * 其他版本／其他卡的记录不动；三个键都不存在时不写 prefs。
+     */
+    fun clearUpdateCardRecords(context: Context, versionCode: Int) {
+        val id = updateCardId(versionCode)
+        val p = prefs(context)
+        val editor = p.edit()
+        var changed = false
+        for (key in listOf(
+            KEY_DONE_PREFIX + id,
+            KEY_SKIPPED_PREFIX + id,
+            KEY_SKIP_AT_PREFIX + id
+        )) {
+            if (p.contains(key)) {
+                editor.remove(key)
+                changed = true
+            }
+        }
+        if (changed) editor.apply()
+    }
+
+    /**
      * 日历卡（第十二批）：本机日历里的日程/会议。出现窗口：会议类开始前
      * 30 分钟、非会议日程开始前 2 小时（calendarCardWindow）；过了结束
      * 时间消失。全天事件不进卡（没有可排的开始时间）；标题空白、起止
@@ -1226,6 +1278,9 @@ object SmartCardRepository {
         // 桌面时出现，问一次。无截止点（sortMs/deadlineMs 都是 Long.MAX_VALUE，
         // 有时效真卡之后、引导卡之前）；不认任何来源权限（它问的是桌面本身）。
         defaultLauncherCard(context)?.let { candidates += it }
+        // 升级卡（第四十五批）：有新版就出现（自动检查或手动检查发现的
+        // 都算）；无截止点，排在有时效真卡之后、引导卡之前；强更置顶。
+        updateCard(context)?.let { candidates += it }
         // 第四十四批：每天一次整体复盘出的卡（本地存的上一批；过了截止点
         // 的不出，与规则卡同事实的不要、只留规则卡）。有时效真卡按截止点
         // 排，复盘卡的 sortMs 就是 deadlineMs，随大流排。
@@ -1315,8 +1370,11 @@ object SmartCardRepository {
                 // 引导卡不是一件真事项，不计入任何来源的“最后使用时间”
                 // （且引导卡根本不进仓库的候选表，这里只是穷尽分支）。
                 // 设默认卡也不是某个来源的事项，同样不计入。
+                // 升级卡也不是某个来源的事项（它问的是启动器自己的版本，
+                // 不计入「已接 N/4 个源」，设计 §5），同样不计入。
                 SmartCardKind.GUIDE,
-                SmartCardKind.DEFAULT_LAUNCHER -> Unit
+                SmartCardKind.DEFAULT_LAUNCHER,
+                SmartCardKind.UPDATE -> Unit
             }
         }
         if (used.isEmpty()) return
