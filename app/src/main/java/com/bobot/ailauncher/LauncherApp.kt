@@ -3,6 +3,7 @@ package com.bobot.ailauncher
 import android.app.Application
 import com.bobot.ailauncher.data.BatteryGuard
 import com.bobot.ailauncher.data.CrashLog
+import com.bobot.ailauncher.data.DailyReviewScheduler
 
 /**
  * v0.40.0：Application 入口。
@@ -16,5 +17,8 @@ class LauncherApp : Application() {
         // 后续初始化路径上的崩溃（写 files/crashes/，链回系统原处理器）
         CrashLog.install(this)
         BatteryGuard.ensureStarted(this)
+        // 第四十四批：每天一次整体复盘（21:30 周期任务，KEEP 幂等）；
+        // 调度失败静默（refresh() 的补跑兜底还在），不崩启动。
+        DailyReviewScheduler.schedule(this)
     }
 }
