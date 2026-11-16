@@ -53,6 +53,8 @@ object SmartCardRepository {
     private const val PREFS = "smart_cards"
     private const val KEY_DONE_PREFIX = "done_"
     private const val KEY_SKIPPED_PREFIX = "skipped_"
+    /** 每天一次整体复盘的水位（第四十四批）：上次复盘跑完的时刻（毫秒）。 */
+    private const val KEY_LAST_REVIEW_MS = "daily_review_last_ms"
     /** 划走时刻（第二十九批）：沉底顺序按划走先后排——早划的在前、新划的
      * 沉最后；重划已沉底的卡刷新此时戳，轮转一圈。旧版只有 skipped_=截止
      * 点的键、没有此时戳，缺省为 0（排最前）。过期时与 skipped_ 一并清。 */
@@ -116,6 +118,9 @@ object SmartCardRepository {
     /** 空重建保留后重试进行中标志（第二十二批）：每轮 refresh 最多一次
      * 重试，不叠加；重试本身不再保留（allowRetry=false），不循环。 */
     private val retryInFlight = AtomicBoolean(false)
+
+    /** 每天一次整体复盘进行中标志（第四十四批）：同一晚只跑一次，不叠加。 */
+    private val reviewInFlight = AtomicBoolean(false)
 
     /** 顶卡划走动画复位代次（第十二批）：skip() 时加一，UI 层把
      * TopSmartCard 的组合键挂上它——同一张卡以新代次重新呈现时动画
@@ -404,6 +409,159 @@ object SmartCardRepository {
             }
             // 失败静默：不写 prep、不重试（每卡一次）、不向用户报大模型错误。
         }
+    }
+
+    // ---------- 每天一次整体复盘（第四十四批，Bob 2026-11-16 定稿） ----------
+
+    /** 复盘水位：上次复盘跑完的时刻（毫秒），存在 "smart_cards" 偏好里。 */
+    private fun lastReviewMs(context: Context): Long =
+        prefs(context).getLong(KEY_LAST_REVIEW_MS, 0L)
+
+    private fun setLastReviewMs(context: Context, nowMs: Long) {
+        prefs(context).edit().putLong(KEY_LAST_REVIEW_MS, nowMs).apply()
+    }
+
+    /**
+     * 补跑触发：refresh() 每分钟调一次；到期（21:30 已过、上次复盘早于
+     * 最近一次触发点）且配了 Key 时，在 prepScope 里跑一次 runDailyReview。
+     * 没配 Key 不跑（只显示原来的规则卡片）；在途不重跑。
+     * WorkManager 21:30 周期任务是主触发，这处是设备休眠醒来后的兜底。
+     */
+    fun maybeRunDailyReview(context: Context) {
+        val appContext = context.applicationContext
+        val nowMs = System.currentTimeMillis()
+        if (!shouldRunReview(LlmConfig.hasKey(appContext), lastReviewMs(appContext), nowMs)) return
+        if (!reviewInFlight.compareAndSet(false, true)) return
+        prepScope.launch {
+            try {
+                runDailyReview(appContext)
+            } finally {
+                reviewInFlight.set(false)
+            }
+        }
+    }
+
+    /**
+     * 跑一次整体复盘（suspend，在 prepScope 的 IO 调度器上跑）：
+     * ①取自上次复盘以来新增的消息（通知收件箱＋短信＋当前在用通知，
+     * 去重后按时间升序，最多取最新的 50 条）；②按脱敏后内容哈希过滤
+     * 已判过的（判断缓存，推/不推都记）；③没新内容 → 只更新水位、
+     * 不调模型（正常一天就是一次调用，没新消息就是零次）；④有新内容 →
+     * 一次批量调 DeepSeek（postChatCompletions，deepseek-flash、
+     * temperature 0.2、safetyCheck=true）；⑤判断结果全写判断缓存；
+     * ⑥推的变卡片、存本地（替换上一批），refresh() 重算一次让新卡出现。
+     * 失败静默、不重试、不出卡：水位在跑之前已更新（失败也算一次，
+     * 沿用 requestPrep「每卡一次」的口径），下次触发点再跑。
+     * 返回 true＝跑完了（有或没有新卡），false＝中途失败。
+     */
+    suspend fun runDailyReview(context: Context): Boolean {
+        val appContext = context.applicationContext
+        val nowMs = System.currentTimeMillis()
+        val sinceMs = maxOf(lastReviewMs(appContext), nowMs - REVIEW_WINDOW_MS)
+        // 水位先更新：失败也算一次（本轮不重试），下次触发点再跑。
+        setLastReviewMs(appContext, nowMs)
+        if (!LlmConfig.hasKey(appContext)) return false
+        val messages = collectReviewMessages(appContext, sinceMs)
+        if (messages.isEmpty()) return true
+        val unjudged = messages.filter {
+            !ReviewJudgmentStore.contains(appContext, reviewMessageHash(it))
+        }
+        if (unjudged.isEmpty()) return true
+        val batch = unjudged.takeLast(REVIEW_PROMPT_MAX_ITEMS)
+        val suggestions = runCatching {
+            val r = LlmRouter.postChatCompletions(
+                LlmConfig.getBaseUrl(appContext),
+                LlmConfig.getApiKey(appContext),
+                LlmConfig.getModel(appContext),
+                REVIEW_SYSTEM_PROMPT,
+                reviewUserPrompt(batch, nowMs),
+                temperature = 0.2,
+                maxTokens = 2000,
+                tag = "DailyReview",
+                safetyCheck = true
+            )
+            if (r.networkError != null || r.httpCode !in 200..299) null
+            else parseReviewResponse(r.rawBody, nowMs)
+        }.getOrNull() ?: return false
+        // 判断落到可执行的动作上（目标以消息来源为准），再全写判断缓存。
+        val byHash = batch.associateBy { reviewMessageHash(it) }
+        val resolved = suggestions.map { resolveReviewAction(it, byHash[it.hash]) }
+        for (s in resolved) {
+            ReviewJudgmentStore.save(appContext, s)
+        }
+        val cards = reviewSuggestionsToCards(resolved, nowMs, nowMs)
+        if (cards.isNotEmpty()) {
+            ReviewCardStore.save(appContext, cards)
+            refresh(appContext, lastNotifications, System.currentTimeMillis())
+        }
+        return true
+    }
+
+    /**
+     * 收集复盘输入：通知收件箱（自 sinceMs 以来）＋短信（过去 24 小时，
+     * 已授权才读）＋当前在用通知（lastNotifications，在途未进收件箱的
+     * 也能赶上）。三路按包名＋标题＋正文＋时间去重，按时间升序。
+     * 通知只收可清除的非进行中通知（收件箱记的时候已滤过；当前在用
+     * 通知这里不过滤——refresh() 的规则卡片已按同一批通知出过，
+     * 复盘多一条输入不影响去重，见 reviewCards）。
+     */
+    private fun collectReviewMessages(
+        context: Context,
+        sinceMs: Long
+    ): List<DailyReviewMessage> {
+        val all = mutableListOf<DailyReviewMessage>()
+        all += ReviewInboxStore.loadSince(context, sinceMs)
+        if (SmsRepository.hasSmsPermission(context)) {
+            val sms = runCatching {
+                SmsRepository.loadRecentSms(context, daysBack = 1, limit = 200)
+            }.getOrNull() ?: emptyList()
+            for (m in sms) {
+                if (m.date < sinceMs) continue
+                all += DailyReviewMessage(
+                    packageName = m.address,
+                    appName = "短信",
+                    title = "",
+                    text = m.body,
+                    timeMs = m.date,
+                    source = "sms"
+                )
+            }
+        }
+        for (n in lastNotifications) {
+            if (n.packageName == context.packageName) continue
+            if (n.time < sinceMs) continue
+            all += DailyReviewMessage(
+                packageName = n.packageName,
+                appName = n.appName,
+                title = n.title,
+                text = n.text,
+                timeMs = n.time,
+                source = "notification"
+            )
+        }
+        return all
+            .distinctBy { "${it.packageName}|${it.title}|${it.text}|${it.timeMs}" }
+            .sortedBy { it.timeMs }
+    }
+
+    /**
+     * 复盘卡片（进 refresh() 的候选）：本地存的上一批复盘卡，
+     * 过了截止点的不出；与规则卡同事实的不要（只留规则卡，
+     * 见 reviewFactMatchesRuleFact）。用户摘卡（markDone）与
+     * 过期摘走 visibleSmartCards 的老路，不在这里重复判。
+     */
+    private fun reviewCards(
+        context: Context,
+        nowMs: Long,
+        ruleCandidates: List<SmartCard>
+    ): List<SmartCard> {
+        return ReviewCardStore.load(context)
+            .filter { it.deadlineMs > nowMs }
+            .filter { review ->
+                ruleCandidates.none { rule ->
+                    reviewFactMatchesRuleFact(review.fact, rule.fact)
+                }
+            }
     }
 
     /**
@@ -1002,6 +1160,10 @@ object SmartCardRepository {
         allowRetry: Boolean = true
     ) {
         lastNotifications = notifications
+        // 第四十四批：每天一次整体复盘的补跑兜底——21:30 设备关机/休眠、
+        // 醒来后 WorkManager 还没跑到时，这里到点就跑一次（maybeRunDailyReview
+        // 自己判到期与否、在途不重跑；没配 Key 不跑）。
+        maybeRunDailyReview(context)
         val prevCards = _cards.value
         // 第十三批：卡片跟着权限走——每个来源的门就是它自己的系统权限，
         // 开关不再进卡片构建路径（UiPrefs 的启用标志已删，编译不过即有残留）。
@@ -1064,6 +1226,10 @@ object SmartCardRepository {
         // 桌面时出现，问一次。无截止点（sortMs/deadlineMs 都是 Long.MAX_VALUE，
         // 有时效真卡之后、引导卡之前）；不认任何来源权限（它问的是桌面本身）。
         defaultLauncherCard(context)?.let { candidates += it }
+        // 第四十四批：每天一次整体复盘出的卡（本地存的上一批；过了截止点
+        // 的不出，与规则卡同事实的不要、只留规则卡）。有时效真卡按截止点
+        // 排，复盘卡的 sortMs 就是 deadlineMs，随大流排。
+        candidates += reviewCards(context, nowMs, candidates)
         val doneIds = liveIds(context, KEY_DONE_PREFIX, nowMs)
         // 跳过集合就是沉底顺序（liveIdList 按卡片截止点排，与正常排序
         // 同一方向）：划走的事项卡一直在可见列表里、排后面，不再靠

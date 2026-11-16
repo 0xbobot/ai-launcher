@@ -19,7 +19,9 @@ import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.core.event.LauncherEvent
 import com.bobot.ailauncher.data.BadgeProbe
 import com.bobot.ailauncher.data.BadgeStickyStore
+import com.bobot.ailauncher.data.DailyReviewMessage
 import com.bobot.ailauncher.data.NotificationRepository
+import com.bobot.ailauncher.data.ReviewInboxStore
 import com.bobot.ailauncher.data.SimpleNotification
 import com.bobot.ailauncher.data.SmsRepository
 import com.bobot.ailauncher.data.aggregateBadgeCounts
@@ -258,6 +260,21 @@ class LauncherNotificationService : NotificationListenerService() {
             if (it.isClearable && !it.isOngoing) {
                 it.toSimpleNotification()?.let { n ->
                     EventBus.emit(LauncherEvent.NotificationReceived(n))
+                    // 第四十四批：每天一次整体复盘的收件箱——通知到达即记一条
+                    // （标题＋正文＋应用＋时间），只记可清除的非进行中通知；
+                    // 复盘时按“自上次复盘以来”取。原文只存本地、不出仓库、
+                    // 不进日志；记不上静默（ReviewInboxStore 内部 try/catch）。
+                    ReviewInboxStore.record(
+                        this,
+                        DailyReviewMessage(
+                            packageName = n.packageName,
+                            appName = n.appName,
+                            title = n.title,
+                            text = n.text,
+                            timeMs = n.time,
+                            source = "notification"
+                        )
+                    )
                 }
                 // 粘性数（Bob 2026-11-08）：新通知到达即记/清 number（事件驱动，
                 // 只在到达时写；只对计入角标的通知记——进行中通知（音乐/导航）
