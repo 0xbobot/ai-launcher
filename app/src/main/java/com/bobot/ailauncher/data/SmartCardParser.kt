@@ -211,13 +211,6 @@ fun parseBillSms(text: String, senderLabel: String, nowMs: Long): ParsedBill? {
     )
 }
 
-/** 账单是否到了出现窗口（到期前 2 天起，到期当天置顶靠排序） */
-fun isBillInWindow(nowMs: Long, dueDayEndMs: Long): Boolean {
-    val dueStart = startOfDayMs(dueDayEndMs)
-    val windowStart = dueStart - BILL_APPEAR_DAYS_BEFORE * 24L * 60 * 60 * 1000
-    return nowMs in windowStart..dueDayEndMs
-}
-
 /** 地点启发式：逗号分段里含地点词、且不含订单/支付/金额的那一段 */
 private val PLACE_KEYWORDS = listOf(
     "楼", "层", "院", "中心", "大厦", "路", "街", "分院", "诊所", "医院", "体检", "门诊"
@@ -292,10 +285,3 @@ fun parseAppointmentSms(text: String, nowMs: Long): ParsedAppointment? {
     )
 }
 
-/** 预约是否到了出现窗口（开始前 24 小时起，结束后消失） */
-fun isAppointmentInWindow(nowMs: Long, appt: ParsedAppointment): Boolean {
-    val startMs = appt.dayStartMs + appt.startMin * 60L * 1000
-    val endMs = appt.dayStartMs + (appt.endMin ?: (appt.startMin + 60)) * 60L * 1000
-    val windowStart = startMs - APPOINTMENT_APPEAR_HOURS_BEFORE * 60L * 60 * 1000
-    return nowMs in windowStart until endMs
-}

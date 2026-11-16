@@ -82,10 +82,6 @@ object ContextEngine {
         // 亮屏时单次追踪保留（上方 ACTION_SCREEN_ON 分支，事件驱动）
     }
 
-    fun stop() {
-        started = false
-    }
-
     /** 查最近 90 秒内最后一次前台的包，变化则发事件 */
     private fun pollForeground(context: Context) {
         try {

@@ -32,9 +32,6 @@ object HiddenApps {
         return out
     }
 
-    fun isHidden(context: Context, packageName: String): Boolean =
-        getHidden(context).contains(packageName)
-
     fun hide(context: Context, packageName: String) {
         val set = getHidden(context).toMutableSet()
         if (set.add(packageName)) {

@@ -1264,18 +1264,3 @@ private fun DockIconButton(
     }
 }
 
-/** v0.68.44：页脚刊头字距文本 */
-@Composable
-private fun TrackedFooterText(text: String, color: androidx.compose.ui.graphics.Color) {
-    Row {
-        text.forEach { ch ->
-            androidx.compose.material3.Text(
-                text = ch.toString(),
-                fontSize = AILauncherType.Caption.fontSize,
-                color = color,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-        }
-    }
-}

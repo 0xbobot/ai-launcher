@@ -33,11 +33,10 @@ import kotlinx.coroutines.withContext
  * 系统壁纸照常透出，背景分类保持 FLAT（轻霜档），玻璃降级但不破相。
  * 位图按屏幕尺寸中心裁剪绘制，近似系统壁纸的呈现方式。
  */
-/** 系统壁纸一次加载的全部产物：位图（玻璃内绘）＋带分类（玻璃档位）＋带亮度（简报自适应字色）。 */
+/** 系统壁纸一次加载的全部产物：位图（玻璃内绘）＋带分类（玻璃档位）＋简报字区带亮度（简报自适应字色）。 */
 internal data class LoadedWallpaper(
     val bitmap: Bitmap,
     val kinds: List<BackdropKind>,
-    val luminance: List<GlassPolicy.BandLuminance>,
     /** 简报字区（左 40% 横向范围）的带亮度，见 GlassPolicy.BRIEFING_TEXT_RIGHT_FRAC。 */
     val briefingLuminance: List<GlassPolicy.BandLuminance>,
 )
@@ -68,12 +67,10 @@ internal fun SystemWallpaperLayer(state: GlassBackdropState, modifier: Modifier 
         if (loaded != null) {
             bitmap = loaded.bitmap
             state.backdropBands = loaded.kinds
-            state.backdropLuminance = loaded.luminance
             state.briefingLuminance = loaded.briefingLuminance
         } else {
             // 读不到（动态壁纸 getDrawable 返回 null、个别厂商限制、异常）：
             // 亮度清空 → 简报沿用上次字色档（见 PetZone，C）；玻璃旧位图保持既有降级行为（不破相）。
-            state.backdropLuminance = emptyList()
             state.briefingLuminance = emptyList()
         }
     }
@@ -112,12 +109,10 @@ private fun loadSystemWallpaper(context: Context): LoadedWallpaper? {
     val small = Bitmap.createScaledBitmap(bmp, thumb, thumb, true)
     val pixels = IntArray(thumb * thumb)
     small.getPixels(pixels, 0, thumb, 0, 0, thumb, thumb)
-    // 带分类与带亮度同批缩略图、同带划分，两份数据一一对应；简报只取顶部带。
     // 简报字色另算一份左 40% 横向范围的带亮度（字区外深色块不许带偏均值）。
     return LoadedWallpaper(
         bitmap = bmp,
         kinds = GlassPolicy.classifyBands(pixels, thumb, thumb),
-        luminance = GlassPolicy.bandLuminance(pixels, thumb, thumb),
         briefingLuminance = GlassPolicy.bandLuminanceRegion(
             pixels, thumb, thumb, 0f, GlassPolicy.BRIEFING_TEXT_RIGHT_FRAC
         ),

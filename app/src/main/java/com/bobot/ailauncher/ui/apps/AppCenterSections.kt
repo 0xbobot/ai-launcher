@@ -1180,7 +1180,6 @@ fun LazyListScope.AppCenterFoldSection(
     foldVisible: Boolean,
     foldExpandedState: Boolean,
     onFoldExpandedChange: (Boolean) -> Unit,
-    foldLastDeclinedN: Int,
     onFoldLastDeclinedNChange: (Int) -> Unit,
     inactiveTargets: List<AppInfo>,
     actions: AppCenterRowActions,

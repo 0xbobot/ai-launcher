@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -35,7 +33,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -51,7 +48,6 @@ import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.PetMotion
 import com.bobot.ailauncher.ui.theme.coverPaletteFor
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.bobot.ailauncher.data.WeatherRepository
@@ -112,7 +108,6 @@ fun PetZone(
     // v0.30.0：天气微动作
     val weatherDesc by com.bobot.ailauncher.data.WeatherState.desc.collectAsState()
     // v0.46.0：天气自动触发——突变才播场景，不打扰
-    var lastWeatherDesc by remember { mutableStateOf<String?>(null) }
     var morningBriefedDate by remember { mutableStateOf("") }
     // v0.67.6：天气缓存 TTL（省电原则）——60 分钟内不重复发网络请求
     var lastWeatherFetchMs by remember { mutableLongStateOf(0L) }
@@ -133,23 +128,22 @@ fun PetZone(
 
 
     // 天气只更新简报文字状态（WeatherState），不再有突变播报/场景。
-    fun onWeatherFetched(info: WeatherRepository.WeatherInfo?, allowTrigger: Boolean) {
-        lastWeatherDesc = info?.desc
+    fun onWeatherFetched(info: WeatherRepository.WeatherInfo?) {
         WeatherState.updateFull(info)
     }
 
-    suspend fun fetchWeather(allowTrigger: Boolean) {
+    suspend fun fetchWeather() {
         val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
-        if (w != null) onWeatherFetched(w, allowTrigger)
+        if (w != null) onWeatherFetched(w)
     }
     // v0.67.6：天气 onResume + 缓存 TTL（省电原则）
     // 回桌面/亮屏时检查：60 分钟内查过直接用缓存，不发网络请求；
-    // 首次只更新状态不播场景（allowTrigger=false），之后有突变才播
+    // 首次只更新状态不播场景，之后有突变才播
     LaunchedEffect(resumeTick) {
         val now = System.currentTimeMillis()
         if (!weatherInitDone || now - lastWeatherFetchMs >= 60 * 60 * 1000L) {
             lastWeatherFetchMs = now
-            fetchWeather(allowTrigger = weatherInitDone)
+            fetchWeather()
             weatherInitDone = true
         }
     }
@@ -163,7 +157,6 @@ fun PetZone(
             morningBriefedDate = today
             val w = withContext(Dispatchers.IO) { WeatherRepository.fetchSync() }
             if (w != null) {
-                lastWeatherDesc = w.desc
                 lastWeatherFetchMs = System.currentTimeMillis() // v0.67.6：计入 TTL，避免重复请求
                 weatherInitDone = true
                 WeatherState.updateFull(w)
@@ -178,7 +171,6 @@ fun PetZone(
     // v0.67.6：删除 15 分钟日程轮询（省电原则）
     // 改为一次性任务：TodaySection 数据管线的会议提醒调度（开会前 30/15 分钟
     // 各一次）；日历数据变化时重算，边界刷新天然兜底（防任务被杀）
-    val notifiedCalendarKeys = remember { mutableSetOf<String>() }
     // v0.68.44：封面模式状态（hero 标题/下个会议）
     var coverSummary by remember { mutableStateOf("难得清闲") }
     var coverNextEvent by remember { mutableStateOf<CalEvent?>(null) }
@@ -187,16 +179,7 @@ fun PetZone(
     // PetZone 离场时清空，避免建议面读到陈旧会议。
     LaunchedEffect(coverNextEvent) {
         TodayEventsHolder.update(coverNextEvent)
-    }
-    // v0.68.93（布局与交互 Loop 一批④）：会议呈现状态与数据同源上报。
-    // 2026-11-11：简报会行已拿掉（Bob），呈现点不存在；presentedNextEventId
-    // 的写入暂时保留（当前无 live 读方，建议面暂无会议行），去重契约待新的
-    // 呈现点出现时再定。recordCalendarUsed 仍按 nextEvent 非空记（沿用旧口径，
-    // 设置连接器列表的“最后使用时间”用）。
-    LaunchedEffect(coverNextEvent) {
-        TodayEventsHolder.updatePresentedNextEventId(
-            coverNextEvent?.eventId
-        )
+        // 会议非空时记日历最后使用时间（设置连接器列表用，沿用旧口径）。
         if (coverNextEvent != null) {
             SmartCardRepository.recordCalendarUsed(context)
         }
@@ -204,7 +187,6 @@ fun PetZone(
     DisposableEffect(Unit) {
         onDispose {
             TodayEventsHolder.update(null)
-            TodayEventsHolder.updatePresentedNextEventId(null)
         }
     }
     // 批B ③：coverPaletteFor 是非组合纯函数，深浅由这里从 CompositionLocal 读后传入
@@ -389,7 +371,7 @@ fun PetZone(
         // 2026-11-11（Bob 亲口）：简报里的日历提醒（NextUp 会行）直接拿掉——
         // 会议只在会前 30 分钟（非会议日程 2 小时）以日历卡出现，不再在简报里
         // 提前预览。coverNextEvent / TodaySection 数据管线不动（日历卡还靠它），
-        // BriefMeetingRow 定义保留（CoverHero.kt），暂无调用点。
+        // BriefMeetingRow 已随 v1.4.0 清理删除（零调用者）。
         // 智能卡片（447）：叠层槽位——简报下方、独立一段，与简报一起在输入态
         // 淡出（竖屏区块切换用 None、横屏沿用 fade，与会行同款）；无卡时
         // SmartCardStackHost 零高度、不留占位。
@@ -437,37 +419,6 @@ fun PetZone(
     )
 }
 
-/** 思考中的三个跳动点 */
-@Composable
-internal fun ThinkDots(modifier: Modifier = Modifier) {
-    // R3-D：系统减动效时三点静止（只表"思考中"，不跳动）
-    val reduceMotion = com.bobot.ailauncher.ui.theme.rememberReduceMotion()
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        repeat(3) { i ->
-            var up by remember { mutableStateOf(false) }
-            LaunchedEffect(reduceMotion) {
-                if (reduceMotion) return@LaunchedEffect
-                delay(i * 150L)
-                while (true) {
-                    up = !up
-                    delay(450)
-                }
-            }
-            val dy by androidx.compose.animation.core.animateFloatAsState(
-                targetValue = if (up) -9f else 0f,
-                animationSpec = PetMotion.PetDot,
-                label = "dot$i"
-            )
-            val density = LocalDensity.current
-            Box(
-                modifier = Modifier
-                    .offset { IntOffset(0, with(density) { dy.dp.toPx() }.roundToInt()) }
-                    .size(9.dp)
-                    .background(Color.White, RoundedCornerShape(99.dp))
-            )
-        }
-    }
-}
 
 
 

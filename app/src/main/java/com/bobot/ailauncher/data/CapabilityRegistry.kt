@@ -51,9 +51,6 @@ data class Capability(
     // v0.68.88：深链全灭时的 geo 意图兜底方式（JSON 可选字段 "geoFallback"）
     val geoFallback: GeoFallback = GeoFallback.NONE
 ) {
-    /** 执行前校验：返回缺失（未传或空白）的必填参数，按声明顺序 */
-    fun missingRequiredParams(filled: Map<String, String>): List<CapabilityParam> =
-        params.filter { it.required && filled[it.name].isNullOrBlank() }
 }
 
 /** Action 风险分级（PRD §二十三）：A=读，B=导航，C=低风险，D=中风险，E=高风险（必须用户确认） */
@@ -289,14 +286,6 @@ object CapabilityRegistry {
     private fun effectivePackageNames(cap: Capability): List<String> =
         CapabilityResolution.effectiveProviders(cap).flatMap { it.packageNames }.distinct()
 
-    /** 意图路由用：取该能力第一个已安装的包 */
-    fun resolveFirstInstalled(context: Context, capabilityId: String): ResolvedCapability? {
-        load(context)
-        val cap = find(capabilityId) ?: return null
-        val pkg = effectivePackageNames(cap).firstOrNull { isInstalled(context, it) } ?: return null
-        return resolveOne(context, cap, pkg)
-    }
-
     fun resolveAndLaunch(
         context: Context,
         capabilityId: String,
@@ -323,7 +312,7 @@ object CapabilityRegistry {
 
     // ---------- v0.68.88：按已装应用动态绑定 ----------
 
-    /** 能力执行结果三态，供 [com.bobot.ailauncher.core.action.ActionEngine] 选诚实文案 */
+    /** 能力执行结果三态，供调用方选诚实文案 */
     sealed interface LaunchOutcome {
         /** 成功打开了某个真实应用（label = 该应用的真实名称） */
         data class Opened(val label: String) : LaunchOutcome
@@ -470,14 +459,4 @@ object CapabilityRegistry {
             packageName
         }
 
-    /**
-     * 旧签名保留（能力页等调用方）：内部已换成候选链执行——解析出的应用是
-     * 优先序第一家，深链失败会顺链降级（geo / 其他提供方 / 应用本体）。
-     */
-    fun launchResolved(
-        context: Context,
-        resolved: ResolvedCapability,
-        params: Map<String, String> = emptyMap()
-    ): Boolean =
-        launchCapability(context, resolved.capability, params) is LaunchOutcome.Opened
 }

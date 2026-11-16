@@ -22,19 +22,7 @@ sealed interface LauncherEvent {
 
     // ---------- 通知 ----------
     data class NotificationReceived(val notification: SimpleNotification) : LauncherEvent
-    data class NotificationRemoved(val key: String) : LauncherEvent
-
-    // ---------- 用户交互 ----------
-    data object UserTappedPet : LauncherEvent
-    data object VoiceStarted : LauncherEvent
-    data object VoiceEnded : LauncherEvent
 
     /** Action 执行结束：成功或失败都要回写（PRD §六十四：失败不许假装成功） */
     data class TaskCompleted(val taskId: String, val success: Boolean) : LauncherEvent
-
-    /** Context 发生变化（时间/地点/前台 App/网络等），Phase 3 由 ContextEngine 发出 */
-    data object ContextChanged : LauncherEvent
-
-    // ---------- Launcher 自身 ----------
-    data class DockStateChanged(val state: String) : LauncherEvent
 }

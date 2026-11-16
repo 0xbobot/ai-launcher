@@ -72,7 +72,6 @@ assertEquals("11月7日", bill.dueLabel)
 assertNull(bill.tail4)
 assertEquals("银行", bill.bank)
 assertEquals(ms(2026, 11, 7, 23, 59, 59), bill.dueDayEndMs - 999)
-assertTrue(isBillInWindow(atDueDay, bill.dueDayEndMs))
 }
 
 // 448 回归：无 ¥ 金额（数字后跟“元”）+ 有尾号
@@ -155,15 +154,6 @@ parseBillSms(
 }
 
 @Test
-fun billWindow_twoDaysBeforeDue() {
-val dueEnd = ms(2026, 11, 7, 23, 59, 59)
-assertTrue(isBillInWindow(ms(2026, 11, 5, 0, 0), dueEnd))
-assertTrue(isBillInWindow(ms(2026, 11, 7, 23, 0), dueEnd))
-assertFalse(isBillInWindow(ms(2026, 11, 4, 23, 59), dueEnd))
-assertFalse(isBillInWindow(ms(2026, 11, 8, 0, 0), dueEnd))
-}
-
-@Test
 fun parseAppointment_anchorExample() {
 val appt = parseAppointmentSms(
 "体检预约：11 月 6 日 08:00–09:00，深圳第一健康鼎和分院四楼，订单已支付",
@@ -212,17 +202,6 @@ parseAppointmentSms(
 afterAppt
 )
 )
-}
-
-@Test
-fun appointmentWindow_24HoursBeforeStart() {
-val appt = parseAppointmentSms(
-"体检预约：11 月 6 日 08:00–09:00，深圳第一健康鼎和分院四楼",
-now
-)!!
-assertTrue(isAppointmentInWindow(ms(2026, 11, 5, 15, 0), appt))
-assertFalse(isAppointmentInWindow(ms(2026, 11, 5, 7, 59), appt))
-assertFalse(isAppointmentInWindow(ms(2026, 11, 6, 9, 0), appt))
 }
 
 @Test

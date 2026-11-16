@@ -21,9 +21,4 @@ object EventBus {
     fun emit(event: LauncherEvent) {
         _events.tryEmit(event)
     }
-
-    /** 挂起发送，调用方愿意等待时用。 */
-    suspend fun publish(event: LauncherEvent) {
-        _events.emit(event)
-    }
 }

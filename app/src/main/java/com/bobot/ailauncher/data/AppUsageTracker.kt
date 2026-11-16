@@ -254,17 +254,6 @@ object AppUsageTracker {
         }
     }
 
-    /** 衰减后小时×星期桶值（单个星期几×小时）。Dock 现走按日类型加总的
-     *  [hwDayTypeCount]，本函数保留供单格查询用。 */
-    fun hwCount(context: Context, packageName: String, dow: Int, hour: Int): Int {
-        return try {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getInt(KEY_HW_PREFIX + dow + "_" + hour + "_" + packageName, 0)
-        } catch (_: Exception) {
-            0
-        }
-    }
-
     /**
      * 日类型时段桶加总（纯函数）：工作日（周一–周五）同一小时求和；周六/
      * 周日单算。hwByDow 为星期几（1–7）→ 该小时的衰减后桶值；缺失按 0 计。
@@ -416,29 +405,6 @@ object AppUsageTracker {
         } catch (_: Exception) {
             emptyMap()
         }
-    }
-
-    /**
-     * 单个应用的智能排序分（总频次 + 3×当前时段亲和度 - 30 分钟内刚用过的
-     * 重复惩罚 2 分）。注意：智能 v3 后搜索不再调用本函数（改用
-     * [usageScoreForSearch]，不含 -2 惩罚）；Dock 新公式内联实现 -2 惩罚，
-     * 本函数保留未删除。
-     */
-    fun usageScore(context: Context, packageName: String): Double {
-        val p = try {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        } catch (_: Exception) {
-            null
-        } ?: return 0.0
-        val slot = ContextEngine.currentSlot().name
-        val c = p.getInt(KEY_COUNT_PREFIX + packageName, 0)
-        val sc = p.getInt(KEY_SLOT_PREFIX + slot + "_" + packageName, 0)
-        val last = p.getLong(KEY_LAST_PREFIX + packageName, 0L)
-        var score = c + 3.0 * sc
-        if (System.currentTimeMillis() - last < 30 * 60 * 1000) {
-            score -= 2.0
-        }
-        return score
     }
 
     /**

@@ -35,42 +35,7 @@ fun parseStickyValue(value: String): Pair<Int, Long>? {
 /** 纯函数：格式化一条存盘值。 */
 fun formatStickyValue(number: Int, time: Long): String = "$number,$time"
 
-/**
- * 纯函数：把粘性数并进角标（每包取最大值；粘性为 0/缺失的包不参与；
- * 空粘性时原样返回，不改调用方 map）。
- */
-fun mergeStickyCounts(base: Map<String, Int>, sticky: Map<String, Int>): Map<String, Int> {
-    if (sticky.isEmpty()) return base
-    val out = base.toMutableMap()
-    for ((pkg, n) in sticky) {
-        if (n > 0) out[pkg] = maxOf(out[pkg] ?: 0, n)
-    }
-    return out
-}
-
-/**
- * 纯函数：按新到通知的 number 更新粘性 map（事件驱动，只在通知到达时调）：
- * - number > 0：记下（新数覆盖旧数，即使新数更小——应用自报的最新总数为准）；
- * - number == 0：清掉该包粘性（应用说没有未读了）；
- * - 该包没有新通知：不动（通知栏清掉不影响粘性，这正是粘住的意义）。
- * 输入 numbers：每包新到通知的 number（0 也要传进来才能清）。
- */
-fun updateStickyMap(current: Map<String, Int>, numbers: Map<String, Int>): Map<String, Int> {
-    if (numbers.isEmpty()) return current
-    val out = current.toMutableMap()
-    for ((pkg, n) in numbers) {
-        if (n > 0) out[pkg] = n else out.remove(pkg)
-    }
-    return out
-}
-
-/** 纯函数：启动应用时清掉该包粘性（启动=去读消息了）；该包无粘性时原样返回。 */
-fun clearStickyForPackage(current: Map<String, Int>, pkg: String): Map<String, Int> {
-    if (!current.containsKey(pkg)) return current
-    return current - pkg
-}
-
-/** 粘性数存取（薄壳，I/O 在 SharedPreferences；纯逻辑在上面三个纯函数里，可单测）。 */
+/** 粘性数存取（薄壳，I/O 在 SharedPreferences）。 */
 object BadgeStickyStore {
     /** 读全部粘性数（包名→number）；脏条目跳过。 */
     fun loadNumbers(context: Context): Map<String, Int> {

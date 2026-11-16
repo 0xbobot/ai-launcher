@@ -27,18 +27,9 @@ object BatteryGuardPrefs {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getInt(KEY_WARN_PCT, 10)
 
-    fun setWarnPct(context: Context, v: Int) {
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .edit().putInt(KEY_WARN_PCT, v.coerceIn(5, 30)).apply()
-    }
-
     /** 紧急阈值，默认 5 */
     fun criticalPct(context: Context): Int =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getInt(KEY_CRITICAL_PCT, 5)
 
-    fun setCriticalPct(context: Context, v: Int) {
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .edit().putInt(KEY_CRITICAL_PCT, v.coerceIn(1, 15)).apply()
-    }
 }

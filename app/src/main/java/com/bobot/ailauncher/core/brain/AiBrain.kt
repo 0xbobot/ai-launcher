@@ -19,7 +19,7 @@ import com.bobot.ailauncher.data.FiledMessages
  * - 其余事件一律 [Decision.Nothing]——Nothing 是合法结果，不打扰用户。
  *
  * 后续 Phase 在此骨架上扩展：shouldThink 接入 Attention Budget（PRD §十四），
- * decide 接入 Intent/Context/Memory 引擎，ActionRequest 接入 ActionEngine（Phase 2）。
+ * decide 接入 Intent/Context/Memory 引擎。
  */
 object AiBrain {
 
@@ -28,8 +28,6 @@ object AiBrain {
         try {
             // TODO(Phase 3): ContextEngine.update(event, context)
             if (!shouldThink(event)) return
-            // TODO(Phase 2): ActionRequest 接入 ActionEngine（decide() 目前只返回 Nothing，
-            // 旧的 ActionRequest 分支是死分支，正式版清理时删掉）。
             decide(event, context)
         } catch (t: Throwable) {
             // Brain 永远不能拖垮 Launcher

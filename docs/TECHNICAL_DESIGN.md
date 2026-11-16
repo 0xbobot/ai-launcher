@@ -86,6 +86,8 @@ PRD 列了 20 个模块。单人 + GitHub Actions 构建的前提下，一次性
 **迁移原则：** 现有直调链路逐个改为"发 Event → Brain 决策 → 原逻辑"，
 每次只迁一条，CI 常绿，行为不变。
 
+> 注：v1.4.0 清理删掉了从未实现的 6 个事件变体（`NotificationRemoved`、`ContextChanged`、`DockStateChanged`、`UserTappedPet`、`VoiceStarted`、`VoiceEnded`）与 `ActionEngine` 骨架；上表为原始设计，Phase 2/3 仍为规划。
+
 ---
 
 ## 五、AI Brain 决策环（PRD §四十三/四十四）

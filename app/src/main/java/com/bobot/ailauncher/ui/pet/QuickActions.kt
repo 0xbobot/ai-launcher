@@ -70,8 +70,6 @@ import com.bobot.ailauncher.ui.settings.isDefaultLauncher
 import com.bobot.ailauncher.ui.settings.openHomeSettings
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.withContext

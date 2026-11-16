@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
 import android.provider.MediaStore
-import android.util.Log
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -44,7 +43,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.MotionTokens
 import com.bobot.ailauncher.ui.theme.PetMotion
@@ -329,10 +327,6 @@ class BlindCaptureController(
     private val setUi: (BlindUiState) -> Unit,
     private val triggerPx: Float,
 ) {
-    companion object {
-        private const val TAG = "BlindCapture"
-    }
-
     /**
      * 中性播报（删宠物批 adaptation）：原 PetRepository.say 只发气泡文本、
      * 无 TTS；盲操的段名/状态确认本就靠 TalkBack 读出。改走 View 的
@@ -392,7 +386,6 @@ class BlindCaptureController(
             dwellRunnable = null
             if (tracking && triggered && !editPinned) {
                 enterEditMode(openAddSheet = false)
-                if (BuildConfig.DEBUG) Log.d(TAG, "diag: edit(dwell 800ms 直接进入)")
             }
         }
         dwellRunnable = r
@@ -401,8 +394,6 @@ class BlindCaptureController(
     /** v0.68.64：编辑钉住时手势层移交扇形自身（点×/＋/拖拽由 MainScreen 侧处理），
      * controller 不再接管 down/move/up（HomeScreen 侧 LaunchedEffect 同步） */
     var editPinned = false
-
-    // v0.68.39：诊断链路已删除（v0.68.12 屏上诊断浮层使命结束）；保留 Log.d 供开发期使用
 
     /**
      * v0.68.42：收起——扇形已展开时走 Dismissing（120ms 内收+淡出动画，
@@ -491,7 +482,6 @@ class BlindCaptureController(
             announce("现在可以编辑了")
         }
         setUi(BlindUiState.Editing(centerX, centerY, fanDir, buildEditSegments(), openAddSheet))
-        if (BuildConfig.DEBUG) Log.d(TAG, "diag: editMode(openAddSheet=$openAddSheet)")
     }
 
     /** v0.68.64：编辑模式引导（只说一次）；返回是否说了完整引导 */
@@ -522,7 +512,6 @@ class BlindCaptureController(
         dwellStartMs = 0L
         setUi(BlindUiState.Hidden)
         velocityTracker.resetTracking()
-        if (BuildConfig.DEBUG) Log.d(TAG, "onStart tracking")
     }
 
     fun onMove(
@@ -594,8 +583,6 @@ class BlindCaptureController(
                 hapticView.confirmHaptic()
                 if (isZeroQuick) guideZeroQuickOnce()
                 else announce("拍点什么？")
-                if (BuildConfig.DEBUG) Log.d(TAG, "diag: fan展开")
-                if (BuildConfig.DEBUG) Log.d(TAG, "triggered dir=$fanDir center=($centerX, $centerY)")
             }
             return
         }
@@ -606,7 +593,6 @@ class BlindCaptureController(
             pos.x < centerX - cancelBackPx
         }
         if (cancelBack) {
-            if (BuildConfig.DEBUG) Log.d(TAG, "diag: idle(滑回取消)")
             dismissFan()
             return
         }
@@ -622,7 +608,6 @@ class BlindCaptureController(
             if (idx >= 0) {
                 hapticView.tickHaptic()
                 announce(segmentLabel(idx))
-                if (BuildConfig.DEBUG) Log.d(TAG, "diag: sector=${segmentLabel(idx)}")
             }
         } else {
             // 同段内大幅移动也算“没停住”，重新计时；手指微颤（12dp 内）
@@ -685,14 +670,11 @@ class BlindCaptureController(
                 modeIndex = -1
                 setUi(BlindUiState.Hidden)
                 launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
-                if (BuildConfig.DEBUG) Log.d(TAG, "diag: commit(拍照-直开本机相机应用)")
             } else if (seg is FanSegment.AddSlot) {
                 enterEditMode(openAddSheet = true)
-                if (BuildConfig.DEBUG) Log.d(TAG, "diag: edit(+段点入)")
             } else {
                 dismissFan()
                 commit(idx)
-                if (BuildConfig.DEBUG) Log.d(TAG, "diag: commit(${segmentLabel(idx)})")
             }
             return true
         }
@@ -710,11 +692,9 @@ class BlindCaptureController(
     private fun commit(idx: Int) {
         when (val s = segments.getOrNull(idx)) {
             is FanSegment.Photo -> {
-                if (BuildConfig.DEBUG) Log.d(TAG, "commit photo")
                 launchCamera(MediaStore.ACTION_IMAGE_CAPTURE)
             }
             is FanSegment.Quick -> {
-                if (BuildConfig.DEBUG) Log.d(TAG, "commit quick=${s.item.label}")
                 launchQuickAction(context, s.item)
             }
             // v0.68.64：＋段不走 commit（onEnd 直接进编辑+弹添加表）

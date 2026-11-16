@@ -120,7 +120,7 @@ internal fun TodaySection(
 internal fun selectNextEvent(events: List<CalEvent>, now: Long): CalEvent? =
     events.sortedBy { it.begin }.firstOrNull { it.end > now }
 
-/** 会议行状态（v0.68.164，供单测与 BriefMeetingRow 标签分支）。 */
+/** 会议行状态（v0.68.164，供单测与会议状态标签分支）。 */
 internal enum class MeetingStatus { UPCOMING, ONGOING, ENDED }
 
 /**

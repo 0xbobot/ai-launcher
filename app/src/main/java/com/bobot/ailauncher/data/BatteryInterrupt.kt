@@ -1,14 +1,11 @@
 package com.bobot.ailauncher.data
 
 import android.content.Context
-import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import com.bobot.ailauncher.ui.battery.BatteryGuardActivity
 
 /**
  * v0.41.14：低电量强制打断（Bob 要求"中断播放的效果"）。
@@ -35,19 +32,6 @@ object BatteryInterrupt {
     /** 是否已授予"显示在其他应用上层"权限 */
     fun canDrawOverlays(context: Context): Boolean =
         Settings.canDrawOverlays(context)
-
-    /** 跳系统设置：为本应用开启"显示在其他应用上层" */
-    fun openOverlaySettings(context: Context) {
-        try {
-            context.startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${context.packageName}")
-                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-            )
-        } catch (_: Exception) {
-        }
-    }
 
     /**
      * 申请瞬时音频焦点 → 正在播放的视频/音乐 App 会暂停。
@@ -99,23 +83,4 @@ object BatteryInterrupt {
         }
     }
 
-    /**
-     * 启动低电全屏提醒。
-     * 有悬浮窗权限 → 直接启动 Activity（系统豁免后台启动限制，稳定盖住）；
-     * 没有 → 返回 false，调用方降级用全屏通知。
-     */
-    fun launchAlertDirectly(context: Context, pct: Int, critical: Boolean): Boolean {
-        if (!canDrawOverlays(context)) return false
-        return try {
-            val intent = Intent(context, BatteryGuardActivity::class.java).apply {
-                putExtra(BatteryGuardActivity.EXTRA_PCT, pct)
-                putExtra(BatteryGuardActivity.EXTRA_CRITICAL, critical)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-            context.startActivity(intent)
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
 }

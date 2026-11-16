@@ -1306,7 +1306,6 @@ fun AppCenterContent(
                     foldVisible = foldVisible,
                     foldExpandedState = foldExpandedState,
                     onFoldExpandedChange = { foldExpandedState = it },
-                    foldLastDeclinedN = foldLastDeclinedN,
                     onFoldLastDeclinedNChange = { foldLastDeclinedN = it },
                     inactiveTargets = inactiveTargets,
                     actions = rowActions

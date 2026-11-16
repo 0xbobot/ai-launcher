@@ -29,37 +29,6 @@ object CustomCategories {
         return out.filterValues { it.isNotBlank() }
     }
 
-    fun setMapping(context: Context, packageName: String, groupId: String) {
-        val obj = try {
-            JSONObject(prefs(context).getString("mapping", "{}").orEmpty())
-        } catch (_: Exception) {
-            JSONObject()
-        }
-        obj.put(packageName, groupId)
-        prefs(context).edit().putString("mapping", obj.toString()).apply()
-    }
-
-    fun removeMapping(context: Context, packageName: String) {
-        val obj = try {
-            JSONObject(prefs(context).getString("mapping", "{}").orEmpty())
-        } catch (_: Exception) {
-            JSONObject()
-        }
-        obj.remove(packageName)
-        prefs(context).edit().putString("mapping", obj.toString()).apply()
-    }
-
-    /** 批量写入 mapping（AI 智能分类用）：packageName -> groupId */
-    fun setMappings(context: Context, mapping: Map<String, String>) {
-        val obj = try {
-            JSONObject(prefs(context).getString("mapping", "{}").orEmpty())
-        } catch (_: Exception) {
-            JSONObject()
-        }
-        mapping.forEach { (pkg, gid) -> obj.put(pkg, gid) }
-        prefs(context).edit().putString("mapping", obj.toString()).apply()
-    }
-
     fun getCustomGroups(context: Context): List<CustomGroupDef> {
         val out = mutableListOf<CustomGroupDef>()
         try {
@@ -75,28 +44,4 @@ object CustomCategories {
         return out
     }
 
-    /** 新建自定义分组，返回分组 id */
-    fun addCustomGroup(context: Context, label: String): String {
-        val id = "custom_" + System.currentTimeMillis()
-        val arr = try {
-            JSONArray(prefs(context).getString("groups", "[]").orEmpty())
-        } catch (_: Exception) {
-            JSONArray()
-        }
-        arr.put(JSONObject().put("id", id).put("label", label))
-        prefs(context).edit().putString("groups", arr.toString()).apply()
-        return id
-    }
-
-    /** 删除自定义分组，并清理指向它的 mapping */
-    fun removeCustomGroup(context: Context, id: String) {
-        val kept = JSONArray()
-        getCustomGroups(context).filter { it.id != id }.forEach {
-            kept.put(JSONObject().put("id", it.id).put("label", it.label))
-        }
-        prefs(context).edit().putString("groups", kept.toString()).apply()
-        getMapping(context).filter { it.value == id }.keys.forEach { pkg ->
-            removeMapping(context, pkg)
-        }
-    }
 }

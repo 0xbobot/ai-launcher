@@ -61,11 +61,9 @@ class MainActivity : FragmentActivity() {
         // v0.68.83（Bob 报）：横屏左侧出现一条"空状态栏"（蓝色）——窗口未进挖孔区被
         // letterbox 避让，没画到的地方透出系统壁纸。SHORT_EDGES 让窗口在横屏时
         // 延伸进左侧短边挖孔区，全屏绘制
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-            window.attributes.layoutInDisplayCutoutMode =
-                android.view.WindowManager.LayoutParams
-                    .LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        }
+        window.attributes.layoutInDisplayCutoutMode =
+            android.view.WindowManager.LayoutParams
+                .LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         CapabilityRegistry.load(this)
         // v0.15 宠物整理员：初始化（亲密度持久化等）
         // v0.68.56（Bob）：B 方案——灵动岛系统通知通道初始化
@@ -228,10 +226,6 @@ class MainActivity : FragmentActivity() {
                 IslandToasts.show("这次没检查成，稍后再试试吧")
             }
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
     }
 
     companion object {

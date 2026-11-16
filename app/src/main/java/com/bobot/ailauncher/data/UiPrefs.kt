@@ -90,11 +90,6 @@ object UiPrefs {
      */
     fun getDockSmartSort(context: Context): Boolean = true
 
-    fun setDockSmartSort(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_DOCK_SMART_SORT, enabled).apply()
-    }
-
     /**
      * Dock 置顶：用户手动固定的应用包名有序列表（v0.35.0）。
      * Dock 渲染时置顶排最前（按此顺序），后面再跟智能排序补齐。

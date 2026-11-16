@@ -31,7 +31,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
-import com.bobot.ailauncher.data.CalEvent
 import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.CoverPalette
@@ -56,8 +55,8 @@ import java.util.Locale
  * 其简报句（summary）与时段讲述本就在版面内；MINIMAL 收为时钟行 + 一行
  * 简报（summary 单行）。
  * 2026-11-11（Bob 亲口）：简报会行拿掉——下一场会不再在简报里出现，会议
- * 只在会前 30 分钟（非会议日程 2 小时）以日历卡出现。[BriefMeetingRow]
- * 定义保留，暂无调用点。
+ * 只在会前 30 分钟（非会议日程 2 小时）以日历卡出现。
+ * （会行组件 BriefMeetingRow 已随 v1.4.0 清理删除。）
  */
 /**
  * 简报文字字级阴影（Bob 2026-10-25 23:27 定 A＋B＋C 之 B）：复用 GlassTextShadow
@@ -510,103 +509,3 @@ fun CoverHeroLandscape(
     }
 }
 
-/**
- * v0.68.99（主页重构 R-1，Bob 拍板「简报即主页」）：简报会行——下一场会
- * 直接长在简报里，取代退役的 NextUp 独立卡（NextUpStrip 已删）。
- * 2026-11-11（Bob 亲口）：简报会行已拿掉，会议只走日历卡；本定义保留，
- * 暂无调用点。
- *
- * 形态（保留时的口径）：无卡片、无玻璃——分隔线 + 金色状态标签 + 宋体标题
- * + 「加入」动作，整行可点走既有 joinCalendarEvent 路径（TODAY 铁律：
- * 信息必须配用户最可能的下一步动作）。
- *
- * v0.68.164（过期日程修复 A）：标签不再写死“接下来”——按 nowMillis 派生
- * 状态：未来为「接下来 · HH:mm」，进行中为「进行中 · HH:mm–HH:mm」
- * （起止都显示）。调用方须传入分钟 ticker 时间（PetZone 的 coverNowMillis），
- * 标签随分钟推进自动翻转，不依赖边界 effect。
- *
- * testTag 沿用 today_nextup：横屏几何断言的语义等价迁移到本行；冒烟的
- * 会行去重现为反向断言 nextup-brief-row-absent（简报里不出现会议行）。
- */
-@Composable
-fun BriefMeetingRow(
-    event: CalEvent,
-    palette: CoverPalette,
-    accent: androidx.compose.ui.graphics.Color,
-    onJoin: (CalEvent) -> Unit,
-    modifier: Modifier = Modifier,
-    nowMillis: Long
-) {
-    val timeText = remember(event.begin) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(event.begin))
-    }
-    val endTimeText = remember(event.end) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(event.end))
-    }
-    // v0.68.164：状态由调用方传入的 nowMillis 派生；已结束的会由选会层
-    // （TodaySection 派生 nextEvent）过滤，本行不再收到 end <= now 的事件，
-    // ENDED 分支仅作防御（仍渲染“接下来”文案，不擅自改语义）。
-    val status = com.bobot.ailauncher.ui.pet.meetingStatus(event.begin, event.end, nowMillis)
-    val labelText = if (status == com.bobot.ailauncher.ui.pet.MeetingStatus.ONGOING) {
-        "正在开 · $timeText–$endTimeText"
-    } else {
-        "下一场 · $timeText"
-    }
-    val title = event.title.ifBlank { "日程" }
-    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 32.dp)) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(palette.title.copy(alpha = 0.18f))
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("today_nextup")
-                // 不合并语义：标题文本节点须独立存在（冒烟按标题文本定位本行、
-                // 去重断言按文本节点计数）；行自身挂整句 contentDescription
-                .semantics {
-                    contentDescription = "$labelText 的会议：$title，点按加入"
-                }
-                .clip(RoundedCornerShape(12.dp))
-                .clickable { onJoin(event) }
-                .padding(vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                TrackedText(
-                    text = labelText,
-                    fontSize = AILauncherType.Caption.fontSize,
-                    tracking = 3.dp,
-                    color = accent
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(style = briefingTextShadowStyle,
-                    text = title,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = AILauncherType.Title.fontSize,
-                    lineHeight = 27.sp,
-                    color = palette.title,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(99.dp))
-                    .background(accent.copy(alpha = 0.16f))
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text(style = briefingTextShadowStyle,
-                    text = "加入",
-                    fontSize = AILauncherType.Callout.fontSize,
-                    fontWeight = FontWeight.SemiBold,
-                    color = accent
-                )
-            }
-        }
-    }
-}
