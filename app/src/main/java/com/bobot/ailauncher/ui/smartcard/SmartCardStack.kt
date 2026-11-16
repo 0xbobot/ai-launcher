@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
@@ -86,10 +87,13 @@ import com.bobot.ailauncher.data.calendarEventDetailLines
 import com.bobot.ailauncher.data.guideIdsForConnector
 import com.bobot.ailauncher.data.isGuideConnectorGranted
 import com.bobot.ailauncher.data.NotificationRepository
+import com.bobot.ailauncher.data.OtaDownloader
+import com.bobot.ailauncher.data.OtaUpdater
 import com.bobot.ailauncher.data.SmartCard
 import com.bobot.ailauncher.data.SmartCardAction
 import com.bobot.ailauncher.data.SmartCardActions
 import com.bobot.ailauncher.data.SmartCardRepository
+import com.bobot.ailauncher.data.overlayUpdateCardDisplay
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.currentGuideCard
 import com.bobot.ailauncher.data.shouldShowGuideVersion
@@ -178,6 +182,36 @@ fun SmartCardStackHost() {
     val cards by SmartCardRepository.cards.collectAsState()
     val prepById by SmartCardRepository.prepById.collectAsState()
     val notifications by NotificationRepository.notifications.collectAsState()
+    // 升级卡下载状态（第四十五批）：订阅下载器状态，状态变了就按同一口径
+    // 覆盖升级卡的事实／按钮／进度条（见 overlayUpdateCardDisplay）——
+    // 只重组、不触发仓库 refresh（下载进度每 200ms 推一次，refresh 一次
+    // 要重查日历／短信缓存／复盘卡，太贵）。必须放在提前返回之前——
+    // collectAsState 调用在重组间顺序要稳定。
+    val dlState by OtaDownloader.state.collectAsState()
+    // 升级卡显示覆盖（第四十五批）：仓库建卡时的下载状态是快照，这里按
+    // 实时下载状态重算事实／按钮／进度条；其余卡原样。id/kind/sourceKey/
+    // sortMs/deadlineMs/action 不动（身份与排序只认仓库那张卡）。
+    // remember 键挂 cards 与 dlState：下载进度每 200ms 推一次才重算，
+    // 其余重组（分钟 ticker、通知变化）不重复读 prefs／文件。
+    val displayCards = remember(cards, dlState) {
+        cards.map { card ->
+            if (card.kind != SmartCardKind.UPDATE) {
+                card
+            } else {
+                val info = (card.action as? SmartCardAction.Update)?.info
+                if (info == null) {
+                    card
+                } else {
+                    overlayUpdateCardDisplay(
+                        card,
+                        dlState,
+                        OtaUpdater.downloadTargetVersion(context),
+                        OtaUpdater.isDownloadedVersion(context, info.versionCode)
+                    )
+                }
+            }
+        }
+    }
     val nowMillis by rememberNowMillis()
     // 冷启动就绪门（第二十五批，问题 1）：卡片叠层不在空桌面上单独先蹦——
     // 与 505 的 Dock 门同一信号（AppCatalog 快照到位才算首页首帧就绪）。
@@ -394,7 +428,7 @@ fun SmartCardStackHost() {
         // 一起出现。return 照常：真卡在场时不落到引导卡分支。
         if (homeReady) {
             SmartCardStack(
-                cards = cards,
+                cards = displayCards,
                 prepById = prepById,
                 onAction = { card ->
                     if (card.action is SmartCardAction.CreateReminder) {
@@ -942,7 +976,9 @@ fun SmartCardStack(
     // 触发 Crossfade（Crossfade 已撤，见文件头 KDoc）。
     LaunchedEffect(index, cards.size, resumeAtMillis, isDragging, isSliding) {
         if (isSliding) return@LaunchedEffect
-        if (!carouselShouldAutoRotate(cards.size)) return@LaunchedEffect
+        // 第四十五批：强更升级卡钉住时不自动轮走（它一直钉在叠层最上面，
+        // 直到装上新版）；用户手动点圆点／拖动仍可去看别的卡（不是全屏阻塞）。
+        if (!carouselShouldAutoRotate(cards, index)) return@LaunchedEffect
         delay(
             carouselWaitMs(
                 SMART_CARD_CAROUSEL_INTERVAL_MS,
@@ -1481,6 +1517,17 @@ internal fun carouselSlideOutAlpha(progress: Float): Float =
 internal fun carouselShouldAutoRotate(size: Int): Boolean = size >= 2
 
 /**
+ * 轮播是否自动轮换（列表版，第四十五批，单测锁死）：张数口径与上面
+ * 同一条；外加强更升级卡钉住时不轮——当前这张是 pinned（强更）就停住，
+ * 直到装上新版卡片消失、或用户手动点圆点／拖动离开；手动离开后恢复
+ * 正常轮换（轮回来时到强更卡又停住）。手动切换本身不禁（不是全屏阻塞，
+ * 用户还能用桌面、还能去看别的卡）。
+ */
+internal fun carouselShouldAutoRotate(cards: List<SmartCard>, index: Int): Boolean =
+    carouselShouldAutoRotate(cards.size) &&
+        cards.getOrNull(index)?.pinned != true
+
+/**
  * 轮播下标钳制（纯函数，第三十二批单测锁死）：摘卡后列表缩短，下标
  * 可能越界，钳回末尾；空列表为 0。
  */
@@ -1716,6 +1763,14 @@ private fun SmartCardView(
                         Modifier.clickable(onClick = onBodyClick)
                     } else Modifier
                 )
+                // 下载进度条（第四十五批）：升级卡下载中才有（card.progress
+                // 0..1），画在事实下方；事实本身已带「（xx%）」，这里只画条。
+                card.progress?.let { progress ->
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 card.prep?.let { prep ->
                     Text(
                         text = prep,
@@ -1758,31 +1813,41 @@ private fun SmartCardView(
                 // 我知道了：卡片消失、不再出现、不追问（设计稿 §4.2）。
                 // 左按钮文案按卡种：默认「我知道了」，设默认卡是「取消」
                 // （card.dismissLabel，Bob 2026-11-14 07:33 亲令）。
-                TextButton(
-                    onClick = onIgnoreClick,
-                    modifier = Modifier.heightIn(min = SmartCardActionRowMinHeight)
-                ) {
-                    Text(
-                        text = card.dismissLabel,
-                        fontSize = AILauncherType.Callout.fontSize,
-                        fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.current.Hint
-                    )
+                // 第四十五批：强更升级卡不出左按钮（hideDismissButton，
+                // 只剩「去更新」）；左按钮藏起时右按钮仍贴右（Spacer 顶住）。
+                if (!card.hideDismissButton) {
+                    TextButton(
+                        onClick = onIgnoreClick,
+                        modifier = Modifier.heightIn(min = SmartCardActionRowMinHeight)
+                    ) {
+                        Text(
+                            text = card.dismissLabel,
+                            fontSize = AILauncherType.Callout.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Hint
+                        )
+                    }
+                } else {
+                    Spacer(Modifier.weight(1f))
                 }
                 // 右按钮（第十二批 Bob 定）：显示下一步的意图（actionLabel：
                 // 去还款 / 帮我建提醒 / 看预约 / 回拨 / 打开看看 / 加入会议 /
                 // 看日程 / 按来源给动作起名），不再写“下一步”几个字。
                 // 金色只留主操作（去 AI 味四条）。
-                TextButton(
-                    onClick = onActionClick,
-                    modifier = Modifier.heightIn(min = SmartCardActionRowMinHeight)
-                ) {
-                    Text(
-                        text = card.actionLabel,
-                        fontSize = AILauncherType.Callout.fontSize,
-                        fontWeight = FontWeight.Medium,
-                        color = AILauncherColors.current.Accent
-                    )
+                // 第四十五批：升级卡下载中右按钮先收起来（hideActionButton，
+                // 下载中没什么可点的）；下完变「安装」，失败变「重试」。
+                if (!card.hideActionButton) {
+                    TextButton(
+                        onClick = onActionClick,
+                        modifier = Modifier.heightIn(min = SmartCardActionRowMinHeight)
+                    ) {
+                        Text(
+                            text = card.actionLabel,
+                            fontSize = AILauncherType.Callout.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Accent
+                        )
+                    }
                 }
             }
         }

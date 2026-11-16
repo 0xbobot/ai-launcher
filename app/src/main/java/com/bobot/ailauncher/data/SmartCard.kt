@@ -34,7 +34,15 @@ enum class SmartCardKind {
     /** 节点一「今天 / 明天一览」：起床窗出今天一览、睡前窗（21:30）
      * 出明天一览；三行（天气＋第一场会＋未读），排在有时效真卡之后、
      * 设默认卡之前；点「我知道了」当天不再出（id 按日拼）。 */
-    DAY_OVERVIEW
+    DAY_OVERVIEW,
+    /** 应用更新（第四十五批，Bob 2026-11-10 定稿，设计见
+     * upgrade-reminder-card-design.md；智能卡片设计稿 §4.9）：
+     * 有新版时出一张卡（id＝update|<versionCode>），一张卡走完
+     * “有新版本 → 正在下载 → 下载好了 → 安装”全程；无截止点，
+     * 只随版本走（装上新版消失，来新版换新卡）。平时排在有时效真卡
+     * 之后、引导卡之前；强更（forceUpdate）置顶、不可划走、
+     * 不出「我知道了」。 */
+    UPDATE
 }
 
 /** 卡片的下一步动作：点它就算处理完一张——除了第十九批的有时间段提醒
@@ -102,6 +110,16 @@ sealed class SmartCardAction {
         /** 退回动作（看预约） */
         val fallback: SmartCardAction
     ) : SmartCardAction()
+
+    /** 升级卡的动作（第四十五批，Bob 2026-11-10 定稿，设计见
+     * upgrade-reminder-card-design.md §4）：去更新／安装／重试是同一
+     * 个动作，执行时按当下状态分流（见 SmartCardActions.performUpdateAction）：
+     * 已下好同版本包 → 弹系统安装提示；下载中 → 不动（按钮已藏起，
+     * 误触也不重下）；其余 → OtaDownloader.start 开始／重试下载。
+     * 点动作成功不摘卡（shouldKeepCardAfterAction 对 UPDATE 恒 true）：
+     * 一张卡走完“有新版本 → 正在下载 → 下载好了 → 安装”全程，
+     * 只有装上新版（versionCode 追上）或点「我知道了」才消失。 */
+    data class Update(val info: OtaInfo) : SmartCardAction()
 
     /** 打开系统默认桌面设置（首次安装设默认卡用，Bob 2026-11-14 07:33
      * 亲令）：与设置页「默认桌面」行同一套动作（openHomeSettings，
@@ -198,7 +216,19 @@ data class SmartCard(
     val targetApp: TargetApp? = null,
     /** 预约卡已建过提醒（第十一批）：卡上显示“已建提醒”，动作已换回
      * 看预约（防重复建）。只对 APPOINTMENT 卡有意义。 */
-    val reminderCreated: Boolean = false
+    val reminderCreated: Boolean = false,
+    /** 下载进度 0..1（第四十五批，升级卡下载中才有）：UI 在事实下方画
+     * 进度条；其余卡为 null，不画。 */
+    val progress: Float? = null,
+    /** 藏起右按钮（第四十五批）：升级卡下载中右按钮先收起来（下载中
+     * 没什么可点的）；其余卡为 false。 */
+    val hideActionButton: Boolean = false,
+    /** 藏起左按钮「我知道了」（第四十五批）：强更升级卡不出「我知道了」；
+     * 其余卡为 false。 */
+    val hideDismissButton: Boolean = false,
+    /** 置顶（第四十五批）：强更升级卡排在最上面（sortMs＝Long.MIN_VALUE），
+     * 自动轮换停住（见 carouselShouldAutoRotate）；其余卡为 false。 */
+    val pinned: Boolean = false
 ) {
     /** 未接来电卡片显示的称呼：有人名显示人名，否则显示号码 */
     val displayName: String
@@ -216,8 +246,12 @@ internal fun kindRank(kind: SmartCardKind): Int = when (kind) {
     SmartCardKind.MISSED_CALL -> 3
     SmartCardKind.NOTIFICATION -> 4
     SmartCardKind.DAY_OVERVIEW -> 5
-    SmartCardKind.DEFAULT_LAUNCHER -> 6
-    SmartCardKind.GUIDE -> 7
+    // 升级卡（第四十五批）：无截止点组，有时效真卡之后、引导卡之前；
+    // 与设默认卡同 sortMs（Long.MAX_VALUE）时按本优先级分先后，
+    // 升级卡在设默认卡之前。
+    SmartCardKind.UPDATE -> 6
+    SmartCardKind.DEFAULT_LAUNCHER -> 7
+    SmartCardKind.GUIDE -> 8
 }
 
 /**
@@ -277,8 +311,8 @@ fun withInProgressPrefix(
  * 482「本轮收起来」）：账单 BILL、预约 APPOINTMENT、日历 CALENDAR、
  * 未接来电 MISSED_CALL、快递/航班 NOTIFICATION——划过只排后面（沉到
  * 摞底），不丢。
- * 应用推的提醒（引导卡 GUIDE、设默认卡 DEFAULT_LAUNCHER，以及还没
- * 落地的 TIP 小贴士 / UPDATE 升级卡）不在这里——划过就丢，不沉底。
+ * 应用推的提醒（引导卡 GUIDE、设默认卡 DEFAULT_LAUNCHER、升级卡 UPDATE，
+ * 以及还没落地的小贴士 TIP）不在这里——划过就丢，不沉底。
  * 新种默认走“应用推的”分支，除非明确列进这里。
  */
 fun isUserMatterCard(kind: SmartCardKind): Boolean = when (kind) {
@@ -291,7 +325,11 @@ fun isUserMatterCard(kind: SmartCardKind): Boolean = when (kind) {
     SmartCardKind.DEFAULT_LAUNCHER,
     // 总览卡 DAY_OVERVIEW：应用推的——它没有沉底语义，点「我知道了」
     // 是 markDone 按日抑制（id 按日拼），不走 skip 的沉底路径。
-    SmartCardKind.DAY_OVERVIEW -> false
+    // 升级卡 UPDATE：应用推的——点「我知道了」是 markDone 按版本抑制
+    // （id＝update|<versionCode>，本版本不再提醒，新版本是新 id），
+    // 不走 skip 的沉底路径。
+    SmartCardKind.DAY_OVERVIEW,
+    SmartCardKind.UPDATE -> false
 }
 
 /**

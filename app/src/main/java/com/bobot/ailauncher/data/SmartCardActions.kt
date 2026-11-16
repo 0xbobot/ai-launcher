@@ -235,10 +235,56 @@ object SmartCardActions {
      * 提醒」不走这里（CreateReminder 由宿主拦截，本来就不摘），不受影响。
      * 点正文（viewAppointment 的 fallback 复制）也走同一条判断——复制
      * 保留 kind 与 deadlineMs，kind 在这里才是判断依据。
+     * 升级卡（UPDATE，第四十五批）：点动作永远不摘——一张卡走完
+     * “有新版本 → 正在下载 → 下载好了 → 安装”全程，点「去更新」只是
+     * 开始下载（卡片留下来走下载和安装），点「安装」只是弹安装提示；
+     * 只有装上新版（versionCode 追上、latestAvailable 清掉）或点
+     * 「我知道了」才消失。
      */
     fun shouldKeepCardAfterAction(card: SmartCard, nowMs: Long): Boolean =
-        (card.kind == SmartCardKind.CALENDAR || card.kind == SmartCardKind.APPOINTMENT) &&
-            nowMs < card.deadlineMs
+        card.kind == SmartCardKind.UPDATE ||
+            ((card.kind == SmartCardKind.CALENDAR ||
+                card.kind == SmartCardKind.APPOINTMENT) &&
+                nowMs < card.deadlineMs)
+
+    /**
+     * 升级卡的动作执行（第四十五批，设计 §4）：去更新／安装／重试是
+     * 同一个动作，点的时候按当下状态分流——
+     * - 已下好同版本包（isDownloadedVersion）→ 弹系统安装提示
+     *   （安装前复查 APK 可解析：坏包不装，转重新下载）；
+     * - 正在下载 → 不动（右按钮下载中已藏起，误触也不重下）；
+     * - 其余（有新版／下载失败）→ OtaDownloader.start 开始／重试下载
+     *   （同版本重试自动续传未完成的分片；下载完 OtaDownloader 直接
+     *   弹安装，卡片事实随 OtaDownloader.state 翻成「下载好了」）。
+     * 返回 true 表已处理（卡片不摘，见 shouldKeepCardAfterAction）；
+     * 只有启动下载抛异常／安装拉不起来才返回 false（卡片保留，可重试）。
+     */
+    fun performUpdateAction(context: Context, info: OtaInfo): Boolean {
+        return try {
+            if (OtaDownloader.state.value is OtaDownloader.State.Downloading) {
+                // 下载中：不动（按钮已藏起；重复点按也不重下、不取消）。
+                true
+            } else if (OtaUpdater.isDownloadedVersion(context, info.versionCode)) {
+                val apk = OtaUpdater.downloadedApk(context)
+                    ?.takeIf { OtaUpdater.isValidApk(context, it) }
+                if (apk != null) {
+                    if (OtaUpdater.promptInstall(context, apk)) {
+                        OtaUpdater.markInstallPrompted(context)
+                    }
+                    true
+                } else {
+                    // 标记说下好了、包却不在或不可解析：重新下载（不装坏包）。
+                    OtaDownloader.start(context, info)
+                    true
+                }
+            } else {
+                OtaDownloader.start(context, info)
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     /**
      * 执行动作并在成功时 markDone（时间段内除外，见
@@ -312,6 +358,10 @@ object SmartCardActions {
                     openHomeSettings(context)
                     true
                 }
+                // 升级卡（第四十五批）：去更新／安装／重试是同一个动作，
+                // 执行时按当下状态分流（见 performUpdateAction）；点动作
+                // 成功不摘卡（shouldKeepCardAfterAction 对 UPDATE 恒 true）。
+                is SmartCardAction.Update -> performUpdateAction(context, action.info)
                 // 日历卡（第十二批）：有会议链接直开链接，无链接打开日历
                 // 应用（再兜底事件详情），与 PetZone 的
                 // joinCalendarEvent 同一条链（CalendarMeeting）。

@@ -22,7 +22,9 @@ import com.bobot.ailauncher.core.brain.AiBrain
 import com.bobot.ailauncher.core.context.ContextEngine
 import com.bobot.ailauncher.core.event.EventBus
 import com.bobot.ailauncher.data.CapabilityRegistry
+import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.OtaUpdater
+import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.data.WakeWindowStore
 import com.bobot.ailauncher.ui.MainScreen
 import com.bobot.ailauncher.ui.theme.AILauncherTheme
@@ -80,6 +82,10 @@ class MainActivity : FragmentActivity() {
         com.bobot.ailauncher.data.BatteryGuard.ensureStarted(this)
         // OTA：版本变化后清理旧安装包，避免"直接安装"命中旧包
         OtaUpdater.onAppUpgraded(this)
+        // 升级卡（第四十五批，设计 §3）：装上新版后清掉该版本的办完／
+        // 跳过记录，不留脏数据（onAppUpgraded 已清掉 latestAvailable，
+        // 卡片即消失；这里清的是 prefs 里那版本按 id 记的状态）。
+        SmartCardRepository.clearUpdateCardRecords(this, BuildConfig.VERSION_CODE)
 
         // v0.41.12：DownloadManager 已换成 App 内 OkHttp（OtaDownloader），下载完成由
         // OtaDownloader 直接弹安装，不再需要系统下载广播。onResume 保留兜底。
@@ -210,15 +216,20 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    /** v0.32.3：快捷方式触发立即检查更新 */
+    /** v0.32.3：快捷方式触发立即检查更新（第四十五批：UpdateDialog 已
+     * 退役，有新版直接写 latestAvailable 并 refresh——升级卡随即在智能
+     * 卡片叠层里出现，不再弹对话框；没新版照常 toast 一句）。 */
     private fun checkUpdateNow() {
         lifecycleScope.launch {
             try {
                 val info = com.bobot.ailauncher.data.OtaUpdater.checkForUpdate(this@MainActivity)
                 if (info != null) {
-                    // 有新版：通过广播或直接弹对话框
-                    // 简单起见，发一个本地事件让 MainScreen 显示
-                    checkUpdateResult.value = info
+                    OtaUpdater.latestAvailable.value = info
+                    SmartCardRepository.refresh(
+                        this@MainActivity,
+                        NotificationRepository.notifications.value,
+                        System.currentTimeMillis()
+                    )
                 } else {
                     IslandToasts.show("你用的已经是最新版本了")
                 }
@@ -226,10 +237,5 @@ class MainActivity : FragmentActivity() {
                 IslandToasts.show("这次没检查成，稍后再试试吧")
             }
         }
-    }
-
-    companion object {
-        /** v0.32.3：快捷方式检查更新结果，MainScreen 观察后弹对话框 */
-        val checkUpdateResult = androidx.compose.runtime.mutableStateOf<com.bobot.ailauncher.data.OtaInfo?>(null)
     }
 }

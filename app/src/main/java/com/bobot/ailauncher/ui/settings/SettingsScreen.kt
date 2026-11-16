@@ -363,14 +363,21 @@ fun SettingsScreen(
             val dlDone = dlState is OtaDownloader.State.Success
             val dlFailed = dlState is OtaDownloader.State.Failed
 
+            // 已知的新版本（第四十五批，设计 §9）：手动检查的 updateInfo
+            // 优先，每天自动检查的 latestAvailable 兜底——两个来源发现的
+            // 新版都一样：行内显示「有新版本 vX.X.X」＋「去更新」按钮，
+            // 点它直接启动后台下载（同一个 OtaDownloader.start，与升级卡
+            // 里的「去更新」是同一个动作），不弹对话框。
+            val availableInfo = updateInfo ?: latestAvailable
+
             // 上行文案走纯函数（单测锁死，见 VersionCardTest）：主文六态、
             // 副文四态，与原来检查更新卡逐字一致。
             val updateTitle = versionUpdateTitle(
-                checking, downloading, dlDone, dlFailed, updateInfo?.versionName
+                checking, downloading, dlDone, dlFailed, availableInfo?.versionName
             )
             val updateHint = versionUpdateHint(
                 downloading, dlDone, dlFailed,
-                updateInfo?.versionName, updateInfo?.changelog,
+                availableInfo?.versionName, availableInfo?.changelog,
                 BuildConfig.VERSION_NAME
             )
 
@@ -388,19 +395,20 @@ fun SettingsScreen(
                         } else {
                             IslandToasts.show("安装包不完整，我再重新下载一次")
                             OtaDownloader.resetIfNotDownloading()
-                            updateInfo?.let { OtaDownloader.start(context, it) }
+                            availableInfo?.let { OtaDownloader.start(context, it) }
                         }
                     }
                 }
                 dlFailed -> {
                     {
-                        updateInfo?.let { OtaDownloader.start(context, it) }
+                        availableInfo?.let { OtaDownloader.start(context, it) }
                             ?: run {
                                 checking = true
                                 scope.launch {
                                     when (val r = OtaUpdater.checkForUpdateResult(context)) {
                                         is OtaCheckResult.UpdateAvailable -> {
                                             updateInfo = r.info
+                                            OtaUpdater.latestAvailable.value = r.info
                                             OtaDownloader.start(context, r.info)
                                         }
                                         else -> IslandToasts.show("这次没检查成，稍后再试试吧")
@@ -410,15 +418,22 @@ fun SettingsScreen(
                             }
                     }
                 }
-                updateInfo != null -> {
-                    { OtaDownloader.start(context, updateInfo!!) }
+                availableInfo != null -> {
+                    { OtaDownloader.start(context, availableInfo!!) }
                 }
                 else -> {
                     {
                         checking = true
                         scope.launch {
                             when (val r = OtaUpdater.checkForUpdateResult(context)) {
-                                is OtaCheckResult.UpdateAvailable -> updateInfo = r.info
+                                is OtaCheckResult.UpdateAvailable -> {
+                                    // 手动检查发现新版：除了本地 updateInfo，
+                                    // 也写进 latestAvailable——升级卡的出现
+                                    // 条件就是 latestAvailable 非空（设计 §3，
+                                    // 自动检查或手动检查发现了新版都出卡）。
+                                    updateInfo = r.info
+                                    OtaUpdater.latestAvailable.value = r.info
+                                }
                                 OtaCheckResult.UpToDate ->
                                     IslandToasts.show("你用的已经是最新版本了")
                                 OtaCheckResult.Failed ->
@@ -496,7 +511,7 @@ fun SettingsScreen(
                                         fontSize = AILauncherType.Footnote.fontSize,
                                         color = MaterialTheme.colorScheme.error
                                     )
-                                    val apkUrl = updateInfo?.apkUrl
+                                    val apkUrl = availableInfo?.apkUrl
                                     if (!apkUrl.isNullOrBlank()) {
                                         Spacer(modifier = Modifier.height(8.dp))
                                         TextButton(
@@ -522,7 +537,7 @@ fun SettingsScreen(
                                         }
                                     }
                                 }
-                                updateInfo != null -> Text(
+                                availableInfo != null -> Text(
                                     text = updateHint.orEmpty(),
                                     fontSize = AILauncherType.Footnote.fontSize,
                                     color = AILauncherColors.current.Hint,
@@ -534,6 +549,29 @@ fun SettingsScreen(
                                     fontSize = AILauncherType.Footnote.fontSize,
                                     color = AILauncherColors.current.Hint
                                 )
+                            }
+                            // 「去更新」按钮（第四十五批，设计 §9）：查到新版时
+                            // 行内直接给一个按钮（不只靠整行点按），点它直接
+                            // 启动后台下载（同一个 OtaDownloader.start，与
+                            // 升级卡里的「去更新」是同一个动作），不弹对话框。
+                            // 只在有新版、且不在检查／下载／下完／失败态时出现。
+                            if (availableInfo != null && !checking &&
+                                !downloading && !dlDone && !dlFailed
+                            ) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                TextButton(
+                                    onClick = {
+                                        view.tickHaptic()
+                                        OtaDownloader.start(context, availableInfo)
+                                    },
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Text(
+                                        text = "去更新",
+                                        fontSize = AILauncherType.Footnote.fontSize,
+                                        color = AILauncherColors.current.Accent
+                                    )
+                                }
                             }
                         }
                     if (checking || downloading) {

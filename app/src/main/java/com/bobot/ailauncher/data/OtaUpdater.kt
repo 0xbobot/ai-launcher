@@ -63,15 +63,23 @@ object OtaUpdater {
     const val APK_FILE_NAME = "ai-launcher-update.apk"
 
     /**
-     * v0.64.2：最新发现的可更新版本（自动检查写入），TODAY 卡片底部的"有新版本"行读取展示。
-     * 更新后（versionCode 追上）调用 clearAvailable() 清掉。
+     * v0.64.2：最新发现的可更新版本（自动检查写入），智能卡片的升级卡
+     * （第四十五批）读取展示；设置页手动检查发现新版时也写入（见
+     * SettingsScreen）。更新后（versionCode 追上）调用 clearAvailable()
+     * 清掉（onAppUpgraded 里做）。
      */
     val latestAvailable = MutableStateFlow<OtaInfo?>(null)
 
-    /**
-     * v0.64.2：请求弹出更新对话框（TODAY 行点击 / 自动检查），MainScreen 收集后展示 UpdateDialog。
-     */
-    val updatePrompt = MutableStateFlow<OtaInfo?>(null)
+    /** 当前下载目标版本（markDownloadStart/markDownloadComplete 写入；
+     * 0＝没有下载过）。升级卡的状态机用它判断下载器里的状态是不是
+     * 本卡这一版的（见 updateDownloadPhase）。 */
+    fun downloadTargetVersion(context: Context): Int =
+        prefs(context).getInt(KEY_TARGET_VERSION, 0)
+
+    /** 清掉最新发现的可更新版本（装上新版后调：卡片即消失）。 */
+    fun clearAvailable() {
+        latestAvailable.value = null
+    }
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -366,11 +374,14 @@ object OtaUpdater {
     /**
      * App 版本变化（升级/重装）后调用：清理旧安装包与旧下载状态，
      * 避免下次更新时"直接安装"命中旧包。建议在 MainActivity.onCreate 调用。
+     * 版本变化时同时清掉 latestAvailable（它指的那个版本已经装上了，
+     * 升级卡即消失；装上新版后下一次检查会重新判定）。
      */
     fun onAppUpgraded(context: Context) {
         val p = prefs(context)
         if (p.getInt(KEY_LAST_RUN_VERSION, 0) != BuildConfig.VERSION_CODE) {
             downloadedApk(context)?.delete()
+            clearAvailable()
             p.edit()
                 .putInt(KEY_LAST_RUN_VERSION, BuildConfig.VERSION_CODE)
                 .putBoolean(KEY_INSTALL_PROMPTED, false)
