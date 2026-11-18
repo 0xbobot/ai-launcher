@@ -1509,9 +1509,13 @@ fresh_find_label() {
     fi
     # 折叠组展开（2026-11-11 r4：api29 实证——桩装进后进了收着的“不常用”组，
     # 组头计数 7→8 证明快照已换表，但组员行不在 dump 里、24 轮永远找不到；
-    # 见到收起标记“一键隐藏”就点一次组头展开；跨 install/uninstall 两次调用
-    # 只展一次，避免把已展开的组又点回去；展开后重拉再判）。
-    if [ "$FRESH_FOLD_EXPANDED" = "0" ] && [ -f "$OUT/fresh_dump.xml" ] && grep -q '一键隐藏' "$OUT/fresh_dump.xml"; then
+    # 见到 chevron 收起态 content-desc“展开不常用”就点一次组头展开；跨 install/uninstall 两次调用
+    # 只展一次，避免把已展开的组又点回去；展开后重拉再判。
+    # 注意：别用“一键隐藏”当触发——那只是功能名，从未渲染为可见文案
+    # （2026-11-18 r10 定性：r4 以来该分支是死代码，api29 腿因此连败 4 轮）；
+    # content-desc 自带状态语义（展开后变“收起不常用”），天然防重复点按，
+    # 也堵住 fresh_ensure_ac 重进清零标记后误点收起的隐患。
+    if [ "$FRESH_FOLD_EXPANDED" = "0" ] && [ -f "$OUT/fresh_dump.xml" ] && grep -q '展开不常用' "$OUT/fresh_dump.xml"; then
       FRESH_FOLD_EXPANDED=1
       FNODE=$(grep -o '<node[^>]*text="[^"]*不常用[^"]*"[^>]*>' "$OUT/fresh_dump.xml" | head -1)
       if [ -n "$FNODE" ]; then
@@ -2127,14 +2131,14 @@ if [ -n "$A_LBL" ]; then
   # 10 次只把 TMobile 从 1920 带到 1548、距中屏底边 1269 还差 279px）：
   # 放宽到 20 次；每 5 次记一条进度。另：A 成功后 B 重进应用中心会把
   # 折叠组复位回收着——A 用的行若在组里（如 api29 的 Phone），B 先见
-  # 收起标记就点一次组头展开再找（与 A / fresh_find_label 同口径）。
+  # chevron 收起态 content-desc“展开不常用”就点一次组头展开再找（与 A / fresh_find_label 同口径）。
   for TRY in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     band_dump ac_band_b
     if [ -f "$OUT/ac_band_b.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band_b.xml"; then
       # 同名 label 有多份拷贝时按 zone 取在中屏区的那份（见 band_pick_row 注）。
       B=$(band_pick_row "$OUT/ac_band_b.xml" "$MID_LO" "$MID_HI" "$(( SCR_W - 100 ))" "$A_LBL" || true)
       if [ -n "$B" ]; then B_HIT="$B"; break; fi
-      if [ "$B_FOLD_EXPANDED" = "0" ] && grep -q '一键隐藏' "$OUT/ac_band_b.xml"; then
+      if [ "$B_FOLD_EXPANDED" = "0" ] && grep -q '展开不常用' "$OUT/ac_band_b.xml"; then
         B_FOLD_EXPANDED=1
         FNODE=$(grep -o '<node[^>]*text="[^"]*不常用[^"]*"[^>]*>' "$OUT/ac_band_b.xml" | head -1)
         if [ -n "$FNODE" ]; then
