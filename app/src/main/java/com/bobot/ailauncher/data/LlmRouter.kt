@@ -194,6 +194,32 @@ object LlmConfig {
 }
 
 /**
+ * DeepSeek /chat/completions 响应的 usage：命中／未命中 token 数
+ * （Context Caching 计费依据）。prompt_tokens ＝命中＋未命中。
+ * 各字段缺失时为 null（不是 0——0 是有效值，缺失是不存在）。
+ */
+data class LlmUsage(
+    val promptTokens: Int?,
+    val completionTokens: Int?,
+    val cacheHitTokens: Int?,
+    val cacheMissTokens: Int?
+)
+
+/** 解析响应 usage（纯函数）：缺 usage／缺字段返回对应 null，不抛异常。 */
+fun parseLlmUsage(rawBody: String): LlmUsage? = try {
+    val usage = JSONObject(rawBody).optJSONObject("usage") ?: return null
+    fun tokens(key: String): Int? = if (usage.has(key)) usage.optInt(key) else null
+    LlmUsage(
+        promptTokens = tokens("prompt_tokens"),
+        completionTokens = tokens("completion_tokens"),
+        cacheHitTokens = tokens("prompt_cache_hit_tokens"),
+        cacheMissTokens = tokens("prompt_cache_miss_tokens")
+    )
+} catch (_: Exception) {
+    null
+}
+
+/**
  * LLM 意图路由：OpenAI 兼容的 /chat/completions 接口。
  * 要求模型只返回 JSON：{"capability_id":"...","params":{"from":"","to":""},"reply":"..."}，
  * capability_id 不在白名单内会被强制改写为 "none"。
@@ -208,7 +234,9 @@ object LlmRouter {
         val httpCode: Int,
         val rawBody: String,
         /** 非空表示网络层失败（超时/断网等），此时 httpCode 为 -1 */
-        val networkError: String?
+        val networkError: String?,
+        /** 响应 usage（DeepSeek Context Caching 命中／未命中 token 数）；无 usage 时为 null */
+        val usage: LlmUsage? = null
     )
 
     /**
@@ -216,7 +244,8 @@ object LlmRouter {
      * 同一个 URL 拼法、同一个请求体构造风格、同一个 OkHttpClient 配置、同一个 header。
      * 注意：不发 response_format 参数（部分中转端点不支持，会回 200 空 body）。
      * 每次调用打 Log.d（TAG 可指定）：请求体字节数、HTTP code、响应体字节数＋
-     * 工具调用次数——只记数量，绝不记响应体原文（正式版审计点名；查证结果
+     * 工具调用次数＋usage 里的缓存命中／未命中 token 数（cacheHit／cacheMiss，
+     * DeepSeek Context Caching 的核实依据）——只记数量，绝不记响应体原文（正式版审计点名；查证结果
      * 进日志就泄漏了）。[safetyCheck] 为真时加 safety_check=high（DeepSeek
      * 全家桶 API，官方文档）：服务端做基础风控（审输入输出），同时忽略客户端
      * 传的 temperature 等采样参数；输入不合规返回 HTTP 400、输出违规返回
@@ -261,14 +290,19 @@ object LlmRouter {
             client().newCall(request).execute().use { resp ->
                 // body 只读一次：ResponseBody 读第二次会是空串
                 val rawBody = try { resp.body?.string().orEmpty() } catch (_: Exception) { "" }
+                val usage = parseLlmUsage(rawBody)
                 if (BuildConfig.DEBUG) {
                     android.util.Log.d(
                         tag,
                         "HTTP ${resp.code} bodyBytes=${rawBody.toByteArray().size} " +
-                            "toolCalls=${countToolCalls(rawBody)}"
+                            "toolCalls=${countToolCalls(rawBody)} " +
+                            "cacheHit=${usage?.cacheHitTokens} " +
+                            "cacheMiss=${usage?.cacheMissTokens} " +
+                            "promptTokens=${usage?.promptTokens} " +
+                            "completionTokens=${usage?.completionTokens}"
                     )
                 }
-                RawChatResult(resp.code, rawBody, null)
+                RawChatResult(resp.code, rawBody, null, usage)
             }
         } catch (e: IOException) {
             if (BuildConfig.DEBUG) android.util.Log.d(tag, "network error: ${e.message}")

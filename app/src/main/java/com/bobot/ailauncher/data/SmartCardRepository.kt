@@ -445,11 +445,15 @@ object SmartCardRepository {
      * 跑一次整体复盘（suspend，在 prepScope 的 IO 调度器上跑）：
      * ①取自上次复盘以来新增的消息（通知收件箱＋短信＋当前在用通知，
      * 去重后按时间升序，最多取最新的 50 条）；②按脱敏后内容哈希过滤
-     * 已判过的（判断缓存，推/不推都记）；③没新内容 → 只更新水位、
-     * 不调模型（正常一天就是一次调用，没新消息就是零次）；④有新内容 →
-     * 一次批量调 DeepSeek（postChatCompletions，deepseek-flash、
-     * temperature 0.2、safetyCheck=true），同时带上滚动 session 摘要
-     * （≤1000 字，见 ReviewSessionStore），模型回新的摘要存回来；
+     * 已判过的（判断缓存，推/不推都记）——判断缓存只决定“什么是新增”，
+     * 绝不用来砍 session 历史：判过的消息早已在历史里（首判那天送进去的）；
+     * ③没新内容 → 只更新水位、不调模型（正常一天就是一次调用，没新消息就是零次）；
+     * ④有新内容 → 一次批量调 DeepSeek（postChatCompletions，deepseek-flash、
+     * temperature 0.2、safetyCheck=true），同时带上完整的 session 历史
+     * （只追加的日志：每天的新消息＋模型每轮的回复原文，见 ReviewHistoryStore；
+     * 历史原样放前面、新消息只追加在末尾，前缀字节级一致，DeepSeek 的提示词
+     * 缓存才能命中；调用后的命中／未命中 token 数见 LlmRouter 的 DEBUG 日志），
+     * 模型回了能解析的回复就把“今天发出去的提示词＋模型回复”追加进历史；
      * ⑤判断结果全写判断缓存；
      * ⑥推的变卡片、存本地（替换上一批），refresh() 重算一次让新卡出现。
      * 失败静默、不重试、不出卡：水位在跑之前已更新（失败也算一次，
@@ -470,16 +474,21 @@ object SmartCardRepository {
         }
         if (unjudged.isEmpty()) return true
         val batch = unjudged.takeLast(REVIEW_PROMPT_MAX_ITEMS)
-        // 滚动 session：把之前复盘的摘要一起发给模型（只发摘要＋今天的新消息，
-        // 不发全文历史，token 基本恒定）；模型回新的摘要再存回来（见下）。
-        val sessionSummary = ReviewSessionStore.load(appContext)
+        // 完整 session 历史：只追加的日志（每天的新消息＋模型每轮的回复），
+        // 原样放在今天的新消息之前发给模型；模型回了能解析的回复，就把
+        // “今天发出去的提示词＋模型回复”追加进历史（只追加、不改写、
+        // 不摘要、不截断），供明天原样再发——前缀字节级一致，DeepSeek 的
+        // 提示词缓存（Context Caching，默认开启）才能命中系统提示词＋历史，
+        // 每天只有新消息那段按未命中价算（见 DailyReview.kt 的说明）。
+        val history = ReviewHistoryStore.load(appContext)
+        val userContent = reviewUserPrompt(batch, nowMs, history = history)
         val result = runCatching {
             val r = LlmRouter.postChatCompletions(
                 LlmConfig.getBaseUrl(appContext),
                 LlmConfig.getApiKey(appContext),
                 LlmConfig.getModel(appContext),
                 REVIEW_SYSTEM_PROMPT,
-                reviewUserPrompt(batch, nowMs, sessionSummary = sessionSummary),
+                userContent,
                 temperature = 0.2,
                 maxTokens = 2000,
                 tag = "DailyReview",
@@ -489,10 +498,12 @@ object SmartCardRepository {
             else parseReviewResult(r.rawBody, nowMs)
         }.getOrNull() ?: return false
         val suggestions = result.suggestions
-        // 模型给了新的 session 摘要就存回来（空/没给则保留旧的）；入库时
-        // ReviewSessionStore 内部再脱敏、压缩到上限。
-        result.sessionSummary?.takeIf { it.isNotBlank() }?.let {
-            ReviewSessionStore.save(appContext, it)
+        // 模型给了能解析的回复就追加进历史（空/解析失败则保留旧历史，
+        // 那一轮不进历史）；回复原文照存、不再脱敏（模型只见过脱敏输入，
+        // 不可能复述出真实敏感信息；sanitizeForLlm 反而会误伤 hash，
+        // 见 reviewHistoryAppend）。
+        result.replyText?.takeIf { it.isNotBlank() }?.let {
+            ReviewHistoryStore.save(appContext, reviewHistoryAppend(userContent, it))
         }
         // 判断落到可执行的动作上（目标以消息来源为准），再全写判断缓存。
         val byHash = batch.associateBy { reviewMessageHash(it) }
