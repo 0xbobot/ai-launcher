@@ -39,6 +39,26 @@ import org.json.JSONObject
  * ①每条消息按脱敏后内容哈希记一次，判过的不再送模型——判断结果按
  * 内容哈希存本地（推/不推都记）；②每天只送自上次复盘以来新增的消息，
  * 不重复送已判过的。正常一天就是一次模型调用。
+ * 判断缓存只决定“什么是新增”（哪些消息还没判过、今天要不要调模型），
+ * 绝不用来砍 session 历史：判过的消息早已在历史里（首判那天送进去的），
+ * 历史必须是完整的。
+ *
+ * Session（完整历史，第四十七批，Bob 2026-11-18 21:34 纠正）：
+ * 549 的滚动摘要是误读——Bob 说的缓存是模型调用的 token 缓存
+ * （DeepSeek API 的 Context Caching，提示词缓存），不是应用的缓存；
+ * 应用侧的有损摘要（丢行、截断）会丢信息、丢智能。正确做法：session
+ * 存完整会话历史（只追加的日志，见 [ReviewHistoryStore]）：每天的新消息
+ * ＋模型每轮的回复原文，应用侧不摘要、不丢、不截断，模型看到全部过去的事。
+ * token 成本靠 API 的前缀缓存控制，不靠应用丢信息——提示词排布按缓存友好：
+ * 稳定的系统提示词放最前面（每天字节级一模一样，顶部不放每天都变的时间戳），
+ * 然后是累积的历史（只追加），最后才是当天的新消息。DeepSeek 的缓存默认开启，
+ * 不用改代码、不用传参数、没有额外费用；只有请求开头部分与已存的缓存前缀单元
+ * 完全一致才命中，开头稍有变化、后面全都不命中。deepseek-flash 命中价
+ * $0.003/百万 token（非高峰），是未命中 $0.15 的 1/50；21:30 CST＝13:30 UTC
+ * 是非高峰。每次调用后把 usage 里的 prompt_cache_hit_tokens /
+ * prompt_cache_miss_tokens 记到日志（只记数字），便于核实缓存到底命没命中、
+ * 实际花了多少。缓存尽力而为、不保证 100% 命中；停止使用后几小时到几天内清除
+ * （每天一次复盘隔 24 小时，命中与否看日志实测）。上下文窗口 100 万 token。
  *
  * 输出：复盘出的建议变智能卡片（[reviewSuggestionsToCards]），按现有
  * 卡种归类（能归到 BILL/APPOINTMENT/NOTIFICATION/CALENDAR 的归过去，
@@ -58,13 +78,6 @@ import org.json.JSONObject
  * 本文件只放纯函数＋轻量本地存储（SharedPreferences＋org.json），
  * 不碰网络；模型调用与编排在 SmartCardRepository.runDailyReview，
  * 调度在 DailyReviewWorker。JVM 单测锁死（DailyReviewTest）。
- *
- * 第四十六批（Bob 2026-11-16 19:52 定）：每天的复盘保持和之前的同一个
- * session，模型要知道过去发生的事；同时不占用太多 token——滚动摘要
- * （见 [ReviewSessionStore]）：本地只存一份紧凑的 session 摘要（已办完
- * 什么、还挂着什么、关键日期，约 1000 字以内），每天只发「摘要＋当天
- * 新增的脱敏消息」，不发全文历史；摘要超限本地压缩（先丢【已办】行，
- * 再丢最旧的行），不另调模型。摘要里只存脱敏内容（入库前再脱敏一次）。
  */
 
 /** 复盘触发时间：每天晚上 21:30（Bob 2026-11-16 17:31 亲定）。 */
@@ -88,17 +101,6 @@ const val REVIEW_INBOX_MAX_ITEMS = 200
 
 /** 判断缓存最多存的条数（超了丢最旧的）。 */
 const val REVIEW_JUDGMENT_MAX_ITEMS = 500
-
-/** Session 摘要上限：约 1000 字；超过本地压缩，保证每天 token 基本恒定、不随天数膨胀。 */
-const val REVIEW_SESSION_MAX_CHARS = 1000
-
-/** 告诉模型把摘要控制在 800 字以内（给上限留余量）。 */
-const val REVIEW_SESSION_TARGET_CHARS = 800
-
-/** Session 摘要的行标记：已办完 / 还挂着 / 关键日期（一行一条结论）。 */
-const val REVIEW_SESSION_DONE_MARK = "【已办】"
-const val REVIEW_SESSION_TODO_MARK = "【待办】"
-const val REVIEW_SESSION_DATE_MARK = "【日期】"
 
 /**
  * 复盘的一条输入消息：通知或短信。title/text 是原文（只存本地收件箱，
@@ -189,16 +191,20 @@ data class ReviewSuggestion(
     val savedMs: Long = 0L
 )
 
-/** 复盘的系统提示词：只按脱敏后的消息判断，不编造时间地点，不写「下一步」。 */
+/**
+ * 复盘的系统提示词：只按脱敏后的消息判断，不编造时间地点，不写「下一步」。
+ * 缓存友好是硬要求：这段提示词每天字节级一模一样（没有任何插值、没有任何
+ * 每天都变的时间戳），DeepSeek 的提示词缓存（Context Caching）才能把它连同
+ * 后面的历史一起命中；开头稍有变化，后面全都不命中。不要往这里加动态内容。
+ */
 val REVIEW_SYSTEM_PROMPT = """
-你是手机桌面助手的复盘助手。下面是用户过去 24 小时内收到的通知与短信（已脱敏，敏感信息已用占位符替换）。
-请逐条判断：哪些值得在桌面上推一张智能卡片提醒用户，哪些不值得。
+你是手机桌面助手的复盘助手。下面是用户过去收到的通知与短信（已脱敏，敏感信息已用占位符替换），按时间顺序排：先是过去的复盘记录（每轮有当时的新消息和模型的判断），最后是今天的新消息。
+请只对今天的新消息逐条判断：哪些值得在桌面上推一张智能卡片提醒用户，哪些不值得。
 值得推的：有明确截止点、过期会吃亏的事（账单还款、预约/体检、取件、航班、会议、证件/保单到期、缴费、报名截止等）。
 不值得推的：已经办完了的确认（保单已承保、缴费成功、订单已完成）、纯营销/广告、验证码、系统提示、无明确事项的闲聊。
-开头会先给过去的复盘摘要（之前几天的结论）：用它判断哪些事已经办完、不用再推；如有冲突，以今天的消息为准。
+过去的复盘记录只供参考：用它判断哪些事已经办完、不用再推；如有冲突，以今天的新消息为准。
 只返回一个 JSON 对象，不要解释、不要寒暄。格式：
-{"suggestions":[{"hash":"<消息编号>","push":true/false,"kind":"BILL|APPOINTMENT|NOTIFICATION|CALENDAR","fact":"<一句话事实，含截止点，如：中信信用卡 11 月 24 日到期，应还 [金额]>","actionLabel":"<下一步意图，如：去还款/查看/回拨，不要写下一步>","action":"open_app|open_sms|open_calendar|none","deadlineMs":<截止点毫秒时间戳，没有填 null>,"sourceLabel":"<原应用名>"}],"sessionSummary":"<更新后的 session 摘要>"}
-sessionSummary 的写法：一行一条结论，每行以【已办】、【待办】或【日期】开头；只写脱敏后的结论（不写名字、电话、金额、车牌、住址）；已办完的写【已办】，还挂着的写【待办】，关键日期写【日期】；总共不超过 ${REVIEW_SESSION_TARGET_CHARS} 字；只写本次复盘确认的事实，不编造；今天没新结论时，原样返回上一次的摘要。
+{"suggestions":[{"hash":"<消息编号>","push":true/false,"kind":"BILL|APPOINTMENT|NOTIFICATION|CALENDAR","fact":"<一句话事实，含截止点，如：中信信用卡 11 月 24 日到期，应还 [金额]>","actionLabel":"<下一步意图，如：去还款/查看/回拨，不要写下一步>","action":"open_app|open_sms|open_calendar|none","deadlineMs":<截止点毫秒时间戳，没有填 null>,"sourceLabel":"<原应用名>"}]}
 不知道的字段填空字符串或 null，不编造时间、地点、金额、包名。
 注意：动作的目标（打开哪个应用/哪条短信）由桌面按消息来源定，你只给意图（actionLabel）和动作方向（action），不要写包名、不要写号码。
 """.trimIndent()
@@ -210,18 +216,21 @@ fun reviewTimeText(timeMs: Long, zoneId: ZoneId = ZoneId.systemDefault()): Strin
 
 /**
  * 复盘的用户提示词：消息逐条编号，编号就是内容哈希（模型原样回填）。
- * 时间写可读日期（不写 epoch 毫秒——模型据此算截止点才准），开头先给
- * 复盘时间（模型回填 deadlineMs 时以它为准）。
- * [sessionSummary] 是过去的复盘摘要（滚动 session）：非空时先给摘要、
- * 再给今天的新消息，模型才能知道过去的事；摘要在入库时已脱敏一次，
- * 这里嵌入前再脱敏一次（最后一道防线，摘要里绝无原文敏感信息）。
- * 每天只发「摘要＋当天新增消息」，不发全文历史（token 基本恒定）。
+ * 时间写可读日期（不写 epoch 毫秒——模型据此算截止点才准）。
+ *
+ * 缓存友好的排布（DeepSeek Context Caching 只认前缀完全一致）：
+ * [history] 是存下的完整 session 历史（过去每轮发出去的提示词原文＋
+ * 模型回复原文），原样放在最前面、一字不改；今天的新消息只追加在末尾。
+ * 每天都变的「现在是」只出现在末尾的今天这段里，绝不放开头——开头稍有
+ * 变化，后面全都不命中。今天这段本身就是明天历史的开头，所以前缀只会
+ * 越长越稳，不会漂移（见 ReviewHistoryTest 的前缀不变量单测）。
+ * 历史为空（第一天）时直接就是今天这段，不加空的历史段。
  */
 fun reviewUserPrompt(
     messages: List<DailyReviewMessage>,
     nowMs: Long,
     zoneId: ZoneId = ZoneId.systemDefault(),
-    sessionSummary: String = ""
+    history: String = ""
 ): String {
     val lines = messages.mapIndexed { index, message ->
         val sanitized = sanitizeForLlm(
@@ -230,20 +239,20 @@ fun reviewUserPrompt(
         val hash = reviewMessageHash(message)
         "[${index + 1}] hash=$hash 来源=${message.appName} 时间=${reviewTimeText(message.timeMs, zoneId)}\n$sanitized"
     }
-    val header = StringBuilder()
-    val summary = sessionSummary.trim()
-    if (summary.isNotEmpty()) {
-        header.append("过去的复盘摘要（之前几天的结论，只供参考；今天的消息为准，如有冲突以今天的消息为准）：\n")
-        header.append(sanitizeForLlm(summary)).append("\n\n")
-    }
-    header.append("现在是：${reviewTimeText(nowMs, zoneId)}（复盘时间）。消息如下（共 ${messages.size} 条）：\n")
-    return header.toString() + lines.joinToString("\n\n")
+    val todayBlock = "现在是：${reviewTimeText(nowMs, zoneId)}（复盘时间）。今天的新消息（共 ${messages.size} 条）：\n" +
+        lines.joinToString("\n\n")
+    return if (history.isBlank()) todayBlock else history + "\n\n" + todayBlock
 }
 
-/** 复盘调用的完整返回：建议列表＋更新后的 session 摘要（可能没有）。 */
+/**
+ * 复盘调用的完整返回：建议列表＋清洗后的回复原文。
+ * [replyText] 只有解析成功时才有（对象格式或裸数组格式都算）：调用方把它
+ * 连同当天发出去的提示词一起追加进 session 历史（见 [reviewHistoryAppend]）。
+ * 解析失败时建议为空、回复原文也为空——那一轮不进历史（失败也算一次）。
+ */
 data class ReviewResult(
     val suggestions: List<ReviewSuggestion>,
-    val sessionSummary: String?
+    val replyText: String?
 )
 
 /** 取 choices[0].message.content，去 ```json 围栏；取不到/空白返回 null。 */
@@ -277,9 +286,10 @@ private fun parseReviewSuggestions(array: JSONArray, nowMs: Long): List<ReviewSu
 }
 
 /**
- * 解析复盘响应（纯函数）：新格式是对象 {"suggestions":[...],"sessionSummary":"..."}；
- * 兼容 546 的裸数组格式（无摘要，sessionSummary 为 null）。
- * 任何解析失败返回空建议＋空摘要（调用方静默、不出卡、不动已存摘要）。
+ * 解析复盘响应（纯函数）：新格式是对象 {"suggestions":[...]}；
+ * 549 的对象格式带 sessionSummary 也兼容（摘要键直接忽略，不再读取）；
+ * 兼容 546 的裸数组格式。replyText 是清洗后的回复原文（解析成功才有）。
+ * 任何解析失败返回空建议＋空回复原文（调用方静默、不出卡、不动已存历史）。
  */
 fun parseReviewResult(rawBody: String, nowMs: Long): ReviewResult {
     val json = reviewResponseContent(rawBody) ?: return ReviewResult(emptyList(), null)
@@ -288,15 +298,14 @@ fun parseReviewResult(rawBody: String, nowMs: Long): ReviewResult {
         val obj = JSONObject(json)
         if (obj.has("suggestions")) {
             val array = obj.optJSONArray("suggestions") ?: JSONArray()
-            val summary = obj.optString("sessionSummary", "").trim().ifEmpty { null }
-            return ReviewResult(parseReviewSuggestions(array, nowMs), summary)
+            return ReviewResult(parseReviewSuggestions(array, nowMs), json)
         }
     } catch (_: Exception) {
         // 不是对象，往下按数组试
     }
-    // 裸数组格式（546，兼容）：无摘要
+    // 裸数组格式（546，兼容）
     return try {
-        ReviewResult(parseReviewSuggestions(JSONArray(json), nowMs), null)
+        ReviewResult(parseReviewSuggestions(JSONArray(json), nowMs), json)
     } catch (_: Exception) {
         ReviewResult(emptyList(), null)
     }
@@ -310,35 +319,20 @@ fun parseReviewResponse(rawBody: String, nowMs: Long): List<ReviewSuggestion> =
     parseReviewResult(rawBody, nowMs).suggestions
 
 /**
- * 压缩 session 摘要（纯函数）：本地压缩，不另调模型。
- * 摘要是一行一条结论（【已办】/【待办】/【日期】开头）。长度在上限内原样返回；
- * 超了先丢【已办】行（最旧的先丢，已办完是历史、最不需要留），还超再从最旧的行
- * 开始丢；单行本身超长则截断。保证存下的摘要绝不超过上限。
+ * 把一轮复盘追加进 session 历史（纯函数）：存下的就是当天发给模型的
+ * 用户提示词原文＋模型的回复原文。只追加、不改写、不摘要、不截断。
+ * 下一次复盘把存下的历史原样放在新消息之前发出去——前缀字节级一致，
+ * DeepSeek 的提示词缓存才能命中（见本文件头部的说明）。
+ * 回复原文照存、不再脱敏：模型只见过脱敏输入，不可能复述出真实敏感
+ * 信息；反而 sanitizeForLlm 会误伤 hash（64 位十六进制里的 11 位数字串
+ * 会被 PHONE_REGEX 当电话 mask 掉，hash 一坏、模型就对不上消息了）。
+ * 回复为空时原样返回（不追加空轮次）。
  */
-fun compressSessionSummary(summary: String, maxChars: Int = REVIEW_SESSION_MAX_CHARS): String {
-    val lines = summary.lines().map { it.trim() }.filter { it.isNotEmpty() }
-    if (lines.isEmpty()) return ""
-    var kept = lines
-    fun joined(ls: List<String>) = ls.joinToString("\n")
-    if (joined(kept).length <= maxChars) return joined(kept)
-    while (joined(kept).length > maxChars) {
-        val doneIdx = kept.indexOfFirst { it.startsWith(REVIEW_SESSION_DONE_MARK) }
-        if (doneIdx < 0) break
-        kept = kept.filterIndexed { i, _ -> i != doneIdx }
-    }
-    while (joined(kept).length > maxChars && kept.size > 1) {
-        kept = kept.drop(1)
-    }
-    val out = joined(kept)
-    return if (out.length > maxChars) out.take(maxChars) else out
+fun reviewHistoryAppend(sentUserContent: String, replyText: String): String {
+    val reply = replyText.trim()
+    if (reply.isEmpty()) return sentUserContent
+    return sentUserContent + "\n模型判断：\n" + reply
 }
-
-/**
- * Session 摘要入库前再脱敏一次（纯函数）：模型只见过脱敏输入，摘要本应已脱敏；
- * 这里是最后一道防线，保证入库的摘要绝无原文里的电话、车牌、金额、人名。
- * 行标记（【已办】/【待办】/【日期】）与日期不受影响。
- */
-fun sanitizeSessionSummary(summary: String): String = sanitizeForLlm(summary)
 
 /** 单条复盘判断解析（纯函数）：缺 hash/fact 返回 null；其余字段缺了用缺省值。 */
 fun reviewSuggestionFromJson(obj: JSONObject, nowMs: Long): ReviewSuggestion? {
@@ -678,36 +672,43 @@ object ReviewJudgmentStore {
 }
 
 /**
- * Session 摘要存储（滚动 session，第四十六批）：本地只存一份紧凑的摘要
- * （已办完什么、还挂着什么、关键日期），每天复盘时随新消息一起发给模型，
- * 模型回新的摘要再存回来——同一个 session 跨天连续，模型知道过去的事。
- * 入库时先脱敏、再压缩到上限（[sanitizeSessionSummary]、
- * [compressSessionSummary]），存下的永远是脱敏后、1000 字以内的摘要。
- * SharedPreferences＋纯文本，与现有缓存方式一致；全部 try/catch，
- * 读写失败静默（摘要丢了，明天复盘没有上下文，不崩）。
+ * Session 历史存储（完整会话，只追加的日志，第四十七批）：
+ * 本地存完整的脱敏会话——每天发给模型的提示词原文（历史＋当天新消息）
+ * ＋模型每轮的回复原文。每天复盘时原样取出、放在新消息之前一起发给
+ * 模型，应用侧不摘要、不丢行、不截断：模型看到全部过去的事，不丢信息、
+ * 不丢智能。token 成本不靠应用丢信息，靠 DeepSeek 的提示词缓存
+ * （Context Caching，默认开启）：提示词按“稳定系统提示词在前、历史在中、
+ * 新消息在末尾”排布，前缀字节级一致的部分按命中价（deepseek-flash 非高峰
+ * $0.003/百万 token，是未命中 $0.15 的 1/50）计费，每天只有新消息那段
+ * 按未命中价算。每次调用的命中／未命中 token 数见 LlmRouter 的日志。
+ * 隐私：历史里只有脱敏内容——消息部分在渲染进提示词时已脱敏（见
+ * [reviewUserPrompt]）；模型回复只见过脱敏输入，不可能复述出真实敏感信息，
+ * 原文照存（不再脱敏，见 [reviewHistoryAppend]）。
+ * SharedPreferences＋纯文本，与现有存储方式一致；全部 try/catch，
+ * 读写失败静默（历史丢了，明天复盘没有上下文，不崩）。
+ * 549 的 ReviewSessionStore（滚动摘要）已拆掉：本版起不再读写
+ * "daily_review_session"，旧摘要数据留在设备上成为孤儿数据（约 1KB，
+ * 不再读取、不删除）。
  */
-object ReviewSessionStore {
-    private const val PREFS = "daily_review_session"
-    private const val KEY_SUMMARY = "summary_v1"
-    private const val KEY_SAVED_MS = "saved_ms_v1"
+object ReviewHistoryStore {
+    private const val PREFS = "daily_review_history"
+    private const val KEY_LOG = "log_v1"
 
-    fun save(context: Context, summary: String) {
+    fun save(context: Context, log: String) {
         try {
-            val clean = compressSessionSummary(sanitizeSessionSummary(summary))
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString(KEY_SUMMARY, clean)
-                .putLong(KEY_SAVED_MS, System.currentTimeMillis())
+                .putString(KEY_LOG, log)
                 .apply()
         } catch (_: Exception) {
-            // 静默：摘要存不上，明天没有上下文，不崩
+            // 静默：历史存不上，明天没有上下文，不崩
         }
     }
 
-    /** 存过的摘要；没有/读失败返回空串（调用方当作没有上下文）。 */
+    /** 存过的完整历史；没有/读失败返回空串（调用方当作没有上下文）。 */
     fun load(context: Context): String {
         return try {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getString(KEY_SUMMARY, null).orEmpty()
+                .getString(KEY_LOG, null).orEmpty()
         } catch (_: Exception) {
             ""
         }
