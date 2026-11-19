@@ -184,22 +184,6 @@ enum class DockState { Hidden, D1, D2, D3 }
 fun suggestionAnalyzeButtonText(analyzing: Boolean): String =
     if (analyzing) "正在分析，稍等一下" else "看看固定哪个、拿下哪个"
 
-/** 静音行行首标签（常量，JVM 单测锁死）：不可点，只说明后面三个词
- * 是「不想看的建议类别」，点一下关、再点恢复。 */
-const val SUGGESTION_MUTE_LABEL = "不想看的："
-
-/** 建议区引导语（常量，JVM 单测锁死；Bob 2026-11-16 追加 refinement：
- * 语言精炼但核心信息要传达清楚——用 AI、智能分析使用行为、给程序坞
- * 提调整建议，三点一句说完，不展开解释）。 */
-const val SUGGESTION_AI_INTRO = "AI 分析你的使用行为，给程序坞提调整建议。"
-
-/** 建议类别展示名：OBSERVE 叫「习惯提醒」，不是「模式观察」。 */
-fun suggestionKindLabel(kind: SuggestionKind): String = when (kind) {
-    SuggestionKind.PIN -> "固定"
-    SuggestionKind.UNPIN -> "取消固定"
-    SuggestionKind.OBSERVE -> "习惯提醒"
-}
-
 /**
  * 分析失败文案（大白话，JVM 单测锁死）：每种原因各一句话，用户一看就
  * 知道是哪一步出了问题、该怎么办；不写实现术语、不出现 HTTP 状态码数字。
@@ -229,7 +213,7 @@ fun suggestionTitleButtonText(analyzing: Boolean, hasSuggestions: Boolean): Stri
 enum class RowSuggestionAction {
     /** 无建议：右侧留空。 */
     NONE,
-    /** 待采纳的固定建议：金色实心按钮「固定到 Dock」。 */
+    /** 待采纳的固定建议：金色实心按钮「固定到程序坞上」。 */
     PIN_ADOPT,
     /** 待采纳的取消固定建议：金色实心按钮「取消固定」。 */
     UNPIN_ADOPT,
@@ -253,7 +237,7 @@ fun rowSuggestionAction(suggestion: DockSuggestion?): RowSuggestionAction = when
  * （行里没有建议标题可对照，「采纳」不知道采纳什么）。
  */
 fun rowAdoptButtonText(kind: SuggestionKind): String = when (kind) {
-    SuggestionKind.PIN -> "固定到 Dock"
+    SuggestionKind.PIN -> "固定到程序坞上"
     SuggestionKind.UNPIN -> "取消固定"
     SuggestionKind.OBSERVE -> "知道了"
 }
@@ -925,13 +909,8 @@ fun PullUpDock(
                             }
                         }
                     }
-                    // 副标题 + 状态行（只在有 Key 时出现；状态行只在有内容时出现）。
+                    // 状态行（只在有 Key 且有内容时出现）。
                     if (hasLlmKey) {
-                        Text(
-                            text = SUGGESTION_AI_INTRO,
-                            fontSize = AILauncherType.Footnote.fontSize,
-                            color = AILauncherColors.current.Hint
-                        )
                         suggestionStatus?.let { status ->
                             Text(
                                 text = status,

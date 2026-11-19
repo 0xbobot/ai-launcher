@@ -20,24 +20,8 @@ import org.junit.Test
  */
 class DockSuggestionsSectionTest {
 
-    // ---------- 类别展示名 ----------
-
-    @Test
-    fun `kind labels are plain words`() {
-        assertEquals("固定", suggestionKindLabel(SuggestionKind.PIN))
-        assertEquals("取消固定", suggestionKindLabel(SuggestionKind.UNPIN))
-        assertEquals("习惯提醒", suggestionKindLabel(SuggestionKind.OBSERVE))
-    }
-
-    @Test
-    fun `no kind is ever called mode observation`() {
-        SuggestionKind.entries.forEach { kind ->
-            assertFalse(suggestionKindLabel(kind).contains("模式观察"))
-        }
-    }
-
-    // ---------- 按钮文案与静音行标签（Bob 2026-11-16 真机 verdict：
-    // 用户看不懂要做什么——按钮要说出点了能得到什么，静音行要有标签） ----------
+    // ---------- 按钮文案（Bob 2026-11-16 真机 verdict：
+    // 用户看不懂要做什么——按钮要说出点了能得到什么） ----------
 
     @Test
     fun `analyze button says what you get not the mechanism`() {
@@ -47,16 +31,6 @@ class DockSuggestionsSectionTest {
     @Test
     fun `analyze button keeps in-progress text`() {
         assertEquals("正在分析，稍等一下", suggestionAnalyzeButtonText(true))
-    }
-
-    @Test
-    fun `mute row label says which kinds it turns off`() {
-        assertEquals("不想看的：", SUGGESTION_MUTE_LABEL)
-    }
-
-    @Test
-    fun `ai intro says ai analyzes usage and advises dock changes`() {
-        assertEquals("AI 分析你的使用行为，给程序坞提调整建议。", SUGGESTION_AI_INTRO)
     }
 
     // ---------- 失败文案（每种原因各一句话） ----------
@@ -253,7 +227,7 @@ class DockSuggestionsSectionTest {
 
     @Test
     fun `adopt button names the action not a bare adopt`() {
-        assertEquals("固定到 Dock", rowAdoptButtonText(SuggestionKind.PIN))
+        assertEquals("固定到程序坞上", rowAdoptButtonText(SuggestionKind.PIN))
         assertEquals("取消固定", rowAdoptButtonText(SuggestionKind.UNPIN))
         assertEquals("知道了", rowAdoptButtonText(SuggestionKind.OBSERVE))
     }
