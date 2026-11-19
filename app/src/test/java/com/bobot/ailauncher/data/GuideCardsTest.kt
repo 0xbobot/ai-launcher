@@ -143,7 +143,7 @@ class GuideCardsTest {
             "把通知提醒打开后，没接到的电话、包裹到了、航班要飞了，我会给你一张卡片，点一下就能处理。",
             cards[1].fact
         )
-        assertEquals("把日历接上后，你的会议会出现在简报里，到时间我会提醒你。", cards[2].fact)
+        assertEquals("把日历接上后，你的会议会变成一张卡片，到时间我会提醒你。", cards[2].fact)
         assertEquals("没接到的电话，点一下就能回拨，只会打开拨号盘，不会直接拨出去。", cards[3].fact)
         assertEquals("只读短信里的账单和预约，不会发到别处", cards[0].prep)
         assertEquals("只读通知内容，不会发到别处", cards[1].prep)
@@ -197,7 +197,7 @@ class GuideCardsTest {
             "有未接来电、包裹或航班提醒时，这里会出现一张卡片，点一下就能处理",
             connected[1].prep
         )
-        assertEquals("会议会出现在简报里，到时间提醒你", connected[2].prep)
+        assertEquals("会议会变成一张卡片，到时间提醒你", connected[2].prep)
         assertEquals("没接到的电话，点一下就能回拨，只会打开拨号盘，不会直接拨出去", connected[3].prep)
     }
 
