@@ -98,12 +98,6 @@ fun CrashRecoveryScreen(
                     fontSize = AILauncherType.BodyLarge.fontSize
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "不用进设置，这里就能看到崩溃记录、发给开发者。",
-                fontSize = AILauncherType.Footnote.fontSize,
-                color = AILauncherColors.current.Hint
-            )
         } else {
             Text(
                 text = "崩溃记录",

@@ -292,12 +292,6 @@ internal fun QuickActionAddFlow(
                     Column {
                         Text("选一个快捷方式", fontSize = AILauncherType.BodyLarge.fontSize, color = AILauncherColors.current.Title)
                         Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = app?.label?.toString().orEmpty(),
-                            fontSize = AILauncherType.Caption.fontSize,
-                            color = AILauncherColors.current.Hint
-                        )
-                        Spacer(Modifier.height(8.dp))
                         // 加载快捷方式（2026-11-02 盲操修复：系统只把应用的
                         // 快捷方式给默认桌面；非默认桌面时 LauncherApps 查回
                         // 来就是空的，旧代码直接留一片空白、让人以为选不到了。
@@ -349,16 +343,9 @@ internal fun QuickActionAddFlow(
                                     item(key = "no-shortcuts") {
                                         Column(modifier = Modifier.padding(vertical = 8.dp)) {
                                             if (!isDefaultLauncher(context)) {
-                                                Text(
-                                                    text = "设为默认桌面后，可以显示更多快捷操作。",
-                                                    fontSize = AILauncherType.Footnote.fontSize,
-                                                    color = AILauncherColors.current.Hint,
-                                                    lineHeight = 18.sp
-                                                )
-                                                Spacer(Modifier.height(8.dp))
                                                 Row {
                                                     TextButton(onClick = { openHomeSettings(context) }) {
-                                                        Text("去设置", color = AILauncherColors.current.Accent)
+                                                        Text("设为默认桌面", color = AILauncherColors.current.Accent)
                                                     }
                                                     Spacer(Modifier.width(8.dp))
                                                     TextButton(onClick = {
@@ -413,7 +400,6 @@ internal fun QuickActionAddFlow(
                             value = label,
                             onValueChange = { if (it.length <= 8) label = it },
                             singleLine = true,
-                            placeholder = { Text("如：拍照、语音聊天", fontSize = AILauncherType.Callout.fontSize) },
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = {
                                 if (label.isNotBlank()) {

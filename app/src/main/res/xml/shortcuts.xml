@@ -5,8 +5,7 @@
         android:shortcutId="check_update"
         android:enabled="true"
         android:icon="@android:drawable/ic_menu_upload"
-        android:shortcutShortLabel="@string/shortcut_check_update_short"
-        android:shortcutLongLabel="@string/shortcut_check_update_long">
+        android:shortcutShortLabel="@string/shortcut_check_update_short">
         <intent
             android:action="com.bobot.ailauncher.CHECK_UPDATE"
             android:targetPackage="com.bobot.ailauncher"

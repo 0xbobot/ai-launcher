@@ -154,12 +154,11 @@ class BatteryOverlayService : Service() {
             elevation = 8 * density
         }
 
-        // 头像（用应用图标占位）
+        // 充电图标（低电量气泡头像位，文案审计 §5 第 5 点选项 A）
         val avatar = ImageView(ctx).apply {
             val size = (40 * density).toInt()
             layoutParams = LinearLayout.LayoutParams(size, size)
-            // TODO：换成真实资源
-            setImageResource(R.mipmap.ic_launcher)
+            setImageResource(R.drawable.ic_battery_charging)
         }
         root.addView(avatar)
 
@@ -211,9 +210,11 @@ class BatteryOverlayService : Service() {
         if (critical) {
             title.text = "电量只剩 $pct% 了"
             desc.text = "再不充电就要关机了…"
+            desc.visibility = View.VISIBLE
         } else {
             title.text = "电量还有 $pct%"
-            desc.text = "该找充电器了"
+            // 非危急档无副标题（文案审计 §5 第 5 点选项 A）：充电图标即行动暗示
+            desc.visibility = View.GONE
         }
     }
 
