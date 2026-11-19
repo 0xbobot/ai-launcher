@@ -99,7 +99,7 @@ data class UpdateCardDisplay(
  *   原因目前没有下发通道——update.json 里没有原因字段，changelog
  *   是开发口径不贴卡上；forceReason 为空时只写必须更新这一句，
  *   Bob 要加原因时再补下发字段，不在本批硬凑）；
- * - 下载中：「正在下载 vX.X.X（xx%）」＋进度条，右按钮收起；
+ * - 下载中：「正在下载 vX.X.X」＋进度条，右按钮收起；
  * - 下完：「下载好了」＋「安装」；
  * - 失败：「下载失败」＋「重试」。
  * 只写版本号，不贴 changelog（设计 §7：changelog 是开发口径，
@@ -136,9 +136,8 @@ fun updateCardDisplay(
             )
         }
         UpdatePhase.DOWNLOADING -> {
-            val pct = (progress * 100).toInt().coerceIn(0, 100)
             UpdateCardDisplay(
-                fact = "正在下载 v$versionName（$pct%）",
+                fact = "正在下载 v$versionName",
                 actionLabel = UPDATE_ACTION_LABEL,
                 progress = progress.coerceIn(0f, 1f),
                 showActionButton = false,

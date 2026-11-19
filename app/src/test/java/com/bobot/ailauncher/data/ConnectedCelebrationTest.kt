@@ -75,7 +75,7 @@ class ConnectedCelebrationTest {
         val card = guideCards().first { it.id == "guide|notification" }
         val feedback = connectedFeedback(card, level = 2, previousLevel = 0)
         assertEquals(2, feedback.levelDelta)
-        assertEquals("智能又强了一点，已接上 2/4 个来源", celebrationLevelText(2, 0))
+        assertEquals("已接上 2/4 个来源", celebrationLevelText(2, 0))
     }
 
     @Test
@@ -100,14 +100,14 @@ class ConnectedCelebrationTest {
 
     @Test
     fun levelText_plusOneAndCount() {
-        assertEquals("智能又强了一点，已接上 3/4 个来源", celebrationLevelText(3, 2))
-        assertEquals("智能又强了一点，已接上 1/4 个来源", celebrationLevelText(1, 0))
-        assertEquals("智能又强了一点，已接上 4/4 个来源", celebrationLevelText(4, 3))
+        assertEquals("已接上 3/4 个来源", celebrationLevelText(3, 2))
+        assertEquals("已接上 1/4 个来源", celebrationLevelText(1, 0))
+        assertEquals("已接上 4/4 个来源", celebrationLevelText(4, 3))
     }
 
     @Test
     fun levelText_noDeltaShowsSameText() {
-        assertEquals("智能又强了一点，已接上 2/4 个来源", celebrationLevelText(2, 2))
+        assertEquals("已接上 2/4 个来源", celebrationLevelText(2, 2))
     }
 
     @Test

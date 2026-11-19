@@ -110,7 +110,7 @@ private fun guideCardFor(connectorKey: String): SmartCard = when (connectorKey) 
     UiPrefs.CONNECTOR_CALENDAR -> guideCard(
         id = "guide|calendar",
         sourceLabel = "日历",
-        fact = "把日历接上后，你的会议会出现在简报里，到时间我会提醒你。",
+        fact = "把日历接上后，你的会议会变成一张卡片，到时间我会提醒你。",
         prep = "只读当天的日程，不会发到别处",
         connectorKey = UiPrefs.CONNECTOR_CALENDAR
     )
@@ -206,7 +206,7 @@ fun isGuideConnectorGranted(
 fun connectedNextStep(connectorKey: String): String = when (connectorKey) {
     UiPrefs.CONNECTOR_MESSAGE -> "有账单或预约短信时，这里会提前提醒你"
     UiPrefs.CONNECTOR_NOTIFICATION -> "有未接来电、包裹或航班提醒时，这里会出现一张卡片，点一下就能处理"
-    UiPrefs.CONNECTOR_CALENDAR -> "会议会出现在简报里，到时间提醒你"
+    UiPrefs.CONNECTOR_CALENDAR -> "会议会变成一张卡片，到时间提醒你"
     UiPrefs.CONNECTOR_PHONE -> "没接到的电话，点一下就能回拨，只会打开拨号盘，不会直接拨出去"
     else -> ""
 }
@@ -244,7 +244,7 @@ data class ConnectedFeedback(
 }
 
 /**
- * 等级行文案（纯函数，单测逐字锁死）：“智能又强了一点，已接上 3/4 个来源”。
+ * 等级行文案（纯函数，单测逐字锁死）：“已接上 3/4 个来源”。
  * total 默认取 SMART_SOURCE_ORDER 的个数（四个源），不写死 4。
  * 涨没涨都同一句（正式版审计 §5 #84 两形态合并）：这行只在接上权限
  * 的庆祝反馈里出现，出现时等级一定涨了。
@@ -253,7 +253,7 @@ fun celebrationLevelText(
     level: Int,
     previousLevel: Int,
     total: Int = SMART_SOURCE_ORDER.size
-): String = "智能又强了一点，已接上 $level/$total 个来源"
+): String = "已接上 $level/$total 个来源"
 
 /** 由一张引导卡＋接上前后的真实等级，造出带庆祝标志的反馈状态。 */
 fun connectedFeedback(

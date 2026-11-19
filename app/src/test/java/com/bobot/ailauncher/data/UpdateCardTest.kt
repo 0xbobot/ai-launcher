@@ -183,7 +183,7 @@ class UpdateCardTest {
     @Test
     fun display_downloading_factProgressAndHiddenAction() {
         val d = updateCardDisplay(info(), UpdatePhase.DOWNLOADING, 0.45f)
-        assertEquals("正在下载 v1.4.3（45%）", d.fact)
+        assertEquals("正在下载 v1.4.3", d.fact)
         assertEquals(0.45f, d.progress)
         assertFalse(d.showActionButton)
         // 下载中也可以点「我知道了」关卡片（只关卡片，不取消下载）。
@@ -192,20 +192,24 @@ class UpdateCardTest {
     }
 
     @Test
-    fun display_downloading_percentBounds() {
+    fun display_downloading_factHasNoPercentAndProgressClamped() {
+        // B11b：事实里不再写百分比（进度条已承载），进度值本身仍钳到 0..1。
         assertEquals(
-            "正在下载 v1.4.3（0%）",
+            "正在下载 v1.4.3",
             updateCardDisplay(info(), UpdatePhase.DOWNLOADING, 0f).fact
         )
+        assertEquals(0f, updateCardDisplay(info(), UpdatePhase.DOWNLOADING, 0f).progress)
         assertEquals(
-            "正在下载 v1.4.3（100%）",
+            "正在下载 v1.4.3",
             updateCardDisplay(info(), UpdatePhase.DOWNLOADING, 1f).fact
         )
-        // 超界进度钳到 0..100，不出「（120%）」这种文案。
+        assertEquals(1f, updateCardDisplay(info(), UpdatePhase.DOWNLOADING, 1f).progress)
+        // 超界进度钳到 0..1。
         assertEquals(
-            "正在下载 v1.4.3（100%）",
+            "正在下载 v1.4.3",
             updateCardDisplay(info(), UpdatePhase.DOWNLOADING, 1.2f).fact
         )
+        assertEquals(1f, updateCardDisplay(info(), UpdatePhase.DOWNLOADING, 1.2f).progress)
     }
 
     @Test
@@ -231,7 +235,7 @@ class UpdateCardTest {
     @Test
     fun display_downloading_forced_stillNoDismiss() {
         val d = updateCardDisplay(info(forced = true), UpdatePhase.DOWNLOADING, 0.3f)
-        assertEquals("正在下载 v1.4.3（30%）", d.fact)
+        assertEquals("正在下载 v1.4.3", d.fact)
         assertFalse(d.showActionButton)
         assertFalse(d.showDismissButton)
         assertTrue(d.pinned)
@@ -284,7 +288,7 @@ class UpdateCardTest {
         val card = buildUpdateCard(
             info(), OtaDownloader.State.Downloading(0.6f), 547, false
         )
-        assertEquals("正在下载 v1.4.3（60%）", card.fact)
+        assertEquals("正在下载 v1.4.3", card.fact)
         assertEquals(0.6f, card.progress)
         assertTrue(card.hideActionButton)
         assertFalse(card.hideDismissButton)
@@ -392,7 +396,7 @@ class UpdateCardTest {
             built, OtaDownloader.State.Downloading(0.25f), 547, false
         )
         // 事实／进度跟着下载状态翻，身份与排序不动。
-        assertEquals("正在下载 v1.4.3（25%）", overlaid.fact)
+        assertEquals("正在下载 v1.4.3", overlaid.fact)
         assertEquals(0.25f, overlaid.progress)
         assertTrue(overlaid.hideActionButton)
         assertEquals("update|547", overlaid.id)
