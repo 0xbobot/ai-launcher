@@ -202,7 +202,15 @@ object UnreadJumpLogLogic {
             null -> null
             else -> if (c.startsWith("cancel_error:")) "取消的时候出了点问题" else "通知留着"
         }
-        val parts = listOfNotNull(head, openPart, cancelPart)
+        // 去重（文案审计第 1 批）：head 已是 launch_app 路径且确认“打开了”
+        // 时，openPart 再确认一次即重复，省略；head 说“没打开”时
+        // “换了个方式打开了应用”是结果反转（确实打开了），必须留；
+        // 未打开／未确认态（还没打开／没法确认／还在确认）一律留。
+        val headConfirmsOpened = tap?.path == "launch_app" && tap.launchOk == true
+        val openPartDeduped =
+            if (headConfirmsOpened && (openPart == "已经打开了" || openPart == "换了个方式打开了应用")) null
+            else openPart
+        val parts = listOfNotNull(head, openPartDeduped, cancelPart)
         return parts.joinToString(" · ") +
             if (out?.partial == true) "（这次的结果记不全）" else ""
     }

@@ -108,10 +108,6 @@ fun CrashLogScreen() {
                     onClick = {
                         view.tickHaptic()
                         val text = crashLogShareText(records)
-                        if (text.isBlank()) {
-                            IslandToasts.show("现在还没有记录可以分享")
-                            return@TextButton
-                        }
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
                             putExtra(Intent.EXTRA_SUBJECT, "AI 桌面崩溃记录")

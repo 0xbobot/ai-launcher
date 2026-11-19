@@ -186,4 +186,75 @@ class UnreadJumpLogTest {
         )
         assertTrue(UnreadJumpLogLogic.summarize(entry).contains("还在确认有没有打开"))
     }
+
+    @Test
+    fun `summary drops repeated opened confirmation when head already says opened`() {
+        val openedTap = tap.copy(path = "launch_app", sendResult = "ok", launchOk = true)
+        val entry = UnreadJumpLogLogic.GroupedEntry(
+            tapTs = 1_000L, pkg = "com.example.chat", tap = openedTap,
+            outcome = outcome.copy(cancel = "kept", cancelFg = "CONFIRMED"),
+        )
+        assertEquals(
+            "已经帮你打开了应用 · 通知留着",
+            UnreadJumpLogLogic.summarize(entry)
+        )
+    }
+
+    @Test
+    fun `summary drops fallback opened when head already says opened`() {
+        val openedTap = tap.copy(path = "launch_app", sendResult = "ok", launchOk = true)
+        val entry = UnreadJumpLogLogic.GroupedEntry(
+            tapTs = 1_000L, pkg = "com.example.chat", tap = openedTap,
+            outcome = outcome.copy(
+                cancel = "kept", fallbackFired = true, fallbackOpened = true,
+                fallbackMs = 2_000L, latchBg = false,
+            ),
+        )
+        val text = UnreadJumpLogLogic.summarize(entry)
+        assertEquals("已经帮你打开了应用 · 通知留着", text)
+        assertFalse(text.contains("换了个方式打开了应用"))
+    }
+
+    @Test
+    fun `summary keeps fallback opened when head says not opened`() {
+        val failedTap = tap.copy(
+            path = "launch_app", sendResult = "error:SecurityException",
+            launchOk = false, fallbackPath = "none",
+        )
+        val entry = UnreadJumpLogLogic.GroupedEntry(
+            tapTs = 1_000L, pkg = "com.example.chat", tap = failedTap,
+            outcome = outcome.copy(
+                cancel = "kept", fallbackFired = true, fallbackOpened = true,
+                fallbackMs = 2_000L, latchBg = false,
+            ),
+        )
+        val text = UnreadJumpLogLogic.summarize(entry)
+        assertTrue(text.contains("直接打开也没打开"))
+        assertTrue(text.contains("换了个方式打开了应用"))
+    }
+
+    @Test
+    fun `summary keeps not opened when head says not opened`() {
+        val failedTap = tap.copy(
+            path = "launch_app", sendResult = "error:SecurityException",
+            launchOk = false, fallbackPath = "none",
+        )
+        val entry = UnreadJumpLogLogic.GroupedEntry(
+            tapTs = 1_000L, pkg = "com.example.chat", tap = failedTap, outcome = outcome,
+        )
+        val text = UnreadJumpLogLogic.summarize(entry)
+        assertTrue(text.contains("直接打开也没打开"))
+        assertTrue(text.contains("还没打开"))
+    }
+
+    @Test
+    fun `summary keeps waiting when head says opened but outcome missing`() {
+        val openedTap = tap.copy(path = "launch_app", sendResult = "ok", launchOk = true)
+        val entry = UnreadJumpLogLogic.GroupedEntry(
+            tapTs = 1_000L, pkg = "com.example.chat", tap = openedTap, outcome = null,
+        )
+        val text = UnreadJumpLogLogic.summarize(entry)
+        assertTrue(text.contains("已经帮你打开了应用"))
+        assertTrue(text.contains("还在确认有没有打开"))
+    }
 }

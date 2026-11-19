@@ -98,10 +98,6 @@ fun JumpLogScreen() {
                     onClick = {
                         view.tickHaptic()
                         val text = UnreadJumpLog.shareText(context)
-                        if (text.isBlank()) {
-                            IslandToasts.show("现在还没有记录可以分享")
-                            return@TextButton
-                        }
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
                             putExtra(Intent.EXTRA_SUBJECT, "AI 桌面未读打开记录")

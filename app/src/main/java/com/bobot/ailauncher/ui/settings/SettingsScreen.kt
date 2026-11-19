@@ -91,6 +91,8 @@ import com.bobot.ailauncher.data.OtaDownloader
 import com.bobot.ailauncher.ui.components.downloadStatusText
 import com.bobot.ailauncher.data.OtaInfo
 import com.bobot.ailauncher.data.OtaUpdater
+import com.bobot.ailauncher.data.UPDATE_INSTALL_LABEL
+import com.bobot.ailauncher.data.UPDATE_RETRY_LABEL
 import com.bobot.ailauncher.ui.theme.AILauncherColors
 import com.bobot.ailauncher.ui.theme.AILauncherType
 import com.bobot.ailauncher.ui.theme.confirmHaptic
@@ -161,9 +163,10 @@ fun versionUpdateTitle(
 }
 
 /**
- * 版本卡上行副文案（纯函数）：下完「点按安装 vX」/ 失败「点按重试」/
- * 有新版更新说明 / 平时「当前版本 vX」。下载中返回 null——下载中副文
- * 是进度条 + downloadStatusText，不走这里。逐字锁死。
+ * 版本卡上行副文案（纯函数）：有新版更新说明 / 平时「当前版本 vX」。
+ * 下完／失败／下载中返回 null——下完与失败态的动作已由行内按钮
+ * （安装／重试）承担，不再用副文教用户点哪里；下载中副文是进度条
+ * + downloadStatusText，不走这里。逐字锁死。
  */
 fun versionUpdateHint(
     downloading: Boolean,
@@ -174,8 +177,8 @@ fun versionUpdateHint(
     currentVersionName: String,
 ): String? = when {
     downloading -> null
-    downloadDone -> "点这里安装 v${updateVersionName ?: ""}"
-    downloadFailed -> "点这里再试一次"
+    downloadDone -> null
+    downloadFailed -> null
     updateVersionName != null -> changelog
     else -> "当前版本 v$currentVersionName"
 }
@@ -511,17 +514,39 @@ fun SettingsScreen(
                                         color = AILauncherColors.current.Hint
                                     )
                                 }
-                                dlDone -> Text(
-                                    text = updateHint.orEmpty(),
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    color = AILauncherColors.current.Accent
-                                )
-                                dlFailed -> {
+                                // 下完态：副文已删，行内直接给「安装」按钮（与
+                                // 「去更新」同款 TextButton）；整行可点＋按钮双通道，
+                                // 点按钮与点整行是同一个安装动作（onCardClick）。
+                                dlDone -> TextButton(
+                                    onClick = {
+                                        view.tickHaptic()
+                                        onCardClick?.invoke()
+                                    },
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
                                     Text(
-                                        text = updateHint.orEmpty(),
+                                        text = UPDATE_INSTALL_LABEL,
                                         fontSize = AILauncherType.Footnote.fontSize,
-                                        color = MaterialTheme.colorScheme.error
+                                        color = AILauncherColors.current.Accent
                                     )
+                                }
+                                dlFailed -> {
+                                    // 失败态：副文已删，行内直接给「重试」按钮（与
+                                    // 「去更新」同款）；标题「这次没下载下来」留作
+                                    // 失败原因；「用浏览器自己下载」按钮不动。
+                                    TextButton(
+                                        onClick = {
+                                            view.tickHaptic()
+                                            onCardClick?.invoke()
+                                        },
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text(
+                                            text = UPDATE_RETRY_LABEL,
+                                            fontSize = AILauncherType.Footnote.fontSize,
+                                            color = AILauncherColors.current.Accent
+                                        )
+                                    }
                                     val apkUrl = availableInfo?.apkUrl
                                     if (!apkUrl.isNullOrBlank()) {
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -769,7 +794,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "智能就来自下面这几处。每多接一处，智能就强一点。每个都能单独接、随时断开。数据只在这台手机上处理，不会发到别处。",
+                                text = "数据只在这台手机上处理，不会发到别处。",
                                 fontSize = AILauncherType.Footnote.fontSize,
                                 color = AILauncherColors.current.Hint,
                                 lineHeight = 18.sp
@@ -851,18 +876,10 @@ fun SettingsScreen(
                         }
                         if (llmExpanded) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "填上大模型密钥，助手能听懂你说话、帮你办事。不填也能用，只是没那么聪明。",
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                lineHeight = 18.sp
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
                             OutlinedTextField(
                                 value = apiKey,
                                 onValueChange = { apiKey = it; persist() },
                                 label = { Text("大模型密钥") },
-                                placeholder = { Text("去 DeepSeek / OpenAI 官网申请一个，粘过来就行", color = AILauncherColors.current.Hint) },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
                                 modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
@@ -895,12 +912,6 @@ fun SettingsScreen(
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
                             )
-                            Text(
-                                text = "一般不用改。用别的服务商才需要换",
-                                fontSize = AILauncherType.Caption.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedTextField(
                                 value = model,
@@ -909,12 +920,6 @@ fun SettingsScreen(
                                 placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
-                            )
-                            Text(
-                                text = "填你申请时选的那个名字，比如 deepseek-flash",
-                                fontSize = AILauncherType.Caption.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                modifier = Modifier.padding(top = 8.dp)
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Button(
@@ -945,32 +950,25 @@ fun SettingsScreen(
                             }
                             // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
                             // 明文降级时醒目提示 + 给得出下一步，不再静默回退
-                            when (keyStatus.mode) {
-                                LlmKeyStore.StorageMode.ENCRYPTED -> Text(
-                                    text = "✓ 你的密钥已经安全地存在这台手机上了",
+                            // 加密态不说话（正常态无消息就是好消息）；只在明文降级
+                            // 时醒目提示 + 给得出下一步（文案审计第 1 批）。
+                            if (keyStatus.mode == LlmKeyStore.StorageMode.PLAIN_FALLBACK) Column(
+                                modifier = Modifier.padding(top = 8.dp)
+                            ) {
+                                Text(
+                                    text = "出了点问题，你的密钥现在没加上保护就存着了",
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = "重启手机后再回到这里，我会再试一次给它加上保护；" +
+                                        "还不行的话，就删掉重新粘贴保存一次。",
                                     fontSize = AILauncherType.Caption.fontSize,
                                     color = AILauncherColors.current.Hint,
+                                    lineHeight = 17.sp,
                                     modifier = Modifier.padding(top = 8.dp)
                                 )
-                                LlmKeyStore.StorageMode.PLAIN_FALLBACK -> Column(
-                                    modifier = Modifier.padding(top = 8.dp)
-                                ) {
-                                    Text(
-                                        text = "出了点问题，你的密钥现在没加上保护就存着了",
-                                        fontSize = AILauncherType.Footnote.fontSize,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                    Text(
-                                        text = "重启手机后再回到这里，我会再试一次给它加上保护；" +
-                                            "还不行的话，就删掉重新粘贴保存一次。",
-                                        fontSize = AILauncherType.Caption.fontSize,
-                                        color = AILauncherColors.current.Hint,
-                                        lineHeight = 17.sp,
-                                        modifier = Modifier.padding(top = 8.dp)
-                                    )
-                                }
-                                LlmKeyStore.StorageMode.EMPTY -> Unit
                             }
                         }
 
@@ -1131,7 +1129,7 @@ fun SettingsScreen(
                         if (crashUnreadCount > 0) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "$crashUnreadCount 条还没看过，点开看看",
+                                text = "$crashUnreadCount 条还没看过",
                                 fontSize = AILauncherType.Footnote.fontSize,
                                 color = AILauncherColors.current.Hint,
                                 lineHeight = 18.sp
@@ -1270,13 +1268,17 @@ private fun SettingsConnectorRow(
                     color = if (enabled) AILauncherColors.current.Title
                         else AILauncherColors.current.Hint
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = state.desc,
-                    fontSize = AILauncherType.Footnote.fontSize,
-                    color = AILauncherColors.current.Hint,
-                    lineHeight = 18.sp
-                )
+                // desc 只在未接上时显示：已接上时开关开态＋绿色状态行已足够
+                // 表达“已接上”，不再重复读一遍接上有何用（文案审计第 1 批）。
+                if (!connected) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = state.desc,
+                        fontSize = AILauncherType.Footnote.fontSize,
+                        color = AILauncherColors.current.Hint,
+                        lineHeight = 18.sp
+                    )
+                }
             }
             Switch(
                 checked = connected,

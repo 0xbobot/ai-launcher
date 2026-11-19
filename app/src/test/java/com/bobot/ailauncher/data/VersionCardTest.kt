@@ -108,9 +108,8 @@ class VersionCardTest {
     }
 
     @Test
-    fun `downloaded hint is tap to install`() {
-        assertEquals(
-            "点这里安装 v1.3.54",
+    fun `downloaded hint is null install button instead`() {
+        assertNull(
             versionUpdateHint(
                 downloading = false, downloadDone = true, downloadFailed = false,
                 updateVersionName = "1.3.54", changelog = "修复若干问题",
@@ -120,9 +119,8 @@ class VersionCardTest {
     }
 
     @Test
-    fun `failed hint is tap to retry`() {
-        assertEquals(
-            "点这里再试一次",
+    fun `failed hint is null retry button instead`() {
+        assertNull(
             versionUpdateHint(
                 downloading = false, downloadDone = false, downloadFailed = true,
                 updateVersionName = "1.3.54", changelog = "修复若干问题",
