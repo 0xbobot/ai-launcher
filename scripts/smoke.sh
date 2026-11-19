@@ -492,10 +492,10 @@ sleep 2
 
 # --- 9. 应用中心空态重试入口（477 后：首页意图入口已删，存活的 LLM 触点只剩应用中心空态）---
 # 477 删了首页意图搜索与无 Key 错误条；反馈闭环保留在应用中心：查询无结果时出
-# 空态「好像有应用能帮你，再确认一次」。本段验该入口在场：进应用中心 → 输无意义串 →
+# 空态「再确认一次」。本段验该入口在场：进应用中心 → 输无意义串 →
 # 空态重试行在场。不断言点按后的 LLM 流程（无 Key 时进选择器，属另一条链路）。
 # （r9：正式版文案审计 f0b6b90a 把旧文案「有应用能打开，重试」改成新文案，
-# 脚本跟上；旧文案已不在应用代码里。）
+# 脚本跟上；文案审计第 2 批把前半句「好像有应用能帮你，」砍掉，只留动作名。）
 # 到达验证走 ac_open_d3；未进则整段跳过不计 FAIL。
 if ac_open_d3 ac9_dump; then
   AC9X=$(SX 540); AC9Y=$(SY 330)
@@ -515,7 +515,7 @@ if ac_open_d3 ac9_dump; then
     adb shell uiautomator dump /sdcard/ac9_after.xml > /dev/null 2>&1 || true
     adb pull /sdcard/ac9_after.xml "$OUT/ac9_after.xml" > /dev/null 2>&1 || true
   fi
-  if [ -f "$OUT/ac9_after.xml" ] && grep -q "好像有应用能帮你，再确认一次" "$OUT/ac9_after.xml"; then
+  if [ -f "$OUT/ac9_after.xml" ] && grep -q "再确认一次" "$OUT/ac9_after.xml"; then
     ok "appcenter-empty-retry"
   else
     ng "appcenter-empty-retry"

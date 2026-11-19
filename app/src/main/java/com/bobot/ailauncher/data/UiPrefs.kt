@@ -10,7 +10,7 @@ object UiPrefs {
     private const val KEY_DOCK_VISIBLE = "dock_visible"
     private const val KEY_DOCK_SMART_SORT = "dock_smart_sort"
     private const val KEY_DOCK_PINNED = "dock_pinned"
-    private const val KEY_ROW_ACTIONS_GUIDE_SEEN = "row_actions_guide_seen"
+    private const val KEY_ROW_ACTIONS_USED = "row_actions_used"
     // 折叠组（419/421）：上次取消时 N/展开态；foldTick 供首页 rail 跟随刷新
     private const val KEY_FOLD_LAST_DECLINED_N = "fold_last_declined_n"
     private const val KEY_FOLD_EXPANDED = "fold_expanded"
@@ -32,6 +32,9 @@ object UiPrefs {
 
     /** Dock 数据变化通知：置顶增删/排序后 bump，Dock 侧重算 */
     val dockTick = MutableStateFlow(0)
+
+    /** 应用行滑动操作用过通知（文案审计第 2 批）：首进 peek 图标靠它重算显隐 */
+    val rowActionsUsedTick = MutableStateFlow(0)
     // v0.56.2（Bob）：Rail 图标闪烁——收藏/隐藏时提示目标位置；Pair(计数, "star"/"eye")
     private val _railFlash = MutableStateFlow(0 to "")
     val railFlash = _railFlash
@@ -109,15 +112,16 @@ object UiPrefs {
         bumpDock()
     }
 
-    /** 应用行左滑操作区的新手引导是否已展示过（v0.35.0）：只打扰一次 */
-    fun hasSeenRowActionsGuide(context: Context): Boolean {
+    /** 应用行滑动操作是否已用过（文案审计第 2 批）：滑开浮层或点过 ★／眼睛／peek 图标即 true，首进 peek 图标随之撤下 */
+    fun hasUsedRowActions(context: Context): Boolean {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_ROW_ACTIONS_GUIDE_SEEN, false)
+            .getBoolean(KEY_ROW_ACTIONS_USED, false)
     }
 
-    fun setRowActionsGuideSeen(context: Context) {
+    fun setRowActionsUsed(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_ROW_ACTIONS_GUIDE_SEEN, true).apply()
+            .edit().putBoolean(KEY_ROW_ACTIONS_USED, true).apply()
+        rowActionsUsedTick.value++
     }
 
     /** 折叠组状态变化通知：取消/收展后 bump，首页 rail 跟随重算 */

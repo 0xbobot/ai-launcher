@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
@@ -105,10 +104,6 @@ internal fun AppRow(
     // （系统应用信息页），不触发行点按；收起时 ⓘ 消失。
     showInfoIcon: Boolean = false,
     onInfoClick: (() -> Unit)? = null,
-    // 内容深链标识（Bob 2026-11-05 晚）：搜索结果行里，点按会走深链直达
-    // 内容的应用出「直达」小标签；只打开首页的没有。调用方按当前查询算好
-    // 再传（CapabilityResolution.supportsDeepLink），默认不显示。
-    showDeepLinkBadge: Boolean = false,
     // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览（最新通知正文
     // 或未读短信片段，调用方算好再传）；null 时只留应用名，字母组行不受影响。
     preview: String? = null,
@@ -120,6 +115,10 @@ internal fun AppRow(
     // 禁用后该行在未读组内暂不能收藏/隐藏（读完回字母组后恢复），见收据。
     // 默认 true，字母组行行为一字不变。
     swipeActionsEnabled: Boolean = true,
+    // 文案审计第 2 批：首进 peek——行尾常驻 ★／眼睛小图标（低 alpha、可点按，
+    // 与滑动浮层同款图标与动作）；调用方只给展示顺序前 3 行传 true，
+    // 用户滑过／点过一次行动作后调用方撤下（peekPkgs 传空集）。
+    showActionPeek: Boolean = false,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -135,6 +134,9 @@ internal fun AppRow(
     val badgeCount = badgeCounts[app.packageName] ?: 0
 
     fun togglePin() {
+        // 文案审计第 2 批：★ 被用过一次（滑到底／点浮层图标／点 peek 图标），
+        // 首进 peek 随之撤下。
+        UiPrefs.setRowActionsUsed(context)
         val cur = UiPrefs.getDockPinned(context).toMutableList()
         if (app.packageName in cur) {
             cur.remove(app.packageName)
@@ -150,6 +152,13 @@ internal fun AppRow(
             UiPrefs.flashRail("star")
             IslandToasts.show("已经帮你加到程序坞上了")
         }
+    }
+
+    // 文案审计第 2 批：眼睛动作（隐藏／取消隐藏）——与 togglePin 同理，
+    // 用过一次即记 peek 已用；三处调用点（右滑到底／浮层图标／peek 图标）共用。
+    fun hideOrUnhide() {
+        UiPrefs.setRowActionsUsed(context)
+        if (onUnhide != null) onUnhide(app) else onHide(app)
     }
 
     // v0.41.30（Bob 统一双钮版）：左右滑同一效果——内容（图标+标题）弱化到 30%，位置不动；
@@ -290,7 +299,7 @@ internal fun AppRow(
                                 }
                                 dragDist < -fullPx -> {
                                     // 右滑到底 → 眼睛（隐藏/取消隐藏）
-                                    if (onUnhide != null) onUnhide(app) else onHide(app)
+                                    hideOrUnhide()
                                     dragDist = 0f
                                     settleDim(from, 0f)
                                 }
@@ -357,7 +366,7 @@ internal fun AppRow(
                 Spacer(modifier = Modifier.width(8.dp))
                 // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览，不抢应用名；
                 // 无预览时只留应用名。名字列恒占满剩余宽（Bob 2026-11-15 未读行标题重叠：
-                // 此前无 ⓘ/「直达」时列无 weight、宽随内容定，长按展开出 ⓘ 时列宽突变、
+                // 此前无 ⓘ 时列无 weight、宽随内容定，长按展开出 ⓘ 时列宽突变、
                 // 标题重排重截；恒 weight(1f) 后列宽只随 ⓘ 有无变、与有 ⓘ 时同口径），
                 // 预览跟名字同宽、单行省略；拖动弱化时跟内容一起淡。
                 // 标题行高显式取 BodyLarge 行高（24sp，此前只给字号、行高靠
@@ -386,12 +395,58 @@ internal fun AppRow(
                         )
                     }
                 }
-                // 内容深链标识：小字标签「直达」——点按这家直接进到查询的那份
-                // 内容。只在搜索结果行出现（调用方按查询算好再传）；拖动弱化
-                // 时跟内容一起淡；本身不是可点目标，不抢行点按。
-                if (showDeepLinkBadge) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    DeepLinkBadge(modifier = Modifier.graphicsLayer { alpha = contentAlpha })
+                // 文案审计第 2 批：首进 peek——行尾常驻 ★／眼睛小图标（低 alpha、
+                // 可点按，与滑动浮层同款图标与动作）；浮层展开／拖动中不显示；
+                // 点按即执行对应动作（★ 固定／移出、眼睛隐藏／取消隐藏），
+                // 用过一次后调用方撤下（peekPkgs 传空集）。
+                if (showActionPeek && !actionsVisible && !hideVisible && !isDragging) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.graphicsLayer { alpha = 0.5f }
+                    ) {
+                        // 眼睛：隐藏／取消隐藏（与浮层同款图标、文案与动作）
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    onClick = {
+                                        hapticView.tickHaptic()
+                                        hideOrUnhide()
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (onUnhide != null) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                contentDescription = if (onUnhide != null) "取消隐藏" else "隐藏",
+                                tint = Color(0xFF5A6C7D),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        // ★：固定／移出程序坞（与浮层同款图标、文案与动作）
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    onClick = {
+                                        hapticView.tickHaptic()
+                                        togglePin()
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = if (isPinned) "移出程序坞" else "加到程序坞",
+                                tint = AILauncherColors.current.Accent.copy(alpha = if (isPinned) 1f else 0.45f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                 }
                 // v0.68.180：展开态行尾 ⓘ（Dock 标题行同款位置与图标）。
                 // IconButton 自带 48dp 触控框；内层 clickable 消费点按，不触发行点按。
@@ -455,9 +510,7 @@ internal fun AppRow(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
-                                        onIconTap("eye") {
-                                            if (onUnhide != null) onUnhide(app) else onHide(app)
-                                        }
+                                        onIconTap("eye") { hideOrUnhide() }
                                     }
                                 ),
                             contentAlignment = Alignment.Center
@@ -530,35 +583,6 @@ internal fun AppRow(
     }
 
     // v0.41.27：方案 B——内容滑动露出底层按钮；右滑隐藏确认框已删除，点眼睛直接隐藏
-}
-
-/**
- * 内容深链标识（竖屏 AppRow 与横屏 LandscapeAppRow 共用）：小字标签「直达」。
- * 样式：Caption（12sp，token 最小字号）＋ Hint 色 ＋ 细线描边圆角、无底色，
- * 不抢眼；不用 emoji、不用金色（金色只留主操作）；横向内边距 8dp（8dp 网格），
- * 纵向不另加内边距（字行高 18sp＋描边即约 20dp 高，行内垂直居中）。
- */
-@Composable
-internal fun DeepLinkBadge(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
-            .border(
-                width = 1.dp,
-                color = AILauncherColors.current.Hint.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(4.dp)
-            )
-            .padding(horizontal = 8.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "直达",
-            fontSize = AILauncherType.Caption.fontSize,
-            lineHeight = AILauncherType.Caption.lineHeight,
-            color = AILauncherColors.current.Hint,
-            maxLines = 1
-        )
-    }
 }
 
 /** 分组 key：a-z/A-Z→大写；中文→拼音首字母大写（GB2312 区位边界法，无需第三方库）；数字及其他→'#' */

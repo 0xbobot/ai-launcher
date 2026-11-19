@@ -61,6 +61,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
@@ -75,6 +76,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.NotificationRepository
 import com.bobot.ailauncher.data.UiPrefs
@@ -153,9 +155,6 @@ fun AppCenterLandscape(
     searchFieldValue: TextFieldValue,
     onSearchFieldChange: (TextFieldValue) -> Unit,
     searchResults: List<AppInfo>?,
-    // 内容深链标识（Bob 2026-11-05 晚）：竖屏按本句查询算好的支持集合，
-    // 横屏搜索行共用（横屏不另算，判定口径与竖屏同一套）。
-    deepLinkSupportedPkgs: Set<String> = emptySet(),
     onSearchSubmit: () -> Unit,
     // 应用中心升级：索引加载中标记（空结果文案区分"索引加载中"与"真无匹配"）
     indexLoading: Boolean = false,
@@ -477,9 +476,10 @@ fun AppCenterLandscape(
                         // 425（Bob 2026-11-04，参考视频）：里侧清空去掉，挪到外面齿轮位（同竖屏）
                         showClearButton = false,
                         showSubmitButton = false,
-                        // 428 滚动关键字（同竖屏）：应用中心箭头只作关键字的运行钮，
-                        // 点箭头只填入关键字、网格随之过滤，不走 onSubmit。
+                        // 428 滚动关键字（同竖屏）：文案审计第 2 批——应用中心
+                        // 不轮换关键字（showKeywords = false，空闲时只显示静态占位）。
                         keywordSubmitCallsOnSubmit = false,
+                        showKeywords = false,
                         fusedBackground = true,
                         onFocusChanged = onSearchFocusChanged,
                         modifier = Modifier
@@ -556,6 +556,7 @@ fun AppCenterLandscape(
                     ) {
                         if (results.isEmpty()) {
                             item(key = "search-empty") {
+                                val context = LocalContext.current
                                 Column(modifier = Modifier.fillMaxWidth()) {
                                     Text(
                                         // 应用中心升级：索引缺失与真无匹配区分文案
@@ -563,7 +564,7 @@ fun AppCenterLandscape(
                                         // 全宽居中、maxLines=1+省略号；文案略缩（同竖屏）。
                                         // 列本身已有 16dp 横向边距，Text 不再另加左右边距。
                                         text = if (indexLoading) "应用列表还没加载好，稍后再试试吧"
-                                            else "没找到「${searchFieldValue.text.trim()}」相关的应用，换个词再试试吧",
+                                            else "没找到「${searchFieldValue.text.trim()}」相关的应用",
                                         fontSize = AILauncherType.Callout.fontSize,
                                         color = AILauncherColors.current.Hint,
                                         textAlign = TextAlign.Center,
@@ -576,6 +577,11 @@ fun AppCenterLandscape(
                                     // 反馈闭环（Bob 2026-11-06）：与竖屏同一行、同一口径。
                                     // 443：大模型已认出意图、但本机没装对应应用时，
                                     // 重试行不再出现，改出应用市场指引行（同竖屏）。
+                                    // 文案审计第 2 批：同竖屏——索引加载中时给可点的
+                                    // 「重试」按钮，点按重调 AppCatalog.ensure。
+                                    if (indexLoading) {
+                                        CatalogRetryRow(onClick = { AppCatalog.ensure(context) })
+                                    }
                                     val guideTerm = marketGuideTerm
                                     if (guideTerm != null) {
                                         MarketGuideRow(
@@ -603,9 +609,6 @@ fun AppCenterLandscape(
                                         // 的 Unit 强制转换适用）。
                                         app = app, onLaunch = { onLaunch(it) },
                                         compact = true,
-                                        // 内容深链标识：这句查询下点按会走深链
-                                        // 直达的应用才出「直达」标签。
-                                        showDeepLinkBadge = deepLinkSupportedPkgs.contains(app.packageName)
                                     )
                                 }
                             }
@@ -705,12 +708,6 @@ fun AppCenterLandscape(
                                                 .height(rowH)
                                                 .padding(start = 16.dp, end = 8.dp)
                                         ) {
-                                            Text(
-                                                text = "这些应用 90 天没打开了，先收在这里",
-                                                fontSize = AILauncherType.Footnote.fontSize,
-                                                color = AILauncherColors.current.Hint,
-                                                modifier = Modifier.weight(1f)
-                                            )
                                             TextButton(onClick = { onUnfold() }) {
                                                 Text(
                                                     text = "都展开",
@@ -752,7 +749,7 @@ fun AppCenterLandscape(
                                             }
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
-                                                text = "点击解锁查看",
+                                                text = "解锁查看",
                                                 fontSize = AILauncherType.Callout.fontSize,
                                                 color = AILauncherColors.current.Title,
                                                 maxLines = 1,
@@ -990,10 +987,6 @@ private fun LandscapeAppRow(
     modifier: Modifier = Modifier,
     // 应用中心升级：键盘弹出时行高 60→56dp（图标 48dp 不动）
     compact: Boolean = false,
-    // 内容深链标识（Bob 2026-11-05 晚）：搜索结果行里，点按会走深链直达
-    // 内容的应用出「直达」小标签；只打开首页的没有。调用方按当前查询算好
-    // 再传（与竖屏 AppRow 同款标签、同一判定），默认不显示。
-    showDeepLinkBadge: Boolean = false,
     // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览（调用方算好再传）；
     // null 时只留应用名，非未读行不受影响。
     preview: String? = null,
@@ -1038,7 +1031,7 @@ private fun LandscapeAppRow(
         }
         Spacer(modifier = Modifier.width(8.dp))
         // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览，不抢应用名；
-        // 无预览时只留应用名。「直达」标签在行尾时名字列占满剩余宽（与原来单 Text
+        // 无预览时只留应用名。名字列占满剩余宽（与原来单 Text
         // 的 weight 口径一致），预览跟名字同宽、单行省略。
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -1064,12 +1057,6 @@ private fun LandscapeAppRow(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-        }
-        // 内容深链标识：小字标签「直达」（与竖屏 AppRow 同款）；本身不是
-        // 可点目标，不抢行点按。
-        if (showDeepLinkBadge) {
-            Spacer(modifier = Modifier.width(8.dp))
-            DeepLinkBadge()
         }
     }
 }

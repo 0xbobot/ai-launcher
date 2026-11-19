@@ -410,7 +410,20 @@ data class AppCenterRowActions(
     // 只未读行点按用；左滑清理仍走 onClearUnreadNotifications 立即取消。
     val onUnreadRowOpened: (AppInfo) -> Unit,
     val onHideApp: (AppInfo) -> Unit,
+    // 文案审计第 2 批：首进 peek 图标的行（按展示顺序前 3 个包名）；用过一次
+    // 行动作后调用方传空集，图标撤下。默认空集——不传即无 peek。
+    val peekPkgs: Set<String> = emptySet(),
 )
+
+/**
+ * 文案审计第 2 批：首进 peek 图标的行——按展示顺序（程序坞 → 未读 → A-Z）
+ * 取前 3 个包名；用过一次行动作后调用方传空集，图标撤下。
+ */
+internal fun firstPeekPkgs(
+    dockPkgs: List<String>,
+    unreadPkgs: List<String>,
+    azPkgs: List<String>
+): Set<String> = (dockPkgs + unreadPkgs + azPkgs).distinct().take(3).toSet()
 
 /**
  * 刊头 + 搜索胶囊 + morph 齿轮（原 1091–1281 行；「问助手」行已删）。
@@ -484,7 +497,7 @@ fun AppCenterHeaderSection(
                 // Bob 2026-11-03：数字跟当前列表走——搜索态显示过滤后条数
                 // 反馈闭环：LLM 重试出结果后，当前列表是 displayResults。
                 text = if (catalog == null) "正在帮你找应用…"
-                    else "共 ${displayResults?.size ?: azApps.size} 个 · 右边滑字母就能找到",
+                    else "共 ${displayResults?.size ?: azApps.size} 个",
                 fontSize = AILauncherType.Caption.fontSize,
                 color = AILauncherColors.current.Hint,
                 modifier = Modifier.padding(top = 8.dp)
@@ -530,10 +543,10 @@ fun AppCenterHeaderSection(
                 // 聚焦变 X、失焦回齿轮，全程只剩外面这一个清空（见下齿轮 morph）。
                 showClearButton = false,
                 showSubmitButton = false,
-                // 428 滚动关键字：应用中心箭头只作关键字的运行钮——点箭头只填入
-                // 关键字、网格随之过滤，不走 onSubmit（其 onSubmit 只是收键盘，
-                // 与“按关键字过滤应用”相悖）。
+                // 428 滚动关键字：文案审计第 2 批——应用中心不轮换关键字
+                // （showKeywords = false，空闲时只显示静态占位）。
                 keywordSubmitCallsOnSubmit = false,
+                showKeywords = false,
                 fusedBackground = true,
                 // v0.68.93：焦点外报 + 范围捕获（根 Box 点外部观察者用）
                 onFocusChanged = { onIntentFocusedChange(it) },
@@ -609,7 +622,6 @@ fun LazyListScope.AppCenterSearchResultsSection(
     showRetryPrompt: Boolean,
     retryLoading: Boolean,
     onRetryClick: () -> Unit,
-    deepLinkSupportedPkgs: Set<String>,
     actions: AppCenterRowActions,
 ) {
     // 搜索态：只显示搜索结果（拼音/首字母/自然语言/模糊）
@@ -623,7 +635,7 @@ fun LazyListScope.AppCenterSearchResultsSection(
                     // maxLines=1+省略号；文案略缩（“相关的”→“相关”）
                 // 以求一行放得下。字号不变（Callout）。
                 text = if (catalog == null) "应用列表还没加载好，稍后再试试吧"
-                    else "没找到「${filterQuery.trim()}」相关的应用，换个词再试试吧",
+                    else "没找到「${filterQuery.trim()}」相关的应用",
                 fontSize = AILauncherType.Callout.fontSize,
                 color = AILauncherColors.current.Hint,
                 textAlign = TextAlign.Center,
@@ -639,6 +651,12 @@ fun LazyListScope.AppCenterSearchResultsSection(
                 // 443：大模型已认出意图、但本机没装对应应用时，
                 // 重试行不再出现（再点也是同一结论），改出应用市场
                 // 指引行——点一下去应用市场搜相关应用、自己安装。
+                // 文案审计第 2 批：目录还没加载好时，后半句改成可点的「重试」
+                // 按钮——点按重调 AppCatalog.ensure（快照为空时恒重建，
+                // 在途构建由 pendingKey 挡下，点按是无害空操作）。
+                if (catalog == null) {
+                    CatalogRetryRow(onClick = { AppCatalog.ensure(actions.context) })
+                }
                 val guideTerm = marketGuideTerm
                 if (guideTerm != null) {
                     MarketGuideRow(
@@ -684,9 +702,7 @@ fun LazyListScope.AppCenterSearchResultsSection(
                         actions.onPopupAppChange(null)
                     },
                     onHide = actions.onHideApp,
-                    // 内容深链标识：这句查询下点按会走深链直达的
-                    // 应用才出「直达」标签（本句算好的集合里查包名）。
-                    showDeepLinkBadge = deepLinkSupportedPkgs.contains(app.packageName),
+                    showActionPeek = actions.peekPkgs.contains(app.packageName),
                     actionsVisible = actions.expandedActionsPkg == app.packageName,
                     onActionsVisibleChange = { expanded ->
                         // v0.41.23：与 revealedHidePkg 互斥
@@ -831,6 +847,7 @@ fun LazyListScope.AppCenterDockSection(
                         actions.onPopupAppChange(null)
                     },
                     onHide = actions.onHideApp,
+                    showActionPeek = actions.peekPkgs.contains(app.packageName),
                     actionsVisible = actions.expandedActionsPkg == app.packageName,
                     onActionsVisibleChange = { expanded ->
                         if (expanded) {
@@ -1052,6 +1069,7 @@ fun LazyListScope.AppCenterUnreadSection(
                                 actions.onPopupAppChange(null)
                             },
                             onHide = actions.onHideApp,
+                            showActionPeek = actions.peekPkgs.contains(app.packageName),
                             actionsVisible = actions.expandedActionsPkg == app.packageName,
                             onActionsVisibleChange = { expanded ->
                                 actions.onExpandedActionsChange(if (expanded) app.packageName else if (actions.expandedActionsPkg == app.packageName) null else actions.expandedActionsPkg)
@@ -1148,6 +1166,7 @@ fun LazyListScope.AppCenterLetterGroupsSection(
                         actions.onPopupAppChange(null)
                     },
                     onHide = actions.onHideApp,
+                    showActionPeek = actions.peekPkgs.contains(app.packageName),
                     actionsVisible = actions.expandedActionsPkg == app.packageName,
                     onActionsVisibleChange = { expanded ->
                         actions.onExpandedActionsChange(if (expanded) app.packageName else if (actions.expandedActionsPkg == app.packageName) null else actions.expandedActionsPkg)
@@ -1250,6 +1269,7 @@ fun LazyListScope.AppCenterFoldSection(
                                 actions.onPopupAppChange(null)
                             },
                             onHide = actions.onHideApp,
+                            showActionPeek = actions.peekPkgs.contains(app.packageName),
                             actionsVisible = actions.expandedActionsPkg == app.packageName,
                             onActionsVisibleChange = { expanded ->
                                 actions.onExpandedActionsChange(if (expanded) app.packageName else if (actions.expandedActionsPkg == app.packageName) null else actions.expandedActionsPkg)
@@ -1282,12 +1302,6 @@ fun LazyListScope.AppCenterFoldSection(
                         .padding(start = 72.dp, end = 64.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "这些应用 90 天没打开了，先收在这里",
-                        fontSize = AILauncherType.Footnote.fontSize,
-                        color = AILauncherColors.current.Hint,
-                        modifier = Modifier.weight(1f)
-                    )
                     TextButton(onClick = {
                         UiPrefs.setFoldLastDeclinedN(actions.context, inactiveTargets.size)
                         onFoldLastDeclinedNChange(inactiveTargets.size)
@@ -1327,7 +1341,7 @@ fun LazyListScope.AppCenterHiddenSection(
     if (hiddenApps.isNotEmpty() || inactiveTargets.isNotEmpty()) {
         // v0.41.32（Bob）：幽灵眼与第一行同行，不单独占行
         // 智能 v3：隐藏为空时不画锁占位（否则 N>0 且无隐藏时会冒出
-        // “点击解锁查看”）；锁占位只在确实有隐藏应用时出现。
+        // “解锁查看”）；锁占位只在确实有隐藏应用时出现。
         if (hiddenApps.isNotEmpty() && !hiddenUnlocked) {
             // 锁定占位：点按触发面部/指纹
             // v0.41.21（Bob）：锁定占位按应用行样式——40dp 圆角锁图标 + 15sp 文字，
@@ -1363,7 +1377,7 @@ fun LazyListScope.AppCenterHiddenSection(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Fingerprint,
-                            // 体检批D ⑨：装饰图标（同行文字「点击解锁查看」已表达）标装饰语义
+                            // 体检批D ⑨：装饰图标（同行文字「解锁查看」已表达）标装饰语义
                             contentDescription = null,
                             tint = AILauncherColors.current.Hint,
                             modifier = Modifier
@@ -1373,7 +1387,7 @@ fun LazyListScope.AppCenterHiddenSection(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "点击解锁查看",
+                        text = "解锁查看",
                         fontSize = AILauncherType.BodyLarge.fontSize,
                         color = AILauncherColors.current.Title
                     )
@@ -1422,6 +1436,7 @@ fun LazyListScope.AppCenterHiddenSection(
                             actions.onPopupAppChange(null)
                         },
                         onHide = {}, // 隐藏分组内：右滑=取消隐藏
+                        showActionPeek = actions.peekPkgs.contains(app.packageName),
                         onUnhide = onUnhideApp,
                         actionsVisible = actions.expandedActionsPkg == app.packageName,
                         onActionsVisibleChange = { expanded ->
@@ -1498,12 +1513,6 @@ fun LazyListScope.AppCenterHiddenSection(
                             color = Color.White
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "藏起来的应用随时可以在这里恢复",
-                        fontSize = AILauncherType.Footnote.fontSize,
-                        color = AILauncherColors.current.Hint
-                    )
                 }
             }
         }

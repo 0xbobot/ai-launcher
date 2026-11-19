@@ -131,7 +131,10 @@ fun IntentCapsuleField(
     // 428 滚动关键字：空输入显示关键字时，点提交箭头是否在填入后走 onSubmit。
     // 应用中心传 false——只填入、网格随之过滤（应用中心箭头是关键字的运行钮，
     // 其 onSubmit 只是收键盘，与“按关键字过滤应用”相悖，故不走 onSubmit）。
-    keywordSubmitCallsOnSubmit: Boolean = true
+    keywordSubmitCallsOnSubmit: Boolean = true,
+    // 文案审计第 2 批：应用中心传 false——胶囊只做过滤，不轮换关键字
+    // （空闲时显示静态占位「想做什么？」）；其余调用方默认 true 不变。
+    showKeywords: Boolean = true
 ) {
     val focusRequester = remember { FocusRequester() }
     // v0.68.102（310 冻结修复二轮）：key 改为 requestFocusOnMount 本身——
@@ -190,7 +193,8 @@ fun IntentCapsuleField(
     var isCapsuleFocused by remember { mutableStateOf(false) }
     var keywordIndex by remember { mutableIntStateOf(0) }
     // 只在空闲时滚动：空输入且未聚焦（键盘没起来）；一聚焦／一打字就停。
-    val rotating = value.text.isEmpty() && !isCapsuleFocused && keywordPool.isNotEmpty()
+    // 文案审计第 2 批：showKeywords=false 时不轮换（应用中心只做过滤）。
+    val rotating = showKeywords && value.text.isEmpty() && !isCapsuleFocused && keywordPool.isNotEmpty()
     val currentKeywordText: String? = if (rotating) {
         keywordPool.getOrNull(keywordIndex % keywordPool.size)?.exampleFillText()
     } else null

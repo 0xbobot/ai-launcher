@@ -60,19 +60,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Fingerprint
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
@@ -80,8 +77,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.bobot.ailauncher.data.BiometricAuth
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -120,7 +115,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -152,7 +146,6 @@ import com.bobot.ailauncher.data.AppCatalog
 import com.bobot.ailauncher.data.AppInfo
 import com.bobot.ailauncher.data.AppSearchIndex
 import com.bobot.ailauncher.data.CapabilityRegistry
-import com.bobot.ailauncher.data.CapabilityResolution
 import com.bobot.ailauncher.ui.home.IntentCapsuleField
 import com.bobot.ailauncher.ui.home.clearIntentFocusOnOutsideTap
 import com.bobot.ailauncher.data.AppUsageTracker
@@ -504,23 +497,6 @@ fun AppCenterContent(
     // LLM 重试认出意图后，用这份结果盖掉本地搜索结果（用户再点行仍走
     // launchApp，深链照常带；换句即清，见上）。
     val displayResults = llmRetryResults ?: searchResults
-    // 内容深链标识（Bob 2026-11-05 晚）：当前这句查询下，点按会走深链直达
-    // 内容的应用包名集合。复用 CapabilityResolution.supportsDeepLink 的
-    // 同一判定（tapSteps 链里含 Deeplink 步即支持），每句查询只算一次；
-    // 竖屏搜索行与横屏共用同一集合（横屏经参数传入，不另算）。查询为空、
-    // 无结果、无能力词、无内容时集合为空，标识自然不出现。
-    // 反馈闭环：按 displayResults 算（LLM 重试结果也要标“直达”）。
-    val deepLinkSupportedPkgs = remember(filterQuery, displayResults) {
-        val q = filterQuery.trim()
-        if (q.isEmpty() || displayResults.isNullOrEmpty()) emptySet()
-        else {
-            CapabilityRegistry.load(context)
-            val caps = CapabilityRegistry.groups().flatMap { it.capabilities }
-            displayResults.mapNotNull { app ->
-                if (CapabilityResolution.supportsDeepLink(caps, q, app.packageName)) app.packageName else null
-            }.toSet()
-        }
-    }
     // 反馈闭环·重试提示是否出现（Bob 2026-11-06）：只剩空态本身——
     // 索引已就绪 + 查询非空 + 搜索 0 结果。
     // 442 通用口径（Bob 2026-11-07 中午真机报“玩游戏”0 条却没提示）：
@@ -1025,12 +1001,18 @@ fun AppCenterContent(
         }
     }
 
-    // v0.35.0：首次左滑新手引导——只展示一次，之后不再打扰
-    var showActionsGuide by remember { mutableStateOf(false) }
-    LaunchedEffect(expandedActionsPkg) {
-        if (expandedActionsPkg != null && !UiPrefs.hasSeenRowActionsGuide(context)) {
-            showActionsGuide = true
-        }
+    // 文案审计第 2 批：首进 peek——按展示顺序（程序坞 → 未读 → A-Z）取前 3 行，
+    // 行尾常驻 ★／眼睛小图标；滑开浮层或点过一次行动作后撤下
+    // （rowActionsUsedTick 驱动重算，见 UiPrefs.setRowActionsUsed）。
+    val rowActionsUsedTick by UiPrefs.rowActionsUsedTick.collectAsState()
+    val rowActionsUsed = remember(rowActionsUsedTick) { UiPrefs.hasUsedRowActions(context) }
+    val peekPkgs = remember(rowActionsUsed, dockApps, unreadApps, azGroups) {
+        if (rowActionsUsed) emptySet()
+        else firstPeekPkgs(
+            dockApps.map { it.packageName },
+            unreadApps.map { it.packageName },
+            azGroups.flatMap { (_, apps) -> apps.map { it.packageName } }
+        )
     }
 
     // 行动作公共参数（AppCenterSections.kt）：各列表段共用同一份。
@@ -1038,15 +1020,17 @@ fun AppCenterContent(
         popupApp = popupApp,
         onPopupAppChange = { popupApp = it },
         expandedActionsPkg = expandedActionsPkg,
-        onExpandedActionsChange = { expandedActionsPkg = it },
+        // 文案审计第 2 批：行被滑开浮层即算“滑过一次”，peek 随之撤下。
+        onExpandedActionsChange = { if (it != null) UiPrefs.setRowActionsUsed(context); expandedActionsPkg = it },
         revealedHidePkg = revealedHidePkg,
-        onRevealedHideChange = { revealedHidePkg = it },
+        onRevealedHideChange = { if (it != null) UiPrefs.setRowActionsUsed(context); revealedHidePkg = it },
         hapticView = hapticView,
         context = context,
         onLaunchApp = ::launchApp,
         onOpenUnreadApp = ::openUnreadApp,
         onUnreadRowOpened = ::scheduleUnreadCancelAfterOpen,
-        onHideApp = ::hideApp
+        onHideApp = ::hideApp,
+        peekPkgs = peekPkgs
     )
 
 
@@ -1185,9 +1169,6 @@ fun AppCenterContent(
                 // 反馈闭环（Bob 2026-11-06）：横屏也用 displayResults
                 // （LLM 重试结果要进横屏列表），空态重试提示两向共用。
                 searchResults = displayResults,
-                // 内容深链标识：竖屏按本句查询算好的支持集合，横屏搜索行
-                // 共用（横屏不另算，判定口径与竖屏同一套）。
-                deepLinkSupportedPkgs = deepLinkSupportedPkgs,
                 onSearchSubmit = {
                     // 意图清理（Bob 2026-11-08 23:38）：横屏胶囊提交（键盘 Done）
                     // 只收键盘，不再问大模型。
@@ -1253,7 +1234,6 @@ fun AppCenterContent(
                         showRetryPrompt = showRetryPrompt,
                         retryLoading = retryLoading,
                         onRetryClick = ::onRetryClick,
-                        deepLinkSupportedPkgs = deepLinkSupportedPkgs,
                         actions = rowActions
                     )
                 } else {
@@ -1355,16 +1335,6 @@ fun AppCenterContent(
 
 
     // v0.40.0：长按 bottom sheet 已删除，改用每行自带的真弹窗菜单（AppPopupMenu）
-
-    // v0.35.0：首次左滑新手引导——点任意处关闭，只出现一次
-    if (showActionsGuide) {
-        RowActionsGuideOverlay(
-            onDismiss = {
-                UiPrefs.setRowActionsGuideSeen(context)
-                showActionsGuide = false
-            }
-        )
-    }
     } // Box
     } // else 竖屏单列
 
@@ -1442,7 +1412,7 @@ internal fun FeedbackRetryRow(
         horizontalArrangement = Arrangement.Center
     ) {
         Text(
-            text = if (loading) "正在确认…" else "好像有应用能帮你，再确认一次",
+            text = if (loading) "正在确认…" else "再确认一次",
             fontSize = AILauncherType.Footnote.fontSize,
             color = AILauncherColors.current.Title.copy(alpha = 0.75f),
             fontWeight = FontWeight.Medium
@@ -1460,88 +1430,38 @@ internal fun FeedbackRetryRow(
 }
 
 /**
- * v0.35.0：行左滑操作区新手引导——一次性半透明遮罩 + 白卡片，
- * 给三个按钮各配一句短说明。点任意处关闭，看过一次后不再打扰。
- * 配色跟 App 主题走（浅暖灰系）。
+ * 文案审计第 2 批：目录加载失败时的重试行——与 FeedbackRetryRow 同款
+ * （Footnote、Title 75%、Medium、金色 16dp 箭头、48dp 最小触控高、居中），
+ * 只在“应用列表还没加载好”态出现；点按重调 AppCatalog.ensure（快照
+ * 为空时 catalogNeedsBuild 恒为真，会重新发起一次构建；在途构建由
+ * pendingKey 挡下，点按是无害空操作）。
  */
 @Composable
-private fun RowActionsGuideOverlay(onDismiss: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.28f))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center
-    ) {
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            modifier = Modifier
-                .padding(horizontal = 40.dp)
-                .clickable(enabled = false, onClick = {})
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // v0.57.2（Bob）：更新为新手势说明
-                Text(
-                    text = "滑一滑，应用随你放",
-                    fontSize = AILauncherType.BodyLarge.fontSize,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AILauncherColors.current.Title
-                )
-                GuideRow(
-                    icon = Icons.Filled.Star,
-                    tint = AILauncherColors.current.Accent,
-                    title = "往左滑，就收进程序坞",
-                    desc = "把应用放进程序坞，再滑一次就拿出来"
-                )
-                GuideRow(
-                    icon = Icons.Filled.VisibilityOff,
-                    tint = Color(0xFF8A8478),
-                    title = "往右滑，就藏起来",
-                    desc = "把应用藏起来，再滑一次就放回来"
-                )
-                Text(
-                    text = "点任意处关闭",
-                    fontSize = AILauncherType.Caption.fontSize,
-                    color = AILauncherColors.current.Hint,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun GuideRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: Color,
-    title: String,
-    desc: String
+internal fun CatalogRetryRow(
+    onClick: () -> Unit
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            imageVector = icon,
-            contentDescription = title,
-            tint = tint,
-            modifier = Modifier.size(22.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "重试",
+            fontSize = AILauncherType.Footnote.fontSize,
+            color = AILauncherColors.current.Title.copy(alpha = 0.75f),
+            fontWeight = FontWeight.Medium
         )
-        Spacer(modifier = Modifier.width(16.dp))
-        Column {
-            Text(
-                text = title,
-                fontSize = AILauncherType.Callout.fontSize,
-                fontWeight = FontWeight.Medium,
-                color = AILauncherColors.current.Title
-            )
-            Text(
-                text = desc,
-                fontSize = AILauncherType.Caption.fontSize,
-                color = AILauncherColors.current.Hint
-            )
-        }
+        Spacer(modifier = Modifier.width(4.dp))
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = null,
+            tint = AILauncherColors.current.Accent,
+            modifier = Modifier.size(16.dp)
+        )
     }
 }
 
