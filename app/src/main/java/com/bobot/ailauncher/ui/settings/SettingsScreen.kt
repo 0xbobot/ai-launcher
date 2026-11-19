@@ -220,6 +220,17 @@ fun betaPlanHint(
 }
 
 /**
+ * 「分享给朋友」的分享文本（纯函数，2026-11-18 Bob 定放关于区）：
+ * 分享的是下载页地址，不是 APK 直链——对方打开是下载页（有介绍、
+ * 自己选版本下），不是直接下一个安装包。文案逐字锁死
+ *（见 ShareFriendsTextTest）。
+ */
+const val SHARE_FRIENDS_DOWNLOAD_PAGE_URL = "https://bobot.is-a.dev/ai-launcher/"
+
+fun shareFriendsText(): String =
+    "我在用的 AI 桌面，下载页在这里：$SHARE_FRIENDS_DOWNLOAD_PAGE_URL"
+
+/**
  * 设置页（v0.57.0 重构）：
  * - 只剩三项：让助手更聪明（收起）/ 关于 / 接收测试版更新（v0.68.80）
  * - 电量守护默认开启，不设开关；Dock 显示纯手势；排序默认智能
@@ -1126,6 +1137,57 @@ fun SettingsScreen(
                                 lineHeight = 18.sp
                             )
                         }
+                    }
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = AILauncherColors.current.Hint,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+
+        // 分享给朋友（2026-11-18 Bob 定放关于区）：点开调系统分享面板，
+        // 分享下载页地址（不是 APK 直链）。行只有标题＋右箭头，无描述句
+        //（532 后设置行只剩标题＋状态的口径）。
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .shadow(
+                        8.dp,
+                        RoundedCornerShape(20.dp),
+                        spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f)
+                    ),
+                onClick = {
+                    view.tickHaptic()
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "AI 桌面")
+                        putExtra(Intent.EXTRA_TEXT, shareFriendsText())
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching {
+                        context.startActivity(Intent.createChooser(send, "分享给朋友"))
+                    }.onFailure { IslandToasts.show("没有能分享的应用，换个方式试试吧") }
+                }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "分享给朋友",
+                            fontSize = AILauncherType.BodyLarge.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            color = AILauncherColors.current.Title,
+                            lineHeight = 22.sp
+                        )
                     }
                     Icon(
                         Icons.Filled.ChevronRight,
