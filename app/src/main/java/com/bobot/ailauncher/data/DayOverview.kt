@@ -412,9 +412,9 @@ fun dayOverviewConclusion(input: DayOverviewInput, nowMs: Long): DayOverviewConc
         if (source != null) {
             val title = first.title.ifBlank { "有日程" }
             val text = if (isToday) {
-                "${formatClock(first.begin)} ${source}的${title}，${source}还有 ${topUnread.count} 条未读，会前看一眼"
+                "${formatClock(first.begin)} ${source}${title}，${source}还有 ${topUnread.count} 条未读，会前看一眼"
             } else {
-                "明天 ${formatClock(first.begin)} ${source}的${title}，${source}还有 ${topUnread.count} 条未读"
+                "明天 ${formatClock(first.begin)} ${source}${title}，${source}还有 ${topUnread.count} 条未读"
             }
             return DayOverviewConclusion(text, DayOverviewConclusionType.SAME_SOURCE, DayOverviewAction.UNREAD)
         }
