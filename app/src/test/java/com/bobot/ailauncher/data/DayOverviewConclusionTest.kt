@@ -489,11 +489,15 @@ class DayOverviewConclusionTest {
     // ---------- 提示词与解析校验 ----------
 
     @Test
-    fun systemPromptHasNoTimestampOrRelativeDayWord() {
-        // 系统提示词稳定、每天字节级一模一样：不插值、不放时间戳、不放相对时间词。
+    fun systemPromptIsStable() {
+        // 系统提示词稳定、每天字节级一模一样：不插值、不放时间戳（不含年份与时刻）、
+        // 不针对某一天。相对时间词禁令本身写在提示词里（模型文本里不能出现
+        // 今天/明天——见 parseRelativeDayWordReturnsNull），所以这里不 assert
+        // 提示词不含「今天」「明天」，只 assert 它不含具体日期与时刻。
         assertFalse(DAY_OVERVIEW_SYSTEM_PROMPT.contains("2026"))
-        assertFalse(DAY_OVERVIEW_SYSTEM_PROMPT.contains("今天"))
-        assertFalse(DAY_OVERVIEW_SYSTEM_PROMPT.contains("明天"))
+        assertFalse(DAY_OVERVIEW_SYSTEM_PROMPT.contains("21:30"))
+        assertFalse(DAY_OVERVIEW_SYSTEM_PROMPT.contains("08:00"))
+        assertTrue(DAY_OVERVIEW_SYSTEM_PROMPT.contains("相对时间词"))
     }
 
     @Test
