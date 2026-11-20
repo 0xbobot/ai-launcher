@@ -467,6 +467,10 @@ object SmartCardRepository {
         // 水位先更新：失败也算一次（本轮不重试），下次触发点再跑。
         setLastReviewMs(appContext, nowMs)
         if (!LlmConfig.hasKey(appContext)) return false
+        // 第四十八批：一览结论与复盘消息无关——没新消息的日子也照算（它不依赖
+        // 复盘收件箱）；失败静默，不影响复盘。WorkManager 21:30 与
+        // maybeRunDailyReview 补跑两路都调 runDailyReview，钩子挂这里两路都覆盖。
+        computeAndStoreOverviewConclusion(appContext, nowMs)
         val messages = collectReviewMessages(appContext, sinceMs)
         if (messages.isEmpty()) return true
         val unjudged = messages.filter {
@@ -1068,10 +1072,18 @@ object SmartCardRepository {
                 UnreadSource(pkg, SmartCardActions.appLabel(context, pkg) ?: pkg, count)
             }
         val calendarPkg = resolveLaunchableCalendarPackage(context)
+        // 第四十八批：读存好的模型结论（dateKey 对上且配了 Key 才用；没配 Key、
+        // 没存、过期都传 null，走规则版跨来源结论）。
+        val dateKey = dateKeyOf(CalendarRepository.dayWindow(nowMs, dayOffset).first)
+        val storedConclusion = if (LlmConfig.hasKey(context)) {
+            OverviewConclusionStore.load(context, dateKey)
+        } else {
+            null
+        }
         return buildDayOverviewCard(
             DayOverviewInput(
                 dayOffset = dayOffset,
-                dateKey = dateKeyOf(CalendarRepository.dayWindow(nowMs, dayOffset).first),
+                dateKey = dateKey,
                 windowStartMs = windowStartMs,
                 windowEndMs = windowEndMs,
                 weather = WeatherState.full.value,
@@ -1084,9 +1096,76 @@ object SmartCardRepository {
                 calendarAppPackage = calendarPkg,
                 calendarAppTargetApp = calendarPkg?.let { pkg ->
                     SmartCardActions.appLabel(context, pkg)?.let { TargetApp(pkg, it) }
-                }
+                },
+                events = events,
+                nowMs = nowMs,
+                hasCalendarPermission = calPerm,
+                modelConclusion = storedConclusion
             )
         )
+    }
+
+    /**
+     * 为明天算好一览结论、存本地（第四十八批，Bob 2026-11-20 18:07 拍板
+     * Key 分流：配了 Key 用 DeepSeek 合成结论，没配 Key 走规则）：
+     * 调用时机是 21:30 复盘时（见 runDailyReview 里的钩子）——早上第一眼
+     * 要快（读本地立刻出，不等网络＋模型）、要稳（没 Key／离线／失败时
+     * 早上照常出规则版）、数据够新（21:30 算明天的日历＋明天天气＋当下
+     * 未读，一夜变化小）、成本极低（一天一次约 $0.001–0.002，一次调用
+     * 同时服务睡前「明天一览」和次日早上「今天一览」）、和复盘共用一次
+     * 触发（不另起触发；复盘没新消息不调模型的日子，一览结论照常算，
+     * 它不依赖复盘收件箱）。
+     * 任何失败都静默（不存，早上走规则），不影响复盘；日志只记成功与否
+     * 与类型，不记结论原文。
+     */
+    internal suspend fun computeAndStoreOverviewConclusion(context: Context, nowMs: Long) {
+        val appContext = context.applicationContext
+        try {
+            if (!LlmConfig.hasKey(appContext)) return
+            if (!CalendarRepository.hasCalendarPermission(appContext)) return
+            val tomorrowKey = dateKeyOf(CalendarRepository.dayWindow(nowMs, 1).first)
+            val events = CalendarRepository.loadDayEvents(appContext, 1)
+            val weather = WeatherState.full.value
+            val unread = NotificationRepository.badgeCounts.value
+                .filter { it.value > 0 }
+                .entries.sortedByDescending { it.value }
+                .map { (pkg, count) ->
+                    UnreadSource(pkg, SmartCardActions.appLabel(appContext, pkg) ?: pkg, count)
+                }
+            val userContent = buildDayOverviewUserPrompt(
+                targetDateKey = tomorrowKey,
+                nowMs = nowMs,
+                weatherDesc = weather?.tomorrowDesc?.ifBlank { null },
+                weatherHigh = weather?.tomorrowHigh,
+                weatherLow = weather?.tomorrowLow,
+                events = events,
+                unread = unread
+            )
+            val r = LlmRouter.postChatCompletions(
+                LlmConfig.getBaseUrl(appContext),
+                LlmConfig.getApiKey(appContext),
+                LlmConfig.getModel(appContext),
+                DAY_OVERVIEW_SYSTEM_PROMPT,
+                userContent,
+                temperature = 0.2,
+                maxTokens = 300,
+                tag = "DayOverview",
+                safetyCheck = true
+            )
+            if (r.networkError != null || r.httpCode !in 200..299) {
+                if (BuildConfig.DEBUG) Log.d(TAG, "DayOverview conclusion: model call failed http=${r.httpCode}")
+                return
+            }
+            val conclusion = parseDayOverviewConclusion(r.rawBody)
+            if (conclusion == null) {
+                if (BuildConfig.DEBUG) Log.d(TAG, "DayOverview conclusion: model reply invalid, rules fallback")
+                return
+            }
+            OverviewConclusionStore.save(appContext, tomorrowKey, conclusion)
+            if (BuildConfig.DEBUG) Log.d(TAG, "DayOverview conclusion: stored for $tomorrowKey type=${conclusion.type}")
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.d(TAG, "DayOverview conclusion: failed ${e.message}")
+        }
     }
 
     /**
