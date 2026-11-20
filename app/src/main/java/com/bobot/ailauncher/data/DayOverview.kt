@@ -240,9 +240,9 @@ private fun freeTimeUnreadText(
             val windowMs = first.begin - nowMs
             if (windowMs <= 0) return null
             if (windowMs < 60 * 60 * 1000) {
-                "${formatClock(first.begin)}开会，只剩 ${formatFreeWindow(windowMs)}，${topUnread.count} 条未读开完会再看"
+                "${formatClock(first.begin)} 开会，只剩 ${formatFreeWindow(windowMs)}，${topUnread.count} 条未读开完会再看"
             } else {
-                "${formatClock(first.begin)}开会前还有 ${formatFreeWindow(windowMs)}，${topUnread.label} ${topUnread.count} 条未读现在看"
+                "${formatClock(first.begin)} 开会前还有 ${formatFreeWindow(windowMs)}，${topUnread.label} ${topUnread.count} 条未读现在看"
             }
         }
     } else {
@@ -325,14 +325,14 @@ fun dayShapeSentence(events: List<CalEvent>, nowMs: Long, isToday: Boolean): Str
     val freeAfter = if (first.end <= dayStart + 14 * 60 * 60 * 1000) "之后全天空着" else "之后空着"
     if (remaining.size == 1) {
         return if (first.begin <= nowMs) {
-            "${firstTitle}进行中，${formatClock(first.end)}结束，$freeAfter"
+            "${firstTitle}进行中，${formatClock(first.end)} 结束，$freeAfter"
         } else {
             "${day}只有 1 个会，${formatClock(first.begin)} $firstTitle，${formatClock(first.end)} $freeAfter"
         }
     }
     if (first.begin <= nowMs) {
         val next = remaining[1]
-        return "${firstTitle}进行中，${formatClock(first.end)}结束，下一场 ${formatClock(next.begin)}"
+        return "${firstTitle}进行中，${formatClock(first.end)} 结束，下一场 ${formatClock(next.begin)}"
     }
     val maxGap = remaining.zipWithNext { a, b -> b.begin - a.end }.maxOrNull() ?: 0L
     return if (maxGap < 60 * 60 * 1000) {

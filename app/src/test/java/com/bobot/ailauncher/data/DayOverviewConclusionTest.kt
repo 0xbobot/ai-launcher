@@ -300,7 +300,7 @@ class DayOverviewConclusionTest {
 
     @Test
     fun shapeSingleUpcoming() {
-        val events = listOf(event(hour = 10, min = 0, endHour = 11, endMin = 0))
+        val events = listOf(event(title = "团队周会", hour = 10, min = 0, endHour = 11, endMin = 0))
         assertEquals(
             "今天只有 1 个会，10:00 团队周会，11:00 之后全天空着",
             dayShapeSentence(events, ms(2026, 11, 15, 7, 0), true)
@@ -310,7 +310,7 @@ class DayOverviewConclusionTest {
     @Test
     fun shapeSingleUpcomingLateEnd() {
         // 最后一场结束 16:00（>14:00）→ 写「之后空着」，不写「全天空着」。
-        val events = listOf(event(hour = 15, min = 0, endHour = 16, endMin = 0))
+        val events = listOf(event(title = "团队周会", hour = 15, min = 0, endHour = 16, endMin = 0))
         assertEquals(
             "今天只有 1 个会，15:00 团队周会，16:00 之后空着",
             dayShapeSentence(events, ms(2026, 11, 15, 7, 0), true)
@@ -319,7 +319,7 @@ class DayOverviewConclusionTest {
 
     @Test
     fun shapeSingleInProgress() {
-        val events = listOf(event(hour = 10, min = 0, endHour = 11, endMin = 0))
+        val events = listOf(event(title = "团队周会", hour = 10, min = 0, endHour = 11, endMin = 0))
         assertEquals(
             "团队周会进行中，11:00 结束，之后全天空着",
             dayShapeSentence(events, ms(2026, 11, 15, 10, 30), true)
@@ -329,7 +329,7 @@ class DayOverviewConclusionTest {
     @Test
     fun shapeConsecutive() {
         val events = listOf(
-            event(hour = 10, min = 0, endHour = 11, endMin = 0, eventId = 1L),
+            event(title = "团队周会", hour = 10, min = 0, endHour = 11, endMin = 0, eventId = 1L),
             event(title = "午会", hour = 11, min = 0, endHour = 12, endMin = 0, eventId = 2L),
             event(title = "下午会", hour = 12, min = 0, endHour = 13, endMin = 0, eventId = 3L)
         )
@@ -342,7 +342,7 @@ class DayOverviewConclusionTest {
     @Test
     fun shapeMaxGap() {
         val events = listOf(
-            event(hour = 10, min = 0, endHour = 11, endMin = 0, eventId = 1L),
+            event(title = "团队周会", hour = 10, min = 0, endHour = 11, endMin = 0, eventId = 1L),
             event(title = "午会", hour = 13, min = 0, endHour = 14, endMin = 0, eventId = 2L),
             event(title = "下午会", hour = 15, min = 0, endHour = 16, endMin = 0, eventId = 3L)
         )
@@ -355,7 +355,7 @@ class DayOverviewConclusionTest {
     @Test
     fun shapeFirstInProgressMulti() {
         val events = listOf(
-            event(hour = 10, min = 0, endHour = 11, endMin = 0, eventId = 1L),
+            event(title = "团队周会", hour = 10, min = 0, endHour = 11, endMin = 0, eventId = 1L),
             event(title = "午会", hour = 13, min = 0, endHour = 14, endMin = 0, eventId = 2L)
         )
         assertEquals(
@@ -658,7 +658,7 @@ class DayOverviewConclusionTest {
     @Test
     fun tomorrowShapeNeverSaysAllEnded() {
         // 明天同一套，但不会出现「都开完了」（明天的事件都还没开始）。
-        val events = listOf(event(day = 16, hour = 10, min = 0, endHour = 11, endMin = 0))
+        val events = listOf(event(title = "团队周会", day = 16, hour = 10, min = 0, endHour = 11, endMin = 0))
         assertEquals(
             "明天只有 1 个会，10:00 团队周会，11:00 之后全天空着",
             dayShapeSentence(events, ms(2026, 11, 15, 21, 30), false)
