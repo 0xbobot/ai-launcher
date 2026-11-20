@@ -228,7 +228,10 @@ data class SmartCard(
     val hideDismissButton: Boolean = false,
     /** 置顶（第四十五批）：强更升级卡排在最上面（sortMs＝Long.MIN_VALUE），
      * 自动轮换停住（见 carouselShouldAutoRotate）；其余卡为 false。 */
-    val pinned: Boolean = false
+    val pinned: Boolean = false,
+    /** 结论句加粗（第四十八批「今天一览」重设计）：fact 第一行是结论句
+     * （lead），UI 把它画成 SemiBold、其余行 Medium；其余卡为 false。 */
+    val leadBold: Boolean = false
 ) {
     /** 未接来电卡片显示的称呼：有人名显示人名，否则显示号码 */
     val displayName: String

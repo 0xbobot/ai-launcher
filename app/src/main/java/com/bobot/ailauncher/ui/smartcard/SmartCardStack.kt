@@ -63,7 +63,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -1753,8 +1757,26 @@ private fun SmartCardView(
                 .verticalScroll(factScrollState)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 结论句加粗（第四十八批「今天一览」重设计）：leadBold 时 fact
+                // 第一行（结论句）画 SemiBold、其余行 Medium；其余卡照常全 Medium。
+                val factText: AnnotatedString = if (card.leadBold) {
+                    buildAnnotatedString {
+                        val firstBreak = card.fact.indexOf('\n')
+                        val leadEnd = if (firstBreak < 0) card.fact.length else firstBreak
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                            append(card.fact.substring(0, leadEnd))
+                        }
+                        if (firstBreak >= 0) {
+                            withStyle(SpanStyle(fontWeight = FontWeight.Medium)) {
+                                append(card.fact.substring(firstBreak))
+                            }
+                        }
+                    }
+                } else {
+                    AnnotatedString(card.fact)
+                }
                 Text(
-                    text = card.fact,
+                    text = factText,
                     fontSize = AILauncherType.Body.fontSize,
                     fontWeight = FontWeight.Medium,
                     lineHeight = AILauncherType.Body.lineHeight,

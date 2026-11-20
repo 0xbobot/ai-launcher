@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,9 +9,11 @@ import java.util.Calendar
 
 /**
  * 节点一「今天 / 明天一览」纯组装单测（方案第一批）：
- * 三行拼法、动作选择、降级组合、按日抑制的 id 口径。
+ * 结论版格式（lead＋去重配角行）、动作选择、降级组合、按日抑制的 id 口径。
  * （markDone 本身的抑制语义由 SmartCardLogicTest 锁，这里只锁
  * id 按日拼、同一天稳定、第二天不同。）
+ * 第四十八批：结论句在先（如今天满卡是好天气结论＋未读行），旧的三行
+ * 并列只在没日历权限时出现。
  */
 class DayOverviewTest {
 
@@ -29,16 +32,17 @@ class DayOverviewTest {
     )
 
     private fun event(
-        title: String = "产品周会", hour: Int = 9, min: Int = 30,
+        title: String = "产品周会", day: Int = 15, hour: Int = 9, min: Int = 30,
         endHour: Int = 10, endMin: Int = 30, eventId: Long = 123L,
-        allDay: Boolean = false
+        allDay: Boolean = false, location: String = "", calendarName: String = ""
     ) = CalEvent(
         title = title,
-        begin = ms(2026, 11, 15, hour, min),
-        end = ms(2026, 11, 15, endHour, endMin),
-        location = "",
+        begin = ms(2026, 11, day, hour, min),
+        end = ms(2026, 11, day, endHour, endMin),
+        location = location,
         allDay = allDay,
-        eventId = eventId
+        eventId = eventId,
+        calendarName = calendarName
     )
 
     private fun input(
@@ -46,7 +50,10 @@ class DayOverviewTest {
         dateKey: String = "20261115",
         weather: WeatherRepository.WeatherInfo? = weather(),
         firstEvent: CalEvent? = event(),
-        meetingUrl: String? = null,
+        events: List<CalEvent>? = null,
+        nowMs: Long = ms(2026, 11, 15, 7, 0),
+        hasCalendarPermission: Boolean = true,
+        modelConclusion: DayOverviewConclusion? = null,
         meetingTargetApp: TargetApp? = TargetApp(null, "豆包日历"),
         unread: List<UnreadSource> = listOf(
             UnreadSource("com.tencent.mm", "微信", 5),
@@ -54,33 +61,44 @@ class DayOverviewTest {
         ),
         calendarAppPackage: String? = "com.android.calendar",
         calendarAppTargetApp: TargetApp? = TargetApp("com.android.calendar", "日历")
-    ) = DayOverviewInput(
-        dayOffset = dayOffset,
-        dateKey = dateKey,
-        windowStartMs = ms(2026, 11, 15, 6, 30),
-        windowEndMs = ms(2026, 11, 15, 8, 30),
-        weather = weather,
-        firstEvent = firstEvent,
-        meetingUrl = meetingUrl,
-        meetingTargetApp = meetingTargetApp,
-        unread = unread,
-        calendarAppPackage = calendarAppPackage,
-        calendarAppTargetApp = calendarAppTargetApp
-    )
+    ): DayOverviewInput {
+        val evs = events ?: listOfNotNull(firstEvent)
+        val first = firstRelevantEvent(evs, nowMs)
+        return DayOverviewInput(
+            dayOffset = dayOffset,
+            dateKey = dateKey,
+            windowStartMs = ms(2026, 11, 15, 6, 30),
+            windowEndMs = ms(2026, 11, 15, 8, 30),
+            weather = weather,
+            firstEvent = first,
+            meetingUrl = first?.let { extractMeetingUrl(it) },
+            meetingTargetApp = meetingTargetApp,
+            unread = unread,
+            calendarAppPackage = calendarAppPackage,
+            calendarAppTargetApp = calendarAppTargetApp,
+            events = evs,
+            nowMs = nowMs,
+            hasCalendarPermission = hasCalendarPermission,
+            modelConclusion = modelConclusion
+        )
+    }
 
     @Test
-    fun todayFullCardThreeRows() {
+    fun todayFullCardConclusionFirst() {
+        // 满卡：晴＋会后大段空闲 → 好天气结论当 lead，天气行去重、未读行保留。
         val card = buildDayOverviewCard(input())
         assertEquals("day_overview_today_20261115", card!!.id)
         assertEquals(SmartCardKind.DAY_OVERVIEW, card.kind)
         assertEquals("今天一览", card.sourceLabel)
         assertEquals(
-            "今天晴 18°～26°\n第一场会 09:30 产品周会\n未读：微信 5 条、飞书 3 条",
+            "10:30之后全天空着，今天晴，适合出去走走\n未读：微信 5 条、飞书 3 条",
             card.fact
         )
-        assertEquals(SmartCardAction.CalendarEvent(123L, null), card.action)
+        assertTrue(card.leadBold)
+        // 好天气结论的动作是「看日程」（日历应用）。
+        assertEquals(SmartCardAction.LaunchApp("com.android.calendar"), card.action)
         assertEquals("看日程", card.actionLabel)
-        assertEquals(TargetApp(null, "豆包日历"), card.targetApp)
+        assertEquals(TargetApp("com.android.calendar", "日历"), card.targetApp)
         assertEquals(Long.MAX_VALUE, card.sortMs)
         assertEquals(ms(2026, 11, 15, 8, 30), card.deadlineMs)
         assertEquals(ms(2026, 11, 15, 6, 30), card.appearFromMs)
@@ -88,67 +106,98 @@ class DayOverviewTest {
 
     @Test
     fun meetingWithUrlJoinsMeeting() {
-        val card = buildDayOverviewCard(input(meetingUrl = "https://meeting.feishu.cn/l/123"))
+        // 阴天（好天气结论不触发）＋飞书线上会 → 形状句当 lead，动作跟第一场会「加入会议」。
+        val card = buildDayOverviewCard(
+            input(
+                weather = weather(desc = "阴"),
+                firstEvent = event(location = "https://meeting.feishu.cn/l/123")
+            )
+        )
         assertEquals(
             SmartCardAction.CalendarEvent(123L, "https://meeting.feishu.cn/l/123"),
             card!!.action
         )
         assertEquals("加入会议", card.actionLabel)
+        assertTrue(card.fact.startsWith("今天只有 1 个会，09:30 产品周会，10:30 之后全天空着"))
     }
 
     @Test
     fun blankTitleShowsHasSchedule() {
-        val card = buildDayOverviewCard(input(firstEvent = event(title = "  ")))
-        assertTrue(card!!.fact.contains("第一场会 09:30 有日程"))
+        val card = buildDayOverviewCard(
+            input(weather = weather(desc = "阴"), firstEvent = event(title = "  "))
+        )
+        assertTrue(card!!.fact.contains("09:30 有日程"))
     }
 
     @Test
     fun tomorrowCardUsesTomorrowWeather() {
+        // 21:30 睡前窗看明天：明天多云＋会后大段空闲 → 明天的好天气结论。
         val card = buildDayOverviewCard(
-            input(dayOffset = 1, dateKey = "20261116", firstEvent = event(hour = 10, min = 0, endHour = 11, endMin = 0))
+            input(
+                dayOffset = 1, dateKey = "20261116",
+                nowMs = ms(2026, 11, 15, 21, 30),
+                firstEvent = event(day = 16, hour = 10, min = 0, endHour = 11, endMin = 0)
+            )
         )
         assertEquals("day_overview_tomorrow_20261116", card!!.id)
         assertEquals("明天一览", card.sourceLabel)
-        assertTrue(card.fact.startsWith("明天多云 17°～24°\n第一场会 10:00 产品周会"))
+        assertEquals(
+            "明天 11:00之后空着，天多云，适合出去走走\n未读：微信 5 条、飞书 3 条",
+            card.fact
+        )
     }
 
     @Test
     fun noWeatherHidesWeatherRow() {
+        // 没天气 → 形状句当 lead，天气行不出现、未读行保留。
         val card = buildDayOverviewCard(input(weather = null))
-        assertEquals("第一场会 09:30 产品周会\n未读：微信 5 条、飞书 3 条", card!!.fact)
+        assertEquals(
+            "今天只有 1 个会，09:30 产品周会，10:30 之后全天空着\n未读：微信 5 条、飞书 3 条",
+            card!!.fact
+        )
     }
 
     @Test
     fun tomorrowWeatherMissingHidesWeatherRow() {
         val card = buildDayOverviewCard(
-            input(dayOffset = 1, dateKey = "20261116", weather = weather(tomorrowDesc = ""))
+            input(
+                dayOffset = 1, dateKey = "20261116",
+                nowMs = ms(2026, 11, 15, 21, 30),
+                firstEvent = event(day = 16, hour = 10, min = 0, endHour = 11, endMin = 0),
+                weather = weather(tomorrowDesc = "")
+            )
         )
-        assertTrue(!card!!.fact.contains("明天"))
-        assertTrue(card.fact.contains("第一场会"))
+        assertTrue(card!!.fact.startsWith("明天只有 1 个会，10:00 产品周会，11:00 之后全天空着"))
+        assertFalse(card.fact.contains("多云"))
+        assertTrue(card.fact.contains("未读：微信 5 条、飞书 3 条"))
     }
 
     @Test
     fun noMeetingOpensTopUnread() {
-        val card = buildDayOverviewCard(input(firstEvent = null))
+        // 没会＋阴天（好天气结论不触发）→ 形状句「今天没有会」，动作跟未读最多来源。
+        val card = buildDayOverviewCard(
+            input(weather = weather(desc = "阴"), firstEvent = null, events = emptyList())
+        )
         assertEquals(SmartCardAction.LaunchApp("com.tencent.mm"), card!!.action)
         assertEquals("打开看看", card.actionLabel)
         assertEquals(TargetApp("com.tencent.mm", "微信"), card.targetApp)
-        assertEquals("今天晴 18°～26°\n未读：微信 5 条、飞书 3 条", card.fact)
+        assertEquals("今天没有会\n今天阴 18°～26°\n未读：微信 5 条、飞书 3 条", card.fact)
     }
 
     @Test
     fun noMeetingNoUnreadOpensCalendarApp() {
-        val card = buildDayOverviewCard(input(firstEvent = null, unread = emptyList()))
+        // 没会没未读＋晴天 → 好天气结论「今天没有会，今天晴，适合出去走走」，动作看日程。
+        val card = buildDayOverviewCard(input(firstEvent = null, events = emptyList(), unread = emptyList()))
         assertEquals(SmartCardAction.LaunchApp("com.android.calendar"), card!!.action)
         assertEquals("看日程", card.actionLabel)
-        assertEquals("今天晴 18°～26°", card.fact)
+        assertEquals("今天没有会，今天晴，适合出去走走", card.fact)
     }
 
     @Test
     fun noActionAvailableBuildsNoCard() {
         // 有天气行但没有可点的动作（没会、没未读、也没日历应用）→ 不出没有下一步的卡。
         val card = buildDayOverviewCard(
-            input(firstEvent = null, unread = emptyList(), calendarAppPackage = null, calendarAppTargetApp = null)
+            input(firstEvent = null, events = emptyList(), unread = emptyList(), calendarAppPackage = null, calendarAppTargetApp = null)
         )
         assertNull(card)
     }
@@ -157,7 +206,7 @@ class DayOverviewTest {
     fun allSourcesMissingBuildsNoCard() {
         val card = buildDayOverviewCard(
             input(
-                weather = null, firstEvent = null, unread = emptyList(),
+                weather = null, firstEvent = null, events = emptyList(), unread = emptyList(),
                 calendarAppPackage = null, calendarAppTargetApp = null
             )
         )
@@ -165,18 +214,44 @@ class DayOverviewTest {
     }
 
     @Test
+    fun noCalendarPermissionFallsBackToThreeRows() {
+        // 没日历权限 → 不算结论（看不到 ≠ 没有），回落 533 三行并列、lead 不加粗。
+        val card = buildDayOverviewCard(input(hasCalendarPermission = false))
+        assertEquals(
+            "今天晴 18°～26°\n第一场会 09:30 产品周会\n未读：微信 5 条、飞书 3 条",
+            card!!.fact
+        )
+        assertFalse(card.leadBold)
+        assertEquals(SmartCardAction.CalendarEvent(123L, null), card.action)
+        assertEquals("看日程", card.actionLabel)
+    }
+
+    @Test
     fun unreadMoreThanFourShowsExtraCount() {
-        // 仓库按条数倒序传进来；这里只显示前 4 个，余下记「等 2 个来源」。
+        // 雨＋出门结论当 lead（天气行去重），未读行照常只显示前 4 个、余下记「等 2 个来源」。
         val unread = (6 downTo 1).map { UnreadSource("pkg$it", "应用$it", it) }
-        val card = buildDayOverviewCard(input(firstEvent = null, unread = unread))
-        assertTrue(card!!.fact.contains("未读：应用6 6 条、应用5 5 条、应用4 4 条、应用3 3 条 等 2 个来源"))
+        val card = buildDayOverviewCard(
+            input(
+                weather = weather(desc = "雨"),
+                firstEvent = event(location = "银行"),
+                unread = unread
+            )
+        )
+        assertTrue(card!!.fact.startsWith("今天有雨，09:30 产品周会要出门，带伞、早点出门"))
+        assertTrue(card.fact.contains("未读：应用6 6 条、应用5 5 条、应用4 4 条、应用3 3 条 等 2 个来源"))
     }
 
     @Test
     fun dayScopedIdStableSameDayDifferentNextDay() {
         val today = buildDayOverviewCard(input())!!
         val todayAgain = buildDayOverviewCard(input())!!
-        val tomorrow = buildDayOverviewCard(input(dayOffset = 1, dateKey = "20261116"))!!
+        val tomorrow = buildDayOverviewCard(
+            input(
+                dayOffset = 1, dateKey = "20261116",
+                nowMs = ms(2026, 11, 15, 21, 30),
+                firstEvent = event(day = 16, hour = 10, min = 0, endHour = 11, endMin = 0)
+            )
+        )!!
         assertEquals(today.id, todayAgain.id)
         assertTrue(today.id != tomorrow.id)
     }
