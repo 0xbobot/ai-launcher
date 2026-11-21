@@ -765,6 +765,16 @@ val SmartCardRowGap = 8.dp
 val SmartCardSubtitleEndInset = 16.dp
 
 /**
+ * 应用小标画不画（第四十九批，Bob 2026-11-21 定审计 A2a）：未接来电卡不画小标——
+ * 按钮“回拨”必然开拨号盘，小标“电话”不增加信息；其他真卡照常画（小标是右按钮
+ * 动作的落点：去哪家应用）。引导卡本来就不画（下一步是去连接来源、不是打开
+ * 某个应用）；“已经连上了”反馈卡也不画（hideActionRow）。纯函数，单测锁死
+ * （SmartCardSubscriptTest）。
+ */
+fun shouldShowAppSubscript(card: SmartCard, hideActionRow: Boolean): Boolean =
+    !hideActionRow && card.kind != SmartCardKind.GUIDE && card.kind != SmartCardKind.MISSED_CALL
+
+/**
  * 正文区可用高度（纯算式，单测锁死）——卡高固定时，正文区＝卡高－上下
  * 内边距－标题行－按钮行－行距（标题行与事实区之间、事实区与按钮行
  * 之间两段）。实卡口径：192－28－20－48－16＝80dp（Body 15sp／24sp
@@ -1666,7 +1676,8 @@ private fun SmartCardView(
         // 只是换位置、不丢信息；右端再向内收 SmartCardSubtitleEndInset
         // （第二十七批：角标已删，内收只作右端留白）。引导卡没有小标
         // （下一步是去连接来源、不是打开某个应用），只有卡内 ×；“已经连上了”反馈卡也不画
-        // （hideActionRow 时不画，见下）。× 落在卡片内部、48dp 触控；
+        // （hideActionRow 时不画，见下）；未接来电卡也不画小标（第四十九批，
+        // Bob 2026-11-21 定审计 A2a：按钮“回拨”已隐含拨号盘）。× 落在卡片内部、48dp 触控；
         // 448 的 × 是卡外单独一行、悬在壁纸上（实拍右上角卡外），改掉。
         Row(
             modifier = Modifier
@@ -1695,7 +1706,7 @@ private fun SmartCardView(
                         modifier = Modifier.size(20.dp)
                     )
                 }
-            } else if (!hideActionRow && card.kind != SmartCardKind.GUIDE) {
+            } else if (shouldShowAppSubscript(card, hideActionRow)) {
                 card.targetApp?.let { target ->
                     AppSubscript(
                         targetApp = target,
@@ -1940,7 +1951,8 @@ private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
 /**
  * 应用小标（第十一批，Bob 定“要小、要优雅”）：只画在真卡上——引导卡的
  * 下一步是去连接来源、不是打开某个应用，不画；“已经连上了”反馈卡也不画
- * （hideActionRow）。16dp 应用图标＋应用名（Caption 12sp，次要色），
+ * （hideActionRow）；未接来电卡也不画（第四十九批，Bob 2026-11-21 定审计
+ * A2a：按钮“回拨”已隐含拨号盘）。16dp 应用图标＋应用名（Caption 12sp，次要色），
  * 无底色、无边框，只做展示、不可点（没有 clickable，点右按钮才是动作）；
  * 名字过长截断（最多 160dp）。图标按包名取真实应用图标；包被卸了、
  * 图标读不到时只显示名字。
