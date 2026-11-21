@@ -1,6 +1,5 @@
 package com.bobot.ailauncher.data
 
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.bobot.ailauncher.ui.glass.BackdropKind
 import com.bobot.ailauncher.ui.smartcard.SmartCardActionRowMinHeight
@@ -10,11 +9,6 @@ import com.bobot.ailauncher.ui.smartcard.SmartCardRowGap
 import com.bobot.ailauncher.ui.smartcard.SmartCardStackTopGap
 import com.bobot.ailauncher.ui.smartcard.SmartCardSubtitleEndInset
 import com.bobot.ailauncher.ui.smartcard.SmartCardTitleRowHeight
-import com.bobot.ailauncher.ui.smartcard.SmartCardHaloColor
-import com.bobot.ailauncher.ui.smartcard.SmartCardHaloMaxAlpha
-import com.bobot.ailauncher.ui.smartcard.SmartCardHaloMinAlpha
-import com.bobot.ailauncher.ui.smartcard.SmartCardHaloPeriodMs
-import com.bobot.ailauncher.ui.smartcard.SmartCardHaloStroke
 import com.bobot.ailauncher.ui.smartcard.smartCardFactAreaHeight
 import com.bobot.ailauncher.ui.smartcard.smartCardTintAlpha
 import org.junit.Assert.assertEquals
@@ -28,12 +22,11 @@ import org.junit.Test
  * 布局本身 JVM 测不到（Compose 排版），锁死的是数值一级：
  * ①卡高固定 192dp（8dp 网格）；②正文区至少 3 行高（算式 192－28－20－48－16
  * ＝80dp ≥ 72dp 的 3 行下限）；③小标右端内收 16dp（右缘距卡右缘 30dp）；
- * ④呼吸描边单色（第三十八批收敛：只留一色暖金、1dp 发丝边、透明度
- * 0.15↔0.35；三色渐变已删）；⑤暖灰衬底透明度（有纹理壁纸 0.55、低对比环境 0.75）；
- * ⑥叠层与 hero 的间距 16dp（8dp 网格）。
- * 正文 15sp Medium、去截断、卡内滚动、露边无字、1dp 呼吸描边（第三十八批
- * 由 3dp 收细）、小标换位本身是 Compose 排版／绘制行为，见收据的 diff 复核
- * ＋Bob 真机验收。
+ * ④呼吸描边已删（2026-11-21，Stageshow 桌面优化 3.2：光晕常量与
+ * breathingBorderModifier 整条拿掉，卡片靠玻璃面＋抬起阴影立住；残留引用
+ * 即编不过）；⑤暖灰衬底透明度全档 0.75；⑥叠层与 hero 的间距 8dp（8dp 网格）。
+ * 正文 15sp Medium、去截断、卡内滚动、露边无字、小标换位本身是 Compose
+ * 排版／绘制行为，见收据的 diff 复核＋Bob 真机验收。
  */
 class SmartCardRedesignTest {
 
@@ -89,40 +82,18 @@ class SmartCardRedesignTest {
         assertEquals(0, SmartCardSubtitleEndInset.value.toInt() % 8)
     }
 
-    // ---------- 呼吸描边单色（第三十八批收敛） ----------
-
-    @Test
-    fun borderColor_isSingleGold() {
-        // 三色渐变删掉，只留一色暖金（Bob 点名的锚点，不新加颜色）。
-        assertEquals(Color(0xFFD4A24E), SmartCardHaloColor)
-    }
-
-    // ---------- 第三十八批：光晕收敛（Bob 2026-11-15：光晕显土） ----------
-
-    @Test
-    fun halo_strokeIs1dp() {
-        // 描边 3dp→1dp：细线才不土，只做轻提示、不做装饰描边。
-        assertEquals(1.dp, SmartCardHaloStroke)
-    }
-
-    @Test
-    fun halo_alphaRangeIsFaint() {
-        // 呼吸 0.8↔1 → 0.15↔0.35：极淡，峰值也只有三分之一不透明。
-        assertEquals(0.15f, SmartCardHaloMinAlpha, 0.001f)
-        assertEquals(0.35f, SmartCardHaloMaxAlpha, 0.001f)
-    }
-
-    @Test
-    fun halo_periodIs4Seconds() {
-        // 一圈 6 秒→4 秒（呼吸半程 2 秒），节奏略快、仍不是跑马灯。
-        assertEquals(4000L, SmartCardHaloPeriodMs)
-    }
+    // ---------- 呼吸描边已删（2026-11-21，Stageshow 桌面优化 3.2） ----------
+    // 光晕常量（SmartCardHaloColor／Stroke／MinAlpha／MaxAlpha／PeriodMs）
+    // 与 breathingBorderModifier 整条拿掉；SmartCardHaloTest.kt 整文件已删。
+    // 残留引用即编不过（编译锁死），此处不再留断言。
 
     // ---------- 暖灰衬底透明度 ----------
 
     @Test
-    fun tintAlpha_texturedBackdrop_is055() {
-        assertEquals(0.55f, smartCardTintAlpha(BackdropKind.TEXTURED), 0.001f)
+    fun tintAlpha_texturedBackdrop_is075() {
+        // 2026-11-21（Stageshow 桌面优化 3.2）：玻璃全档抬到 0.75，
+        // 有纹理壁纸也不再留 0.55。
+        assertEquals(0.75f, smartCardTintAlpha(BackdropKind.TEXTURED), 0.001f)
     }
 
     @Test
@@ -140,8 +111,8 @@ class SmartCardRedesignTest {
     // ---------- 叠层与 hero 的间距 ----------
 
     @Test
-    fun stackTopGap_is16dp() {
-        assertEquals(16.dp, SmartCardStackTopGap)
+    fun stackTopGap_is8dp() {
+        assertEquals(8.dp, SmartCardStackTopGap)
     }
 
     @Test

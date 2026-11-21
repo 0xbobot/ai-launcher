@@ -49,7 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -107,6 +107,7 @@ import com.bobot.ailauncher.ui.glass.BackdropKind
 import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
 import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
 import com.bobot.ailauncher.ui.glass.glassSurface
+import com.bobot.ailauncher.ui.home.TrackedText
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.settings.OnGrantedTransition
@@ -181,7 +182,11 @@ import kotlinx.coroutines.launch
  * 文案 v3：每张讲三件事——这是什么、为什么要连、连上之后会发生什么。
  */
 @Composable
-fun SmartCardStackHost() {
+fun SmartCardStackHost(
+    // Stageshow 桌面优化 3.1（Bob 2026-11-21 定）：顶卡 kind 上报——HomeScreen
+    // 按它决定 hero 安静／完整（顶卡是一览卡时安静）；null＝叠层无卡。
+    onTopCardKindChange: (SmartCardKind?) -> Unit = {}
+) {
     val context = LocalContext.current
     val cards by SmartCardRepository.cards.collectAsState()
     val prepById by SmartCardRepository.prepById.collectAsState()
@@ -434,6 +439,8 @@ fun SmartCardStackHost() {
             SmartCardStack(
                 cards = displayCards,
                 prepById = prepById,
+                // Stageshow 桌面优化 3.1：上报当前卡 kind，供 hero 决定安静／完整。
+                onCurrentCardChange = { card -> onTopCardKindChange(card?.kind) },
                 onAction = { card ->
                     if (card.action is SmartCardAction.CreateReminder) {
                         // 预约卡“帮我建提醒”：已授权直接建；没授权先说明（显著披露）
@@ -592,6 +599,11 @@ fun SmartCardStackHost() {
             seenGuideVersion = GUIDE_VERSION
         }
     }
+    // Stageshow 桌面优化 3.1：叠层空下来（无真卡、无引导卡）时顶卡 kind 为空，
+    // hero 恢复完整版，不留上次的顶卡 kind。
+    LaunchedEffect(displayed.isEmpty()) {
+        if (displayed.isEmpty()) onTopCardKindChange(null)
+    }
     if (guideSeen || displayed.isEmpty()) return
     // 就绪门（第二十五批，问题 1）：引导卡也一样——首帧没齐之前不画，
     // 不在空桌面上单独先蹦；门开后与 Dock 一起出现。
@@ -599,6 +611,8 @@ fun SmartCardStackHost() {
         SmartCardStack(
             cards = displayed,
             connectedFeedbacks = connectedFeedbacks,
+            // Stageshow 桌面优化 3.1：引导卡顶卡 kind 是 GUIDE，hero 完整。
+            onCurrentCardChange = { card -> onTopCardKindChange(card?.kind) },
             onAction = { card ->
                 val key = (card.action as? SmartCardAction.Connect)?.connectorKey
                     ?: return@SmartCardStack true
@@ -726,10 +740,17 @@ fun SmartCardStackHost() {
 val SmartCardStackSideMargin = 24.dp
 
 /**
- * 叠层与 hero 的间距（重设计 §2.7）：16dp——叠层顶缘锚在 hero 底部（讲述句）
- * 下方 16dp，吃掉 486 拿掉会行腾出的约 56dp。8dp 网格。
+ * 叠层与 hero 的间距（重设计 §2.7）：8dp——Stageshow 桌面优化 3.5
+ * （Bob 2026-11-21 定）：hero 与卡片收紧成一组，16dp→8dp；卡片两侧
+ * 24dp 不动。8dp 网格。
  */
-val SmartCardStackTopGap = 16.dp
+val SmartCardStackTopGap = 8.dp
+
+/**
+ * 卡片抬起阴影（Stageshow 桌面优化 3.2，Bob 2026-11-21 定）：呼吸边拿掉后，
+ * 卡片靠面与阴影立住——柔和抬起阴影 8.dp（设计没给数字，Bob 可再调）。
+ */
+val SmartCardLiftShadow = 8.dp
 
 /**
  * 卡片固定高度（重设计 §2.6）：192dp，不随正文长短变；所有卡一样高，
@@ -788,68 +809,19 @@ fun smartCardFactAreaHeight(): Dp =
     SmartCardHeight - SmartCardContentPadding * 2 - SmartCardTitleRowHeight -
         SmartCardActionRowMinHeight - SmartCardRowGap * 2
 
-/**
- * 光晕描边颜色（第三十八批，Bob 2026-11-15：光晕显土——收敛）：
- * 只留一色暖金 #D4A24E（Bob 点名的锚点、圆点与主操作同色，不新加颜色）。
- * 516 加亮的三色渐变（金／玫／青绕圈）就是土的来源，本批整条删掉：
- * 不再有渐变、不再有旋转、不再加亮，只剩一层极淡的单色呼吸边。
- * 选①（极淡单色）不选②（直接拿掉）：呼吸边是顶卡“活着”的唯一信号，
- * 拿掉后顶卡与玻璃底只剩一层实色衬底之隔，轮播时“当前这张”没了轻提示；
- * 极淡单色保留了这点提示，又去掉了土味——以 Bob 真机截图为准，
- * 还显土就走②（整条拿掉，见收据已知局限）。
- */
-val SmartCardHaloColor = Color(0xFFD4A24E)
+// Stageshow 桌面优化 3.2（Bob 2026-11-21 定）：呼吸边整条拿掉——光晕常量
+// （SmartCardHaloColor／SmartCardHaloStroke／SmartCardHaloInset／
+// SmartCardHaloCornerRadius／SmartCardHaloMinAlpha／SmartCardHaloMaxAlpha／
+// SmartCardHaloPeriodMs）、haloStrokeClearance 与 breathingBorderModifier
+// 已删；卡片靠玻璃面（全档 0.75）＋抬起阴影立住，轮换间隙完全静止。
 
 /**
- * 光晕描边宽度（第三十八批收敛：3dp→1dp——细线才不土，1dp 发丝边
- * 配极淡透明度，只做轻提示，不做装饰描边）。
- */
-val SmartCardHaloStroke = 1.dp
-
-/**
- * 光晕描边内收量（第三十八批：1dp ＝ 半线宽 0.5dp ＋ 0.5dp 安全余量，
- * 整条描边落在裁剪内，可见边缘是描边自身的抗锯齿边——第三十七批
- * 修毛边的同一条规则，线宽变了、内收跟着变；单测锁死
- * （haloStrokeClearance）。
- */
-val SmartCardHaloInset = 1.dp
-
-/**
- * 光晕描边圆角（第三十八批）：卡片圆角 20dp －内收 1dp＝19dp，
- * 与裁剪圆角同心，描边外缘与卡片边界平行。
- */
-val SmartCardHaloCornerRadius = 19.dp
-
-/**
- * 描边外缘相对卡片边界的余量（纯函数，单测锁死）：inset − stroke/2。
- * ≥0.5dp 整条描边落在裁剪内；第三十七批的教训：旧值 1dp − 1.5dp
- * ＝ −0.5dp，外缘探出、被 clipPath 切掉，圆角成台阶（毛边）。
- */
-internal fun haloStrokeClearance(inset: Dp, stroke: Dp): Dp = inset - stroke / 2
-
-/**
- * 光晕呼吸透明度上下限（第三十八批收敛：0.8↔1 → 0.15↔0.35——
- * 极淡，峰值也只有三分之一不透明；呼吸只在 0.15↔0.35 之间轻脉动，
- * 不做刺眼的跑马灯、不做加亮。减动效时静止在上限 0.35f。
- */
-const val SmartCardHaloMinAlpha = 0.15f
-const val SmartCardHaloMaxAlpha = 0.35f
-
-/**
- * 光晕一圈时长（重设计 §2.2，第二十六批：6000ms→4000ms——呼吸
- * 半程 2000ms；第三十八批不动，只改颜色与透明度，节奏不变；
- * 减动效时仍静止）。
- */
-const val SmartCardHaloPeriodMs = 4000L
-
-/**
- * 暖灰半透明衬底的透明度（重设计 §2.1）：下限 0.55；低对比环境回到 0.75 兜底。
- * 低对比＝壁纸平（GlassPolicy 判 FLAT，低亮度方差／低饱和，衬底与壁纸分不开）
- * 或玻璃状态没提供（无模糊可读，衬底是唯一可读层），都走安全档 0.75；
- * 有真实纹理的壁纸（TEXTURED），玻璃模糊已做分隔，衬底只留 0.55。
+ * 暖灰半透明衬底的透明度（重设计 §2.1）：全档 0.75——Stageshow 桌面优化 3.2
+ * （Bob 2026-11-21 定）：呼吸边拿掉后卡片靠面立住，玻璃由约 0.55 抬到 0.75，
+ * 有纹理壁纸也不再留 0.55（低对比环境的 0.75 兜底档即现行全档）。
  */
 fun smartCardTintAlpha(backdropKind: BackdropKind?): Float = when (backdropKind) {
-    BackdropKind.TEXTURED -> 0.55f
+    BackdropKind.TEXTURED -> 0.75f
     else -> 0.75f
 }
 
@@ -870,7 +842,10 @@ fun SmartCardStack(
     connectedFeedbacks: Map<String, ConnectedFeedback> = emptyMap(),
     // 大模型准备清单（第十二批）：按卡片 id 的异步结果，覆盖卡片构建时
     // 的 prep（构建时为 null）。没回来就是没有，不贴模板。
-    prepById: Map<String, String> = emptyMap()
+    prepById: Map<String, String> = emptyMap(),
+    // Stageshow 桌面优化 3.1（Bob 2026-11-21 定）：当前卡上报——宿主按顶卡
+    // kind 决定 hero 安静／完整（顶卡是一览卡时安静）。null＝无卡。
+    onCurrentCardChange: (SmartCard?) -> Unit = {}
 ) {
     if (cards.isEmpty()) return
     // 轮播下标（第三十三批）：当前卡在轮播里的位置。点圆点跳卡改下标；
@@ -879,6 +854,10 @@ fun SmartCardStack(
     // 到下一张”）。
     var currentIndex by remember { mutableIntStateOf(0) }
     val index = carouselClampIndex(currentIndex, cards.size)
+    // Stageshow 桌面优化 3.1：当前卡变化时上报（下标变／列表变都走这里）。
+    LaunchedEffect(index, cards) {
+        onCurrentCardChange(cards.getOrNull(index))
+    }
     // 点圆点后暂停自动轮换到这个时刻（第三十二批定 8 秒，第三十三批沿用）：
     // 点圆点后安静 8 秒再恢复 5 秒一档。
     var resumeAtMillis by remember { mutableLongStateOf(0L) }
@@ -1262,15 +1241,24 @@ fun SmartCardStack(
 }
 
 /**
- * 轮播圆点指示（第三十二批）：当前张实心金、其余空心淡；点圆点跳到那一张。
- * Hero 无现成圆点可抄（CoverHero 无圆点），样式取主题 token：当前张 Accent
- * 金（去 AI 味：金色只留主操作，圆点当前态是主操作指示）、其余 Hint 40%
- * 透明度；尺寸走 8dp 网格（6dp 点、8dp 间距）。
+ * 轮播圆点指示（第三十二批）：当前张实心深灰、其余空心淡；点圆点跳到那一张。
+ * Hero 无现成圆点可抄（CoverHero 无圆点），样式取主题 token：当前张 Title
+ * 深灰（Stageshow 桌面优化 3.3，Bob 2026-11-21 定：金色只留主操作——
+ * 右按钮与时间冒号；圆点当前态的金色收回）、其余 Hint 40% 透明度；
+ * 尺寸走 8dp 网格（6dp 点、8dp 间距）。
  * 点按：整行一个 pointerInput，按落点 x 换算到最近的圆点（不给每个 6dp
  * 点单独挂 clickable——点太小，触控区会重叠、点到相邻的点）。行高 32dp，
  * 圆点居中；落点消费掉，不落到叠层下层。pointerInput 的键挂上 count 与
  * current——下标变了就用新的 onDotClick（旧闭包里的 index 会过期）。
  */
+/**
+ * 轮播圆点颜色（纯函数，单测锁死；Stageshow 桌面优化 3.3）：当前张实心
+ * Title 深灰、其余 Hint 40% 透明度。金色只留主操作（右按钮与时间冒号），
+ * 圆点当前态不用金。
+ */
+internal fun carouselDotColor(selected: Boolean, palette: AILauncherColors.Palette): Color =
+    if (selected) palette.Title else palette.Hint.copy(alpha = 0.4f)
+
 @Composable
 private fun CarouselDots(
     count: Int,
@@ -1310,10 +1298,7 @@ private fun CarouselDots(
                     modifier = Modifier
                         .size(SmartCardCarouselDotSize)
                         .clip(CircleShape)
-                        .background(
-                            if (selected) AILauncherColors.current.Accent
-                            else AILauncherColors.current.Hint.copy(alpha = 0.4f)
-                        )
+                        .background(carouselDotColor(selected, AILauncherColors.current))
                 )
             }
         }
@@ -1339,8 +1324,9 @@ internal fun crossfadeDurationMs(reduceMotion: Boolean): Int =
 
 /**
  * 轮播自动轮换间隔（毫秒，第三十二批）：Hero 无现成间隔可抄——
- * CoverHero 是按日期哈希每天换模板（coverTemplateFor：dayOfYear % 3），
- * 无定时器、无圆点、无手动切。取 5 秒，常见轮播档；Bob 可再定。
+ * CoverHero 已收敛到 GIANT_TIME 一个模板（2026-11-21，Stageshow 桌面
+ * 优化：三模板轮换已删），无定时器、无圆点、无手动切。取 5 秒，
+ * 常见轮播档；Bob 可再定。
  */
 internal const val SMART_CARD_CAROUSEL_INTERVAL_MS = 5000L
 
@@ -1650,6 +1636,7 @@ private fun SmartCardView(
     val factScrollState = rememberScrollState()
     Column(
         modifier = modifier
+            .shadow(elevation = SmartCardLiftShadow, shape = shape)
             .clip(shape)
             .graphicsLayer {
                 scaleX = pop.value
@@ -1665,7 +1652,6 @@ private fun SmartCardView(
                 color = tint,
                 shape = shape
             )
-            .then(breathingBorderModifier(reduceMotion))
             .height(SmartCardHeight)
             .padding(SmartCardContentPadding),
         verticalArrangement = Arrangement.spacedBy(SmartCardRowGap)
@@ -1686,10 +1672,14 @@ private fun SmartCardView(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
+            // Stageshow 桌面优化 3.4：来源标签与 hero 刊头同一体（小字、tracking、
+            // Title 深灰——金色只留主操作，见 3.3；视觉稿里标签的金色是稿件
+            // 不准确处，以设计文档文字为准）。
+            TrackedText(
                 text = card.sourceLabel,
                 fontSize = AILauncherType.Caption.fontSize,
-                color = AILauncherColors.current.Hint
+                tracking = 4.dp,
+                color = AILauncherColors.current.Title
             )
             if (onCloseClick != null) {
                 Box(
@@ -1899,54 +1889,7 @@ private fun smartCardTint(): Color {
     )
 }
 
-/**
- * 顶卡单色呼吸描边（重设计 §2.2）：只画顶卡。
- * 第三十八批收敛（Bob 2026-11-15：光晕显土）：三色渐变整条删掉——
- * 不再有旋转渐变、不再加亮；只剩一层极淡的单色暖金（SmartCardHaloColor），
- * 1dp 发丝边、透明度在 0.15↔0.35 之间轻呼吸。减动效时静止在上限 0.35f。
- * 描边向内收 SmartCardHaloInset（1dp＝半线宽 0.5dp＋0.5dp 安全余量），
- * 整条描边都落在 20dp 圆角裁剪内（第三十七批修毛边的同一条规则）。
- * 参数见 SmartCardHaloStroke／SmartCardHaloColor／SmartCardHaloMinAlpha／
- * SmartCardHaloMaxAlpha／SmartCardHaloPeriodMs（单测锁死）。
- * 还显土就走②（整条拿掉，只留玻璃卡本身干净的边）。
- */
-@Composable
-private fun breathingBorderModifier(reduceMotion: Boolean): Modifier {
-    val borderAlpha = remember { Animatable(SmartCardHaloMaxAlpha) }
-    LaunchedEffect(reduceMotion) {
-        if (reduceMotion) {
-            borderAlpha.snapTo(SmartCardHaloMaxAlpha)
-        } else {
-            launch {
-                while (true) {
-                    borderAlpha.animateTo(
-                        SmartCardHaloMinAlpha,
-                        tween(durationMillis = (SmartCardHaloPeriodMs / 2).toInt())
-                    )
-                    borderAlpha.animateTo(
-                        SmartCardHaloMaxAlpha,
-                        tween(durationMillis = (SmartCardHaloPeriodMs / 2).toInt())
-                    )
-                }
-            }
-        }
-    }
-    val density = LocalDensity.current
-    val strokePx = with(density) { SmartCardHaloStroke.toPx() }
-    val radiusPx = with(density) { SmartCardHaloCornerRadius.toPx() }
-    val insetPx = with(density) { SmartCardHaloInset.toPx() }
-    return Modifier.drawWithContent {
-        drawContent()
-        drawRoundRect(
-            color = SmartCardHaloColor,
-            topLeft = Offset(insetPx, insetPx),
-            size = Size(size.width - 2 * insetPx, size.height - 2 * insetPx),
-            cornerRadius = CornerRadius(radiusPx, radiusPx),
-            style = Stroke(width = strokePx),
-            alpha = borderAlpha.value
-        )
-    }
-}
+// Stageshow 桌面优化 3.2：breathingBorderModifier 已删（见上文光晕常量删除注）。
 
 /**
  * 应用小标（第十一批，Bob 定“要小、要优雅”）：只画在真卡上——引导卡的
