@@ -458,11 +458,15 @@ fun AppCenterLandscape(
                         },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "$totalCount 款",
-                            fontSize = AILauncherType.Caption.fontSize,
-                            color = AILauncherColors.current.Hint
-                        )
+                        // Stageshow 应用中心优化 3.5：计数只在搜索态出现——
+                        // 默认态顶栏不显示「N 款」，打字后回来（与竖屏同口径）。
+                        if (shouldShowAppCenterCount(searchFieldValue.text)) {
+                            Text(
+                                text = appCenterCountTextLandscape(totalCount),
+                                fontSize = AILauncherType.Caption.fontSize,
+                                color = AILauncherColors.current.Hint
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.weight(1f))
                     // F2：与竖屏同一 IntentCapsuleField（占位/✕ 清空/焦点
@@ -670,8 +674,9 @@ fun AppCenterLandscape(
                                         )
                                     }
                                     is FlowItem.FoldHeader -> {
-                                        // 折叠组（419）：区头行位，点按收展；样式同区头
-                                        // （Body 粗体、字距 2sp、Title 色）＋收展 chevron
+                                        // 折叠组（419）：区头行位，点按收展；Stageshow
+                                        // 应用中心优化 3.4：组头用刊头体（与竖屏同一纯
+                                        // 函数），不再同区头 Body 粗体＋收展 chevron
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier
@@ -681,11 +686,11 @@ fun AppCenterLandscape(
                                                 .clickable { onToggleFold() }
                                                 .padding(start = 16.dp, end = 8.dp)
                                         ) {
+                                            val foldStyle = foldHeaderStyle()
                                             Text(
-                                                text = "不常用 · ${item.count} 个",
-                                                fontSize = AILauncherType.Body.fontSize,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 2.sp,
+                                                text = foldHeaderText(item.count),
+                                                fontSize = foldStyle.fontSize,
+                                                letterSpacing = foldStyle.letterSpacing,
                                                 color = AILauncherColors.current.Title,
                                                 modifier = Modifier.weight(1f)
                                             )
