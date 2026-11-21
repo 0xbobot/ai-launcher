@@ -93,6 +93,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -111,6 +112,45 @@ import com.bobot.ailauncher.ui.theme.tickHaptic
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+
+/**
+ * Stageshow 应用中心优化（Bob 2026-11-21 拍板「就按这个设计做」，设计文档
+ * appcenter-stageshow-optimization-design.md §3）——纯函数，供单测锁死：
+ * 3.1 一键隐藏按钮：收金（白卡面＋标题色字）＋缩文案；
+ * 3.2 组标记说一种语言：幽灵标记透明度统一 0.35；
+ * 3.4 折叠组头用刊头体：小字、tracking、Title 深灰；
+ * 3.5 计数只在搜索态出现：默认态不显示，搜索态回来。
+ * 3.3 rail 字母宋体见 WaveRail.kt（railLetterFontFamily）；行与动效不动。
+ */
+
+/** 组标记幽灵透明度（3.2）：收藏 ★／隐藏 👁／锁占位与吸顶悬停同值，一套导航只用一种音量。 */
+internal const val AppCenterGhostMarkerAlpha = 0.35f
+
+/** 一键隐藏按钮文案（3.1）：「藏起 N 个不常用的应用」——同一个 N 只说一次。 */
+internal fun hideInactiveButtonText(inactiveCount: Int): String =
+    "藏起 $inactiveCount 个不常用的应用"
+
+/** 一键隐藏按钮底色（3.1）：安静白卡面，不再是金色满填 CTA。 */
+internal fun hideInactiveButtonContainerColor(palette: AILauncherColors.Palette): Color =
+    palette.Card
+
+/** 计数是否显示（3.5）：打字才显示（过滤后剩几个，是有用的反馈）；默认态不显示。 */
+internal fun shouldShowAppCenterCount(query: String): Boolean = query.isNotEmpty()
+
+/** 竖屏刊头计数的文案（3.5，搜索态）。 */
+internal fun appCenterCountText(count: Int): String = "共 $count 个"
+
+/** 横屏顶栏计数的文案（3.5，搜索态）。 */
+internal fun appCenterCountTextLandscape(count: Int): String = "$count 款"
+
+/** 折叠组头文案（3.4）：竖屏横屏同一纯函数，不再各拼一份。 */
+internal fun foldHeaderText(count: Int): String = "不常用 · $count 个"
+
+/** 折叠组头刊头体样式（3.4）：与首页卡片标签同口径——Caption 小字、4.sp 字距、Title 深灰。 */
+internal data class FoldHeaderStyle(val fontSize: TextUnit, val letterSpacing: TextUnit)
+
+internal fun foldHeaderStyle(): FoldHeaderStyle =
+    FoldHeaderStyle(AILauncherType.Caption.fontSize, 4.sp)
 
 /**
  * 手动吸顶状态（v0.41.8）：当前组首行刚开始滚出顶部（offset>0），悬停 overlay
@@ -492,16 +532,27 @@ fun AppCenterHeaderSection(
                 letterSpacing = 2.sp,
                 color = AILauncherColors.current.Title
             )
-            Text(
-                // 应用中心升级：catalog 为空时不显示"0 款"空列表，改弱提示
-                // Bob 2026-11-03：数字跟当前列表走——搜索态显示过滤后条数
-                // 反馈闭环：LLM 重试出结果后，当前列表是 displayResults。
-                text = if (catalog == null) "正在帮你找应用…"
-                    else "共 ${displayResults?.size ?: azApps.size} 个",
-                fontSize = AILauncherType.Caption.fontSize,
-                color = AILauncherColors.current.Hint,
-                modifier = Modifier.padding(top = 8.dp)
-            )
+            // Stageshow 应用中心优化 3.5：计数只在搜索态出现——默认态刊头只有
+            // 「全部应用」一行；打字后计数回来。catalog 为空是加载态弱提示，
+            // 不是计数，保留。
+            if (catalog == null) {
+                Text(
+                    // 应用中心升级：catalog 为空时不显示"0 款"空列表，改弱提示
+                    text = "正在帮你找应用…",
+                    fontSize = AILauncherType.Caption.fontSize,
+                    color = AILauncherColors.current.Hint,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            } else if (shouldShowAppCenterCount(query)) {
+                Text(
+                    // Bob 2026-11-03：数字跟当前列表走——搜索态显示过滤后条数
+                    // 反馈闭环：LLM 重试出结果后，当前列表是 displayResults。
+                    text = appCenterCountText(displayResults?.size ?: azApps.size),
+                    fontSize = AILauncherType.Caption.fontSize,
+                    color = AILauncherColors.current.Hint,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
         }
         }  // else 竖屏刊头结束
         // 本搜索区仅竖屏组合；横屏由 AppCenterLandscape 组合（F2 起同一胶囊契约）
@@ -812,9 +863,9 @@ fun LazyListScope.AppCenterDockSection(
                 // 高，★ 就漂到面板旁、没贴着任何行。
                 Icon(
                     imageVector = Icons.Filled.Star,
-                    // 体检批D ⑨：幽灵占位（alpha 0/0.14 纯视觉）标装饰语义
+                    // 体检批D ⑨：幽灵占位（alpha 0/0.35 纯视觉）标装饰语义
                     contentDescription = null,
-                    tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) 0.14f else 0f),
+                    tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) AppCenterGhostMarkerAlpha else 0f),
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(start = 24.dp, top = 12.dp)
@@ -1225,9 +1276,13 @@ fun LazyListScope.AppCenterFoldSection(
                     .padding(horizontal = 16.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Stageshow 应用中心优化 3.4：折叠组头用刊头体——与首页卡片标签
+                // 同口径（Caption 小字、4.sp 字距、Title 深灰）。
+                val foldStyle = foldHeaderStyle()
                 Text(
-                    text = "不常用 · ${foldMembers.size} 个",
-                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    text = foldHeaderText(foldMembers.size),
+                    fontSize = foldStyle.fontSize,
+                    letterSpacing = foldStyle.letterSpacing,
                     color = AILauncherColors.current.Title,
                     modifier = Modifier.weight(1f)
                 )
@@ -1350,9 +1405,9 @@ fun LazyListScope.AppCenterHiddenSection(
                 Box(modifier = Modifier.fillMaxWidth()) {
                     Icon(
                         imageVector = Icons.Outlined.Lock,
-                        // 体检批D ⑨：幽灵占位（alpha 0.14 纯视觉）标装饰语义
+                        // 体检批D ⑨：幽灵占位（alpha 0.35 纯视觉）标装饰语义
                         contentDescription = null,
-                        tint = AILauncherColors.current.Title.copy(alpha = 0.14f),
+                        tint = AILauncherColors.current.Title.copy(alpha = AppCenterGhostMarkerAlpha),
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .padding(start = 24.dp)
@@ -1401,9 +1456,9 @@ fun LazyListScope.AppCenterHiddenSection(
                 Box(modifier = Modifier.fillMaxWidth()) {
                     Icon(
                         imageVector = Icons.Filled.VisibilityOff,
-                        // 体检批D ⑨：幽灵占位（alpha 0/0.14 纯视觉）标装饰语义
+                        // 体检批D ⑨：幽灵占位（alpha 0/0.35 纯视觉）标装饰语义
                         contentDescription = null,
-                        tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) 0.14f else 0f),
+                        tint = AILauncherColors.current.Title.copy(alpha = if (index == 0) AppCenterGhostMarkerAlpha else 0f),
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .padding(start = 24.dp)
@@ -1498,9 +1553,11 @@ fun LazyListScope.AppCenterHiddenSection(
                                     AppUsageTracker.lastUsed(actions.context, app.packageName).let { it == 0L || now - it > ninetyDaysMs }
                             }.forEach { HiddenApps.hide(actions.context, it.packageName) }
                         },
+                        // Stageshow 应用中心优化 3.1：收金——安静白卡面＋标题色字，
+                        // 不再是全宽金色 CTA（金色只留主操作，这按钮是家务活）。
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = AILauncherColors.current.Accent,
-                            contentColor = Color.White
+                            containerColor = hideInactiveButtonContainerColor(AILauncherColors.current),
+                            contentColor = AILauncherColors.current.Title
                         ),
                         shape = CircleShape,
                         modifier = Modifier
@@ -1508,9 +1565,9 @@ fun LazyListScope.AppCenterHiddenSection(
                             .height(56.dp)
                     ) {
                         Text(
-                            text = "把 90 天没打开的应用（${inactiveTargets.size} 个）藏起来",
+                            text = hideInactiveButtonText(inactiveTargets.size),
                             fontSize = AILauncherType.BodyLarge.fontSize,
-                            color = Color.White
+                            color = AILauncherColors.current.Title
                         )
                     }
                 }
@@ -1554,7 +1611,7 @@ fun BoxScope.AppCenterStuckOverlays(
                 imageVector = Icons.Filled.Star,
                 // 体检批D ⑨：悬停幽灵（纯视觉）标装饰语义
                 contentDescription = null,
-                tint = AILauncherColors.current.Title.copy(alpha = 0.14f * stuckDockAlpha),
+                tint = AILauncherColors.current.Title.copy(alpha = AppCenterGhostMarkerAlpha * stuckDockAlpha),
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(start = 24.dp, top = 16.dp)
@@ -1569,7 +1626,7 @@ fun BoxScope.AppCenterStuckOverlays(
                     else Icons.Filled.VisibilityOff,
                 // 体检批D ⑨：悬停幽灵（纯视觉）标装饰语义
                 contentDescription = null,
-                tint = AILauncherColors.current.Title.copy(alpha = 0.14f * stuckHiddenAlpha),
+                tint = AILauncherColors.current.Title.copy(alpha = AppCenterGhostMarkerAlpha * stuckHiddenAlpha),
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(start = 24.dp, top = 16.dp)

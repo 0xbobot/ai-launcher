@@ -55,6 +55,7 @@ import com.bobot.ailauncher.ui.theme.tickHaptic
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -141,6 +142,15 @@ internal fun railIndexAtWithDeadZone(
     val crossed = if (raw > lastIndex) y > boundaryY + deadPx else y < boundaryY - deadPx
     return if (crossed) raw else lastIndex
 }
+
+/**
+ * rail 字母字体（纯函数，供单测）：Stageshow 应用中心优化 3.3（Bob 2026-11-21
+ * 拍板）——rail 字母用宋体，与幽灵字母同一体；字号／行高／间距不动。
+ * WaveRail 由应用中心竖屏／横屏与首页选择器共用，一处改、四处同改
+ * （字母导航四处同步，Bob 2026-10-25 永久规则）。当前字母气泡里的字母
+ * 是同一字母，同一字体。
+ */
+internal fun railLetterFontFamily(): FontFamily = FontFamily.Serif
 
 /**
  * 波浪字母导航 v2（v0.25）。
@@ -503,6 +513,8 @@ internal fun WaveRail(
                             lineHeight = letterLineHeight,
                             color = AILauncherColors.current.Title.copy(alpha = letterAlpha),
                             fontWeight = letterFontWeight,
+                            // Stageshow 应用中心优化 3.3：rail 字母用宋体
+                            fontFamily = railLetterFontFamily(),
                             maxLines = 1,
                             // v0.68.96（F-07）：单字母标签形式对齐——超宽字形省略而非硬裁
                             overflow = TextOverflow.Ellipsis,
@@ -607,6 +619,8 @@ internal fun WaveRail(
                         text = bubbleItem.char.toString(),
                         fontSize = AILauncherType.Title.fontSize,
                         fontWeight = FontWeight.Bold,
+                        // Stageshow 应用中心优化 3.3：气泡字母与 rail 字母同一体
+                        fontFamily = railLetterFontFamily(),
                         color = AILauncherColors.current.Title
                     )
                 } else {
