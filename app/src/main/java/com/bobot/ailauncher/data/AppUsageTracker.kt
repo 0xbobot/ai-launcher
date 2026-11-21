@@ -193,8 +193,20 @@ object AppUsageTracker {
     }
 
     /**
+     * 安装时间豁免（纯函数，Bob 2026-11-20 拍板）：装完不到 90 天的应用
+     * 不可能已经 90 天没用 → 不算不活跃。installTime == 0（未知）不豁免，
+     * 走原有规则。边界与既有阈值同口径：满 90 天整仍豁免（> 90 天才不豁免）。
+     */
+    fun isNewInstallExempt(installTime: Long, now: Long): Boolean =
+        installTime > 0L && now - installTime <= NINETY_DAYS_MS
+
+    /**
      * 单应用不活跃判定（纯规则，系统表与历史深度由调用方一次算好传入）：
-     * 有效最后使用 > 0 且距今 > 90 天 → 不活跃。
+     * 先判安装时间豁免（Bob 2026-11-20）：装完不到 90 天 → 不活跃为
+     * false——historyDeep 分支会跳过首次见到宽限直接判不活跃（2026-11-18
+     * 夜跑：刚装应用在深历史设备上装上即进折叠组），安装时间是唯一能
+     * 区分「装了很久一直没用」与「刚装」的事实，不走首次见到口径。
+     * 其余不变：有效最后使用 > 0 且距今 > 90 天 → 不活跃；
      * 有效最后使用 == 0（无记录）时：系统已授权且历史够深（任一应用的系统
      * lastTimeUsed 早于 90 天，证明系统有 90 天以上历史）→ 不活跃；
      * 否则（未授权，或新手机没历史）走首次见到宽限：first_<pkg> 缺失时懒打戳
@@ -206,8 +218,10 @@ object AppUsageTracker {
         packageName: String,
         sys: Map<String, Long>?,
         historyDeep: Boolean,
-        now: Long
+        now: Long,
+        installTime: Long = 0L
     ): Boolean {
+        if (isNewInstallExempt(installTime, now)) return false
         val eff = if (sys != null) (sys[packageName] ?: 0L)
             else p.getLong(KEY_LAST_PREFIX + packageName, 0L)
         if (eff > 0L) return now - eff > NINETY_DAYS_MS
@@ -226,6 +240,8 @@ object AppUsageTracker {
      * 搜索 tie-break 的时间源一律不动，仍走自己记的 counts/last）。
      * 输入须为可见集（已去隐藏、去自己，沿用 azApps 口径）；固定位
      * （UiPrefs.getDockPinned 置顶集合）永远不进。系统表只查一次。
+     * 安装时间（AppInfo.firstInstallTime）随快照带来：装完不到 90 天的
+     * 应用豁免不进（Bob 2026-11-20）；安装时间未知（0）时不豁免。
      */
     fun inactiveMembers(context: Context, apps: List<AppInfo>): List<AppInfo> {
         return try {
@@ -236,7 +252,7 @@ object AppUsageTracker {
             val pinned = UiPrefs.getDockPinned(context).toSet()
             apps.filter { app ->
                 app.packageName !in pinned &&
-                    isInactiveRule(p, app.packageName, sys, historyDeep, now)
+                    isInactiveRule(p, app.packageName, sys, historyDeep, now, app.firstInstallTime)
             }
         } catch (_: Exception) {
             emptyList()

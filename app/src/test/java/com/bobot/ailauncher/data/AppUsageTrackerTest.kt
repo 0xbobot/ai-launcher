@@ -10,8 +10,8 @@ import org.junit.Test
  * 清楚是多久——转移改算占比、窗口计数定死 7 天（Bob 2026-11-13 22:24：
  * 30 天太长，Dock 按周走，改成 7 天）。
  * 只测纯函数 dayTypeHwSum / transferDominant / shiftYmd / recentCount /
- * dockScore / dockReason / recencyFactor / windowMature；SharedPreferences
- * 读数与重组走分支 CI + Bob 真机验收。
+ * dockScore / dockReason / recencyFactor / windowMature / isNewInstallExempt；
+ * SharedPreferences 读数与重组走分支 CI + Bob 真机验收。
  */
 class AppUsageTrackerTest {
 
@@ -291,5 +291,45 @@ class AppUsageTrackerTest {
         // 脏日期不算记满
         assertEquals(false, AppUsageTracker.windowMature("garbage", "20261113"))
         assertEquals(false, AppUsageTracker.windowMature("2026111", "20261113"))
+    }
+
+    // ---- isNewInstallExempt：安装时间豁免（Bob 2026-11-20）----
+    // 装完不到 90 天的应用不可能已经 90 天没用 → 不进折叠组；
+    // 豁免窗口与 90 天折叠阈值同一口径，满 90 天整仍豁免。
+
+    @Test
+    fun `newly installed app is exempt`() {
+        val now = 1_700_000_000_000L
+        val day = 86_400_000L
+        // 刚装（5 秒前）→ 豁免
+        assertEquals(true, AppUsageTracker.isNewInstallExempt(now - 5_000L, now))
+        // 装了 89 天 → 豁免
+        assertEquals(true, AppUsageTracker.isNewInstallExempt(now - 89 * day, now))
+        // 装了整 90 天 → 仍豁免（与「> 90 天才不活跃」同口径）
+        assertEquals(true, AppUsageTracker.isNewInstallExempt(now - 90 * day, now))
+    }
+
+    @Test
+    fun `old install is not exempt`() {
+        val now = 1_700_000_000_000L
+        val day = 86_400_000L
+        // 装了 90 天零 1 毫秒 → 不豁免，交给原有规则判
+        assertEquals(false, AppUsageTracker.isNewInstallExempt(now - 90 * day - 1L, now))
+        // 装了 200 天 → 不豁免
+        assertEquals(false, AppUsageTracker.isNewInstallExempt(now - 200 * day, now))
+    }
+
+    @Test
+    fun `unknown install time is not exempt`() {
+        val now = 1_700_000_000_000L
+        // 安装时间读不到（0）→ 不豁免，走原有规则（首次见到宽限 / historyDeep）
+        assertEquals(false, AppUsageTracker.isNewInstallExempt(0L, now))
+    }
+
+    @Test
+    fun `future install time is exempt`() {
+        val now = 1_700_000_000_000L
+        // 时钟偏差导致安装时间在未来 → 按新装算，豁免
+        assertEquals(true, AppUsageTracker.isNewInstallExempt(now + 60_000L, now))
     }
 }
