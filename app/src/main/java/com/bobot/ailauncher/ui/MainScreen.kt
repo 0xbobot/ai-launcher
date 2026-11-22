@@ -67,6 +67,7 @@ import com.bobot.ailauncher.ui.apps.AppRail
 import com.bobot.ailauncher.ui.apps.buildRailItems
 import com.bobot.ailauncher.ui.apps.railLettersFromVisibleApps
 import com.bobot.ailauncher.ui.apps.PullUpDock
+import com.bobot.ailauncher.ui.apps.RAIL_LETTER_LINE_HEIGHT_14SP
 import com.bobot.ailauncher.ui.glass.GlassBackdropState
 import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
 import com.bobot.ailauncher.ui.glass.SystemWallpaperLayer
@@ -528,10 +529,10 @@ private fun HomeHost(
                 },
                 visible = pickerActive,
                 // 横屏刘海避让（见 HomeHost 根部注释）：横屏容器跟随高 + 右侧让位 + 底距 0dp（与应用中心横屏同锚点）；竖屏底距 70dp、避让不动。
-                // 字母导航精修（Bob 2026-10-25）：与应用中心同一套字——14sp/16sp 行高/1.0/Normal，
+                // 字母导航精修（Bob 2026-10-25）：与应用中心同一套字——14sp/20sp 行高/1.0/Normal，
                 // 不再走 12sp/0.6 旧默认值，三条导航观感统一。
                 letterFontSize = 14.sp,
-                letterLineHeight = 16.sp,
+                letterLineHeight = RAIL_LETTER_LINE_HEIGHT_14SP,
                 letterAlpha = 1f,
                 letterFontWeight = FontWeight.Normal,
                 // 字母导航统一样式（Bob 2026-10-25）：触控列宽与应用中心

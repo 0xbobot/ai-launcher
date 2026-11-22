@@ -491,9 +491,19 @@ fun AppCenterLandscape(
                             .widthIn(max = 440.dp)
                             .onGloballyPositioned { onSearchPositioned(it.boundsInRoot()) }
                     )
-                    Spacer(modifier = Modifier.weight(1f))
+                    // Bob 2026-11-22：搜的时候 X 离胶囊太远——右边空档收到 8dp，
+                    // X 贴到胶囊右边；不搜时空档恢复 weight，齿轮还在最右不动。
+                    // 425 的“位置不动”是旧口径，本次改位置是 Bob 亲口定的。
+                    // 426 行为不动：X 点按仍是有字清空／没字退焦，按钮仍不可聚焦，
+                    // bounds 回传保留（onGloballyPositioned 随移动重报）。
+                    if (searchFocused || searchFieldValue.text.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                     // 425（Bob 2026-11-04，参考视频）：齿轮位 morph（同竖屏）——失焦设置齿轮原样，
-                    // 聚焦（输入态）就地变清空；只换图标＋动作＋文案，圆盘／位置／尺寸／testTag 一律不动。
+                    // 聚焦（输入态）变清空；只换图标＋动作＋文案，圆盘／尺寸／testTag 一律不动。
+                    // 位置：搜时 X 贴胶囊右边（Bob 2026-11-22，见上），不搜时齿轮回最右。
                     // 点 X：有字清空（留输入态，X 还在）、没字退焦（键盘收起，自动变回齿轮）。
                     // 429：触发改成“聚焦 或 有字”（同竖屏）。
                     // 设置齿轮（Bob：横屏时竖屏的齿轮拿掉，放这里）
@@ -957,7 +967,7 @@ fun AppCenterLandscape(
                     eyePullArmed = true
                 },
                 // Rail 高度跟随容器（Bob 2026-10-24）：不再写死 400dp（横屏
-                // 屏高不足时上下裁字母），占比 0.95、字母 14sp/16sp 行高。
+                // 屏高不足时上下裁字母），占比 0.95、字母 14sp/20sp 行高。
                 // 字母 B 方案：对比度拉满（横屏路径）——透明度 1.0 + Normal
                 // 字重（329 起三条导航统一）；触控列宽与竖屏同为 48dp
                 // （此前默认 44dp，modifier 上 56dp 被列宽覆盖、属于死码，
@@ -965,7 +975,7 @@ fun AppCenterLandscape(
                 railHeight = null,
                 railFraction = 0.95f,
                 letterFontSize = 14.sp,
-                letterLineHeight = 16.sp,
+                letterLineHeight = RAIL_LETTER_LINE_HEIGHT_14SP,
                 letterAlpha = 1f,
                 letterFontWeight = FontWeight.Normal,
                 railWidth = 48.dp,

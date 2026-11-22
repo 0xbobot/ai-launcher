@@ -152,6 +152,12 @@ internal fun railIndexAtWithDeadZone(
  */
 internal fun railLetterFontFamily(): FontFamily = FontFamily.Serif
 
+// 2026-11-22（Bob 实拍：宋体字母底边被截）：行高给足才不裁字——
+// 12sp 字配 18sp、14sp 字配 20sp（v0.55.3 同款教训）。四处同改：
+// 默认值与三处显式传参都走这两个常量，单测锁死。
+internal val RAIL_LETTER_LINE_HEIGHT_12SP = 18.sp
+internal val RAIL_LETTER_LINE_HEIGHT_14SP = 20.sp
+
 /**
  * 波浪字母导航 v2（v0.25）。
  * - v0.40.2：右侧一条可见 rail + 左侧隐形触发区（Bob：左边不摆 rail，摆两个很奇怪；
@@ -197,13 +203,13 @@ internal fun WaveRail(
     // 不传），触摸层整条不断。
     cardStackBandPx: Pair<Float, Float>? = null,
     // 横屏应用中心修（Bob 2026-10-24）：rail 占比与字母字号可参——
-    // 竖屏保持 0.85/12sp/14sp 不动；横屏传 0.95/14sp/16sp（v0.55.3 教训：
-    // G/S 底部被截断就是行高不够，14sp 字至少配 16sp 行高）。
+    // 默认 12sp/18sp；可见的三处 rail 都显式传 14sp/20sp（v0.55.3 教训：
+    // G/S 底部被截断就是行高不够；2026-11-22：563 换宋体后 16sp 行高又装不下）。
     // 横屏字母 B 方案（Bob 2026-10-24）：字母透明度与字重同样可参——
     // 竖屏保持 0.6/Normal 不动；横屏传 1.0/Medium（对比度拉满）。
     railFraction: Float = 0.85f,
     letterFontSize: TextUnit = 12.sp,
-    letterLineHeight: TextUnit = 14.sp,
+    letterLineHeight: TextUnit = RAIL_LETTER_LINE_HEIGHT_12SP,
     letterAlpha: Float = 0.6f,
     letterFontWeight: FontWeight = FontWeight.Normal
 ) {
@@ -709,7 +715,7 @@ internal fun AppRail(
     railHeight: Dp? = 400.dp,
     railFraction: Float = 0.85f,
     letterFontSize: TextUnit = 12.sp,
-    letterLineHeight: TextUnit = 14.sp,
+    letterLineHeight: TextUnit = RAIL_LETTER_LINE_HEIGHT_12SP,
     letterAlpha: Float = 0.6f,
     letterFontWeight: FontWeight = FontWeight.Normal,
     // 字母导航统一样式（Bob 2026-10-25）：触控列宽统一 48dp——

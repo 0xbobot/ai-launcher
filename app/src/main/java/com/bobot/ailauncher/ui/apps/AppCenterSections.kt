@@ -1858,12 +1858,12 @@ fun BoxScope.AppCenterRailSection(
             onHousePull = onHousePull,
             onEyePull = onEyePull,
             // 应用中心升级（Bob 定稿①）：竖屏跟进 B 方案全套——
-            // 14sp / 16sp 行高 / 1.0 / Normal（329 起），与横屏同款
+            // 14sp / 20sp 行高 / 1.0 / Normal（329 起），与横屏同款
             // （railFraction 仍 0.85；高度改跟随列表容器，bottom 70dp 保留）
             railHeight = null,
             railFraction = 0.85f,
             letterFontSize = 14.sp,
-            letterLineHeight = 16.sp,
+            letterLineHeight = RAIL_LETTER_LINE_HEIGHT_14SP,
             letterAlpha = 1f,
             letterFontWeight = FontWeight.Normal,
             railWidth = 48.dp,
