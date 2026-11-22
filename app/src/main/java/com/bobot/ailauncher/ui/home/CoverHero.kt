@@ -112,7 +112,7 @@ fun CoverHeroGiantTime(
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = if (inputCompact) 16.dp else 56.dp, start = 32.dp, end = 16.dp)
+            .padding(top = if (inputCompact) CoverHeroGiantTimeTopPaddingCompact else CoverHeroGiantTimeTopPadding, start = 32.dp, end = 16.dp)
     ) {
         val scale = (maxWidth / 400.dp).coerceIn(0.75f, 1f)
         // v0.68.101：输入态时钟收一档（104→82 基准），给胶囊堆栈让高
@@ -319,6 +319,32 @@ internal fun daypartForHour(hour: Int): String = when (hour) {
 }
 
 /**
+ * 横屏 hero 顶距（Bob 2026-11-22 实拍对齐批，563/v1.4.19 横屏截图）：
+ * 横屏首页卡片顶边比 D2 Dock 顶边低约 20dp（无宠物线实测 55/1000 屏高）。
+ * 根因：Dock 是 MainScreen 悬浮层、底边锚定（顶边＝屏高－184dp，D2）；
+ * 卡片在 HomeScreen Column 里顺着 hero 往下排（顶边＝顶距＋hero 高＋8dp
+ * 间隙），两边没有共同锚点。hero 底边已顶到 Dock 顶边附近（天气行约在
+ * Dock 顶边高度），卡片不能直接上移 20dp（会压 hero 约 12dp），须连 hero
+ * 一起收：本顶距 32→12dp，hero 收 20dp，卡片随之上移 20dp，顶边落到
+ * D2 Dock 顶边。只动横屏 hero；竖屏顶距（56/16dp）不动。
+ */
+internal val CoverHeroLandscapeTopPadding = 12.dp
+
+/** 横屏 hero 顶距收窄量（dp）：32－12＝20，与实拍 gap（约 20dp）相等。 */
+internal const val CoverHeroLandscapeTopReductionDp = 20f
+
+/**
+ * 横屏卡片修后顶边（纯函数，供单测）：修前卡片顶边减收窄量。
+ * 对齐判定：修后卡片顶边＝D2 Dock 顶边（屏高－184dp）即对齐。
+ */
+internal fun landscapeCardTopAfterFix(cardTopBeforeFixDp: Float): Float =
+    cardTopBeforeFixDp - CoverHeroLandscapeTopReductionDp
+
+/** 竖屏 hero 顶距（回归锁：本批不动；56dp，输入态紧凑 16dp）。 */
+internal val CoverHeroGiantTimeTopPadding = 56.dp
+internal val CoverHeroGiantTimeTopPaddingCompact = 16.dp
+
+/**
  * v0.68.60（Bob）：横屏统一紧凑布局——横排，不跟 Dock 抢竖向空间。
  * 左：日期刊头 + 时间（64.sp）+ 标题 + 天气（v0.68.101 撤七仔后纯文字）。
  */
@@ -337,7 +363,7 @@ fun CoverHeroLandscape(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 32.dp, start = 32.dp, end = 32.dp),
+            .padding(top = CoverHeroLandscapeTopPadding, start = 32.dp, end = 32.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
