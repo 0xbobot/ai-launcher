@@ -1129,14 +1129,11 @@ fun AppCenterContent(
                 foldApps = foldMembers,
                 // 未读组：状态由调用点传入（横屏不另起一套）；unreadApps
                 // 已按未读数排好序、含 N>0 门，横屏直接用。
+                // 横屏图标网格（Bob 2026-11-22 定稿）：预览文案 / 显示名 /
+                // 左滑清理 / 右滑关通知在格子里不用，签名已去掉，竖屏仍用
+                // 调用点算好的同一份（见竖屏 AppCenterContent 调用点）。
                 unreadApps = unreadApps,
-                // 未读组打磨（Bob 2026-11-08）：预览文案 + 在用通知包 + 左滑清理回调，
-                // 横屏与竖屏共用调用点算好的同一份，不另算。
-                unreadPreviews = unreadPreviews,
-                unreadDisplayNames = unreadDisplayNames,
                 activeNotifPkgs = activeNotifPkgs,
-                onClearNotifications = onClearUnreadNotifications,
-                onDisableAppNotifications = onDisableUnreadNotifications,
                 foldExpanded = foldExpandedState,
                 onToggleFold = {
                     val next = !foldExpandedState

@@ -9,7 +9,6 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
@@ -22,16 +21,15 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
@@ -55,7 +53,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
@@ -68,7 +65,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -114,34 +110,30 @@ fun AppCenterLandscape(
     // 未读组（Bob 2026-11-07 晚）：状态由调用点传入（竖屏同款，不得另起一套）；
     // unreadApps 已按未读数排好序、含 N>0 门，横屏直接用。
     unreadApps: List<AppInfo> = emptyList(),
-    // 未读组打磨（Bob 2026-11-08）：预览文案（包名→预览，无预览的包不在 map 里）、
-    // 在用通知包（左滑启用判定）、左滑清理回调——调用点（竖屏）算好的同一份，
-    // 横屏不另算、不另起状态源。
-    unreadPreviews: Map<String, String> = emptyMap(),
-    // 未读行显示名（Bob 2026-11-08 22:45）：与竖屏同款，调用点算好的同一份
-    // （包名→行名，全覆盖；无标题时即应用名），横屏不另算。
-    unreadDisplayNames: Map<String, String> = emptyMap(),
+    // 未读组（横屏图标网格，Bob 2026-11-22 定稿）：网格里没有预览小字，
+    // 未读只用图标角标表示——unreadPreviews / unreadDisplayNames 不再
+    // 用（竖屏仍用，调用点继续算）；左滑清理在格子里放不下（触发距离
+    // 120dp 比格子宽），点按打开＋取消仍走 onOpenUnreadApp /
+    // onUnreadRowOpened——onClearNotifications / onDisableAppNotifications
+    // 不再用（竖屏仍用，调用点继续算）。四者已从签名去掉。
     activeNotifPkgs: Set<String> = emptySet(),
-    onClearNotifications: (String) -> Unit = {},
-    // 未读组右滑关通知（Bob 2026-11-14 09:55 亲定右滑）：跳系统通知设置页；
-    // 默认空操作（调用点传入，与 onClearNotifications 同款）。
-    onDisableAppNotifications: (String) -> Unit = {},
     onToggleFold: () -> Unit = {},
     // 折叠组（421 安静版）：组底“取消折叠”——调用点传入竖屏同一双写逻辑。
     onUnfold: () -> Unit = {},
     // 打开 + 清除（Bob 2026-11-08 23:20）：未读行点按要像点通知栏通知一样，
     // 成功打开时取消通知——调用点传 ::launchApp（Boolean），未读行处按
     // opened 门控取消；其余行只透传（Boolean→Unit 是 Kotlin 允许的
-    // Unit 适配，LandscapeAppRow 的 onLaunch 仍是 (AppInfo) -> Unit）。
+    // Unit 适配，LandscapeGridAppCell 的 onLaunch 仍是 (AppInfo) -> Unit）。
     onLaunch: (AppInfo) -> Boolean,
     // 未读行点按的“打开”（Bob 2026-11-08 23:49）：优先发通知自己的
     // contentIntent 直达会话/消息，没有或失败时退回普通打开应用
     // （调用点 AppCenter.kt 的 openUnreadApp）。默认 = onLaunch（普通打开），
     // 调用点传入通知感知的版本；只未读行用。
     onOpenUnreadApp: (AppInfo) -> Boolean = onLaunch,
-    // 未读行点按的“取消”那一半（Bob 2026-11-09 12:20 ②）：先打开、确认应用
+    // 未读格点按的“取消”那一半（Bob 2026-11-09 12:20 ②）：先打开、确认应用
     // 真的到了前台再取消（调用点 AppCenter.kt 的 scheduleUnreadCancelAfterOpen）。
-    // 默认空操作（只未读行点按用，调用点传入）；左滑清理仍走 onClearNotifications 立即取消。
+    // 默认空操作（只未读格点按用，调用点传入）；网格里没有左滑清理，
+    // 点按打开＋取消是格子里唯一的清理路径。
     onUnreadRowOpened: (AppInfo) -> Unit = {},
     onLongPress: (AppInfo) -> Unit,
     onOpenSettings: () -> Unit,
@@ -151,7 +143,7 @@ fun AppCenterLandscape(
     // F2 销账（线 C）：搜索契约与竖屏统一——同一 IntentCapsuleField 组件
     // （showClearButton 变体）、同一 TextFieldValue 状态层（composing 守卫 /
     // 120ms 防抖 / AppSearchIndex 过滤语义对横屏同样生效），本文件只保留
-    // 横屏布局（列流 + 字母轨），不再自绘搜索框、不再走裸 String 契约
+    // 横屏布局（网格 + 字母轨），不再自绘搜索框、不再走裸 String 契约
     searchFieldValue: TextFieldValue,
     onSearchFieldChange: (TextFieldValue) -> Unit,
     searchResults: List<AppInfo>?,
@@ -188,7 +180,7 @@ fun AppCenterLandscape(
     val density = LocalDensity.current
     val onPullDownToD2State = rememberUpdatedState(onPullDownToD2)
     val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
-    val rowState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
     // 横屏挖孔留白（Bob 2026-10-24）：横屏下左侧是竖屏状态栏位置
     // （摄像头/刘海），此前内容顶到左边缘、第一列会被挖孔遮挡。
     // 取系统 displayCutout inset，不写死数值；无挖孔的设备/模拟器上
@@ -216,190 +208,67 @@ fun AppCenterLandscape(
     // 初始从 A 开始（Bob 2026-10-24）：首次进入且非搜索态时定位一次。
     var initialScrollDone by remember { mutableStateOf(false) }
 
-    BoxWithConstraints(
+    Box(
         modifier = modifier
             .fillMaxSize()
     ) {
-        val rowH = LandscapeRowH
-        // v0.68.73：字母头占一个完整行位（rowH），与应用同高
-        // v0.68.75（Bob）：减去顶栏 56.dp + 底部分隔 8.dp，否则多算一行导致末行被压缩
-        val rowsPerCol = ((maxHeight - 56.dp - 8.dp) / rowH).toInt().coerceAtLeast(3)
 
-        // 未读组打磨（Bob 2026-11-08）：未读包集合，供列流里的 FlowItem.App
-        // 判定该行是不是未读行（未读行带预览 + 左滑清理，非未读行一字不动）。
-        val unreadPkgs = remember(unreadApps) { unreadApps.map { it.packageName }.toSet() }
-        // 465（Bob 2026-11-08 19:27 横屏未读幽灵图标也没有）：未读组首个
-        // 应用包名，供列流给首行挂幽灵信封（与竖屏首行信封同符号
-        // UnreadGlyph、同尺寸 32dp）；其余未读行不挂，只首行有标记。
-        val firstUnreadPkg = remember(unreadApps) { unreadApps.firstOrNull()?.packageName }
-
-        // 按字母切列：每个字母从新列顶部开始，字母头占首行位（Bob）
-        // 首列：[字母头 rowH][应用...]；续列：无头，应用直接从顶部开始
-        // v0.68.75（Bob）：收藏放最前、隐藏放最后，核心功能不能丢
-        // hiddenUnlocked 必须进 key：解锁前后隐藏列形态不同（锁定占位 ↔
-        // 应用列），否则解锁后列流不重建。
-        // 未读列索引与列流同源（466）：构建时记下未读组首列的索引，随
-        // columns 一起返回；不能事后按“列内是否含未读应用”找。
-        // 2026-11-14：收藏列不再可能含未读应用（单一归属口径覆盖
-        // dockApps 源头，未读只进未读列）——但索引仍构建时记下，不事后找。
-        val (columns, unreadColIdx) = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, unreadApps, rowsPerCol) {
-            val cols = mutableListOf<MutableList<FlowItem>>()
-            var cur = mutableListOf<FlowItem>()
-            fun colCap(): Int = rowsPerCol
-            fun flush() {
-                if (cur.isNotEmpty()) { cols.add(cur); cur = mutableListOf() }
-            }
-            // 未读组首列索引（构建时记下，见未读组块；无未读组时为 null）
-            var unreadFirstCol: Int? = null
-            // 收藏区（★头）
-            if (favApps.isNotEmpty()) {
-                flush()
-                cur.add(FlowItem.SectionHeader("收藏"))
-                var cap = colCap() - 1
-                var count = 0
-                favApps.forEach { app ->
-                    if (count >= cap) {
-                        flush(); cap = colCap(); count = 0
-                    }
-                    cur.add(FlowItem.App(app)); count++
-                }
-            }
-            // 未读组（Bob 2026-11-07 晚）：收藏之后、A 组之前最优先；始终展开、
-            // 不折叠；464 起区头“未读 · N 个”已删（Bob 2026-11-08 18:37），
-            // 未读应用直接续排进列流、不占区头行位；组仍以“收藏之后第一列 +
-            // rail 信封”标识。搜索态不走列流，未读组不参与。
-            if (unreadApps.isNotEmpty()) {
-                flush()
-                // flush 后 cols.size 就是下一列（未读首列）的索引；未读组
-                // 从这里开始，后续列（若未读应用跨列）依次往后排。
-                unreadFirstCol = cols.size
-                var cap = colCap()
-                var count = 0
-                unreadApps.forEach { app ->
-                    if (count >= cap) {
-                        flush(); cap = colCap(); count = 0
-                    }
-                    cur.add(FlowItem.App(app)); count++
-                }
-            }
-            azGroups.forEach { (letter, apps) ->
-                flush()  // 新字母新起一列
-                cur.add(FlowItem.Header(letter))
-                var cap = colCap() - 1  // 字母头已占 1 行
-                var count = 0
-                apps.forEach { app ->
-                    if (count >= cap) {
-                        flush()
-                        // 续列：无头，应用直接顶头排
-                        cap = colCap()
-                        count = 0
-                    }
-                    cur.add(FlowItem.App(app)); count++
-                }
-            }
-            // 折叠组（419/421）：A-Z 之后、隐藏区之前；平时只占区头一行
-            // （“不常用 · N 个”＋收展 chevron，点按收展），展开时组内应用
-            // 按列流续排（与其它区同 cap 逻辑），行后跟组底确认行。
-            // 搜索态不走列流，折叠不参与。
-            if (foldApps.isNotEmpty()) {
-                flush()
-                cur.add(FlowItem.FoldHeader(foldApps.size, foldExpanded))
-                if (foldExpanded) {
-                    var cap = colCap() - 1
-                    var count = 0
-                    foldApps.forEach { app ->
-                        if (count >= cap) {
-                            flush(); cap = colCap(); count = 0
-                        }
-                        cur.add(FlowItem.App(app)); count++
-                    }
-                    // 组底确认行占一列格；当前列已满先 flush 再放
-                    if (count >= cap) {
-                        flush()
-                    }
-                    cur.add(FlowItem.FoldFooter)
-                }
-            }
-            // 隐藏区（👁头）：竖屏同款门禁——未解锁时只放锁定占位（点按
-            // 触发指纹/面部），解锁后才列出隐藏应用、可直接打开。
-            if (hiddenApps.isNotEmpty()) {
-                flush()
-                cur.add(FlowItem.SectionHeader("已隐藏的应用"))
-                if (!hiddenUnlocked) {
-                    cur.add(FlowItem.LockPlaceholder)
-                } else {
-                    var cap = colCap() - 1
-                    var count = 0
-                    hiddenApps.forEach { app ->
-                        if (count >= cap) {
-                            flush(); cap = colCap(); count = 0
-                        }
-                        cur.add(FlowItem.App(app)); count++
-                    }
-                }
-            }
-            flush()
-            cols.map { it.toList() } to unreadFirstCol
+        // 横屏图标网格（Bob 2026-11-22 定稿，设计稿
+        // appcenter-landscape-grid-draft）：项表扁平化——组头占满一行、
+        // 应用一格一个，纵向滚；列流（LazyRow + FlowItem）已删。
+        // 顺序不变：收藏 → 未读（无区头，464 已删）→ A–Z → 不常用 → 已隐藏。
+        // 未读组首个应用带 isFirstUnread，格子里挂幽灵信封标记（465，
+        // 网格里没有行首空位，改叠在图标左上角，见 LandscapeGridAppCell）。
+        val gridItems = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, unreadApps) {
+            buildLandscapeGridItems(
+                favApps = favApps,
+                unreadApps = unreadApps,
+                azGroups = azGroups,
+                foldApps = foldApps,
+                foldExpanded = foldExpanded,
+                hiddenApps = hiddenApps,
+                hiddenUnlocked = hiddenUnlocked
+            )
         }
-        // 字母 → 列索引（取该字母首次出现的列）；★→0，👁→末列
-        val letterToCol = remember(columns) {
-            val map = mutableMapOf<Char, Int>()
-            columns.forEachIndexed { colIdx, col ->
-                col.forEach { item ->
-                    if (item is FlowItem.Header && !map.containsKey(item.letter)) {
-                        map[item.letter] = colIdx
-                    }
-                }
-            }
-            map
-        }
-        val favColIdx = 0
-        val hiddenColIdx = remember(columns) {
-            columns.indexOfFirst { col -> col.any { it is FlowItem.SectionHeader && it.title.contains("隐藏") } }
-                .takeIf { it >= 0 }
-        }
-        // 折叠组（419）：收纳盒专位 → 折叠区头所在列
-        val foldColIdx = remember(columns) {
-            columns.indexOfFirst { col -> col.any { it is FlowItem.FoldHeader } }
-                .takeIf { it >= 0 }
-        }
+        // rail 点按 / 初始定位的锚点下标（组头与未读首项在项表里的位置）。
+        val anchors = remember(gridItems) { landscapeGridAnchors(gridItems) }
         fun scrollToLetter(letter: Char) {
-            letterToCol[letter]?.let { idx ->
-                scope.launch { rowState.animateScrollToItem(idx) }
+            anchors.letters[letter]?.let { idx ->
+                scope.launch { gridState.animateScrollToItem(idx) }
             }
         }
 
-        // 初始落在列表顶（Bob 2026-10-24 + 字母 B 方案 + 未读组）：
-        // 只在首次进入且非搜索态时定位一次——未读组在则未读列、否则首个
-        // 有应用的字母列（A 有应用时就是 A 列）；收藏列仍在，点 ★ 回去。
+        // 初始落在网格顶（Bob 2026-10-24 + 字母 B 方案 + 未读组）：
+        // 只在首次进入且非搜索态时定位一次——未读组在则未读首项、否则首个
+        // 有应用的字母组头（A 有应用时就是 A 组头）；收藏组仍在，点 ★ 回去。
         // 守卫保证不与用户后续滚动打架、不影响搜索态。
         // 465（Bob 2026-11-08 19:27 横屏没从未读开始）：只有数据就绪
-        // （有未读列或有字母列、target 非空）时才消耗一次定位；首帧
+        // （有未读项或有字母组头、target 非空）时才消耗一次定位；首帧
         // catalog 为空（AppCatalog.snapshot 初值 null，IO 构建）时
-        // target 为 null，不消耗，等 catalog 到位、columns 变化后再定位
-        // ——否则一次定位被空耗，列表停在收藏列（与竖屏
+        // target 为 null，不消耗，等 catalog 到位、gridItems 变化后再定位
+        // ——否则一次定位被空耗，网格停在收藏组（与竖屏
         // dockInitialScrollDone 同款问题，竖屏已有此守卫、横屏漏了）。
-        LaunchedEffect(columns, searchResults) {
+        LaunchedEffect(gridItems, searchResults) {
             if (!initialScrollDone && searchResults == null) {
-                val target = unreadColIdx
-                    ?: ('A'..'Z').firstNotNullOfOrNull { letterToCol[it] }
+                val target = anchors.unread
+                    ?: ('A'..'Z').firstNotNullOfOrNull { anchors.letters[it] }
                 if (target != null) {
                     initialScrollDone = true
-                    rowState.scrollToItem(target)
+                    gridState.scrollToItem(target)
                 }
             }
         }
 
-        // 取消搜索后落到列表顶：未读组在则未读列、否则首个字母列（同竖屏
+        // 取消搜索后落到网格顶：未读组在则未读首项、否则首个字母组头（同竖屏
         // 437 口径改后；此前横屏取消搜索后停在进入前位置，与竖屏不一致）。
         var hadSearched by remember { mutableStateOf(false) }
         LaunchedEffect(searchResults) {
             if (searchResults != null) {
                 hadSearched = true
             } else if (hadSearched) {
-                val target = unreadColIdx
-                    ?: ('A'..'Z').firstNotNullOfOrNull { letterToCol[it] }
-                if (target != null) rowState.scrollToItem(target)
+                val target = anchors.unread
+                    ?: ('A'..'Z').firstNotNullOfOrNull { anchors.letters[it] }
+                if (target != null) gridState.scrollToItem(target)
             }
         }
 
@@ -554,8 +423,10 @@ fun AppCenterLandscape(
                 }
                 val results = searchResults
                 if (results != null) {
-                    // v0.68.82（横屏专项第 2 项）：搜索态——单列结果列表（行样式复用）
-                    LazyColumn(
+                    // 横屏图标网格（Bob 2026-11-22 定稿）：搜索态用同一网格
+                    // （只过滤显示的应用），不再是单列结果列表。
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(LandscapeGridColumns),
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
@@ -566,10 +437,12 @@ fun AppCenterLandscape(
                                 alpha = if (searchFieldValue.composition != null) 0.6f else 1f
                             },
                         // 底部留出手势条高度，避免末行被手势条盖住（同竖屏）
-                        contentPadding = PaddingValues(bottom = 96.dp)
+                        contentPadding = PaddingValues(bottom = 96.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (results.isEmpty()) {
-                            item(key = "search-empty") {
+                            item(key = "search-empty", span = { GridItemSpan(maxLineSpan) }) {
                                 val context = LocalContext.current
                                 Column(modifier = Modifier.fillMaxWidth()) {
                                     Text(
@@ -612,238 +485,179 @@ fun AppCenterLandscape(
                             }
                         } else {
                             // 注：不用 items(results, key=)/trailing lambda——本文件上下文里
-                            // LazyListScope.items 重载解析总偏向 count:Int 版，改用 forEach+item 避开
+                            // LazyGridScope.items 重载解析总偏向 count:Int 版，改用 forEach+item 避开
                             results.forEach { app ->
                                 item(key = "s:${app.packageName}") {
-                                    // Bob 2026-11-03：行距压缩——横屏搜索行同步走紧凑行
-                                    LandscapeAppRow(
+                                    LandscapeGridAppCell(
+                                        app = app,
                                         // Unit 适配：onLaunch 现为 (AppInfo) -> Boolean，
                                         // 函数类型值不能直接当 (AppInfo) -> Unit 传，
                                         // 包一层 lambda 丢掉返回值（lambda 体尾表达式
                                         // 的 Unit 强制转换适用）。
-                                        app = app, onLaunch = { onLaunch(it) },
-                                        compact = true,
+                                        onLaunch = { onLaunch(it) }
                                     )
                                 }
                             }
                         }
                     }
                 } else {
-                // 应用竖排流（单向横滚，不嵌套）
-                LazyRow(
-                    state = rowState,
+                // 横屏图标网格（Bob 2026-11-22 定稿）：纵向网格，组头占满
+                // 一行、应用一格一个；列流（横滚多列）已删。
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(LandscapeGridColumns),
+                    state = gridState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                         .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(bottom = 96.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(
-                        count = columns.size,
-                        key = { idx -> "col:$idx" }
-                    ) { idx ->
-                        Column(
-                            modifier = Modifier
-                                .width(250.dp)
-                                .fillMaxHeight(),
-                            verticalArrangement = Arrangement.Top
-                        ) {
-                            columns[idx].forEach { item ->
-                                when (item) {
-                                    is FlowItem.Header -> {
-                                        // v0.68.73（Bob）：字母头占一个完整应用行位，融入应用流
-                                        Text(
-                                            text = item.letter.toString(),
-                                            fontFamily = FontFamily.Serif,
-                                            fontSize = AILauncherType.Title.fontSize,
-                                            fontWeight = FontWeight.Bold,
-                                            color = AILauncherColors.current.Title,
+                    gridItems.forEachIndexed { index, gridItem ->
+                        when (gridItem) {
+                            is LandscapeGridItem.Header -> {
+                                // 横屏图标网格：小字组头贴在每组网格上方，
+                                // 不再占一整行 60dp（稿子里的 26px 组头）。
+                                item(key = "header:${gridItem.title}", span = { GridItemSpan(maxLineSpan) }) {
+                                    Text(
+                                        text = gridItem.title,
+                                        fontSize = AILauncherType.Callout.fontSize,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 2.sp,
+                                        color = AILauncherColors.current.Title,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                                    )
+                                }
+                            }
+                            is LandscapeGridItem.FoldHeader -> {
+                                // 横屏图标网格：不常用行占满一行，放在网格最下方
+                                // （稿子里的“不常用 · N 个”＋分隔线，字色弱化）。
+                                item(key = "fold-header", span = { GridItemSpan(maxLineSpan) }) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Box(
                                             modifier = Modifier
-                                                .height(rowH)
-                                                .padding(start = 16.dp)
-                                                .wrapContentHeight(Alignment.CenterVertically)
+                                                .fillMaxWidth()
+                                                .padding(top = 8.dp)
+                                                .height(1.dp)
+                                                .background(AILauncherColors.current.Divider)
                                         )
-                                    }
-                                    is FlowItem.SectionHeader -> {
-                                        // v0.68.75（Bob）：收藏/隐藏区头，占一个完整行位
-                                        // 应用中心升级：区头金色 → Title 色（金色只留
-                                        // 选中环 / 已收藏★ 本体，不再成片刷）
-                                        // 464 起未读区头已删：SectionHeader 只剩收藏/隐藏；
-                                        // 465 起列内幽灵信封补回来了，挂在未读组首行（见
-                                        // FlowItem.App 未读分支），不再附在区头行上。
-                                        Text(
-                                            text = item.title,
-                                            fontSize = AILauncherType.Body.fontSize,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 2.sp,
-                                            color = AILauncherColors.current.Title,
-                                            modifier = Modifier
-                                                .height(rowH)
-                                                .padding(start = 16.dp)
-                                                .wrapContentHeight(Alignment.CenterVertically)
-                                        )
-                                    }
-                                    is FlowItem.FoldHeader -> {
-                                        // 折叠组（419）：区头行位，点按收展；Stageshow
-                                        // 应用中心优化 3.4：组头用刊头体（与竖屏同一纯
-                                        // 函数），不再同区头 Body 粗体＋收展 chevron
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .height(rowH)
                                                 .clip(RoundedCornerShape(12.dp))
                                                 .clickable { onToggleFold() }
-                                                .padding(start = 16.dp, end = 8.dp)
+                                                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
                                         ) {
                                             val foldStyle = foldHeaderStyle()
                                             Text(
-                                                text = foldHeaderText(item.count),
+                                                text = foldHeaderText(gridItem.count),
                                                 fontSize = foldStyle.fontSize,
                                                 letterSpacing = foldStyle.letterSpacing,
-                                                color = AILauncherColors.current.Title,
+                                                color = AILauncherColors.current.Hint,
                                                 modifier = Modifier.weight(1f)
                                             )
                                             Icon(
-                                                imageVector = if (item.expanded) Icons.Outlined.KeyboardArrowUp
+                                                imageVector = if (gridItem.expanded) Icons.Outlined.KeyboardArrowUp
                                                     else Icons.Outlined.KeyboardArrowDown,
-                                                contentDescription = if (item.expanded) "收起不常用" else "展开不常用",
+                                                contentDescription = if (gridItem.expanded) "收起不常用" else "展开不常用",
                                                 tint = AILauncherColors.current.Hint,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
                                     }
-                                    is FlowItem.FoldFooter -> {
-                                        // 折叠组（421 安静版）：组底确认行——不点就是认了，
-                                        // 点“取消折叠”走调用点 onUnfold（压制＋收起）。
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(rowH)
-                                                .padding(start = 16.dp, end = 8.dp)
-                                        ) {
-                                            TextButton(onClick = { onUnfold() }) {
-                                                Text(
-                                                    text = "都展开",
-                                                    color = AILauncherColors.current.Body,
-                                                    fontWeight = FontWeight.Medium
-                                                )
-                                            }
-                                        }
-                                    }
-                                    is FlowItem.LockPlaceholder -> {
-                                        // 竖屏同款锁定占位（横屏列格样式）：点按触发
-                                        // 指纹/面部解锁；CI 只能验占位渲染，生物识别
-                                        // 本身归真机验收。
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(rowH)
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .clickable { onUnlockHiddenAppsState.value() }
-                                                .testTag("hidden_locked")
-                                                .padding(horizontal = 16.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(40.dp)
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .background(AILauncherColors.current.Divider),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Fingerprint,
-                                                    contentDescription = null,
-                                                    tint = AILauncherColors.current.Hint,
-                                                    modifier = Modifier
-                                                        .size(22.dp)
-                                                        .semantics { invisibleToUser() }
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.width(8.dp))
+                                }
+                            }
+                            is LandscapeGridItem.FoldFooter -> {
+                                // 折叠组（421 安静版）：组底确认行——不点就是认了，
+                                // 点“取消折叠”走调用点 onUnfold（压制＋收起）。
+                                item(key = "fold-footer", span = { GridItemSpan(maxLineSpan) }) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 16.dp, end = 8.dp)
+                                    ) {
+                                        TextButton(onClick = { onUnfold() }) {
                                             Text(
-                                                text = "解锁查看",
-                                                fontSize = AILauncherType.Callout.fontSize,
-                                                color = AILauncherColors.current.Title,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f)
+                                                text = "都展开",
+                                                color = AILauncherColors.current.Body,
+                                                fontWeight = FontWeight.Medium
                                             )
                                         }
                                     }
-                                    is FlowItem.App -> {
-                                        // 未读组打磨（Bob 2026-11-08）：未读行带预览 + 左滑清理；
-                                        // 非未读行一字不动（不包左滑清理行，不改手势）。
-                                        // 注意：搜索结果分支（上）在另一处，不走这里，不带预览/左滑。
-                                        val pkg = item.app.packageName
-                                        if (pkg in unreadPkgs) {
-                                            // 465（Bob 2026-11-08 19:27 横屏未读幽灵图标也没有）：
-                                            // 464 删区头时列内幽灵信封随区头行一起去掉了，465 补回来。
-                                            // 466（Bob 2026-11-08 20:03 横屏信封挂错）：信封是
-                                            // 未读组的标记（一个组只一个、标在组上，像幽灵字母
-                                            // 标字母组那样），不是每行都挂的小图标；只挂在
-                                            // 未读列的首行（列内 + 首行两个条件），收藏列、
-                                            // 字母列的行一律不挂。rail 信封保留。
-                                            // 466（Bob 2026-11-08 20:02 左滑清理蒙层全宽）：
-                                            // 48dp 起首从 LandscapeAppRow 移到 ClearableUnreadRow
-                                            // 外面的 wrapper Box（行外），蒙层继承缩进、只盖
-                                            // 行内容，不盖信封区；与竖屏 Column 外包同款。
-                                            val isUnreadCol = unreadColIdx != null && idx == unreadColIdx
-                                            Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
-                                                if (isUnreadCol && pkg == firstUnreadPkg) {
-                                                    UnreadGlyph(
-                                                        color = AILauncherColors.current.Title.copy(alpha = 0.35f),
-                                                        modifier = Modifier
-                                                            .align(Alignment.CenterStart)
-                                                            .padding(start = 16.dp)
-                                                            .size(32.dp)
-                                                    )
-                                                }
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(start = if (isUnreadCol) 48.dp else 0.dp)
-                                                ) {
-                                                    ClearableUnreadRow(
-                                                        enabled = pkg in activeNotifPkgs,
-                                                        onClear = { onClearNotifications(pkg) },
-                                                        onDisableNotifications = { onDisableAppNotifications(pkg) }
-                                                    ) {
-                                                        LandscapeAppRow(
-                                                            app = item.app,
-                                                            // 打开 + 清除（Bob 2026-11-08 23:20，与竖屏同款）：
-                                                            // 成功打开且有在用通知时取消通知。
-                                                            // “打开”那一半（Bob 2026-11-08 23:49）：走
-                                                            // onOpenUnreadApp——优先发通知自己的 contentIntent
-                                                            // 直达会话/消息，没有或失败时退回普通打开应用。
-                                                            // “取消”那一半（Bob 2026-11-09 12:20 ②，与竖屏同款）：
-                                                            // 不再调起返回成功就立即取消——先打开、确认应用真的
-                                                            // 到了前台（200ms 一轮、最多 1 秒）再取消；1 秒内
-                                                            // 没见到就不取消，通知留着。
-                                                            // 短信行无在用通知，只打开、不调取消。
-                                                            onLaunch = { app ->
-                                                                val opened = onOpenUnreadApp(app)
-                                                                if (opened && pkg in activeNotifPkgs) {
-                                                                    onUnreadRowOpened(app)
-                                                                }
-                                                            },
-                                                            compact = true,
-                                                            displayLabel = unreadDisplayNames[pkg],
-                                                            preview = unreadPreviews[pkg]
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            LandscapeAppRow(
-                                                app = item.app,
-                                                // Unit 适配（同搜索行）：包一层 lambda 丢返回值。
-                                                onLaunch = { onLaunch(it) },
-                                                compact = true
+                                }
+                            }
+                            is LandscapeGridItem.LockPlaceholder -> {
+                                // 竖屏同款锁定占位：点按触发指纹/面部解锁；CI 只能
+                                // 验占位渲染，生物识别本身归真机验收。
+                                item(key = "hidden-lock", span = { GridItemSpan(maxLineSpan) }) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { onUnlockHiddenAppsState.value() }
+                                            .testTag("hidden_locked")
+                                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(AILauncherColors.current.Divider),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Fingerprint,
+                                                contentDescription = null,
+                                                tint = AILauncherColors.current.Hint,
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .semantics { invisibleToUser() }
                                             )
                                         }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "解锁查看",
+                                            fontSize = AILauncherType.Callout.fontSize,
+                                            color = AILauncherColors.current.Title,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+                            is LandscapeGridItem.App -> {
+                                // 横屏图标网格：一个应用一格；未读格点按仍走
+                                // 打开＋取消（与竖屏同款，见 onOpenUnreadApp /
+                                // onUnreadRowOpened），左滑清理在格子里放不下、
+                                // 预览小字按稿子去掉，未读只用图标角标表示。
+                                // 465 幽灵信封：只挂在未读组首个格（isFirstUnread），
+                                // 叠在图标左上角（与角标对称）。
+                                val pkg = gridItem.app.packageName
+                                item(key = "app:$index:$pkg") {
+                                    if (gridItem.isUnread) {
+                                        LandscapeGridAppCell(
+                                            app = gridItem.app,
+                                            onLaunch = { app ->
+                                                val opened = onOpenUnreadApp(app)
+                                                if (opened && pkg in activeNotifPkgs) {
+                                                    onUnreadRowOpened(app)
+                                                }
+                                            },
+                                            isFirstUnread = gridItem.isFirstUnread
+                                        )
+                                    } else {
+                                        LandscapeGridAppCell(
+                                            app = gridItem.app,
+                                            // Unit 适配（同搜索行）：包一层 lambda 丢返回值。
+                                            onLaunch = { onLaunch(it) }
+                                        )
                                     }
                                 }
                             }
@@ -886,7 +700,7 @@ fun AppCenterLandscape(
                         // 竖屏同口径：点房子本身不跳转，回首页走上拉手势。
                         is RailItem.House -> {}
                         is RailItem.Star -> {
-                            scope.launch { rowState.animateScrollToItem(favColIdx) }
+                            scope.launch { gridState.animateScrollToItem(anchors.fav ?: 0) }
                         }
                         // 横屏隐藏补齐（竖屏同款）：未解锁时点 👁触发生物
                         // 识别解锁；解锁后点 👁滚到隐藏列。
@@ -894,8 +708,8 @@ fun AppCenterLandscape(
                             if (!hiddenUnlocked) {
                                 onUnlockHiddenAppsState.value()
                             } else {
-                                hiddenColIdx?.let { idx ->
-                                    scope.launch { rowState.animateScrollToItem(idx) }
+                                anchors.hidden?.let { idx ->
+                                    scope.launch { gridState.animateScrollToItem(idx) }
                                 }
                             }
                         }
@@ -903,25 +717,25 @@ fun AppCenterLandscape(
                             // 找该字母或之后最近有应用的字母（过滤后一般直
                             // 中，兜底保留作保险）
                             var c = item.char
-                            while (c <= 'Z' && !letterToCol.containsKey(c)) c++
+                            while (c <= 'Z' && !anchors.letters.containsKey(c)) c++
                             if (c <= 'Z') scrollToLetter(c)
                             else {
                                 // 往前找
                                 c = item.char
-                                while (c >= 'A' && !letterToCol.containsKey(c)) c--
+                                while (c >= 'A' && !anchors.letters.containsKey(c)) c--
                                 if (c >= 'A') scrollToLetter(c)
                             }
                         }
-                        // 折叠组（419）：收纳盒专位 → 折叠区头所在列
+                        // 折叠组（419）：收纳盒专位 → 折叠区头所在项
                         is RailItem.Fold -> {
-                            foldColIdx?.let { idx ->
-                                scope.launch { rowState.animateScrollToItem(idx) }
+                            anchors.fold?.let { idx ->
+                                scope.launch { gridState.animateScrollToItem(idx) }
                             }
                         }
-                        // 未读组：信封专位 → 未读应用所在列（464 起区头已删）
+                        // 未读组：信封专位 → 未读应用所在项（464 起区头已删）
                         is RailItem.Unread -> {
-                            unreadColIdx?.let { idx ->
-                                scope.launch { rowState.animateScrollToItem(idx) }
+                            anchors.unread?.let { idx ->
+                                scope.launch { gridState.animateScrollToItem(idx) }
                             }
                         }
                         else -> {}
@@ -990,48 +804,155 @@ fun AppCenterLandscape(
 }
 
 
-// 横屏应用中心修（Bob 2026-10-24）：行高 68dp→60dp（仍高于 48dp 触控
-// 线），同样屏高下每列多出一行，字母列达到头 + 4 个应用。
-private val LandscapeRowH = 60.dp
+// 横屏图标网格（Bob 2026-11-22 定稿，设计稿
+// appcenter-landscape-grid-draft）：列表行（60dp 行：48dp 图标＋名字＋
+// 预览小字）改成图标网格。竖屏仍是列表，不动。
+// 列数 8、图标 50dp（稿子 100px ≈ 50dp，Bob 批的就是这个尺寸，
+// 不是 56dp——56dp 一屏只能放约 16 个，到不了 20+）。
+internal val LandscapeGridColumns = 8
+internal val LandscapeGridIconSize = 50.dp
 
-/** 横屏应用行（68dp，复用于列流与搜索结果列表） */
+/**
+ * 横屏图标网格的扁平项模型（纯数据，LazyVerticalGrid 直接渲染）。
+ * 组头（收藏 / 字母 / 已隐藏的应用）与不常用行、组底行、锁定占位
+ * 占满一行（GridItemSpan(maxLineSpan)），应用一格一个。
+ * 未读组无区头（464 已删）：未读应用直接续在收藏之后，首个带
+ * isFirstUnread（格子里挂幽灵信封标记，465）。
+ */
+internal sealed interface LandscapeGridItem {
+    /** 小字组头（收藏 / 字母 / 已隐藏的应用） */
+    data class Header(val title: String) : LandscapeGridItem
+    /** 一个应用格子；isUnread=未读组成员（角标＋点按直达＋取消） */
+    data class App(
+        val app: AppInfo,
+        val isUnread: Boolean = false,
+        val isFirstUnread: Boolean = false
+    ) : LandscapeGridItem
+    /** 不常用区头（个数＋收展态），点按收展 */
+    data class FoldHeader(val count: Int, val expanded: Boolean) : LandscapeGridItem
+    /** 不常用组底确认行（展开态才有），点按走 onUnfold */
+    data object FoldFooter : LandscapeGridItem
+    /** 隐藏区锁定占位（未解锁时） */
+    data object LockPlaceholder : LandscapeGridItem
+}
+
+/**
+ * 横屏图标网格的项表（纯函数，可单测）。顺序不变：收藏 → 未读
+ * （无区头）→ A–Z → 不常用 → 已隐藏。未读应用同时在字母组里
+ * 出现一次（与旧列流同款——未读组是前置的快捷区，不是归属迁移）。
+ */
+internal fun buildLandscapeGridItems(
+    favApps: List<AppInfo>,
+    unreadApps: List<AppInfo>,
+    azGroups: List<Pair<Char, List<AppInfo>>>,
+    foldApps: List<AppInfo>,
+    foldExpanded: Boolean,
+    hiddenApps: List<AppInfo>,
+    hiddenUnlocked: Boolean
+): List<LandscapeGridItem> {
+    val items = mutableListOf<LandscapeGridItem>()
+    if (favApps.isNotEmpty()) {
+        items.add(LandscapeGridItem.Header("收藏"))
+        favApps.forEach { items.add(LandscapeGridItem.App(it)) }
+    }
+    if (unreadApps.isNotEmpty()) {
+        unreadApps.forEachIndexed { index, app ->
+            items.add(LandscapeGridItem.App(app, isUnread = true, isFirstUnread = index == 0))
+        }
+    }
+    azGroups.forEach { (letter, apps) ->
+        items.add(LandscapeGridItem.Header(letter.toString()))
+        apps.forEach { items.add(LandscapeGridItem.App(it)) }
+    }
+    if (foldApps.isNotEmpty()) {
+        items.add(LandscapeGridItem.FoldHeader(foldApps.size, foldExpanded))
+        if (foldExpanded) {
+            foldApps.forEach { items.add(LandscapeGridItem.App(it)) }
+            items.add(LandscapeGridItem.FoldFooter)
+        }
+    }
+    if (hiddenApps.isNotEmpty()) {
+        items.add(LandscapeGridItem.Header("已隐藏的应用"))
+        if (!hiddenUnlocked) {
+            items.add(LandscapeGridItem.LockPlaceholder)
+        } else {
+            hiddenApps.forEach { items.add(LandscapeGridItem.App(it)) }
+        }
+    }
+    return items.toList()
+}
+
+/** rail 点按 / 初始定位的锚点下标（组头与未读首项在项表里的位置）。 */
+internal data class LandscapeGridAnchors(
+    val fav: Int?,
+    val unread: Int?,
+    val letters: Map<Char, Int>,
+    val fold: Int?,
+    val hidden: Int?
+)
+
+/** 从项表算锚点（纯函数，可单测）：字母取组头首次出现的位置。 */
+internal fun landscapeGridAnchors(items: List<LandscapeGridItem>): LandscapeGridAnchors {
+    var fav: Int? = null
+    var unread: Int? = null
+    val letters = mutableMapOf<Char, Int>()
+    var fold: Int? = null
+    var hidden: Int? = null
+    items.forEachIndexed { index, item ->
+        when (item) {
+            is LandscapeGridItem.Header -> {
+                if (item.title == "收藏" && fav == null) fav = index
+                if (item.title == "已隐藏的应用" && hidden == null) hidden = index
+                val letter = item.title.singleOrNull()
+                if (letter != null && letter in 'A'..'Z' && !letters.containsKey(letter)) {
+                    letters[letter] = index
+                }
+            }
+            is LandscapeGridItem.App -> {
+                if (item.isUnread && unread == null) unread = index
+            }
+            is LandscapeGridItem.FoldHeader -> {
+                if (fold == null) fold = index
+            }
+            else -> {}
+        }
+    }
+    return LandscapeGridAnchors(fav, unread, letters, fold, hidden)
+}
+
+/**
+ * 横屏图标网格格子：50dp 图标＋下方单行名字（超长省略）。
+ * 未读只用图标右上角的角标表示（稿子定稿，预览小字去掉）；
+ * 名字一律用应用名（未读通知标题是列表行的口径，格子里不用）。
+ * 465 幽灵信封：未读组首个格才挂，叠在图标左上角（与角标对称）。
+ * 长按弹窗是竖屏专属（横屏原来就不接 onLongPress，见 AppCenter.kt
+ * 传入但从未调用），格子只接点按，不改。
+ */
 @Composable
-private fun LandscapeAppRow(
+private fun LandscapeGridAppCell(
     app: AppInfo,
     onLaunch: (AppInfo) -> Unit,
     modifier: Modifier = Modifier,
-    // 应用中心升级：键盘弹出时行高 60→56dp（图标 48dp 不动）
-    compact: Boolean = false,
-    // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览（调用方算好再传）；
-    // null 时只留应用名，非未读行不受影响。
-    preview: String? = null,
-    // 未读行显示名（Bob 2026-11-08 22:45）：与竖屏 AppRow 同款，未读组里用
-    // 最新通知标题当行名；不传时默认应用名。
-    displayLabel: String? = null
+    isFirstUnread: Boolean = false
 ) {
     // 未读角标（Bob 2026-11-07 晚）：通知监听汇总的该包条数；>0 才显示。
     val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
     val badgeCount = badgeCounts[app.packageName] ?: 0
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .fillMaxWidth()
-            // Bob 2026-11-15 未读行标题重叠：此前定高 56dp 无纵向内边距，标题
-            // （14sp 字、继承 bodyLarge 行高 24sp）＋预览（12sp/18sp）＝42sp，
-            // 字号 1.3 时 54.6dp 只剩 1.4dp 余量、1.5 时 63dp 直接溢出定高、
-            // 两行被夹裁进彼此；改 min 高、行随字长，不再硬裁。
-            .heightIn(min = if (compact) 56.dp else LandscapeRowH)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onLaunch(app) }
-            .padding(horizontal = 8.dp)
+            .padding(vertical = 4.dp)
     ) {
-        // 未读角标：叠在图标右上角、微微压住角；纯视觉覆盖层，不抢行点按。
-        Box(modifier = Modifier.size(48.dp)) {
+        // 未读角标：叠在图标右上角、微微压住角；纯视觉覆盖层，不抢格点按。
+        Box(modifier = Modifier.size(LandscapeGridIconSize)) {
             AppIconImage(
                 drawable = app.icon,
                 contentDescription = null,
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(LandscapeGridIconSize)
                     .clip(RoundedCornerShape(12.dp))
             )
             if (badgeCount > 0) {
@@ -1043,46 +964,27 @@ private fun LandscapeAppRow(
                         .offset(x = 4.dp, y = (-4).dp)
                 )
             }
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        // 未读预览行（Bob 2026-11-08）：应用名下弱化小字单行预览，不抢应用名；
-        // 无预览时只留应用名。名字列占满剩余宽（与原来单 Text
-        // 的 weight 口径一致），预览跟名字同宽、单行省略。
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = displayLabel ?: app.label.toString(),
-                fontSize = AILauncherType.Callout.fontSize,
-                // 标题行高显式取 Callout 行高（22sp，此前只给字号、行高继承
-                // bodyLarge 的 24sp——14sp 字配 24sp 行高，比 Callout 自身高 2sp，
-                // 两行 42sp 挤进 56dp 定高是重叠的另一半）。
-                lineHeight = AILauncherType.Callout.lineHeight,
-                color = AILauncherColors.current.Title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth()
-            )
-            if (preview != null) {
-                Text(
-                    text = preview,
-                    fontSize = AILauncherType.Caption.fontSize,
-                    lineHeight = AILauncherType.Caption.lineHeight,
-                    color = AILauncherColors.current.Hint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth()
+            if (isFirstUnread) {
+                UnreadGlyph(
+                    color = AILauncherColors.current.Title.copy(alpha = 0.35f),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = (-4).dp, y = (-4).dp)
+                        .size(20.dp)
                 )
             }
         }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = app.label.toString(),
+            fontSize = AILauncherType.Caption.fontSize,
+            lineHeight = AILauncherType.Caption.lineHeight,
+            color = AILauncherColors.current.Title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
-private sealed interface FlowItem {
-    data class Header(val letter: Char) : FlowItem
-    data class SectionHeader(val title: String) : FlowItem
-    // 折叠组（419）：区头（个数＋收展态），点按收展
-    data class FoldHeader(val count: Int, val expanded: Boolean) : FlowItem
-    // 折叠组（421 安静版）：组底确认行（展开态才有），点按走 onUnfold
-    data object FoldFooter : FlowItem
-    data object LockPlaceholder : FlowItem
-    data class App(val app: AppInfo) : FlowItem
-}
