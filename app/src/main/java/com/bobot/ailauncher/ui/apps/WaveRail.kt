@@ -524,7 +524,17 @@ internal fun WaveRail(
                             maxLines = 1,
                             // v0.68.96（F-07）：单字母标签形式对齐——超宽字形省略而非硬裁
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.graphicsLayer {
+                            // 2026-11-22（Bob 实拍：rail 字母底边被截，真修）：
+                            // 裁剪层是 Text 自身的实测高度——weight(1f) 槽位给
+                            // Text 精确高度约束，把节点压到槽位高（横屏约 11dp），
+                            // 而段落高 = 行高（16/20sp），字形下半部分落在节点
+                            // 之外被裁。显式高度让节点高 = 行高，字形完全落在
+                            // 节点内；节点比槽位高、溢出可见（Star 图标同款，
+                            // size(14.dp) 溢出槽位完整可见）。不要再动行高：
+                            // 565 行高 16→20sp 反而让字更往下移、裁得更深。
+                            modifier = Modifier
+                                .height((letterLineHeight.value * density.fontScale).dp)
+                                .graphicsLayer {
                                 // 纯波浪（Bob 2026-10-25）：只位移、不放大——横向鼓出＋
                                 // 纵向散开形成波形，波浪整体再往拇指反方向避让；
                                 // pulse（收藏/隐藏闪烁反馈）保留，不属波浪放大
@@ -872,6 +882,10 @@ private fun FoldGlyph(
 /**
  * 未读组：线性信封——与房子/星星/眼睛/收纳盒同款细描边+圆角。
  * 外框 + 封口两条斜线（左右上角向中下收），14dp 下仍可辨。
+ * 2026-11-22（Bob：信封看着比房子/星星矮一截）：外框纵向
+ * 0.14–0.88h，与房子（屋顶 0.14h、底边 0.88h）同视觉高度；
+ * 此前 0.22–0.78h 只有 0.56h 高，显得更矮更轻。描边与
+ * 透明度不动（w*0.08f / 0.6，与房子同款）。
  * internal：未读组幽灵标记（AppCenter 竖屏 + AppCenterLandscape 横屏）与 rail 共用同一符号。
  */
 @Composable
@@ -887,23 +901,23 @@ internal fun UnreadGlyph(
         // 信封外框
         drawRoundRect(
             color = color,
-            topLeft = Offset(w * 0.08f, h * 0.22f),
-            size = Size(w * 0.84f, h * 0.56f),
+            topLeft = Offset(w * 0.08f, h * 0.14f),
+            size = Size(w * 0.84f, h * 0.74f),
             cornerRadius = CornerRadius(w * 0.06f, w * 0.06f),
             style = style
         )
         // 封口：左右上角向中下收
         drawLine(
             color = color,
-            start = Offset(w * 0.08f, h * 0.22f),
-            end = Offset(w * 0.50f, h * 0.55f),
+            start = Offset(w * 0.08f, h * 0.14f),
+            end = Offset(w * 0.50f, h * 0.56f),
             strokeWidth = stroke,
             cap = StrokeCap.Round
         )
         drawLine(
             color = color,
-            start = Offset(w * 0.92f, h * 0.22f),
-            end = Offset(w * 0.50f, h * 0.55f),
+            start = Offset(w * 0.92f, h * 0.14f),
+            end = Offset(w * 0.50f, h * 0.56f),
             strokeWidth = stroke,
             cap = StrokeCap.Round
         )
