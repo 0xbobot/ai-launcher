@@ -78,8 +78,8 @@ data class CrashRecord(
 /**
  * 崩溃本地日志（v0.68.100 卫生批）：侧载分发没有 Play Console，真机崩溃
  * 此前零可见。这里只做本地留痕——不引入任何崩溃上报 SDK、不外发数据：
- * 崩溃写 files/crashes/ 环形 10 份，设置页可看全文、可经系统分享面板
- * 发出去、可删；下次冷启动对没看过的记录非模态提示一次。
+ * 崩溃写 files/crashes/ 环形 10 份，供冒烟测试与崩溃恢复屏使用；
+ * 设置页查看入口已随 2026-11-23 设置页重组删除（Bob：中间产物）。
  */
 object CrashLog {
     private const val PREFS = "crashlog"

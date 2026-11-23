@@ -6,13 +6,17 @@ import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
@@ -75,7 +79,6 @@ import androidx.compose.ui.unit.sp
 import com.bobot.ailauncher.BuildConfig
 import com.bobot.ailauncher.R
 import com.bobot.ailauncher.data.ConnectorState
-import com.bobot.ailauncher.data.CrashLog
 import com.bobot.ailauncher.data.SmartCardRepository
 import com.bobot.ailauncher.data.UiPrefs
 import com.bobot.ailauncher.data.SMART_SOURCE_ORDER
@@ -234,35 +237,17 @@ fun shareFriendsText(): String =
     "我在用的 AI 桌面，下载页在这里：$SHARE_FRIENDS_DOWNLOAD_PAGE_URL"
 
 /**
- * 设置页（v0.57.0 重构）：
- * - 只剩三项：让助手更聪明（收起）/ 关于 / 接收测试版更新（v0.68.80）
- * - 电量守护默认开启，不设开关；Dock 显示纯手势；排序默认智能
- * - 文案全部用户视角
+ * 设置页（2026-11-23 Bob 定 v3-B 两大组重组）：
+ * - 两组：桌面（版本＋默认桌面）/ 智能（智能＋关于），各一张大卡；
+ *   卡内小标签（版本、默认桌面、关于）保留，文案一字不动；
+ * - 横屏两张卡并排等高，竖屏同一分组纵向堆叠、单列满宽；
+ * - 未读打开记录与崩溃记录已删（Bob：中间产物），入口与查看屏一并删；
+ *   关于只剩分享给朋友＋联系我；落款只留 bobot 词标。
  */
 @Composable
-fun SettingsScreen(
-    onOpenJumpLog: () -> Unit = {},
-    onOpenCrashLog: () -> Unit = {}
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var apiKey by remember { mutableStateOf(LlmConfig.getApiKey(context)) }
-    var baseUrl by remember { mutableStateOf(LlmConfig.getBaseUrl(context)) }
-    var model by remember { mutableStateOf(LlmConfig.getModel(context)) }
-    // v0.68.100（卫生批）：Key 存放形态（加密 / 明文降级）——保存后刷新，卡内明示
-    var keyStatus by remember { mutableStateOf(LlmConfig.keyStorageStatus(context)) }
-    var testing by remember { mutableStateOf(false) }
-    var llmExpanded by remember { mutableStateOf(false) }
-    // 智能区来源卡用户点过的收起态（2026-11-14 Bob 定：4/4 默认收起）；
-    // null 表从未点过——首次接满 4/4 时默认收起。进设置页重读 prefs。
-    var sourcesCollapsedOverride by remember { mutableStateOf(UiPrefs.getSourcesCardCollapsed(context)) }
-    // 崩溃记录未读数（正式版审计 ②-1）：设置页行上动态提示；进崩溃记录页
-    // 标记已读后，返回时重建重读。
-    val crashUnreadCount by remember { mutableStateOf(CrashLog.unreadCount(context)) }
+fun SettingsScreen() {
     val keyboardController = LocalSoftwareKeyboardController.current
-    val hideOnBlur = Modifier.onFocusChanged { if (!it.isFocused) keyboardController?.hide() }
     val focusManager = LocalFocusManager.current
-    val view = LocalView.current
 
     // v0.68.98（F-08）：焦点礼仪与 .93 首页同一套语义——三个输入框只有 hideOnBlur
     // （失焦才收键盘）而页面没有点外部清焦，点空白处焦点不走、键盘收不掉。
@@ -278,6 +263,525 @@ fun SettingsScreen(
             else if (focusedField == index) focusedField = -1
         }
         .onGloballyPositioned { fieldBounds = fieldBounds + (index to it.boundsInRoot()) }
+    val hideOnBlur = Modifier.onFocusChanged { if (!it.isFocused) keyboardController?.hide() }
+
+    // 设置页底部上滑回主页已删除（Bob 2026-11-03：避免操作干扰，与应用中心同批）
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        // 横竖屏同一分组：横屏两卡并排，竖屏纵向堆叠（HomeScreen 同款 maxWidth > maxHeight 判定）
+        val isLandscape = maxWidth > maxHeight
+        LazyColumn(
+            // v0.61.1：和应用中心一样的半透明背景（GlassCardStrong，白 88%）
+            // 430（Bob 2026-11-05 晚亲批“设置页面也参考这个”）：半透明底换成已批纹理背景
+            // （与应用中心同一套，主题感知）。设置页是 NavHost 独立目的地、首页不在其后，
+            // 88% 底透出的只是窗口底色，换不透明纹理不改变任何可见内容，只换背景层。
+            // v0.68.45：contentPadding 归零，各 item 自带 padding——刊头和应用中心像素对齐
+            modifier = Modifier.fillMaxSize()
+                .pageTextureBackground()
+                .statusBarsTopPadding()
+                // 刘海避让（Bob 2026-10-25 全页检查）：横屏下挖孔移到两侧边，行内容
+                // 左右 20dp 顶不到横屏 cutout 侧边 inset；两侧直接吃 displayCutout
+                // inset——竖屏侧边 inset 为 0，竖屏布局零变化。
+                .windowInsetsPadding(
+                    WindowInsets.displayCutout.only(
+                        WindowInsetsSides.Start + WindowInsetsSides.End
+                    )
+                )
+                .onGloballyPositioned { rootPosInRoot = it.positionInRoot() }
+                .clearIntentFocusOnOutsideTap(
+                    focused = { focusedField >= 0 },
+                    targetBoundsInHost = {
+                        fieldBounds[focusedField]?.let { b ->
+                            Rect(
+                                b.left - rootPosInRoot.x, b.top - rootPosInRoot.y,
+                                b.right - rootPosInRoot.x, b.bottom - rootPosInRoot.y
+                            )
+                        }
+                    },
+                    focusManager = focusManager,
+                    keyboardController = keyboardController
+                ),
+            contentPadding = PaddingValues(0.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                // 杂志刊头——与应用中心完全一致（24.dp 左 / 8.dp 顶 / 32.sp 宋体）。
+                // 返回箭头已删（Bob 2026-11-07）：系统返回键/手势仍经 NavController
+                // 退回（设置页是 NavHost 独立目的地）；键盘由系统返回自行收起，
+                // 不再需要离开前手动清焦。
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 24.dp, end = 16.dp, top = 8.dp)
+                ) {
+                    Text(
+                        text = "设置",
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = AILauncherType.Display.fontSize,
+                        letterSpacing = 2.sp,
+                        color = AILauncherColors.current.Title
+                    )
+                }
+            }
+
+            // 两大组：桌面 / 智能（2026-11-23 Bob 定 v3-B）。横屏两张卡并排等高，
+            // 竖屏同一分组纵向堆叠；组内行与展开态原样保留。
+            item {
+                if (isLandscape) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp)
+                            .height(IntrinsicSize.Max),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        DesktopGroupCard(modifier = Modifier.weight(1f).fillMaxHeight())
+                        SmartGroupCard(
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            hideOnBlur = hideOnBlur,
+                            fieldFocusMods = { index -> fieldFocusMods(index) }
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        DesktopGroupCard(modifier = Modifier.fillMaxWidth())
+                        SmartGroupCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            hideOnBlur = hideOnBlur,
+                            fieldFocusMods = { index -> fieldFocusMods(index) }
+                        )
+                    }
+                }
+            }
+
+            // 落款：只留手写体 bobot 词标（Bob 2026-11-07 发来的图，
+            // 同款矢量版 bobot-wordmark.svg 的透明底渲染，1372x632，#a13f04）。
+            // 词标是图片资产（res/drawable/bobot_wordmark.png），不是排版文字；
+            // 联系邮箱已挪进关于区“联系我”一行，这里不再放邮箱。
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.bobot_wordmark),
+                        contentDescription = "bobot",
+                        modifier = Modifier.width(140.dp).aspectRatio(1372f / 632f),
+                        contentScale = ContentScale.Fit
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 设置页分组大卡（2026-11-23 v3-B）：组标题（宋体 Bold 20sp）+ 组内内容。
+ * 壳与现版卡片同一口径（20dp 圆角、主题 Card 色、8dp 阴影）。
+ */
+@Composable
+private fun SettingsGroupCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = modifier.shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
+    ) {
+        Column {
+            Text(
+                text = title,
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.Bold,
+                fontSize = AILauncherType.Title.fontSize,
+                letterSpacing = 2.sp,
+                color = AILauncherColors.current.Title,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)
+            )
+            content()
+        }
+    }
+}
+
+/** 桌面组：版本（检查更新 + 加入测试计划）+ 默认桌面。 */
+@Composable
+private fun DesktopGroupCard(modifier: Modifier = Modifier) {
+    SettingsGroupCard(modifier = modifier, title = "桌面") {
+        SettingsGroupSubLabel("版本")
+        VersionSectionBody()
+        SettingsGroupSubLabel("默认桌面")
+        DefaultDesktopSectionBody()
+    }
+}
+
+/** 智能组：智能（来源 + 大模型）+ 关于（分享给朋友 + 联系我）。 */
+@Composable
+private fun SmartGroupCard(
+    modifier: Modifier = Modifier,
+    hideOnBlur: Modifier,
+    fieldFocusMods: (Int) -> Modifier
+) {
+    SettingsGroupCard(modifier = modifier, title = "智能") {
+        SmartSectionBody(hideOnBlur = hideOnBlur, fieldFocusMods = fieldFocusMods)
+        SettingsGroupSubLabel("关于")
+        AboutSectionBody()
+    }
+}
+
+/**
+ * 版本区内容（不含卡片壳）：更新行 + 分隔线 + 测试计划行。
+ * 逻辑与文案原样保留（2026-11-23 v3-B：只换壳，行不动）。
+ */
+@Composable
+private fun VersionSectionBody() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
+    var checking by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
+    val dlState by OtaDownloader.state.collectAsState()
+
+    // 下行副文的两个版本号来源：测试轨道复用更新行已有的检查结果
+    // （手动检查的 updateInfo / 每天自动检查的 latestAvailable，
+    // 不为副文单独再发 update.json 请求）；正式轨道读 prefs 里存的
+    // 上次读到的 releases/latest.json，设置页打开时刷新一次
+    // （LaunchedEffect 一次，刷新本身在 Dispatchers.IO、失败全吞）。
+    val latestAvailable by OtaUpdater.latestAvailable.collectAsState()
+    var formalLatest by remember { mutableStateOf(OtaUpdater.formalLatest(context)) }
+    LaunchedEffect(Unit) {
+        OtaUpdater.refreshFormalLatest(context)
+        formalLatest = OtaUpdater.formalLatest(context)
+    }
+
+    val downloading = dlState is OtaDownloader.State.Downloading
+    val dlProgress = (dlState as? OtaDownloader.State.Downloading)?.progress ?: 0f
+    val dlDone = dlState is OtaDownloader.State.Success
+    val dlFailed = dlState is OtaDownloader.State.Failed
+
+    // 已知的新版本（第四十五批，设计 §9）：手动检查的 updateInfo
+    // 优先，每天自动检查的 latestAvailable 兜底——两个来源发现的
+    // 新版都一样：行内显示「有新版本 vX.X.X」＋「去更新」按钮，
+    // 点它直接启动后台下载（同一个 OtaDownloader.start，与升级卡
+    // 里的「去更新」是同一个动作），不弹对话框。
+    val availableInfo = updateInfo ?: latestAvailable
+
+    // 上行文案走纯函数（单测锁死，见 VersionCardTest）：主文六态、
+    // 副文四态，与原来检查更新卡逐字一致。
+    val updateTitle = versionUpdateTitle(
+        checking, downloading, dlDone, dlFailed, availableInfo?.versionName
+    )
+    val updateHint = versionUpdateHint(
+        downloading, dlDone, dlFailed,
+        availableInfo?.versionName, availableInfo?.changelog,
+        BuildConfig.VERSION_NAME
+    )
+
+    val onCardClick: (() -> Unit)? = when {
+        checking || downloading -> null
+        dlDone -> {
+            {
+                // v0.65.6：安装前复查 APK 可解析——坏包不装，转重新下载
+                val apk = OtaUpdater.downloadedApk(context)
+                    ?.takeIf { OtaUpdater.isValidApk(context, it) }
+                if (apk != null) {
+                    if (OtaUpdater.promptInstall(context, apk)) {
+                        OtaUpdater.markInstallPrompted(context)
+                    }
+                } else {
+                    IslandToasts.show("安装包不完整，我再重新下载一次")
+                    OtaDownloader.resetIfNotDownloading()
+                    availableInfo?.let { OtaDownloader.start(context, it) }
+                }
+            }
+        }
+        dlFailed -> {
+            {
+                availableInfo?.let { OtaDownloader.start(context, it) }
+                    ?: run {
+                        checking = true
+                        scope.launch {
+                            when (val r = OtaUpdater.checkForUpdateResult(context)) {
+                                is OtaCheckResult.UpdateAvailable -> {
+                                    updateInfo = r.info
+                                    OtaUpdater.latestAvailable.value = r.info
+                                    OtaDownloader.start(context, r.info)
+                                }
+                                else -> IslandToasts.show("这次没检查成，稍后再试试吧")
+                            }
+                            checking = false
+                        }
+                    }
+            }
+        }
+        availableInfo != null -> {
+            { OtaDownloader.start(context, availableInfo!!) }
+        }
+        else -> {
+            {
+                checking = true
+                scope.launch {
+                    when (val r = OtaUpdater.checkForUpdateResult(context)) {
+                        is OtaCheckResult.UpdateAvailable -> {
+                            // 手动检查发现新版：除了本地 updateInfo，
+                            // 也写进 latestAvailable——升级卡的出现
+                            // 条件就是 latestAvailable 非空（设计 §3，
+                            // 自动检查或手动检查发现了新版都出卡）。
+                            updateInfo = r.info
+                            OtaUpdater.latestAvailable.value = r.info
+                        }
+                        OtaCheckResult.UpToDate ->
+                            IslandToasts.show("你用的已经是最新版本了")
+                        OtaCheckResult.Failed ->
+                            IslandToasts.show("这次没检查成，稍后再试试吧")
+                    }
+                    checking = false
+                }
+            }
+        }
+    }
+
+    // 版本（2026-11-14 Bob 定：检查更新 + 加入测试计划合成一张卡，
+    // 两行、中间一条细分隔线；上行更新各态与点按行为原样保留，
+    // 下行标题 + 动态副文 + 开关）
+    var betaOptIn by remember { mutableStateOf(OtaUpdater.isBetaOptIn(context)) }
+    // 下行副文随开关状态变（betaPlanHint 五种情况）：betaOptIn 是
+    // 屏幕持有的 state，开关一拨副文立刻跟着变；测试轨道取更新行
+    // 已有的检查结果（updateInfo 优先，自动检查的 latestAvailable
+    // 兜底），正式轨道取 prefs 里的上次读数。
+    val betaHint = betaPlanHint(
+        betaOptIn,
+        updateInfo ?: latestAvailable,
+        formalLatest,
+        BuildConfig.VERSION_CODE
+    )
+    Column {
+        // 上行：更新行——点按只走更新（F-10：可点态补 tick；
+        // 检查中/下载中不可点，不震，与视觉禁用一致）
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = onCardClick != null) {
+                    onCardClick?.let { view.tickHaptic(); it() }
+                }
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = updateTitle,
+                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                when {
+                    downloading -> {
+                        LinearProgressIndicator(
+                            progress = { dlProgress },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = downloadStatusText(
+                                dlState as OtaDownloader.State.Downloading
+                            ),
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Hint
+                        )
+                    }
+                    // 下完态：副文已删，行内直接给「安装」按钮（与
+                    // 「去更新」同款 TextButton）；整行可点＋按钮双通道，
+                    // 点按钮与点整行是同一个安装动作（onCardClick）。
+                    dlDone -> TextButton(
+                        onClick = {
+                            view.tickHaptic()
+                            onCardClick?.invoke()
+                        },
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(
+                            text = UPDATE_INSTALL_LABEL,
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Accent
+                        )
+                    }
+                    dlFailed -> {
+                        // 失败态：副文已删，行内直接给「重试」按钮（与
+                        // 「去更新」同款）；标题「这次没下载下来」留作
+                        // 失败原因；「用浏览器自己下载」按钮不动。
+                        TextButton(
+                            onClick = {
+                                view.tickHaptic()
+                                onCardClick?.invoke()
+                            },
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text(
+                                text = UPDATE_RETRY_LABEL,
+                                fontSize = AILauncherType.Footnote.fontSize,
+                                color = AILauncherColors.current.Accent
+                            )
+                        }
+                        val apkUrl = availableInfo?.apkUrl
+                        if (!apkUrl.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(
+                                onClick = {
+                                    view.tickHaptic()
+                                    try {
+                                        val intent = Intent(
+                                            Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(apkUrl)
+                                        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        IslandToasts.show("浏览器打不开，换个方式试试吧")
+                                    }
+                                },
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text(
+                                    text = "用浏览器自己下载",
+                                    fontSize = AILauncherType.Footnote.fontSize,
+                                    color = AILauncherColors.current.Accent
+                                )
+                            }
+                        }
+                    }
+                    availableInfo != null -> Text(
+                        text = updateHint.orEmpty(),
+                        fontSize = AILauncherType.Footnote.fontSize,
+                        color = AILauncherColors.current.Hint,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    else -> Text(
+                        text = updateHint.orEmpty(),
+                        fontSize = AILauncherType.Footnote.fontSize,
+                        color = AILauncherColors.current.Hint
+                    )
+                }
+                // 「去更新」按钮（第四十五批，设计 §9）：查到新版时
+                // 行内直接给一个按钮（不只靠整行点按），点它直接
+                // 启动后台下载（同一个 OtaDownloader.start，与
+                // 升级卡里的「去更新」是同一个动作），不弹对话框。
+                // 只在有新版、且不在检查／下载／下完／失败态时出现。
+                if (availableInfo != null && !checking &&
+                    !downloading && !dlDone && !dlFailed
+                ) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            view.tickHaptic()
+                            OtaDownloader.start(context, availableInfo)
+                        },
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(
+                            text = "去更新",
+                            fontSize = AILauncherType.Footnote.fontSize,
+                            color = AILauncherColors.current.Accent
+                        )
+                    }
+                }
+            }
+        if (checking || downloading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = AILauncherColors.current.Accent
+            )
+        } else if (onCardClick != null) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowForward,
+                // 体检批D ⑨：装饰（整卡可点、状态由卡内文字表达）标装饰语义
+                contentDescription = null,
+                tint = AILauncherColors.current.Hint,
+                modifier = Modifier.semantics { invisibleToUser() }
+            )
+        }
+        }
+        // 两行之间的细分隔线（与应用弹窗同一口径：
+        // HorizontalDivider + 横向 16.dp + 主题 Divider 色）
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            color = AILauncherColors.current.Divider
+        )
+        // 下行：测试计划行——标题 + 动态副文 + 开关（2026-11-14 Bob 定：
+        // 副文随开关状态变，告诉用户升级会升到什么版本，与上行
+        // 「当前版本 vX」同一口径）。点按开关只走测试计划，
+        // 不触发上行更新；下载中开关照常用。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "加入测试计划",
+                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = betaHint,
+                    fontSize = AILauncherType.Footnote.fontSize,
+                    color = AILauncherColors.current.Hint
+                )
+            }
+            Switch(
+                checked = betaOptIn,
+                onCheckedChange = {
+                    // F-10：开关切换 = confirm 档
+                    view.confirmHaptic()
+                    betaOptIn = it
+                    OtaUpdater.setBetaOptIn(context, it)
+                }
+            )
+        }
+    }
+}
+
+/**
+ * 智能区内容（不含卡片壳）：来源行 + 分隔线 + 大模型行 + 短信显著披露弹窗。
+ * 逻辑与文案原样保留（2026-11-23 v3-B：只换壳，行不动）。
+ */
+@Composable
+private fun SmartSectionBody(
+    hideOnBlur: Modifier,
+    fieldFocusMods: (Int) -> Modifier
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    var apiKey by remember { mutableStateOf(LlmConfig.getApiKey(context)) }
+    var baseUrl by remember { mutableStateOf(LlmConfig.getBaseUrl(context)) }
+    var model by remember { mutableStateOf(LlmConfig.getModel(context)) }
+    // v0.68.100（卫生批）：Key 存放形态（加密 / 明文降级）——保存后刷新，卡内明示
+    var keyStatus by remember { mutableStateOf(LlmConfig.keyStorageStatus(context)) }
+    var testing by remember { mutableStateOf(false) }
+    var llmExpanded by remember { mutableStateOf(false) }
+    // 智能区来源卡用户点过的收起态（2026-11-14 Bob 定：4/4 默认收起）；
+    // null 表从未点过——首次接满 4/4 时默认收起。进设置页重读 prefs。
+    var sourcesCollapsedOverride by remember { mutableStateOf(UiPrefs.getSourcesCardCollapsed(context)) }
+
+    fun persist() {
+        LlmConfig.save(context, apiKey, baseUrl, model)
+        keyStatus = LlmConfig.keyStorageStatus(context)
+    }
 
     // 收起「让助手更聪明」时输入区连同焦点一起卸载：主动清焦 + 收键盘，
     // 不把键盘留在已消失的输入框上（F-08：打开子面板/收起时的焦点处理）
@@ -287,956 +791,417 @@ fun SettingsScreen(
             keyboardController?.hide()
         }
     }
-
-    fun persist() {
-        LlmConfig.save(context, apiKey, baseUrl, model)
-        keyStatus = LlmConfig.keyStorageStatus(context)
+    val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
+    val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
+    val smsGranted = rememberPermissionState { isSmsGranted(context) }
+    val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
+    val openSms = rememberSmsPermissionOpener(smsGranted)
+    // 应用运行中去设置里开通知读取权限时系统不回调，在这里重绑监听
+    OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
+    // 消息刚接上就立即重读短信（不然卡片要等下次回桌面才出现）
+    OnGrantedTransition(smsGranted.value) {
+        SmartCardRepository.refreshSms(context, force = true)
     }
-
-    // 设置页底部上滑回主页已删除（Bob 2026-11-03：避免操作干扰，与应用中心同批）
-    LazyColumn(
-        // v0.61.1：和应用中心一样的半透明背景（GlassCardStrong，白 88%）
-        // 430（Bob 2026-11-05 晚亲批“设置页面也参考这个”）：半透明底换成已批纹理背景
-        // （与应用中心同一套，主题感知）。设置页是 NavHost 独立目的地、首页不在其后，
-        // 88% 底透出的只是窗口底色，换不透明纹理不改变任何可见内容，只换背景层。
-        // v0.68.45：contentPadding 归零，各 item 自带 padding——刊头和应用中心像素对齐
-        modifier = Modifier.fillMaxSize()
-            .pageTextureBackground()
-            .statusBarsTopPadding()
-            // 刘海避让（Bob 2026-10-25 全页检查）：横屏下挖孔移到两侧边，行内容
-            // 左右 20dp 顶不到横屏 cutout 侧边 inset；两侧直接吃 displayCutout
-            // inset——竖屏侧边 inset 为 0，竖屏布局零变化。
-            .windowInsetsPadding(
-                WindowInsets.displayCutout.only(
-                    WindowInsetsSides.Start + WindowInsetsSides.End
-                )
-            )
-            .onGloballyPositioned { rootPosInRoot = it.positionInRoot() }
-            .clearIntentFocusOnOutsideTap(
-                focused = { focusedField >= 0 },
-                targetBoundsInHost = {
-                    fieldBounds[focusedField]?.let { b ->
-                        Rect(
-                            b.left - rootPosInRoot.x, b.top - rootPosInRoot.y,
-                            b.right - rootPosInRoot.x, b.bottom - rootPosInRoot.y
-                        )
+    // 显著披露：先讲清要什么、为什么，用户点“同意”后再弹系统框
+    // （设计稿 §5.4：显著披露在第一次请求权限之前）。
+    var disclosure by remember { mutableStateOf<String?>(null) }
+    val connectorStates = remember(
+        calendarGranted.value, notificationGranted.value,
+        smsGranted.value
+    ) { buildConnectorStates(context) }
+    val byKey = connectorStates.associateBy { it.key }
+    // 开关只显示接没接上（第十三批，Bob 2026-11-10 定：双重关全改掉）：
+    // 接上＝权限给了，开关不再是一道关。点没接上的开关 → 走该来源
+    // 既有的接上流程（显著披露/系统框/跳系统设置页，按设计稿 §5.2，
+    // 不另起一套）；用户取消或拒绝，权限仍未授，开关仍为关。
+    // 点已接上的开关 → 跳系统设置页：权限在那里管，关掉回来后开关
+    // 跟着变（断开＝去系统里撤权限，应用内没有撤权限的开关了；
+    // 点按必须有反应，不静默无动作）。
+    fun openConnectorSettings(key: String) {
+        when (key) {
+            UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
+                openNotificationSettings(context)
+            else -> openAppDetailsSettings(context)
+        }
+    }
+    fun connect(key: String) {
+        when (key) {
+            UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
+                openNotificationSettings(context)
+            UiPrefs.CONNECTOR_CALENDAR -> openCalendar()
+            UiPrefs.CONNECTOR_MESSAGE -> disclosure = "sms"
+        }
+    }
+    fun onConnectorToggle(state: ConnectorState, turnOn: Boolean) {
+        if (turnOn) connect(state.key) else openConnectorSettings(state.key)
+    }
+    // 智能等级（设计稿 §2，2026-11-08 Bob 定）：已经接上了 N/4 个来源，
+    // 数字随接上/断开实时变（connectorStates 本就随权限状态重算；第十三批起只认权限）。
+    // 2026-11-14 Bob 定：4 个源全接上时这块默认收起，收起是标题行 +
+    // chevron；没接满时保持展开，方便接上剩下的。收起/展开记下来，下次进
+    // 设置页还按上次的来；4/4 首次接满（从未点过）默认收起。
+    val connectedCount = connectedSourceCount(connectorStates)
+    val allSourcesConnected = connectedCount == SMART_SOURCE_ORDER.size
+    // 合并卡两行可见态走纯函数状态机（smartSectionRowsVisible）：
+    // 来源行收起态与大模型行展开态各算各的，互不干扰。
+    val rowsVisible = smartSectionRowsVisible(
+        allSourcesConnected, sourcesCollapsedOverride, llmExpanded
+    )
+    val sourcesCollapsed = rowsVisible.sourcesCollapsed
+    Column {
+        // 上行：来源——内容、文案、持久化、纯函数、没接满不可点
+        // 全部原样保留，只是从独立卡片收进这张卡的上行；点标题行
+        // 展开/收起只影响本行（2026-11-14 Bob 定，与版本区同款）。
+        Column(modifier = Modifier.padding(16.dp)) {
+            // 展开/收起只认标题行（与「让助手更聪明」卡同一口径 F-08）；
+            // 4/4 时标题行可点（带 tick），没接满时不可点、保持展开。
+            Row(
+                modifier = if (allSourcesConnected) {
+                    Modifier.fillMaxWidth().clickable {
+                        view.tickHaptic()
+                        val next = !sourcesCollapsed
+                        sourcesCollapsedOverride = next
+                        UiPrefs.setSourcesCardCollapsed(context, next)
                     }
+                } else {
+                    Modifier.fillMaxWidth()
                 },
-                focusManager = focusManager,
-                keyboardController = keyboardController
-            ),
-        contentPadding = PaddingValues(0.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            // 杂志刊头——与应用中心完全一致（24.dp 左 / 8.dp 顶 / 32.sp 宋体）。
-            // 返回箭头已删（Bob 2026-11-07）：系统返回键/手势仍经 NavController
-            // 退回（设置页是 NavHost 独立目的地）；键盘由系统返回自行收起，
-            // 不再需要离开前手动清焦。
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 24.dp, end = 16.dp, top = 8.dp)
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "设置",
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = AILauncherType.Display.fontSize,
-                    letterSpacing = 2.sp,
-                    color = AILauncherColors.current.Title
+                    text = "已经接上了 $connectedCount/${SMART_SOURCE_ORDER.size} 个来源",
+                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title,
+                    modifier = Modifier.weight(1f)
+                )
+                if (allSourcesConnected) {
+                    Icon(
+                        if (sourcesCollapsed) Icons.Filled.KeyboardArrowDown
+                        else Icons.Filled.KeyboardArrowUp,
+                        contentDescription = if (sourcesCollapsed) "展开" else "收起",
+                        tint = AILauncherColors.current.Hint
+                    )
+                }
+            }
+            if (!sourcesCollapsed) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { connectedCount / SMART_SOURCE_ORDER.size.toFloat() },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "数据只在这台手机上处理，不会发到别处。",
+                    fontSize = AILauncherType.Footnote.fontSize,
+                    color = AILauncherColors.current.Hint,
+                    lineHeight = 18.sp
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                byKey[UiPrefs.CONNECTOR_MESSAGE]?.let { state ->
+                    SettingsConnectorRow(
+                        state = state,
+                        onToggle = { onConnectorToggle(state, it) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { state ->
+                    SettingsConnectorRow(
+                        state = state,
+                        onToggle = { onConnectorToggle(state, it) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                byKey[UiPrefs.CONNECTOR_CALENDAR]?.let { state ->
+                    SettingsConnectorRow(
+                        state = state,
+                        onToggle = { onConnectorToggle(state, it) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                byKey[UiPrefs.CONNECTOR_PHONE]?.let { state ->
+                    // 电话拨号器开关跟着通知走（设计稿 §2，2026-11-08 Bob 定；
+                    // 第十三批改为跟着通知的权限走）：它的 granted 本就是
+                    // 从通知推导的，直接按 state 渲染；通知没接上时行变灰
+                    // 点不动（isDialerRowEnabled），不能单独开。
+                    SettingsConnectorRow(
+                        state = state,
+                        enabled = isDialerRowEnabled(connectorStates),
+                        onToggle = { onConnectorToggle(state, it) }
+                    )
+                }
+            }
+        }
+        // 两行之间的细分隔线（与版本区同款：HorizontalDivider +
+        // 横向 16.dp + 主题 Divider 色）
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            color = AILauncherColors.current.Divider
+        )
+        // 下行：大模型——内容、文案、纯函数、清焦清键盘行为全部原样
+        // 保留，只是从独立卡片收进这张卡的下行；点标题行展开/收起
+        // 只影响本行（2026-11-14 Bob 定，与版本区同款；大模型卡
+        // 原 2026-11-14 00:11 从助手分区整块挪到智能分区）。
+        Column(modifier = Modifier.padding(16.dp)) {
+            // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
+            // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
+            // F-10：点按补 tick（走 Haptics 两档门面）。
+            // 收起行与来源卡同一口径：标题行 + chevron
+            // （llmCardTitle），完整说明文字只在展开块里。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        view.tickHaptic()
+                        llmExpanded = !llmExpanded
+                    },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = llmCardTitle(llmExpanded, apiKey.isBlank()),
+                        fontSize = AILauncherType.BodyLarge.fontSize,
+                        fontWeight = FontWeight.Medium,
+                        color = AILauncherColors.current.Title
+                    )
+                }
+                Icon(
+                    if (llmExpanded) Icons.Filled.KeyboardArrowUp
+                    else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = if (llmExpanded) "收起" else "展开",
+                    tint = AILauncherColors.current.Hint
                 )
             }
-        }
-
-        // 分区：版本（检查更新 + 加入测试计划）
-        item {
-            SettingsSectionTitle("版本")
-        }
-
-        // 版本
-        item {
-            var checking by remember { mutableStateOf(false) }
-            var updateInfo by remember { mutableStateOf<OtaInfo?>(null) }
-            val dlState by OtaDownloader.state.collectAsState()
-
-            // 下行副文的两个版本号来源：测试轨道复用更新行已有的检查结果
-            // （手动检查的 updateInfo / 每天自动检查的 latestAvailable，
-            // 不为副文单独再发 update.json 请求）；正式轨道读 prefs 里存的
-            // 上次读到的 releases/latest.json，设置页打开时刷新一次
-            // （LaunchedEffect 一次，刷新本身在 Dispatchers.IO、失败全吞）。
-            val latestAvailable by OtaUpdater.latestAvailable.collectAsState()
-            var formalLatest by remember { mutableStateOf(OtaUpdater.formalLatest(context)) }
-            LaunchedEffect(Unit) {
-                OtaUpdater.refreshFormalLatest(context)
-                formalLatest = OtaUpdater.formalLatest(context)
-            }
-
-            val downloading = dlState is OtaDownloader.State.Downloading
-            val dlProgress = (dlState as? OtaDownloader.State.Downloading)?.progress ?: 0f
-            val dlDone = dlState is OtaDownloader.State.Success
-            val dlFailed = dlState is OtaDownloader.State.Failed
-
-            // 已知的新版本（第四十五批，设计 §9）：手动检查的 updateInfo
-            // 优先，每天自动检查的 latestAvailable 兜底——两个来源发现的
-            // 新版都一样：行内显示「有新版本 vX.X.X」＋「去更新」按钮，
-            // 点它直接启动后台下载（同一个 OtaDownloader.start，与升级卡
-            // 里的「去更新」是同一个动作），不弹对话框。
-            val availableInfo = updateInfo ?: latestAvailable
-
-            // 上行文案走纯函数（单测锁死，见 VersionCardTest）：主文六态、
-            // 副文四态，与原来检查更新卡逐字一致。
-            val updateTitle = versionUpdateTitle(
-                checking, downloading, dlDone, dlFailed, availableInfo?.versionName
-            )
-            val updateHint = versionUpdateHint(
-                downloading, dlDone, dlFailed,
-                availableInfo?.versionName, availableInfo?.changelog,
-                BuildConfig.VERSION_NAME
-            )
-
-            val onCardClick: (() -> Unit)? = when {
-                checking || downloading -> null
-                dlDone -> {
-                    {
-                        // v0.65.6：安装前复查 APK 可解析——坏包不装，转重新下载
-                        val apk = OtaUpdater.downloadedApk(context)
-                            ?.takeIf { OtaUpdater.isValidApk(context, it) }
-                        if (apk != null) {
-                            if (OtaUpdater.promptInstall(context, apk)) {
-                                OtaUpdater.markInstallPrompted(context)
-                            }
-                        } else {
-                            IslandToasts.show("安装包不完整，我再重新下载一次")
-                            OtaDownloader.resetIfNotDownloading()
-                            availableInfo?.let { OtaDownloader.start(context, it) }
-                        }
-                    }
-                }
-                dlFailed -> {
-                    {
-                        availableInfo?.let { OtaDownloader.start(context, it) }
-                            ?: run {
-                                checking = true
-                                scope.launch {
-                                    when (val r = OtaUpdater.checkForUpdateResult(context)) {
-                                        is OtaCheckResult.UpdateAvailable -> {
-                                            updateInfo = r.info
-                                            OtaUpdater.latestAvailable.value = r.info
-                                            OtaDownloader.start(context, r.info)
-                                        }
-                                        else -> IslandToasts.show("这次没检查成，稍后再试试吧")
-                                    }
-                                    checking = false
-                                }
-                            }
-                    }
-                }
-                availableInfo != null -> {
-                    { OtaDownloader.start(context, availableInfo!!) }
-                }
-                else -> {
-                    {
-                        checking = true
-                        scope.launch {
-                            when (val r = OtaUpdater.checkForUpdateResult(context)) {
-                                is OtaCheckResult.UpdateAvailable -> {
-                                    // 手动检查发现新版：除了本地 updateInfo，
-                                    // 也写进 latestAvailable——升级卡的出现
-                                    // 条件就是 latestAvailable 非空（设计 §3，
-                                    // 自动检查或手动检查发现了新版都出卡）。
-                                    updateInfo = r.info
-                                    OtaUpdater.latestAvailable.value = r.info
-                                }
-                                OtaCheckResult.UpToDate ->
-                                    IslandToasts.show("你用的已经是最新版本了")
-                                OtaCheckResult.Failed ->
-                                    IslandToasts.show("这次没检查成，稍后再试试吧")
-                            }
-                            checking = false
-                        }
-                    }
-                }
-            }
-
-            // 版本（2026-11-14 Bob 定：检查更新 + 加入测试计划合成一张卡，
-            // 两行、中间一条细分隔线；上行更新各态与点按行为原样保留，
-            // 下行标题 + 动态副文 + 开关）
-            var betaOptIn by remember { mutableStateOf(OtaUpdater.isBetaOptIn(context)) }
-            // 下行副文随开关状态变（betaPlanHint 五种情况）：betaOptIn 是
-            // 屏幕持有的 state，开关一拨副文立刻跟着变；测试轨道取更新行
-            // 已有的检查结果（updateInfo 优先，自动检查的 latestAvailable
-            // 兜底），正式轨道取 prefs 里的上次读数。
-            val betaHint = betaPlanHint(
-                betaOptIn,
-                updateInfo ?: latestAvailable,
-                formalLatest,
-                BuildConfig.VERSION_CODE
-            )
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-            ) {
-                Column {
-                    // 上行：更新行——点按只走更新（F-10：可点态补 tick；
-                    // 检查中/下载中不可点，不震，与视觉禁用一致）
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = onCardClick != null) {
-                                onCardClick?.let { view.tickHaptic(); it() }
-                            }
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = updateTitle,
-                                fontSize = AILauncherType.BodyLarge.fontSize,
-                                fontWeight = FontWeight.Medium,
-                                color = AILauncherColors.current.Title
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            when {
-                                downloading -> {
-                                    LinearProgressIndicator(
-                                        progress = { dlProgress },
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = downloadStatusText(
-                                            dlState as OtaDownloader.State.Downloading
-                                        ),
-                                        fontSize = AILauncherType.Footnote.fontSize,
-                                        color = AILauncherColors.current.Hint
-                                    )
-                                }
-                                // 下完态：副文已删，行内直接给「安装」按钮（与
-                                // 「去更新」同款 TextButton）；整行可点＋按钮双通道，
-                                // 点按钮与点整行是同一个安装动作（onCardClick）。
-                                dlDone -> TextButton(
-                                    onClick = {
-                                        view.tickHaptic()
-                                        onCardClick?.invoke()
-                                    },
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    Text(
-                                        text = UPDATE_INSTALL_LABEL,
-                                        fontSize = AILauncherType.Footnote.fontSize,
-                                        color = AILauncherColors.current.Accent
-                                    )
-                                }
-                                dlFailed -> {
-                                    // 失败态：副文已删，行内直接给「重试」按钮（与
-                                    // 「去更新」同款）；标题「这次没下载下来」留作
-                                    // 失败原因；「用浏览器自己下载」按钮不动。
-                                    TextButton(
-                                        onClick = {
-                                            view.tickHaptic()
-                                            onCardClick?.invoke()
-                                        },
-                                        contentPadding = PaddingValues(0.dp)
-                                    ) {
-                                        Text(
-                                            text = UPDATE_RETRY_LABEL,
-                                            fontSize = AILauncherType.Footnote.fontSize,
-                                            color = AILauncherColors.current.Accent
-                                        )
-                                    }
-                                    val apkUrl = availableInfo?.apkUrl
-                                    if (!apkUrl.isNullOrBlank()) {
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        TextButton(
-                                            onClick = {
-                                                view.tickHaptic()
-                                                try {
-                                                    val intent = Intent(
-                                                        Intent.ACTION_VIEW,
-                                                        android.net.Uri.parse(apkUrl)
-                                                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-                                                    context.startActivity(intent)
-                                                } catch (_: Exception) {
-                                                    IslandToasts.show("浏览器打不开，换个方式试试吧")
-                                                }
-                                            },
-                                            contentPadding = PaddingValues(0.dp)
-                                        ) {
-                                            Text(
-                                                text = "用浏览器自己下载",
-                                                fontSize = AILauncherType.Footnote.fontSize,
-                                                color = AILauncherColors.current.Accent
-                                            )
-                                        }
-                                    }
-                                }
-                                availableInfo != null -> Text(
-                                    text = updateHint.orEmpty(),
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    color = AILauncherColors.current.Hint,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                else -> Text(
-                                    text = updateHint.orEmpty(),
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    color = AILauncherColors.current.Hint
-                                )
-                            }
-                            // 「去更新」按钮（第四十五批，设计 §9）：查到新版时
-                            // 行内直接给一个按钮（不只靠整行点按），点它直接
-                            // 启动后台下载（同一个 OtaDownloader.start，与
-                            // 升级卡里的「去更新」是同一个动作），不弹对话框。
-                            // 只在有新版、且不在检查／下载／下完／失败态时出现。
-                            if (availableInfo != null && !checking &&
-                                !downloading && !dlDone && !dlFailed
-                            ) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                TextButton(
-                                    onClick = {
-                                        view.tickHaptic()
-                                        OtaDownloader.start(context, availableInfo)
-                                    },
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    Text(
-                                        text = "去更新",
-                                        fontSize = AILauncherType.Footnote.fontSize,
-                                        color = AILauncherColors.current.Accent
-                                    )
-                                }
-                            }
-                        }
-                    if (checking || downloading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = AILauncherColors.current.Accent
-                        )
-                    } else if (onCardClick != null) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowForward,
-                            // 体检批D ⑨：装饰（整卡可点、状态由卡内文字表达）标装饰语义
-                            contentDescription = null,
-                            tint = AILauncherColors.current.Hint,
-                            modifier = Modifier.semantics { invisibleToUser() }
-                        )
-                    }
-                }
-                // 两行之间的细分隔线（与应用弹窗同一口径：
-                // HorizontalDivider + 横向 16.dp + 主题 Divider 色）
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = AILauncherColors.current.Divider
-                )
-                // 下行：测试计划行——标题 + 动态副文 + 开关（2026-11-14 Bob 定：
-                // 副文随开关状态变，告诉用户升级会升到什么版本，与上行
-                // 「当前版本 vX」同一口径）。点按开关只走测试计划，
-                // 不触发上行更新；下载中开关照常用。
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "加入测试计划",
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = betaHint,
-                            fontSize = AILauncherType.Footnote.fontSize,
-                            color = AILauncherColors.current.Hint
-                        )
-                    }
-                    Switch(
-                        checked = betaOptIn,
-                        onCheckedChange = {
-                            // F-10：开关切换 = confirm 档
-                            view.confirmHaptic()
-                            betaOptIn = it
-                            OtaUpdater.setBetaOptIn(context, it)
-                        }
-                    )
-                }
-            }
-            }
-        }
-
-        // 分区：智能——智能卡片的四个本机连接器就是智能的源（447 起，设计稿 §2/§5）
-        // 各自单独接、有明确理由、随时可断；数据只在手机上处理，不发到别处。
-        // 2026-11-08 Bob 定：分区改名“智能”（不再叫“提醒来源”），区顶显示
-        // 智能等级（已经接上了 N/4 个来源），行序按源对智能的提升比例（消息>通知>
-        // 日历>电话拨号器）；默认桌面不是源，不在本区（Bob 2026-11-14 07:33：
-        // 独立成区，放在智能之后、关于之前）。
-        // 联系人已取消（第十四批，2026-11-10 Bob 定：不是必须的，不申请
-        // READ_CONTACTS）——没有联系人行，等级按四个源算。
-        // 448 合并：旧“权限”分区并入本分区——日历、通知只出现一次（原两处重叠）。
-        // 引导里跳过/拒绝后随时可补授权的承诺仍由本分区兑现。
-        // 第十三批（Bob 2026-11-10 定：双重关全改掉）：开关只显示接没接上
-        // （接上＝权限给了），点它走授权/去系统设置，不再是一道关；等级只认权限。
-        item {
-            SettingsSectionTitle("智能")
-        }
-
-        item {
-            val calendarGranted = rememberPermissionState { isCalendarGranted(context) }
-            val notificationGranted = rememberPermissionState { isNotificationAccessGranted(context) }
-            val smsGranted = rememberPermissionState { isSmsGranted(context) }
-            val openCalendar = rememberCalendarPermissionOpener(calendarGranted)
-            val openSms = rememberSmsPermissionOpener(smsGranted)
-            // 应用运行中去设置里开通知读取权限时系统不回调，在这里重绑监听
-            OnGrantedTransition(notificationGranted.value) { rebindListener(context) }
-            // 消息刚接上就立即重读短信（不然卡片要等下次回桌面才出现）
-            OnGrantedTransition(smsGranted.value) {
-                SmartCardRepository.refreshSms(context, force = true)
-            }
-            // 显著披露：先讲清要什么、为什么，用户点“同意”后再弹系统框
-            // （设计稿 §5.4：显著披露在第一次请求权限之前）。
-            var disclosure by remember { mutableStateOf<String?>(null) }
-            val connectorStates = remember(
-                calendarGranted.value, notificationGranted.value,
-                smsGranted.value
-            ) { buildConnectorStates(context) }
-            val byKey = connectorStates.associateBy { it.key }
-            // 开关只显示接没接上（第十三批，Bob 2026-11-10 定：双重关全改掉）：
-            // 接上＝权限给了，开关不再是一道关。点没接上的开关 → 走该来源
-            // 既有的接上流程（显著披露/系统框/跳系统设置页，按设计稿 §5.2，
-            // 不另起一套）；用户取消或拒绝，权限仍未授，开关仍为关。
-            // 点已接上的开关 → 跳系统设置页：权限在那里管，关掉回来后开关
-            // 跟着变（断开＝去系统里撤权限，应用内没有撤权限的开关了；
-            // 点按必须有反应，不静默无动作）。
-            fun openConnectorSettings(key: String) {
-                when (key) {
-                    UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
-                        openNotificationSettings(context)
-                    else -> openAppDetailsSettings(context)
-                }
-            }
-            fun connect(key: String) {
-                when (key) {
-                    UiPrefs.CONNECTOR_NOTIFICATION, UiPrefs.CONNECTOR_PHONE ->
-                        openNotificationSettings(context)
-                    UiPrefs.CONNECTOR_CALENDAR -> openCalendar()
-                    UiPrefs.CONNECTOR_MESSAGE -> disclosure = "sms"
-                }
-            }
-            fun onConnectorToggle(state: ConnectorState, turnOn: Boolean) {
-                if (turnOn) connect(state.key) else openConnectorSettings(state.key)
-            }
-            // 智能等级（设计稿 §2，2026-11-08 Bob 定）：已经接上了 N/4 个来源，
-            // 数字随接上/断开实时变（connectorStates 本就随权限状态重算；第十三批起只认权限）。
-            // 2026-11-14 Bob 定：4 个源全接上时这块默认收起，收起是标题行 +
-            // chevron；没接满时保持展开，方便接上剩下的。收起/展开记下来，下次进
-            // 设置页还按上次的来；4/4 首次接满（从未点过）默认收起。
-            val connectedCount = connectedSourceCount(connectorStates)
-            val allSourcesConnected = connectedCount == SMART_SOURCE_ORDER.size
-            // 合并卡两行可见态走纯函数状态机（smartSectionRowsVisible）：
-            // 来源行收起态与大模型行展开态各算各的，互不干扰。
-            val rowsVisible = smartSectionRowsVisible(
-                allSourcesConnected, sourcesCollapsedOverride, llmExpanded
-            )
-            val sourcesCollapsed = rowsVisible.sourcesCollapsed
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-            ) {
-                Column {
-                    // 上行：来源——内容、文案、持久化、纯函数、没接满不可点
-                    // 全部原样保留，只是从独立卡片收进这张卡的上行；点标题行
-                    // 展开/收起只影响本行（2026-11-14 Bob 定，与版本区同款）。
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        // 展开/收起只认标题行（与「让助手更聪明」卡同一口径 F-08）；
-                        // 4/4 时标题行可点（带 tick），没接满时不可点、保持展开。
-                        Row(
-                            modifier = if (allSourcesConnected) {
-                                Modifier.fillMaxWidth().clickable {
-                                    view.tickHaptic()
-                                    val next = !sourcesCollapsed
-                                    sourcesCollapsedOverride = next
-                                    UiPrefs.setSourcesCardCollapsed(context, next)
-                                }
-                            } else {
-                                Modifier.fillMaxWidth()
-                            },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "已经接上了 $connectedCount/${SMART_SOURCE_ORDER.size} 个来源",
-                                fontSize = AILauncherType.BodyLarge.fontSize,
-                                fontWeight = FontWeight.Medium,
-                                color = AILauncherColors.current.Title,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (allSourcesConnected) {
-                                Icon(
-                                    if (sourcesCollapsed) Icons.Filled.KeyboardArrowDown
-                                    else Icons.Filled.KeyboardArrowUp,
-                                    contentDescription = if (sourcesCollapsed) "展开" else "收起",
-                                    tint = AILauncherColors.current.Hint
-                                )
-                            }
-                        }
-                        if (!sourcesCollapsed) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            LinearProgressIndicator(
-                                progress = { connectedCount / SMART_SOURCE_ORDER.size.toFloat() },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "数据只在这台手机上处理，不会发到别处。",
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                lineHeight = 18.sp
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            byKey[UiPrefs.CONNECTOR_MESSAGE]?.let { state ->
-                                SettingsConnectorRow(
-                                    state = state,
-                                    onToggle = { onConnectorToggle(state, it) }
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(16.dp))
-                            byKey[UiPrefs.CONNECTOR_NOTIFICATION]?.let { state ->
-                                SettingsConnectorRow(
-                                    state = state,
-                                    onToggle = { onConnectorToggle(state, it) }
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(16.dp))
-                            byKey[UiPrefs.CONNECTOR_CALENDAR]?.let { state ->
-                                SettingsConnectorRow(
-                                    state = state,
-                                    onToggle = { onConnectorToggle(state, it) }
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(16.dp))
-                            byKey[UiPrefs.CONNECTOR_PHONE]?.let { state ->
-                                // 电话拨号器开关跟着通知走（设计稿 §2，2026-11-08 Bob 定；
-                                // 第十三批改为跟着通知的权限走）：它的 granted 本就是
-                                // 从通知推导的，直接按 state 渲染；通知没接上时行变灰
-                                // 点不动（isDialerRowEnabled），不能单独开。
-                                SettingsConnectorRow(
-                                    state = state,
-                                    enabled = isDialerRowEnabled(connectorStates),
-                                    onToggle = { onConnectorToggle(state, it) }
-                                )
-                            }
-                        }
-                    }
-                    // 两行之间的细分隔线（与版本区同款：HorizontalDivider +
-                    // 横向 16.dp + 主题 Divider 色）
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = AILauncherColors.current.Divider
-                    )
-                    // 下行：大模型——内容、文案、纯函数、清焦清键盘行为全部原样
-                    // 保留，只是从独立卡片收进这张卡的下行；点标题行展开/收起
-                    // 只影响本行（2026-11-14 Bob 定，与版本区同款；大模型卡
-                    // 原 2026-11-14 00:11 从助手分区整块挪到智能分区）。
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        // F-08：展开/收起只认标题行——此前整卡 clickable，编辑中点到
-                        // 卡片空白区就把输入区连同焦点一起卸载，打断编辑上下文。
-                        // F-10：点按补 tick（走 Haptics 两档门面）。
-                        // 收起行与来源卡同一口径：标题行 + chevron
-                        // （llmCardTitle），完整说明文字只在展开块里。
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    view.tickHaptic()
-                                    llmExpanded = !llmExpanded
-                                },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = llmCardTitle(llmExpanded, apiKey.isBlank()),
-                                    fontSize = AILauncherType.BodyLarge.fontSize,
-                                    fontWeight = FontWeight.Medium,
-                                    color = AILauncherColors.current.Title
-                                )
-                            }
-                            Icon(
-                                if (llmExpanded) Icons.Filled.KeyboardArrowUp
-                                else Icons.Filled.KeyboardArrowDown,
-                                contentDescription = if (llmExpanded) "收起" else "展开",
-                                tint = AILauncherColors.current.Hint
-                            )
-                        }
-                        if (llmExpanded) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = apiKey,
-                                onValueChange = { apiKey = it; persist() },
-                                label = { Text("大模型密钥") },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            TextButton(
-                                onClick = {
-                                    view.tickHaptic()
-                                    val web = Intent(Intent.ACTION_VIEW).apply {
-                                        data = android.net.Uri.parse("https://platform.deepseek.com/api_keys")
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    runCatching { context.startActivity(web) }
-                                        .onFailure { IslandToasts.show("没有可用的浏览器") }
-                                },
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text(
-                                    text = "去 DeepSeek 开放平台注册 / 查看 Key",
-                                    fontSize = AILauncherType.Caption.fontSize,
-                                    color = AILauncherColors.current.Accent
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = baseUrl,
-                                onValueChange = { baseUrl = it; persist() },
-                                label = { Text("服务器地址") },
-                                placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = model,
-                                onValueChange = { model = it; persist() },
-                                label = { Text("用哪个模型") },
-                                placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = {
-                                    if (testing) return@Button
-                                    // F-10：主按钮 = confirm 档
-                                    view.confirmHaptic()
-                                    persist()
-                                    if (apiKey.isBlank()) {
-                                        IslandToasts.show("先把大模型密钥填上吧")
-                                        return@Button
-                                    }
-                                    testing = true
-                                    scope.launch {
-                                        val err = LlmConnectionTester.testConnection(
-                                            baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
-                                            apiKey,
-                                            model.ifBlank { LlmConfig.DEFAULT_MODEL }
-                                        )
-                                        testing = false
-                                        IslandToasts.show(err ?: "连上了，没问题")
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
-                            ) {
-                                Text(if (testing) "正在试，稍等一下" else "试试能不能连上")
-                            }
-                            // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
-                            // 明文降级时醒目提示 + 给得出下一步，不再静默回退
-                            // 加密态不说话（正常态无消息就是好消息）；只在明文降级
-                            // 时醒目提示 + 给得出下一步（文案审计第 1 批）。
-                            if (keyStatus.mode == LlmKeyStore.StorageMode.PLAIN_FALLBACK) Column(
-                                modifier = Modifier.padding(top = 8.dp)
-                            ) {
-                                Text(
-                                    text = "出了点问题，你的密钥现在没加上保护就存着了",
-                                    fontSize = AILauncherType.Footnote.fontSize,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                Text(
-                                    text = "重启手机后再回到这里，我会再试一次给它加上保护；" +
-                                        "还不行的话，就删掉重新粘贴保存一次。",
-                                    fontSize = AILauncherType.Caption.fontSize,
-                                    color = AILauncherColors.current.Hint,
-                                    lineHeight = 17.sp,
-                                    modifier = Modifier.padding(top = 8.dp)
-                                )
-                            }
-                        }
-
-                    }
-                }
-            }
-            if (disclosure == "sms") {
-                AlertDialog(
-                    onDismissRequest = { disclosure = null },
-                    title = {
-                        Text(
-                            text = "让我读读你的短信",
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title
-                        )
-                    },
-                    text = {
-                        Text(
-                            text = "我要读短信里的账单和体检预约提醒。只看最近 7 天的短信，只找账单和预约这两类，看完不留原文，也不会发到别处。",
-                            fontSize = AILauncherType.Body.fontSize,
-                            color = AILauncherColors.current.Body
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { disclosure = null; openSms() }) {
-                            Text(
-                                text = "同意",
-                                fontSize = AILauncherType.Callout.fontSize,
-                                color = AILauncherColors.current.Accent,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { disclosure = null }) {
-                            Text(
-                                text = "取消",
-                                fontSize = AILauncherType.Callout.fontSize,
-                                color = AILauncherColors.current.Hint
-                            )
-                        }
-                    }
-                )
-            }
-        }
-
-        // 分区：默认桌面（Bob 2026-11-14 07:33）：从智能分区搬出来独立成区，
-        // 只放这一行，放在智能之后、关于之前。行本身不动（无开关，只有状态＋去设置）。
-        item {
-            SettingsSectionTitle("默认桌面")
-        }
-
-        item {
-            val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.padding(horizontal = 24.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    SettingsPermissionRow(
-                        title = "默认桌面",
-                        granted = defaultGranted.value,
-                        doneText = "已经设为默认",
-                        todoText = "还没设为默认",
-                        actionText = "去设置",
-                        onOpen = { openHomeSettings(context) }
-                    )
-                }
-            }
-        }
-
-        // 分区：关于——落款
-        item {
-            SettingsSectionTitle("关于")
-        }
-
-        // 未读跳转日志（Bob 2026-11-11 21:59：删质检、加日志）：点开看
-        // 最近点按记录（只读）+ 分享。只加这一行，放在“关于”区——
-        // 版本/智能/默认桌面都是功能区，关于是唯一收杂项的区；474 删掉的
-        // 诊断区不重建；落款词标仍在最末尾。
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier
-                    .padding(horizontal = 24.dp)
-                    .shadow(
-                        8.dp,
-                        RoundedCornerShape(20.dp),
-                        spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f)
-                    ),
-                onClick = {
-                    view.tickHaptic()
-                    onOpenJumpLog()
-                }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "未读打开记录",
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title,
-                            lineHeight = 22.sp
-                        )
-                    }
-                    Icon(
-                        Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = AILauncherColors.current.Hint,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-        }
-
-        // 崩溃记录（正式版审计 ②-1）：冷启动 toast 承诺的入口——
-        // 闪退过几次、为什么闪退，都记在这里；点开看全文、可分享、可清空。
-        // 放在“关于”区“未读打开记录”旁边，同样的只读列表入口。
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier
-                    .padding(horizontal = 24.dp)
-                    .shadow(
-                        8.dp,
-                        RoundedCornerShape(20.dp),
-                        spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f)
-                    ),
-                onClick = {
-                    view.tickHaptic()
-                    onOpenCrashLog()
-                }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "崩溃记录",
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title,
-                            lineHeight = 22.sp
-                        )
-                        // 2026-11-15 精炼：整句说明删掉，只留状态——有未看
-                        // 的记录才显示条数，没有就不显示第二行。
-                        if (crashUnreadCount > 0) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "$crashUnreadCount 条还没看过",
-                                fontSize = AILauncherType.Footnote.fontSize,
-                                color = AILauncherColors.current.Hint,
-                                lineHeight = 18.sp
-                            )
-                        }
-                    }
-                    Icon(
-                        Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = AILauncherColors.current.Hint,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-        }
-
-        // 分享给朋友（2026-11-18 Bob 定放关于区）：点开调系统分享面板，
-        // 分享下载页地址（不是 APK 直链）。行只有标题＋右箭头，无描述句
-        //（532 后设置行只剩标题＋状态的口径）。
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AILauncherColors.current.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier
-                    .padding(horizontal = 24.dp)
-                    .shadow(
-                        8.dp,
-                        RoundedCornerShape(20.dp),
-                        spotColor = AILauncherColors.current.Title.copy(alpha = 0.08f)
-                    ),
-                onClick = {
-                    view.tickHaptic()
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "AI 桌面")
-                        putExtra(Intent.EXTRA_TEXT, shareFriendsText())
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    runCatching {
-                        context.startActivity(Intent.createChooser(send, "分享给朋友"))
-                    }.onFailure { IslandToasts.show("没有能分享的应用，换个方式试试吧") }
-                }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "分享给朋友",
-                            fontSize = AILauncherType.BodyLarge.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = AILauncherColors.current.Title,
-                            lineHeight = 22.sp
-                        )
-                    }
-                    Icon(
-                        Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = AILauncherColors.current.Hint,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-        }
-
-        // 落款 / 关于：手写体 bobot 词标（Bob 2026-11-07 发来的图，
-        // 同款矢量版 bobot-wordmark.svg 的透明底渲染，1372x632，#a13f04）
-        // + 联系邮箱。词标是图片资产（res/drawable/bobot_wordmark.png），
-        // 不是排版文字；点邮箱打开邮件应用写信。
-        item {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.bobot_wordmark),
-                    contentDescription = "bobot",
-                    modifier = Modifier.width(140.dp).aspectRatio(1372f / 632f),
-                    contentScale = ContentScale.Fit
+            if (llmExpanded) {
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it; persist() },
+                    label = { Text("大模型密钥") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(0))
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 TextButton(
                     onClick = {
                         view.tickHaptic()
-                        val mail = Intent(Intent.ACTION_SENDTO).apply {
-                            data = android.net.Uri.parse("mailto:0xbobot@gmail.com")
+                        val web = Intent(Intent.ACTION_VIEW).apply {
+                            data = android.net.Uri.parse("https://platform.deepseek.com/api_keys")
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
-                        runCatching { context.startActivity(mail) }
-                            .onFailure { IslandToasts.show("没有能发邮件的应用，换个方式试试吧") }
+                        runCatching { context.startActivity(web) }
+                            .onFailure { IslandToasts.show("没有可用的浏览器") }
                     },
                     contentPadding = PaddingValues(0.dp)
                 ) {
                     Text(
-                        text = "0xbobot@gmail.com",
-                        fontSize = AILauncherType.Body.fontSize,
+                        text = "去 DeepSeek 开放平台注册 / 查看 Key",
+                        fontSize = AILauncherType.Caption.fontSize,
                         color = AILauncherColors.current.Accent
                     )
                 }
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it; persist() },
+                    label = { Text("服务器地址") },
+                    placeholder = { Text(LlmConfig.DEFAULT_BASE_URL, color = AILauncherColors.current.Hint) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(1))
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it; persist() },
+                    label = { Text("用哪个模型") },
+                    placeholder = { Text(LlmConfig.DEFAULT_MODEL, color = AILauncherColors.current.Hint) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().then(hideOnBlur).then(fieldFocusMods(2))
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        if (testing) return@Button
+                        // F-10：主按钮 = confirm 档
+                        view.confirmHaptic()
+                        persist()
+                        if (apiKey.isBlank()) {
+                            IslandToasts.show("先把大模型密钥填上吧")
+                            return@Button
+                        }
+                        testing = true
+                        scope.launch {
+                            val err = LlmConnectionTester.testConnection(
+                                baseUrl.ifBlank { LlmConfig.DEFAULT_BASE_URL },
+                                apiKey,
+                                model.ifBlank { LlmConfig.DEFAULT_MODEL }
+                            )
+                            testing = false
+                            IslandToasts.show(err ?: "连上了，没问题")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AILauncherColors.current.Accent)
+                ) {
+                    Text(if (testing) "正在试，稍等一下" else "试试能不能连上")
+                }
+                // v0.68.100（卫生批）：Key 存放形态明示——加密时低调一行，
+                // 明文降级时醒目提示 + 给得出下一步，不再静默回退
+                // 加密态不说话（正常态无消息就是好消息）；只在明文降级
+                // 时醒目提示 + 给得出下一步（文案审计第 1 批）。
+                if (keyStatus.mode == LlmKeyStore.StorageMode.PLAIN_FALLBACK) Column(
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Text(
+                        text = "出了点问题，你的密钥现在没加上保护就存着了",
+                        fontSize = AILauncherType.Footnote.fontSize,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Text(
+                        text = "重启手机后再回到这里，我会再试一次给它加上保护；" +
+                            "还不行的话，就删掉重新粘贴保存一次。",
+                        fontSize = AILauncherType.Caption.fontSize,
+                        color = AILauncherColors.current.Hint,
+                        lineHeight = 17.sp,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
             }
-        }
 
+        }
+    }
+    if (disclosure == "sms") {
+        AlertDialog(
+            onDismissRequest = { disclosure = null },
+            title = {
+                Text(
+                    text = "让我读读你的短信",
+                    fontSize = AILauncherType.BodyLarge.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = AILauncherColors.current.Title
+                )
+            },
+            text = {
+                Text(
+                    text = "我要读短信里的账单和体检预约提醒。只看最近 7 天的短信，只找账单和预约这两类，看完不留原文，也不会发到别处。",
+                    fontSize = AILauncherType.Body.fontSize,
+                    color = AILauncherColors.current.Body
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { disclosure = null; openSms() }) {
+                    Text(
+                        text = "同意",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Accent,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { disclosure = null }) {
+                    Text(
+                        text = "取消",
+                        fontSize = AILauncherType.Callout.fontSize,
+                        color = AILauncherColors.current.Hint
+                    )
+                }
+            }
+        )
     }
 }
+
+/** 默认桌面行（不含卡片壳）：状态＋去设置。 */
+@Composable
+private fun DefaultDesktopSectionBody() {
+    val context = LocalContext.current
+    val defaultGranted = rememberPermissionState { isDefaultLauncher(context) }
+    Column(modifier = Modifier.padding(16.dp)) {
+        SettingsPermissionRow(
+            title = "默认桌面",
+            granted = defaultGranted.value,
+            doneText = "已经设为默认",
+            todoText = "还没设为默认",
+            actionText = "去设置",
+            onOpen = { openHomeSettings(context) }
+        )
+    }
+}
+
+/** 联系邮箱（2026-11-23 Bob 定：关于区“联系我”行的收件地址）。 */
+const val CONTACT_EMAIL = "0xbobot@gmail.com"
+
+/**
+ * 关于区内容（不含卡片壳）：分享给朋友 + 联系我（2026-11-23 Bob 定）。
+ * 未读打开记录与崩溃记录已删（Bob：中间产物）。行只有标题＋右箭头。
+ */
+@Composable
+private fun AboutSectionBody() {
+    val context = LocalContext.current
+    val view = LocalView.current
+    AboutRow(
+        title = "分享给朋友",
+        onClick = {
+            view.tickHaptic()
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "AI 桌面")
+                putExtra(Intent.EXTRA_TEXT, shareFriendsText())
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                context.startActivity(Intent.createChooser(send, "分享给朋友"))
+            }.onFailure { IslandToasts.show("没有能分享的应用，换个方式试试吧") }
+        }
+    )
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 16.dp),
+        color = AILauncherColors.current.Divider
+    )
+    AboutRow(
+        title = "联系我",
+        onClick = {
+            view.tickHaptic()
+            val mail = Intent(Intent.ACTION_SENDTO).apply {
+                data = android.net.Uri.parse("mailto:$CONTACT_EMAIL")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching { context.startActivity(mail) }
+                .onFailure { IslandToasts.show("没有能发邮件的应用，换个方式试试吧") }
+        }
+    )
+}
+
+/** 关于区一行：标题＋右箭头（与分享给朋友行同一口径）。 */
+@Composable
+private fun AboutRow(title: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = AILauncherType.BodyLarge.fontSize,
+                fontWeight = FontWeight.Medium,
+                color = AILauncherColors.current.Title,
+                lineHeight = 22.sp
+            )
+        }
+        Icon(
+            Icons.Filled.ChevronRight,
+            contentDescription = null,
+            tint = AILauncherColors.current.Hint,
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}
+
 
 /**
  * 设置 → 智能区的一行（447；2026-11-08 Bob 真机 verdict 后改：每行只有一个控件）。
@@ -1308,18 +1273,15 @@ private fun SettingsConnectorRow(
     }
 }
 
-/**
- * 设置页分区标题：与应用中心分区标题同一语言
- * （Footnote / Medium / Hint / 左右 24dp）。
- */
+/** 组内小标签（版本 / 默认桌面 / 关于）：v3-B 稿同一口径（13sp 半粗、标题色）。 */
 @Composable
-private fun SettingsSectionTitle(text: String) {
+private fun SettingsGroupSubLabel(text: String) {
     Text(
         text = text,
         fontSize = AILauncherType.Footnote.fontSize,
-        fontWeight = FontWeight.Medium,
-        color = AILauncherColors.current.Hint,
-        modifier = Modifier.padding(horizontal = 24.dp)
+        fontWeight = FontWeight.SemiBold,
+        color = AILauncherColors.current.Title,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)
     )
 }
 

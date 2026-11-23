@@ -70,13 +70,8 @@ class MainActivity : FragmentActivity() {
         // v0.15 宠物整理员：初始化（亲密度持久化等）
         // v0.68.56（Bob）：B 方案——灵动岛系统通知通道初始化
         com.bobot.ailauncher.ui.island.IslandToasts.init(this)
-        // v0.68.100（卫生批）：有没看过的崩溃记录时，冷启动非模态提示一次
-        // （每个新崩溃至多提示一次，在设置页看过后不再提）。
-        // 恢复屏出现时不弹 toast——恢复屏本身已说明崩溃，两处提示会打架。
-        if (!showRecoveryAtStart) {
-            com.bobot.ailauncher.data.CrashLog.promptTextIfNeeded(this)
-                ?.let { IslandToasts.show(it) }
-        }
+        // 崩溃记录查看屏已删（Bob 2026-11-23：中间产物），冷启动不再提示
+        // 去设置页看崩溃记录——数据仍在 files/crashes/，供冒烟与恢复屏使用。
         // v0.40.0：低电量守护不再用前台服务（常驻通知打扰），BatteryGuard 跟随进程生命周期；
         // LauncherApp.onCreate 已注册，这里幂等再保一次
         com.bobot.ailauncher.data.BatteryGuard.ensureStarted(this)
