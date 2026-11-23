@@ -65,6 +65,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.invisibleToUser
@@ -211,6 +212,13 @@ fun AppCenterLandscape(
     val hapticView = LocalView.current
     // 初始从 A 开始（Bob 2026-10-24）：首次进入且非搜索态时定位一次。
     var initialScrollDone by remember { mutableStateOf(false) }
+    // 悬浮搜索直达输入态（Bob 2026-11-24 早：点搜索要直接进入输入态，
+    // 不是显示搜索栏）：悬浮搜索钮点按后滚回顶部，再把本请求位置 true，
+    // 搜索框（IntentCapsuleField 的 requestFocusOnMount，见下）随之聚焦、
+    // 键盘弹起。一次性的请求位，聚焦确认或顶栏收起后即清掉（见下两处
+    // LaunchedEffect），避免下次顶栏重现时误弹键盘。
+    var fabFocusRequest by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     Box(
         modifier = modifier
@@ -265,6 +273,21 @@ fun AppCenterLandscape(
                     }
                 }
             }
+        }
+        // 悬浮搜索请求位收尾（配合上文 fabFocusRequest，一次性）：
+        // ① 聚焦确认后清掉——searchFocused 由 AppCenter.kt 的
+        // onSearchFocusChanged 回流，变 true 即聚焦已落定，顺手显式弹一
+        // 次键盘（聚焦本身一般已自动弹起，show() 是补一道、幂等）；
+        // ② 顶栏收起时清掉——聚焦落定前用户又滚走了，请求作废，下次顶栏
+        // 重现不再误弹键盘。两处都不用固定延时，时序由状态驱动。
+        LaunchedEffect(searchFocused) {
+            if (searchFocused) {
+                fabFocusRequest = false
+                keyboardController?.show()
+            }
+        }
+        LaunchedEffect(isTopBarCollapsed) {
+            if (isTopBarCollapsed) fabFocusRequest = false
         }
 
         // 初始落在网格顶（Bob 2026-10-24 + 字母 B 方案 + 未读组）：
@@ -385,6 +408,11 @@ fun AppCenterLandscape(
                         showKeywords = false,
                         fusedBackground = true,
                         onFocusChanged = onSearchFocusChanged,
+                        // 悬浮搜索直达输入态（Bob 2026-11-24）：requestFocusOnMount
+                        // 是组件自带的口子（按 prop 本身 key 的 LaunchedEffect，
+                        // 翻 true 就发聚焦请求，键盘随聚焦弹起）；这里只接悬浮
+                        // 搜索钮的一次性请求位，平时 false，点搜索栏本身的行为不动。
+                        requestFocusOnMount = fabFocusRequest,
                         modifier = Modifier
                             .weight(1f)
                             .widthIn(max = 440.dp)
@@ -728,8 +756,9 @@ fun AppCenterLandscape(
                     }
                 }
                 // 悬浮按钮（搜索滚动收起后）：搜索在最右（贴 rail）、齿轮在其左。
-                // 点搜索 → 滚回顶部、搜索栏重新展开；点齿轮 → 设置；滚回顶部 →
-                // 顶部栏回来、悬浮按钮消失。
+                // 点搜索 → 滚回顶部、搜索栏重新展开并直接进入输入态（聚焦＋弹
+                // 键盘，不用再点搜索栏）；点齿轮 → 设置；滚回顶部 → 顶部栏回来、
+                // 悬浮按钮消失。
                 if (isTopBarCollapsed) {
                     Row(
                         modifier = Modifier
@@ -746,7 +775,17 @@ fun AppCenterLandscape(
                             icon = Icons.Filled.Search,
                             description = "搜索",
                             testTag = "appcenter_fab_search",
-                            onClick = { scope.launch { gridState.animateScrollToItem(0) } }
+                            onClick = {
+                                scope.launch {
+                                    // 先滚回顶部（保留 569 行为），再把聚焦请求位置
+                                    // true——顶栏是滚到顶后才重新出现的，请求位翻
+                                    // true 时搜索框已在树里，组件内的
+                                    // LaunchedEffect(requestFocusOnMount) 随即发聚
+                                    // 焦请求（见 IntentCapsuleField），不用固定延时。
+                                    gridState.animateScrollToItem(0)
+                                    fabFocusRequest = true
+                                }
+                            }
                         )
                     }
                 }
