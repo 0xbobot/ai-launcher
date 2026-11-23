@@ -1213,12 +1213,22 @@ shot "glass-default"
 glass_home_alive() {
   # 477 后首页无胶囊、无常驻宠物：只验「进程存活 + 首页可达」——
   # pidof 在场，且首页 dump 里 cover_hero 或 dock_panel 任一在场。
+  # uiautomator dump 偶发回空（base 腿 2026-11-22 实证：glass_alive.xml
+  # 0 字节、其后段落正常跑，属 dump 瞬时抖动非应用死亡）：空文件重拉，
+  # 最多 3 次；先删本地旧文件，免得拉到 stale 内容误判。
   adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1 || true
   sleep 1
   adb shell input keyevent KEYCODE_HOME > /dev/null 2>&1 || true
   sleep 2
-  adb shell uiautomator dump /sdcard/glass_alive.xml > /dev/null 2>&1 || true
-  adb pull /sdcard/glass_alive.xml "$OUT/glass_alive.xml" > /dev/null 2>&1 || true
+  local TRY
+  for TRY in 1 2 3; do
+    rm -f "$OUT/glass_alive.xml"
+    adb shell uiautomator dump /sdcard/glass_alive.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/glass_alive.xml "$OUT/glass_alive.xml" > /dev/null 2>&1 || true
+    if [ -s "$OUT/glass_alive.xml" ]; then break; fi
+    log "glass: alive dump empty on try $TRY, retrying"
+    sleep 2
+  done
   [ -f "$OUT/glass_alive.xml" ] && { grep -q 'resource-id="cover_hero"' "$OUT/glass_alive.xml" || grep -q 'resource-id="dock_panel"' "$OUT/glass_alive.xml"; }
 }
 glass_bubble_shot() {
@@ -2127,6 +2137,8 @@ if [ -n "$A_LBL" ]; then
   if [ "$A_OK" = "1" ]; then band_open_d3 || true; fi
   B_HIT=""
   B_FOLD_EXPANDED=0
+  B_REOPENED=0
+  B_ENTRY_FAILED=0
   # 滚步因腿而异（base 约 170px/次；tabletport 实证仅约 40–85px/次，
   # 10 次只把 TMobile 从 1920 带到 1548、距中屏底边 1269 还差 279px）：
   # 放宽到 20 次；每 5 次记一条进度。另：A 成功后 B 重进应用中心会把
@@ -2134,6 +2146,19 @@ if [ -n "$A_LBL" ]; then
   # chevron 收起态 content-desc“展开不常用”就点一次组头展开再找（与 A / fresh_find_label 同口径）。
   for TRY in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     band_dump ac_band_b
+    if [ ! -f "$OUT/ac_band_b.xml" ] || ! grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band_b.xml" 2>/dev/null; then
+      # 不在应用中心（B 入口上滑被首页引导卡吃掉，small 腿 2026-11-22
+      # 实证：band_open_d3 三次重试未进，B 随后在首页上盲滑 20 次假 FAIL）：
+      # 只重进一次；重进后仍不在就跳过本段、不计 FAIL（A 循环同款恢复口径）。
+      if [ "$B_REOPENED" = "0" ]; then
+        B_REOPENED=1
+        log "band-tap: B not in App Center on try $TRY, re-opening once"
+        band_open_d3 || true
+        continue
+      fi
+      B_ENTRY_FAILED=1
+      break
+    fi
     if [ -f "$OUT/ac_band_b.xml" ] && grep -q 'resource-id="appcenter_settings"' "$OUT/ac_band_b.xml"; then
       # 同名 label 有多份拷贝时按 zone 取在中屏区的那份（见 band_pick_row 注）。
       B=$(band_pick_row "$OUT/ac_band_b.xml" "$MID_LO" "$MID_HI" "$(( SCR_W - 100 ))" "$A_LBL" || true)
@@ -2155,6 +2180,19 @@ if [ -n "$A_LBL" ]; then
           fi
         fi
       fi
+      # 目标行已在中屏区之上（A 点按刚用过该应用、它被提进主列表顶部，
+      # api29 腿 2026-11-22 实证：Search 重进后在 y=858、中屏区 [912,1488]
+      # 之上）：前滚只会把它越推越远，改回滚把它带下来；回滚后重拉再判。
+      B_POS=$(band_label_bounds "$OUT/ac_band_b.xml" "$A_LBL" || true)
+      if [ -n "$B_POS" ]; then
+        B_POS_Y=$(echo "$B_POS" | cut -d' ' -f2)
+        if [ "$B_POS_Y" -lt "$MID_LO" ]; then
+          log "band-tap: B '$A_LBL' above mid zone (y=$B_POS_Y < $MID_LO), scrolling back"
+          band_swipe_back
+          sleep 1
+          continue
+        fi
+      fi
     fi
     if [ $((TRY % 5)) -eq 0 ]; then log "band-tap: B try $TRY, '$A_LBL' not in mid zone yet"; fi
     band_swipe_fwd
@@ -2165,28 +2203,47 @@ if [ -n "$A_LBL" ]; then
     log "band-tap: B mid tap same app '$A_LBL' at ($BX,$BY)"
     if band_tap_row "$OUT/ac_band_b.xml" "$A_LBL" "$BX" "$BY"; then ok "appcenter-band-sameapp-mid"; else ng "appcenter-band-sameapp-mid"; fi
   else
+    if [ "$B_ENTRY_FAILED" = "1" ]; then
+      log "band-tap: B could not re-enter App Center after retry - segment skipped (not counted)"
+    else
     # 结构性不可达（2026-11-11 r6：tabletport 实证——B 20 次后 TMobile 停在
     # 1548，与 r4 的 10 次终局位置完全相同，列表已到滚动尽头、中屏底边 1269
     # 仍差 279px）：终局 dump 里若见得到该 label，再滑一次重拉——位置不动
     # 即已到尽头、且中心仍在中屏区之下时跳过不计 FAIL；否则仍判 FAIL。
+    # 对称情形（r11）：行卡在中屏区之上、回滚一次仍不动，即已到列表顶端，
+    # 同款结构性不可达，跳过不计 FAIL。
     B_SKIP=0
     B1=$(band_label_bounds "$OUT/ac_band_b.xml" "$A_LBL" || true)
     if [ -n "$B1" ]; then
       B1Y=$(echo "$B1" | cut -d' ' -f2)
-      band_swipe_fwd; sleep 1
-      band_dump ac_band_b2
-      B2=$(band_label_bounds "$OUT/ac_band_b2.xml" "$A_LBL" || true)
-      if [ -n "$B2" ]; then
-        B2Y=$(echo "$B2" | cut -d' ' -f2)
-        if [ "$B1Y" = "$B2Y" ] && [ "$B2Y" -gt "$MID_HI" ]; then
-          B_SKIP=1
-          log "band-tap: '$A_LBL' stuck at y=$B2Y after extra swipe (mid bottom=$MID_HI) - list at scroll end, segment skipped (not counted)"
+      if [ "$B1Y" -lt "$MID_LO" ]; then
+        band_swipe_back; sleep 1
+        band_dump ac_band_b2
+        B2=$(band_label_bounds "$OUT/ac_band_b2.xml" "$A_LBL" || true)
+        if [ -n "$B2" ]; then
+          B2Y=$(echo "$B2" | cut -d' ' -f2)
+          if [ "$B1Y" = "$B2Y" ] && [ "$B2Y" -lt "$MID_LO" ]; then
+            B_SKIP=1
+            log "band-tap: '$A_LBL' stuck at y=$B2Y after extra back swipe (mid top=$MID_LO) - list at top end, segment skipped (not counted)"
+          fi
+        fi
+      else
+        band_swipe_fwd; sleep 1
+        band_dump ac_band_b2
+        B2=$(band_label_bounds "$OUT/ac_band_b2.xml" "$A_LBL" || true)
+        if [ -n "$B2" ]; then
+          B2Y=$(echo "$B2" | cut -d' ' -f2)
+          if [ "$B1Y" = "$B2Y" ] && [ "$B2Y" -gt "$MID_HI" ]; then
+            B_SKIP=1
+            log "band-tap: '$A_LBL' stuck at y=$B2Y after extra swipe (mid bottom=$MID_HI) - list at scroll end, segment skipped (not counted)"
+          fi
         fi
       fi
     fi
     if [ "$B_SKIP" = "0" ]; then
       log "band-tap: same app '$A_LBL' never reached mid zone"
       ng "appcenter-band-sameapp-mid"
+    fi
     fi
   fi
   fi
