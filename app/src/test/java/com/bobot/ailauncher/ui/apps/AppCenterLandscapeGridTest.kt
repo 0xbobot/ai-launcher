@@ -30,6 +30,12 @@ class AppCenterLandscapeGridTest {
     }
 
     @Test
+    fun `apps per row is seven`() {
+        assertEquals(7, LandscapeGridAppsPerRow)
+        assertEquals(LandscapeGridColumns - 1, LandscapeGridAppsPerRow)
+    }
+
+    @Test
     fun `build items order is favorites then unread then letters`() {
         val wechat = app("com.tencent.mm", "微信")
         val chatgpt = app("com.openai.chatgpt", "ChatGPT")
@@ -45,20 +51,65 @@ class AppCenterLandscapeGridTest {
             hiddenApps = emptyList(),
             hiddenUnlocked = false
         )
+        // 每组一行 8 格：标签 1 格＋应用＋空占位格垫满，下一组另起一行。
+        // 收藏行：标签＋2 应用＋5 空；未读行：标签＋1 未读＋6 空；
+        // A 行：标签＋2 应用＋5 空；B 行：标签＋1 应用＋6 空。
+        val e = LandscapeGridItem.EmptyCell
         assertEquals(
             listOf(
-                LandscapeGridItem.Header("收藏"),
+                LandscapeGridItem.GroupLabel("收藏"),
                 LandscapeGridItem.App(wechat),
-                LandscapeGridItem.App(chatgpt),
-                LandscapeGridItem.App(douyin, isUnread = true, isFirstUnread = true),
-                LandscapeGridItem.Header("A"),
+                LandscapeGridItem.App(chatgpt), e, e, e, e, e,
+                LandscapeGridItem.GroupLabel("未读"),
+                LandscapeGridItem.App(douyin, isUnread = true, isFirstUnread = true), e, e, e, e, e, e,
+                LandscapeGridItem.GroupLabel("A"),
                 LandscapeGridItem.App(douyin),
-                LandscapeGridItem.App(bobot),
-                LandscapeGridItem.Header("B"),
-                LandscapeGridItem.App(bilibili)
+                LandscapeGridItem.App(bobot), e, e, e, e, e,
+                LandscapeGridItem.GroupLabel("B"),
+                LandscapeGridItem.App(bilibili), e, e, e, e, e, e
             ),
             items
         )
+    }
+
+    @Test
+    fun `unread section has its own header before the unread apps`() {
+        val douyin = app("com.ss.android.ugc.aweme", "抖音")
+        val items = buildLandscapeGridItems(
+            favApps = emptyList(),
+            unreadApps = listOf(douyin),
+            azGroups = emptyList(),
+            foldApps = emptyList(),
+            foldExpanded = false,
+            hiddenApps = emptyList(),
+            hiddenUnlocked = false
+        )
+        assertEquals(LandscapeGridItem.GroupLabel("未读"), items[0])
+        assertEquals(
+            LandscapeGridItem.App(douyin, isUnread = true, isFirstUnread = true),
+            items[1]
+        )
+    }
+
+    @Test
+    fun `group with eight apps wraps the eighth under the app column`() {
+        val apps = (1..8).map { app("com.example.g$it", "G 应用 $it") }
+        val items = buildLandscapeGridItems(
+            favApps = emptyList(),
+            unreadApps = emptyList(),
+            azGroups = listOf('G' to apps),
+            foldApps = emptyList(),
+            foldExpanded = false,
+            hiddenApps = emptyList(),
+            hiddenUnlocked = false
+        )
+        // 第 1 行：标签＋7 个应用（8 格满）；第 2 行：空占位格＋第 8 个应用＋6 个垫格。
+        assertEquals(16, items.size)
+        assertEquals(LandscapeGridItem.GroupLabel("G"), items[0])
+        (1..7).forEach { i -> assertEquals(LandscapeGridItem.App(apps[i - 1]), items[i]) }
+        assertEquals(LandscapeGridItem.EmptyCell, items[8])
+        assertEquals(LandscapeGridItem.App(apps[7]), items[9])
+        (10..15).forEach { i -> assertEquals(LandscapeGridItem.EmptyCell, items[i]) }
     }
 
     @Test
@@ -107,10 +158,11 @@ class AppCenterLandscapeGridTest {
             hiddenApps = emptyList(),
             hiddenUnlocked = false
         )
+        val e = LandscapeGridItem.EmptyCell
         assertEquals(
             listOf(
-                LandscapeGridItem.Header("A"),
-                LandscapeGridItem.App(a),
+                LandscapeGridItem.GroupLabel("A"),
+                LandscapeGridItem.App(a), e, e, e, e, e, e,
                 LandscapeGridItem.FoldHeader(2, true),
                 LandscapeGridItem.App(a),
                 LandscapeGridItem.App(b),
@@ -192,13 +244,15 @@ class AppCenterLandscapeGridTest {
             hiddenApps = listOf(hidden),
             hiddenUnlocked = false
         )
-        // 0:收藏头 1:微信 2:抖音(未读) 3:A头 4:抖音 5:bobot 6:不常用头 7:隐藏头 8:锁定占位
+        // 0:收藏标签 1:微信 2-7:空占位 8:未读标签 9:抖音(未读) 10-15:空占位
+        // 16:A 标签 17:抖音 18:bobot 19-23:空占位 24:不常用头 25:隐藏头 26:锁定占位
         val anchors = landscapeGridAnchors(items)
         assertEquals(0, anchors.fav)
-        assertEquals(2, anchors.unread)
-        assertEquals(mapOf('A' to 3), anchors.letters)
-        assertEquals(6, anchors.fold)
-        assertEquals(7, anchors.hidden)
+        assertEquals(9, anchors.unread)
+        assertEquals(8, anchors.unreadHeader)
+        assertEquals(mapOf('A' to 16), anchors.letters)
+        assertEquals(24, anchors.fold)
+        assertEquals(25, anchors.hidden)
     }
 
     @Test
@@ -216,6 +270,7 @@ class AppCenterLandscapeGridTest {
         val anchors = landscapeGridAnchors(items)
         assertNull(anchors.fav)
         assertNull(anchors.unread)
+        assertNull(anchors.unreadHeader)
         assertEquals(mapOf('A' to 0), anchors.letters)
         assertNull(anchors.fold)
         assertNull(anchors.hidden)

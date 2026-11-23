@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
@@ -214,9 +218,9 @@ fun AppCenterLandscape(
     ) {
 
         // 横屏图标网格（Bob 2026-11-22 定稿，设计稿
-        // appcenter-landscape-grid-draft）：项表扁平化——组头占满一行、
-        // 应用一格一个，纵向滚；列流（LazyRow + FlowItem）已删。
-        // 顺序不变：收藏 → 未读（无区头，464 已删）→ A–Z → 不常用 → 已隐藏。
+        // appcenter-landscape-grid-draft）：项表扁平化——分组标签占一格、
+        // 与该组第一行应用同行，应用一格一个，纵向滚；列流（LazyRow + FlowItem）已删。
+        // 顺序不变：收藏 → 未读（独立分栏，带“未读”标签）→ A–Z → 不常用 → 已隐藏。
         // 未读组首个应用带 isFirstUnread，格子里挂幽灵信封标记（465，
         // 网格里没有行首空位，改叠在图标左上角，见 LandscapeGridAppCell）。
         val gridItems = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, unreadApps) {
@@ -230,11 +234,36 @@ fun AppCenterLandscape(
                 hiddenUnlocked = hiddenUnlocked
             )
         }
-        // rail 点按 / 初始定位的锚点下标（组头与未读首项在项表里的位置）。
+        // rail 点按 / 初始定位的锚点下标（组标签与未读首项在项表里的位置）。
         val anchors = remember(gridItems) { landscapeGridAnchors(gridItems) }
         fun scrollToLetter(letter: Char) {
             anchors.letters[letter]?.let { idx ->
                 scope.launch { gridState.animateScrollToItem(idx) }
+            }
+        }
+        // 搜索滚动收起（Bob 2026-11-23）：网格往下滚出初始落点行后，顶部
+        // 搜索栏收起，右上角出现悬浮搜索/齿轮按钮；滚回初始落点行（或之
+        // 上）时顶部栏回来。初始落点行＝未读组标签行（有未读时）或首字母
+        // 组标签行——首次进入定位到该行，顶部栏不收起，避免一进来就误判
+        // 为已滚动。搜索态不收起（搜索栏本身就是输入处）。
+        val collapseOffsetPx = with(density) { 8.dp.toPx() }
+        val homeRowStart = anchors.unreadHeader
+            ?: ('A'..'Z').firstNotNullOfOrNull { anchors.letters[it] }
+        val isTopBarCollapsed by remember(homeRowStart, searchResults) {
+            derivedStateOf {
+                if (searchResults != null) {
+                    false
+                } else {
+                    val home = homeRowStart
+                    if (home == null) {
+                        gridState.firstVisibleItemIndex > 0 ||
+                            gridState.firstVisibleItemScrollOffset > 0
+                    } else {
+                        gridState.firstVisibleItemIndex > home ||
+                            (gridState.firstVisibleItemIndex == home &&
+                                gridState.firstVisibleItemScrollOffset > collapseOffsetPx)
+                    }
+                }
             }
         }
 
@@ -276,9 +305,10 @@ fun AppCenterLandscape(
             // 左：内容区（容器级挖孔偏移：header 行与列区同量右移，
             // 无挖孔时偏移为 0，布局不变）
             Column(modifier = Modifier.weight(1f).fillMaxHeight().padding(start = contentStartExtra)) {
-                // 紧凑顶栏
+                // 紧凑顶栏（搜索滚动收起：网格往下滚出初始落点行后收起，滚回即回来）
                 // v0.68.82（横屏专项第 1 项）：顶栏下滑 → D2（阈值沿用竖屏 80dp）
                 val headThreshPx = with(density) { 80.dp.toPx() }
+                if (!isTopBarCollapsed) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -421,6 +451,7 @@ fun AppCenterLandscape(
                         }
                     }
                 }
+                }
                 val results = searchResults
                 if (results != null) {
                     // 横屏图标网格（Bob 2026-11-22 定稿）：搜索态用同一网格
@@ -501,14 +532,19 @@ fun AppCenterLandscape(
                         }
                     }
                 } else {
-                // 横屏图标网格（Bob 2026-11-22 定稿）：纵向网格，组头占满
-                // 一行、应用一格一个；列流（横滚多列）已删。
+                // 横屏图标网格（Bob 2026-11-22 定稿）：纵向网格，分组标签
+                // 占一格、与该组第一行应用同行，应用一格一个；列流（横滚多列）已删。
+                // 悬浮按钮叠在网格右上角（搜索滚动收起后才出现），故网格包进 Box。
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(LandscapeGridColumns),
                     state = gridState,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
+                        .fillMaxSize()
                         .padding(horizontal = 16.dp),
                     contentPadding = PaddingValues(bottom = 96.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -516,9 +552,36 @@ fun AppCenterLandscape(
                 ) {
                     gridItems.forEachIndexed { index, gridItem ->
                         when (gridItem) {
+                            is LandscapeGridItem.GroupLabel -> {
+                                // 内联分组标签（Bob 2026-11-23）：占一格，与该组第一行
+                                // 应用同行；标签在左列、应用在右。字母用刊头宋体
+                                // （Display），词组（收藏/未读）用区块标题（Title）。
+                                // 顶部留 12dp，与首行图标中心对齐。
+                                item(key = "label:${gridItem.title}") {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.TopCenter
+                                    ) {
+                                        val isLetter = gridItem.title.length == 1 &&
+                                            gridItem.title[0] in 'A'..'Z'
+                                        Text(
+                                            text = gridItem.title,
+                                            style = if (isLetter) AILauncherType.Display
+                                                else AILauncherType.Title,
+                                            color = AILauncherColors.current.Title,
+                                            modifier = Modifier.padding(top = 12.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            is LandscapeGridItem.EmptyCell -> {
+                                // 空占位格：续行行首与组末垫行，不画内容。
+                                item(key = "empty:$index") {
+                                    Spacer(modifier = Modifier.fillMaxWidth())
+                                }
+                            }
                             is LandscapeGridItem.Header -> {
-                                // 横屏图标网格：小字组头贴在每组网格上方，
-                                // 不再占一整行 60dp（稿子里的 26px 组头）。
+                                // 全宽组头（只剩“已隐藏的应用”）：占满一行。
                                 item(key = "header:${gridItem.title}", span = { GridItemSpan(maxLineSpan) }) {
                                     Text(
                                         text = gridItem.title,
@@ -663,6 +726,30 @@ fun AppCenterLandscape(
                             }
                         }
                     }
+                }
+                // 悬浮按钮（搜索滚动收起后）：搜索在最右（贴 rail）、齿轮在其左。
+                // 点搜索 → 滚回顶部、搜索栏重新展开；点齿轮 → 设置；滚回顶部 →
+                // 顶部栏回来、悬浮按钮消失。
+                if (isTopBarCollapsed) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 8.dp, end = 16.dp)
+                    ) {
+                        LandscapeFabButton(
+                            icon = Icons.Filled.Settings,
+                            description = "设置",
+                            testTag = "appcenter_fab_settings",
+                            onClick = { onOpenSettings() }
+                        )
+                        LandscapeFabButton(
+                            icon = Icons.Filled.Search,
+                            description = "搜索",
+                            testTag = "appcenter_fab_search",
+                            onClick = { scope.launch { gridState.animateScrollToItem(0) } }
+                        )
+                    }
+                }
                 }
                 }  // else 非搜索态结束
                 Spacer(modifier = Modifier.height(8.dp))
@@ -811,16 +898,25 @@ fun AppCenterLandscape(
 // 不是 56dp——56dp 一屏只能放约 16 个，到不了 20+）。
 internal val LandscapeGridColumns = 8
 internal val LandscapeGridIconSize = 50.dp
+/** 内联分组标签占 1 格，应用每行 7 格（标签列＋应用列＝8 列）。 */
+internal val LandscapeGridAppsPerRow = 7
 
 /**
  * 横屏图标网格的扁平项模型（纯数据，LazyVerticalGrid 直接渲染）。
- * 组头（收藏 / 字母 / 已隐藏的应用）与不常用行、组底行、锁定占位
- * 占满一行（GridItemSpan(maxLineSpan)），应用一格一个。
- * 未读组无区头（464 已删）：未读应用直接续在收藏之后，首个带
- * isFirstUnread（格子里挂幽灵信封标记，465）。
+ * 分组标签（收藏 / 未读 / A–Z）是内联标签：占一格，与该组第一行应用
+ * 同行（标签在左列、应用在右，每行 7 格，换行时应用对齐在应用列下）；
+ * 每组末行用空占位格垫满，下一组另起一行。不常用行、组底行、锁定占位
+ * 与已隐藏组头仍占满一行（GridItemSpan(maxLineSpan)）。
+ * 未读组有自己的“未读”标签（Bob 2026-11-23，独立分栏）：未读应用
+ * 不论是否固定都移出收藏，只在未读组出现（数据单一归属调用点已保证）；
+ * 首个带 isFirstUnread（格子里挂幽灵信封标记，465）。
  */
 internal sealed interface LandscapeGridItem {
-    /** 小字组头（收藏 / 字母 / 已隐藏的应用） */
+    /** 内联分组标签（收藏 / 未读 / A–Z）：占一格，与该组第一行应用同行 */
+    data class GroupLabel(val title: String) : LandscapeGridItem
+    /** 空占位格：续行行首（应用对齐在应用列下）与组末垫行（下一组另起一行） */
+    data object EmptyCell : LandscapeGridItem
+    /** 全宽组头（只剩“已隐藏的应用”）：占满一行 */
     data class Header(val title: String) : LandscapeGridItem
     /** 一个应用格子；isUnread=未读组成员（角标＋点按直达＋取消） */
     data class App(
@@ -838,8 +934,11 @@ internal sealed interface LandscapeGridItem {
 
 /**
  * 横屏图标网格的项表（纯函数，可单测）。顺序不变：收藏 → 未读
- * （无区头）→ A–Z → 不常用 → 已隐藏。未读应用同时在字母组里
- * 出现一次（与旧列流同款——未读组是前置的快捷区，不是归属迁移）。
+ * （独立分栏，带“未读”标签）→ A–Z → 不常用 → 已隐藏。未读应用
+ * 只在未读组出现（调用点已保证单一归属：dockApps 与 azGroups 都
+ * 排除了未读；这里只渲染传入的列表，不再过滤）。
+ * 每组标签与第一行应用同行（标签 1 格＋应用每行 7 格），续行行首
+ * 用空占位格、末行垫满，下一组另起一行。
  */
 internal fun buildLandscapeGridItems(
     favApps: List<AppInfo>,
@@ -851,18 +950,34 @@ internal fun buildLandscapeGridItems(
     hiddenUnlocked: Boolean
 ): List<LandscapeGridItem> {
     val items = mutableListOf<LandscapeGridItem>()
-    if (favApps.isNotEmpty()) {
-        items.add(LandscapeGridItem.Header("收藏"))
-        favApps.forEach { items.add(LandscapeGridItem.App(it)) }
-    }
-    if (unreadApps.isNotEmpty()) {
-        unreadApps.forEachIndexed { index, app ->
-            items.add(LandscapeGridItem.App(app, isUnread = true, isFirstUnread = index == 0))
+    // 一组（标签＋应用）：标签占首行首格，应用每行 7 格；续行行首补空
+    // 占位格（应用对齐在应用列下），末行垫满（下一组另起一行）。
+    fun emitLabeledGroup(label: String, apps: List<AppInfo>, isUnread: Boolean = false) {
+        if (apps.isEmpty()) return
+        items.add(LandscapeGridItem.GroupLabel(label))
+        apps.chunked(LandscapeGridAppsPerRow).forEachIndexed { chunkIndex, chunk ->
+            if (chunkIndex > 0) items.add(LandscapeGridItem.EmptyCell)
+            chunk.forEachIndexed { index, app ->
+                val globalIndex = chunkIndex * LandscapeGridAppsPerRow + index
+                items.add(
+                    LandscapeGridItem.App(
+                        app,
+                        isUnread = isUnread,
+                        isFirstUnread = isUnread && globalIndex == 0
+                    )
+                )
+            }
+        }
+        val remainder = apps.size % LandscapeGridAppsPerRow
+        val lastRowApps = if (remainder == 0) LandscapeGridAppsPerRow else remainder
+        repeat(LandscapeGridColumns - 1 - lastRowApps) {
+            items.add(LandscapeGridItem.EmptyCell)
         }
     }
+    emitLabeledGroup("收藏", favApps)
+    emitLabeledGroup("未读", unreadApps, isUnread = true)
     azGroups.forEach { (letter, apps) ->
-        items.add(LandscapeGridItem.Header(letter.toString()))
-        apps.forEach { items.add(LandscapeGridItem.App(it)) }
+        emitLabeledGroup(letter.toString(), apps)
     }
     if (foldApps.isNotEmpty()) {
         items.add(LandscapeGridItem.FoldHeader(foldApps.size, foldExpanded))
@@ -886,27 +1001,33 @@ internal fun buildLandscapeGridItems(
 internal data class LandscapeGridAnchors(
     val fav: Int?,
     val unread: Int?,
+    /** 未读组标签下标：顶部栏收起的“家”行锚点（初始落点行）。 */
+    val unreadHeader: Int?,
     val letters: Map<Char, Int>,
     val fold: Int?,
     val hidden: Int?
 )
 
-/** 从项表算锚点（纯函数，可单测）：字母取组头首次出现的位置。 */
+/** 从项表算锚点（纯函数，可单测）：字母取组标签首次出现的位置。 */
 internal fun landscapeGridAnchors(items: List<LandscapeGridItem>): LandscapeGridAnchors {
     var fav: Int? = null
     var unread: Int? = null
+    var unreadHeader: Int? = null
     val letters = mutableMapOf<Char, Int>()
     var fold: Int? = null
     var hidden: Int? = null
     items.forEachIndexed { index, item ->
         when (item) {
-            is LandscapeGridItem.Header -> {
+            is LandscapeGridItem.GroupLabel -> {
                 if (item.title == "收藏" && fav == null) fav = index
-                if (item.title == "已隐藏的应用" && hidden == null) hidden = index
+                if (item.title == "未读" && unreadHeader == null) unreadHeader = index
                 val letter = item.title.singleOrNull()
                 if (letter != null && letter in 'A'..'Z' && !letters.containsKey(letter)) {
                     letters[letter] = index
                 }
+            }
+            is LandscapeGridItem.Header -> {
+                if (item.title == "已隐藏的应用" && hidden == null) hidden = index
             }
             is LandscapeGridItem.App -> {
                 if (item.isUnread && unread == null) unread = index
@@ -917,7 +1038,39 @@ internal fun landscapeGridAnchors(items: List<LandscapeGridItem>): LandscapeGrid
             else -> {}
         }
     }
-    return LandscapeGridAnchors(fav, unread, letters, fold, hidden)
+    return LandscapeGridAnchors(fav, unread, unreadHeader, letters, fold, hidden)
+}
+
+/**
+ * 横屏悬浮圆钮（搜索滚动收起后）：40dp 白色圆盘＋20dp 图标，48dp 触控面
+ * （IconButton）；阴影 4dp。搜索在最右（贴 rail）、齿轮在其左。
+ */
+@Composable
+private fun LandscapeFabButton(
+    icon: ImageVector,
+    description: String,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.testTag(testTag)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .shadow(4.dp, CircleShape)
+                .background(AILauncherColors.current.Card, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = description,
+                tint = AILauncherColors.current.Title,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
 }
 
 /**
