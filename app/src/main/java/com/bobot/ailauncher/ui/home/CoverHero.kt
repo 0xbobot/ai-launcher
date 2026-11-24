@@ -1,5 +1,6 @@
 package com.bobot.ailauncher.ui.home
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import com.bobot.ailauncher.data.SmartCard
 import com.bobot.ailauncher.data.SmartCardKind
 import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.theme.AILauncherType
@@ -139,7 +141,14 @@ fun CoverHeroGiantTime(
     Box(
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+                .animateContentSize(
+                    animationSpec = androidx.compose.animation.core.tween(
+                        mt.Medium, easing = mt.Easing
+                    )
+                )
+        ) {
             // 刊头日期
             androidx.compose.animation.AnimatedVisibility(
                 visible = entered,
@@ -306,11 +315,14 @@ private fun daypartLine(nowMs: Long): String {
 
 /**
  * 安静版 hero 判定（纯函数，供单测，Stageshow 桌面优化 3.1）：
- * 顶卡是一览卡（讲今天）时 hero 安静——不讲简报标题、不讲时段句；
- * 顶卡是其他卡或无卡时 hero 完整。
+ * 叠层里有一览卡（讲今天）时 hero 安静——不讲简报标题、不讲时段句，
+ * 卡片当主角；没有一览卡（其他卡或无卡）时 hero 完整。
+ * 2026-11-24（轮播跳动根因修）：只认卡片列表的组成，不认轮播瞬时
+ * 下标——下标每 5 秒一变，hero 不能跟着每 5 秒翻一次高度（单帧
+ * 111px 上跳）；列表组成只在窗口边界／摘卡时变，hero 才跟着变。
  */
-internal fun isQuietHero(topKind: SmartCardKind?): Boolean =
-    topKind == SmartCardKind.DAY_OVERVIEW
+internal fun isQuietHero(cards: List<SmartCard>): Boolean =
+    cards.any { it.kind == SmartCardKind.DAY_OVERVIEW }
 internal fun daypartForHour(hour: Int): String = when (hour) {
     in 6..11 -> ""
     in 12..17 -> "适合出门走走"
