@@ -104,9 +104,10 @@ fun PetZone(
     // 同目标透明度 0.3、同 180ms tween（MainScreen.kt v0.68.32 Dock 口径）。
     // 本区含杂志 hero 与智能卡片叠层，一起淡化；Dock 自有同款实现，不在本处。
     blindActive: Boolean = false,
-    // Stageshow 桌面优化 3.1（Bob 2026-11-21 定）：安静版 hero——顶卡是
-    // 一览卡时 hero 不讲简报标题、不讲时段句，卡片当主角；由 HomeScreen
-    // 按顶卡 kind 算好传进来（isQuietHero）。
+    // Stageshow 桌面优化 3.1（Bob 2026-11-21 定）：安静版 hero——叠层
+    // 里有一览卡时 hero 不讲简报标题、不讲时段句，卡片当主角；由
+    // HomeScreen 按叠层卡片列表算好传进来（isQuietHero）。2026-11-24
+    // 轮播跳动根因修：不认轮播瞬时下标（见 CoverHero.kt isQuietHero）。
     quietHero: Boolean = false
 ) {
     // v0.30.0：天气微动作

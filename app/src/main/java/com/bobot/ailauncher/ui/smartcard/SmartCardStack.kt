@@ -108,6 +108,7 @@ import com.bobot.ailauncher.ui.glass.GlassSurfaceKind
 import com.bobot.ailauncher.ui.glass.LocalGlassBackdrop
 import com.bobot.ailauncher.ui.glass.glassSurface
 import com.bobot.ailauncher.ui.home.TrackedText
+import com.bobot.ailauncher.ui.home.isQuietHero
 import com.bobot.ailauncher.ui.island.IslandToasts
 import com.bobot.ailauncher.ui.rememberNowMillis
 import com.bobot.ailauncher.ui.settings.OnGrantedTransition
@@ -183,9 +184,11 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun SmartCardStackHost(
-    // Stageshow 桌面优化 3.1（Bob 2026-11-21 定）：顶卡 kind 上报——HomeScreen
-    // 按它决定 hero 安静／完整（顶卡是一览卡时安静）；null＝叠层无卡。
-    onTopCardKindChange: (SmartCardKind?) -> Unit = {}
+    // Stageshow 桌面优化 3.1（Bob 2026-11-21 定）：hero 安静／完整上报——
+    // 叠层里有一览卡时安静，没有时完整。
+    // 2026-11-24（轮播跳动根因修）：只报列表派生的安静与否，不报轮播
+    // 瞬时下标对应的顶卡——下标每 5 秒一变，hero 跟着翻高度会单帧跳变。
+    onQuietHeroChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val cards by SmartCardRepository.cards.collectAsState()
@@ -220,6 +223,14 @@ fun SmartCardStackHost(
                 }
             }
         }
+    }
+    // 轮播跳动根因修（2026-11-24）：hero 安静只认叠层卡片列表的组成——
+    // displayCards 是真卡列表（引导卡不含一览卡、空栈也是空列表，两种
+    // 情况 isQuietHero 都是 false，hero 完整）。LaunchedEffect 只在安静
+    // 与否翻转时上报，不跟轮播下标走。
+    val quietHero = isQuietHero(displayCards)
+    LaunchedEffect(quietHero) {
+        onQuietHeroChange(quietHero)
     }
     val nowMillis by rememberNowMillis()
     // 冷启动就绪门（第二十五批，问题 1）：卡片叠层不在空桌面上单独先蹦——
@@ -439,8 +450,6 @@ fun SmartCardStackHost(
             SmartCardStack(
                 cards = displayCards,
                 prepById = prepById,
-                // Stageshow 桌面优化 3.1：上报当前卡 kind，供 hero 决定安静／完整。
-                onCurrentCardChange = { card -> onTopCardKindChange(card?.kind) },
                 onAction = { card ->
                     if (card.action is SmartCardAction.CreateReminder) {
                         // 预约卡“帮我建提醒”：已授权直接建；没授权先说明（显著披露）
@@ -599,11 +608,6 @@ fun SmartCardStackHost(
             seenGuideVersion = GUIDE_VERSION
         }
     }
-    // Stageshow 桌面优化 3.1：叠层空下来（无真卡、无引导卡）时顶卡 kind 为空，
-    // hero 恢复完整版，不留上次的顶卡 kind。
-    LaunchedEffect(displayed.isEmpty()) {
-        if (displayed.isEmpty()) onTopCardKindChange(null)
-    }
     if (guideSeen || displayed.isEmpty()) return
     // 就绪门（第二十五批，问题 1）：引导卡也一样——首帧没齐之前不画，
     // 不在空桌面上单独先蹦；门开后与 Dock 一起出现。
@@ -611,8 +615,6 @@ fun SmartCardStackHost(
         SmartCardStack(
             cards = displayed,
             connectedFeedbacks = connectedFeedbacks,
-            // Stageshow 桌面优化 3.1：引导卡顶卡 kind 是 GUIDE，hero 完整。
-            onCurrentCardChange = { card -> onTopCardKindChange(card?.kind) },
             onAction = { card ->
                 val key = (card.action as? SmartCardAction.Connect)?.connectorKey
                     ?: return@SmartCardStack true
@@ -843,9 +845,6 @@ fun SmartCardStack(
     // 大模型准备清单（第十二批）：按卡片 id 的异步结果，覆盖卡片构建时
     // 的 prep（构建时为 null）。没回来就是没有，不贴模板。
     prepById: Map<String, String> = emptyMap(),
-    // Stageshow 桌面优化 3.1（Bob 2026-11-21 定）：当前卡上报——宿主按顶卡
-    // kind 决定 hero 安静／完整（顶卡是一览卡时安静）。null＝无卡。
-    onCurrentCardChange: (SmartCard?) -> Unit = {}
 ) {
     if (cards.isEmpty()) return
     // 轮播下标（第三十三批）：当前卡在轮播里的位置。点圆点跳卡改下标；
@@ -854,10 +853,6 @@ fun SmartCardStack(
     // 到下一张”）。
     var currentIndex by remember { mutableIntStateOf(0) }
     val index = carouselClampIndex(currentIndex, cards.size)
-    // Stageshow 桌面优化 3.1：当前卡变化时上报（下标变／列表变都走这里）。
-    LaunchedEffect(index, cards) {
-        onCurrentCardChange(cards.getOrNull(index))
-    }
     // 点圆点后暂停自动轮换到这个时刻（第三十二批定 8 秒，第三十三批沿用）：
     // 点圆点后安静 8 秒再恢复 5 秒一档。
     var resumeAtMillis by remember { mutableLongStateOf(0L) }

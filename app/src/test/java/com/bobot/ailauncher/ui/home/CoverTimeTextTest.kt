@@ -1,5 +1,7 @@
 package com.bobot.ailauncher.ui.home
 
+import com.bobot.ailauncher.data.SmartCard
+import com.bobot.ailauncher.data.SmartCardAction
 import com.bobot.ailauncher.data.SmartCardKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,17 +52,46 @@ class CoverTimeTextTest {
         assertEquals("好好休息", daypartForHour(23))
     }
 
-    // ---------- isQuietHero（2026-11-21，Stageshow 桌面优化 3.1） ----------
+    // ---------- isQuietHero（2026-11-21，Stageshow 桌面优化 3.1；
+    // 2026-11-24 轮播跳动根因修：只认卡片列表的组成，不认轮播瞬时下标） ----------
+
+    private fun card(kind: SmartCardKind) = SmartCard(
+        id = "t|${kind.name}",
+        kind = kind,
+        sourceLabel = "短信",
+        fact = "fact",
+        prep = null,
+        actionLabel = "动作",
+        sortMs = 100L,
+        deadlineMs = 200L,
+        action = SmartCardAction.SmsThread("95558"),
+        sourceKey = "t|${kind.name}"
+    )
 
     @Test
-    fun `quiet hero only when top card is day overview`() {
-        // 顶卡是一览卡时 hero 安静（不讲简报标题、不讲时段句），卡片当主角；
-        // 其他卡或无卡时 hero 完整。
-        assertTrue(isQuietHero(SmartCardKind.DAY_OVERVIEW))
-        assertFalse(isQuietHero(SmartCardKind.CALENDAR))
-        assertFalse(isQuietHero(SmartCardKind.BILL))
-        assertFalse(isQuietHero(SmartCardKind.MISSED_CALL))
-        assertFalse(isQuietHero(SmartCardKind.GUIDE))
-        assertFalse(isQuietHero(null))
+    fun `quiet hero when stack contains day overview`() {
+        // 叠层里有一览卡时 hero 安静（不讲简报标题、不讲时段句），卡片当主角；
+        // 没有一览卡或无卡时 hero 完整。
+        assertTrue(isQuietHero(listOf(card(SmartCardKind.DAY_OVERVIEW))))
+        assertTrue(isQuietHero(listOf(card(SmartCardKind.UPDATE), card(SmartCardKind.DAY_OVERVIEW))))
+        assertFalse(isQuietHero(listOf(card(SmartCardKind.CALENDAR))))
+        assertFalse(isQuietHero(listOf(card(SmartCardKind.BILL))))
+        assertFalse(isQuietHero(listOf(card(SmartCardKind.UPDATE), card(SmartCardKind.CALENDAR))))
+        assertFalse(isQuietHero(emptyList()))
+    }
+
+    @Test
+    fun `quiet hero does not depend on carousel index`() {
+        // 轮播跳动根因（2026-11-24）：一览卡在列表里第几张，hero 都安静——
+        // 轮播切卡（下标变）不能翻转 hero 模式，否则 hero 每 5 秒矮一行、
+        // 卡片槽单帧上跳 111px。
+        val overviewFirst = listOf(card(SmartCardKind.DAY_OVERVIEW), card(SmartCardKind.UPDATE))
+        val overviewSecond = listOf(card(SmartCardKind.UPDATE), card(SmartCardKind.DAY_OVERVIEW))
+        assertTrue(isQuietHero(overviewFirst))
+        assertTrue(isQuietHero(overviewSecond))
+        // 没有一览卡时，无论哪张在上面，hero 都完整。
+        val noOverview = listOf(card(SmartCardKind.UPDATE), card(SmartCardKind.CALENDAR))
+        assertFalse(isQuietHero(noOverview))
+        assertFalse(isQuietHero(noOverview.reversed()))
     }
 }
