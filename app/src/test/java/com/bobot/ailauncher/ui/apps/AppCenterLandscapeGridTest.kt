@@ -173,7 +173,7 @@ class AppCenterLandscapeGridTest {
     }
 
     @Test
-    fun `hidden locked shows placeholder instead of apps`() {
+    fun `hidden locked shows inline label and unlock cell`() {
         val h = app("com.example.hidden", "隐藏应用")
         val items = buildLandscapeGridItems(
             favApps = emptyList(),
@@ -184,17 +184,19 @@ class AppCenterLandscapeGridTest {
             hiddenApps = listOf(h),
             hiddenUnlocked = false
         )
+        // 锁定态也和收藏一样内联标签：一行 8 格——标签＋解锁格＋6 个空占位格。
+        val e = LandscapeGridItem.EmptyCell
         assertEquals(
             listOf(
-                LandscapeGridItem.Header("已隐藏的应用"),
-                LandscapeGridItem.LockPlaceholder
+                LandscapeGridItem.GroupLabel("已隐藏"),
+                LandscapeGridItem.UnlockHidden, e, e, e, e, e, e
             ),
             items
         )
     }
 
     @Test
-    fun `hidden unlocked shows apps`() {
+    fun `hidden unlocked shows inline label and apps`() {
         val h = app("com.example.hidden", "隐藏应用")
         val items = buildLandscapeGridItems(
             favApps = emptyList(),
@@ -205,10 +207,12 @@ class AppCenterLandscapeGridTest {
             hiddenApps = listOf(h),
             hiddenUnlocked = true
         )
+        // 解锁态：标签＋1 个应用＋6 个空占位格（和收藏/未读同款垫满口径）。
+        val e = LandscapeGridItem.EmptyCell
         assertEquals(
             listOf(
-                LandscapeGridItem.Header("已隐藏的应用"),
-                LandscapeGridItem.App(h)
+                LandscapeGridItem.GroupLabel("已隐藏"),
+                LandscapeGridItem.App(h), e, e, e, e, e, e
             ),
             items
         )
@@ -245,7 +249,7 @@ class AppCenterLandscapeGridTest {
             hiddenUnlocked = false
         )
         // 0:收藏标签 1:微信 2-7:空占位 8:未读标签 9:抖音(未读) 10-15:空占位
-        // 16:A 标签 17:抖音 18:bobot 19-23:空占位 24:不常用头 25:隐藏头 26:锁定占位
+        // 16:A 标签 17:抖音 18:bobot 19-23:空占位 24:不常用头 25:隐藏标签 26:解锁格 27-32:空占位
         val anchors = landscapeGridAnchors(items)
         assertEquals(0, anchors.fav)
         assertEquals(9, anchors.unread)

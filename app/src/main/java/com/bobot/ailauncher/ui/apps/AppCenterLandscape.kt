@@ -606,21 +606,6 @@ fun AppCenterLandscape(
                                     Spacer(modifier = Modifier.fillMaxWidth())
                                 }
                             }
-                            is LandscapeGridItem.Header -> {
-                                // 全宽组头（只剩“已隐藏的应用”）：占满一行。
-                                item(key = "header:${gridItem.title}", span = { GridItemSpan(maxLineSpan) }) {
-                                    Text(
-                                        text = gridItem.title,
-                                        fontSize = AILauncherType.Callout.fontSize,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 2.sp,
-                                        color = AILauncherColors.current.Title,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
-                                    )
-                                }
-                            }
                             is LandscapeGridItem.FoldHeader -> {
                                 // 横屏图标网格：不常用行占满一行，放在网格最下方
                                 // （稿子里的“不常用 · N 个”＋分隔线，字色弱化）。
@@ -680,45 +665,12 @@ fun AppCenterLandscape(
                                     }
                                 }
                             }
-                            is LandscapeGridItem.LockPlaceholder -> {
-                                // 竖屏同款锁定占位：点按触发指纹/面部解锁；CI 只能
-                                // 验占位渲染，生物识别本身归真机验收。
-                                item(key = "hidden-lock", span = { GridItemSpan(maxLineSpan) }) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .clickable { onUnlockHiddenAppsState.value() }
-                                            .testTag("hidden_locked")
-                                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(AILauncherColors.current.Divider),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Filled.Fingerprint,
-                                                contentDescription = null,
-                                                tint = AILauncherColors.current.Hint,
-                                                modifier = Modifier
-                                                    .size(22.dp)
-                                                    .semantics { invisibleToUser() }
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "解锁查看",
-                                            fontSize = AILauncherType.Callout.fontSize,
-                                            color = AILauncherColors.current.Title,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
+                            is LandscapeGridItem.UnlockHidden -> {
+                                // 隐藏组锁定态第一格「解锁查看」：按应用格样式（50dp 图标区＋下方名字），
+                                // 图标区放指纹图标（竖屏锁定行同款）；点按触发指纹/面部解锁，
+                                // 生物识别本身归真机验收。
+                                item(key = "hidden-unlock") {
+                                    UnlockHiddenCell(onUnlock = { onUnlockHiddenAppsState.value() })
                                 }
                             }
                             is LandscapeGridItem.App -> {
@@ -937,20 +889,20 @@ internal val LandscapeGridAppsPerRow = 7
 
 /**
  * 横屏图标网格的扁平项模型（纯数据，LazyVerticalGrid 直接渲染）。
- * 分组标签（收藏 / 未读 / A–Z）是内联标签：占一格，与该组第一行应用
+ * 分组标签（收藏 / 未读 / A–Z / 已隐藏）是内联标签：占一格，与该组第一行应用
  * 同行（标签在左列、应用在右，每行 7 格，换行时应用对齐在应用列下）；
- * 每组末行用空占位格垫满，下一组另起一行。不常用行、组底行、锁定占位
- * 与已隐藏组头仍占满一行（GridItemSpan(maxLineSpan)）。
+ * 每组末行用空占位格垫满，下一组另起一行。不常用行、组底行
+ * 仍占满一行（GridItemSpan(maxLineSpan)）。
  * 未读组有自己的“未读”标签（Bob 2026-11-23，独立分栏）：未读应用
  * 不论是否固定都移出收藏，只在未读组出现（数据单一归属调用点已保证）。
+ * 隐藏组也用内联标签（Bob 2026-11-26，和收藏一样）：解锁态应用正常排，
+ * 锁定态第一格是「解锁查看」，其余格垫满一行。
  */
 internal sealed interface LandscapeGridItem {
     /** 内联分组标签（收藏 / 未读 / A–Z）：占一格，与该组第一行应用同行 */
     data class GroupLabel(val title: String) : LandscapeGridItem
     /** 空占位格：续行行首（应用对齐在应用列下）与组末垫行（下一组另起一行） */
     data object EmptyCell : LandscapeGridItem
-    /** 全宽组头（只剩“已隐藏的应用”）：占满一行 */
-    data class Header(val title: String) : LandscapeGridItem
     /** 一个应用格子；isUnread=未读组成员（角标＋点按直达＋取消） */
     data class App(
         val app: AppInfo,
@@ -960,8 +912,8 @@ internal sealed interface LandscapeGridItem {
     data class FoldHeader(val count: Int, val expanded: Boolean) : LandscapeGridItem
     /** 不常用组底确认行（展开态才有），点按走 onUnfold */
     data object FoldFooter : LandscapeGridItem
-    /** 隐藏区锁定占位（未解锁时） */
-    data object LockPlaceholder : LandscapeGridItem
+    /** 隐藏组锁定态第一格「解锁查看」：按应用格样式，点按触发解锁 */
+    data object UnlockHidden : LandscapeGridItem
 }
 
 /**
@@ -971,6 +923,7 @@ internal sealed interface LandscapeGridItem {
  * 排除了未读；这里只渲染传入的列表，不再过滤）。
  * 每组标签与第一行应用同行（标签 1 格＋应用每行 7 格），续行行首
  * 用空占位格、末行垫满，下一组另起一行。
+ * 隐藏组同款内联标签（Bob 2026-11-26）：锁定态第一格是「解锁查看」。
  */
 internal fun buildLandscapeGridItems(
     favApps: List<AppInfo>,
@@ -1016,12 +969,15 @@ internal fun buildLandscapeGridItems(
             items.add(LandscapeGridItem.FoldFooter)
         }
     }
+    // 隐藏组（Bob 2026-11-26）：和收藏一样用内联标签，未解锁也一样——
+    // 第一格是「解锁查看」（按应用格样式），其余格按空占位格垫满一行。
     if (hiddenApps.isNotEmpty()) {
-        items.add(LandscapeGridItem.Header("已隐藏的应用"))
         if (!hiddenUnlocked) {
-            items.add(LandscapeGridItem.LockPlaceholder)
+            items.add(LandscapeGridItem.GroupLabel("已隐藏"))
+            items.add(LandscapeGridItem.UnlockHidden)
+            repeat(LandscapeGridAppsPerRow - 1) { items.add(LandscapeGridItem.EmptyCell) }
         } else {
-            hiddenApps.forEach { items.add(LandscapeGridItem.App(it)) }
+            emitLabeledGroup("已隐藏", hiddenApps)
         }
     }
     return items.toList()
@@ -1051,13 +1007,11 @@ internal fun landscapeGridAnchors(items: List<LandscapeGridItem>): LandscapeGrid
             is LandscapeGridItem.GroupLabel -> {
                 if (item.title == "收藏" && fav == null) fav = index
                 if (item.title == "未读" && unreadHeader == null) unreadHeader = index
+                if (item.title == "已隐藏" && hidden == null) hidden = index
                 val letter = item.title.singleOrNull()
                 if (letter != null && letter in 'A'..'Z' && !letters.containsKey(letter)) {
                     letters[letter] = index
                 }
-            }
-            is LandscapeGridItem.Header -> {
-                if (item.title == "已隐藏的应用" && hidden == null) hidden = index
             }
             is LandscapeGridItem.App -> {
                 if (item.isUnread && unread == null) unread = index
@@ -1149,6 +1103,55 @@ private fun LandscapeGridAppCell(
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = app.label.toString(),
+            fontSize = AILauncherType.Caption.fontSize,
+            lineHeight = AILauncherType.Caption.lineHeight,
+            color = AILauncherColors.current.Title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+/**
+ * 隐藏组锁定态「解锁查看」格：按应用格样式（50dp 图标区＋下方名字）。
+ * 图标区是竖屏锁定行同款的指纹瓦片（Divider 底＋指纹图标；竖屏 40dp
+ * 盒配 22dp 指纹，这里 50dp 盒按同比例配 28dp），点按触发指纹/面部解锁。
+ */
+@Composable
+private fun UnlockHiddenCell(
+    onUnlock: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onUnlock() }
+            .testTag("hidden_locked")
+            .padding(vertical = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(LandscapeGridIconSize)
+                .clip(RoundedCornerShape(12.dp))
+                .background(AILauncherColors.current.Divider),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Fingerprint,
+                contentDescription = null,
+                tint = AILauncherColors.current.Hint,
+                modifier = Modifier
+                    .size(28.dp)
+                    .semantics { invisibleToUser() }
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "解锁查看",
             fontSize = AILauncherType.Caption.fontSize,
             lineHeight = AILauncherType.Caption.lineHeight,
             color = AILauncherColors.current.Title,
