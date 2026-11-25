@@ -10,6 +10,10 @@
 
 ---
 
+## v1.4.28（versionCode 572）— 2026-11-25
+
+横屏应用中心未读组去掉图标左上角的幽灵信封（465 标记，569 分栏后已多余）；角标与「未读」标签不动；竖屏信封与 rail 信封不动。
+
 ## v1.4.27（versionCode 571）— 2026-11-24
 
 Bob 2026-11-24 23:30 录屏报轮播还会跳动。根因：hero 安静模式绑在轮播瞬时下标上——自动轮换切卡收尾提交下标那一帧，顶卡从升级卡切到一览卡，hero 简报标题行（42sp ≈ 111px）单帧消失，卡片槽＋圆点跟着上跳 111px；水平滑动本身没问题。修法：isQuietHero 改列表口径（叠层里有一览卡即安静，不认轮播瞬时下标），SmartCardStackHost 按 displayCards 派生并经 LaunchedEffect(quietHero) 上报，回调改名 onQuietHeroChange，下标上报链路（onCurrentCardChange）整段撤掉；hero Column 加 animateContentSize（250ms EaseOutCubic），一览卡进／出叠层时高度平滑过渡。单测：CoverTimeTextTest 改 isQuietHero 列表断言，新增下标无关性断言，全量 1134 项，分支 CI 全绿。真机验收：①自动轮换切卡只有水平滑动、卡片槽不垂直跳变；②叠层里有一览卡时 hero 安静、无一览卡时完整；③一览卡进／出叠层时 hero 高度平滑过渡；④回归：拖动跟手、圆点、自动轮换、扇形淡化、其他卡种、复盘都不变。
