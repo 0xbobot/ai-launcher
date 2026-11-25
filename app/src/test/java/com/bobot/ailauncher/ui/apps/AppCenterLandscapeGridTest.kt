@@ -61,7 +61,7 @@ class AppCenterLandscapeGridTest {
                 LandscapeGridItem.App(wechat),
                 LandscapeGridItem.App(chatgpt), e, e, e, e, e,
                 LandscapeGridItem.GroupLabel("未读"),
-                LandscapeGridItem.App(douyin, isUnread = true, isFirstUnread = true), e, e, e, e, e, e,
+                LandscapeGridItem.App(douyin, isUnread = true), e, e, e, e, e, e,
                 LandscapeGridItem.GroupLabel("A"),
                 LandscapeGridItem.App(douyin),
                 LandscapeGridItem.App(bobot), e, e, e, e, e,
@@ -86,7 +86,7 @@ class AppCenterLandscapeGridTest {
         )
         assertEquals(LandscapeGridItem.GroupLabel("未读"), items[0])
         assertEquals(
-            LandscapeGridItem.App(douyin, isUnread = true, isFirstUnread = true),
+            LandscapeGridItem.App(douyin, isUnread = true),
             items[1]
         )
     }

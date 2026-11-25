@@ -229,8 +229,6 @@ fun AppCenterLandscape(
         // appcenter-landscape-grid-draft）：项表扁平化——分组标签占一格、
         // 与该组第一行应用同行，应用一格一个，纵向滚；列流（LazyRow + FlowItem）已删。
         // 顺序不变：收藏 → 未读（独立分栏，带“未读”标签）→ A–Z → 不常用 → 已隐藏。
-        // 未读组首个应用带 isFirstUnread，格子里挂幽灵信封标记（465，
-        // 网格里没有行首空位，改叠在图标左上角，见 LandscapeGridAppCell）。
         val gridItems = remember(azGroups, favApps, hiddenApps, hiddenUnlocked, foldApps, foldExpanded, unreadApps) {
             buildLandscapeGridItems(
                 favApps = favApps,
@@ -728,8 +726,6 @@ fun AppCenterLandscape(
                                 // 打开＋取消（与竖屏同款，见 onOpenUnreadApp /
                                 // onUnreadRowOpened），左滑清理在格子里放不下、
                                 // 预览小字按稿子去掉，未读只用图标角标表示。
-                                // 465 幽灵信封：只挂在未读组首个格（isFirstUnread），
-                                // 叠在图标左上角（与角标对称）。
                                 val pkg = gridItem.app.packageName
                                 item(key = "app:$index:$pkg") {
                                     if (gridItem.isUnread) {
@@ -740,8 +736,7 @@ fun AppCenterLandscape(
                                                 if (opened && pkg in activeNotifPkgs) {
                                                     onUnreadRowOpened(app)
                                                 }
-                                            },
-                                            isFirstUnread = gridItem.isFirstUnread
+                                            }
                                         )
                                     } else {
                                         LandscapeGridAppCell(
@@ -947,8 +942,7 @@ internal val LandscapeGridAppsPerRow = 7
  * 每组末行用空占位格垫满，下一组另起一行。不常用行、组底行、锁定占位
  * 与已隐藏组头仍占满一行（GridItemSpan(maxLineSpan)）。
  * 未读组有自己的“未读”标签（Bob 2026-11-23，独立分栏）：未读应用
- * 不论是否固定都移出收藏，只在未读组出现（数据单一归属调用点已保证）；
- * 首个带 isFirstUnread（格子里挂幽灵信封标记，465）。
+ * 不论是否固定都移出收藏，只在未读组出现（数据单一归属调用点已保证）。
  */
 internal sealed interface LandscapeGridItem {
     /** 内联分组标签（收藏 / 未读 / A–Z）：占一格，与该组第一行应用同行 */
@@ -960,8 +954,7 @@ internal sealed interface LandscapeGridItem {
     /** 一个应用格子；isUnread=未读组成员（角标＋点按直达＋取消） */
     data class App(
         val app: AppInfo,
-        val isUnread: Boolean = false,
-        val isFirstUnread: Boolean = false
+        val isUnread: Boolean = false
     ) : LandscapeGridItem
     /** 不常用区头（个数＋收展态），点按收展 */
     data class FoldHeader(val count: Int, val expanded: Boolean) : LandscapeGridItem
@@ -996,13 +989,11 @@ internal fun buildLandscapeGridItems(
         items.add(LandscapeGridItem.GroupLabel(label))
         apps.chunked(LandscapeGridAppsPerRow).forEachIndexed { chunkIndex, chunk ->
             if (chunkIndex > 0) items.add(LandscapeGridItem.EmptyCell)
-            chunk.forEachIndexed { index, app ->
-                val globalIndex = chunkIndex * LandscapeGridAppsPerRow + index
+            chunk.forEach { app ->
                 items.add(
                     LandscapeGridItem.App(
                         app,
-                        isUnread = isUnread,
-                        isFirstUnread = isUnread && globalIndex == 0
+                        isUnread = isUnread
                     )
                 )
             }
@@ -1116,7 +1107,6 @@ private fun LandscapeFabButton(
  * 横屏图标网格格子：50dp 图标＋下方单行名字（超长省略）。
  * 未读只用图标右上角的角标表示（稿子定稿，预览小字去掉）；
  * 名字一律用应用名（未读通知标题是列表行的口径，格子里不用）。
- * 465 幽灵信封：未读组首个格才挂，叠在图标左上角（与角标对称）。
  * 长按弹窗是竖屏专属（横屏原来就不接 onLongPress，见 AppCenter.kt
  * 传入但从未调用），格子只接点按，不改。
  */
@@ -1124,8 +1114,7 @@ private fun LandscapeFabButton(
 private fun LandscapeGridAppCell(
     app: AppInfo,
     onLaunch: (AppInfo) -> Unit,
-    modifier: Modifier = Modifier,
-    isFirstUnread: Boolean = false
+    modifier: Modifier = Modifier
 ) {
     // 未读角标（Bob 2026-11-07 晚）：通知监听汇总的该包条数；>0 才显示。
     val badgeCounts by NotificationRepository.badgeCounts.collectAsState()
@@ -1154,15 +1143,6 @@ private fun LandscapeGridAppCell(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .offset(x = 4.dp, y = (-4).dp)
-                )
-            }
-            if (isFirstUnread) {
-                UnreadGlyph(
-                    color = AILauncherColors.current.Title.copy(alpha = 0.35f),
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .offset(x = (-4).dp, y = (-4).dp)
-                        .size(20.dp)
                 )
             }
         }
