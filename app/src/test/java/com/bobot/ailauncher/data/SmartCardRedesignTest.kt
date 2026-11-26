@@ -24,7 +24,8 @@ import org.junit.Test
  * ＝80dp ≥ 72dp 的 3 行下限）；③小标右端内收 16dp（右缘距卡右缘 30dp）；
  * ④呼吸描边已删（2026-11-21，Stageshow 桌面优化 3.2：光晕常量与
  * breathingBorderModifier 整条拿掉，卡片靠玻璃面＋抬起阴影立住；残留引用
- * 即编不过）；⑤暖灰衬底透明度全档 0.75；⑥叠层与 hero 的间距 8dp（8dp 网格）。
+ * 即编不过）；⑤暖灰衬底透明度全档 0.95（第五十五批：0.75 时壁纸明暗透出来
+ * 框成方框）；⑥叠层与 hero 的间距 8dp（8dp 网格）。
  * 正文 15sp Medium、去截断、卡内滚动、露边无字、小标换位本身是 Compose
  * 排版／绘制行为，见收据的 diff 复核＋Bob 真机验收。
  */
@@ -90,22 +91,37 @@ class SmartCardRedesignTest {
     // ---------- 暖灰衬底透明度 ----------
 
     @Test
-    fun tintAlpha_texturedBackdrop_is075() {
-        // 2026-11-21（Stageshow 桌面优化 3.2）：玻璃全档抬到 0.75，
-        // 有纹理壁纸也不再留 0.55。
-        assertEquals(0.75f, smartCardTintAlpha(BackdropKind.TEXTURED), 0.001f)
+    fun tintAlpha_texturedBackdrop_is095() {
+        // 第五十五批（Bob 2026-11-27：卡内方框重定位）：0.75 档时壁纸的
+        // 大尺度明暗透过模糊＋衬底仍留约 25 亮度差、框成方框；0.95 压到
+        // 约 5 亮度以下，卡面均匀如系统通知卡片。
+        assertEquals(0.95f, smartCardTintAlpha(BackdropKind.TEXTURED), 0.001f)
     }
 
     @Test
-    fun tintAlpha_flatBackdrop_is075() {
-        // 低对比环境（壁纸平）回到 0.75 兜底。
-        assertEquals(0.75f, smartCardTintAlpha(BackdropKind.FLAT), 0.001f)
+    fun tintAlpha_flatBackdrop_is095() {
+        // 低对比环境同样走 0.95 全档，卡面不因壁纸种类变通透度。
+        assertEquals(0.95f, smartCardTintAlpha(BackdropKind.FLAT), 0.001f)
     }
 
     @Test
-    fun tintAlpha_noBackdropState_is075() {
-        // 玻璃状态没提供（无模糊可读）走安全档 0.75。
-        assertEquals(0.75f, smartCardTintAlpha(null), 0.001f)
+    fun tintAlpha_noBackdropState_is095() {
+        // 玻璃状态没提供（无模糊可读）走安全档 0.95。
+        assertEquals(0.95f, smartCardTintAlpha(null), 0.001f)
+    }
+
+    @Test
+    fun tintAlpha_uniformAcrossBackdropKinds() {
+        // 方框根因是衬底不够遮壁纸明暗：三档必须同值，卡面通透度
+        // 不随壁纸种类漂移，否则换壁纸又框出矩形。
+        assertEquals(
+            smartCardTintAlpha(BackdropKind.TEXTURED),
+            smartCardTintAlpha(BackdropKind.FLAT), 0.001f
+        )
+        assertEquals(
+            smartCardTintAlpha(BackdropKind.TEXTURED),
+            smartCardTintAlpha(null), 0.001f
+        )
     }
 
     // ---------- 叠层与 hero 的间距 ----------
