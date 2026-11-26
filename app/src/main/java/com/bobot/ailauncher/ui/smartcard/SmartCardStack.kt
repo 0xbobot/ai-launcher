@@ -815,16 +815,19 @@ fun smartCardFactAreaHeight(): Dp =
 // （SmartCardHaloColor／SmartCardHaloStroke／SmartCardHaloInset／
 // SmartCardHaloCornerRadius／SmartCardHaloMinAlpha／SmartCardHaloMaxAlpha／
 // SmartCardHaloPeriodMs）、haloStrokeClearance 与 breathingBorderModifier
-// 已删；卡片靠玻璃面（全档 0.75）＋抬起阴影立住，轮换间隙完全静止。
+// 已删；卡片靠玻璃面（全档 0.95，第五十五批）＋抬起阴影立住，轮换间隙完全静止。
 
 /**
- * 暖灰半透明衬底的透明度（重设计 §2.1）：全档 0.75——Stageshow 桌面优化 3.2
- * （Bob 2026-11-21 定）：呼吸边拿掉后卡片靠面立住，玻璃由约 0.55 抬到 0.75，
- * 有纹理壁纸也不再留 0.55（低对比环境的 0.75 兜底档即现行全档）。
+ * 暖灰半透明衬底的透明度（重设计 §2.1）：全档 0.95——第五十五批
+ * （Bob 2026-11-27 定：卡内方框重定位）：0.75 档时壁纸的大尺度明暗
+ * （暗红顶 → 粉红椭圆）透过 26dp 模糊＋0.75 衬底仍留约 25 亮度差，
+ * 被表头／按钮行框成一个“更透的方框”；575 拿掉 shader 证实与锐利层
+ * 无关。0.95 把壁纸残差压到约 5 亮度以下、慢渐变不成矩形，卡面与
+ * 系统通知卡片一样干净均匀；模糊＋描边＋顶部亮边仍在，仍是玻璃。
  */
 fun smartCardTintAlpha(backdropKind: BackdropKind?): Float = when (backdropKind) {
-    BackdropKind.TEXTURED -> 0.75f
-    else -> 0.75f
+    BackdropKind.TEXTURED -> 0.95f
+    else -> 0.95f
 }
 
 @Composable
@@ -1558,7 +1561,8 @@ internal fun carouselWaitMs(intervalMs: Long, resumeAtMillis: Long, nowMillis: L
  *   呼吸；减动效时静止）。第二十六批加粗加亮（Bob 2026-11-14：太淡感受不到）。
  * - 正文：Body 15sp Medium；不截断（maxLines=3＋Ellipsis 已删），全文在
  *   卡内滚动；卡高固定 192dp（第十六批由 168dp 抬高），正文区至少 3 行高
- *   （80dp，3.3 行，见 smartCardFactAreaHeight）。
+ *   （80dp，3.3 行，见 smartCardFactAreaHeight）。衬底全档 0.95（第五十五批：
+ *   0.75 时壁纸明暗透出来框成方框，见 smartCardTintAlpha）。
  * - 内边距 14dp；圆角 20dp、两侧收边 24dp、按钮、金色庆祝不动；应用小标
  *   不再独占一行，搬到标题行右上角（§2.8）。
  * SIMULATED 档／无玻璃环境退回半透明暖灰 GlassCard（glassSurface 自带）。
@@ -1619,8 +1623,8 @@ private fun SmartCardView(
             checkScale.snapTo(1f)
         }
     }
-    // 暖灰半透明衬底（重设计 §2.1）：见 smartCardTintAlpha——有纹理壁纸 0.55，
-    // 低对比环境 0.75 兜底；颜色取主题暖灰底（浅色 #F4F2EE／深色 #1A1815）。
+    // 暖灰半透明衬底（重设计 §2.1）：见 smartCardTintAlpha——第五十五批
+    // 全档 0.95（壁纸明暗不再透出来框成方框）；颜色取主题暖灰底（浅色 #F4F2EE／深色 #1A1815）。
     val tint = smartCardTint()
     // 正文滚动：事实＋准备清单＋已建提醒一起在卡内滚动。
     // 第四十三批（2026-11-15）：正文底部渐隐（factFade）已删——它用
