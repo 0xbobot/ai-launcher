@@ -228,6 +228,10 @@ internal fun glassRadialRadius(fraction: Float, extentPx: Float): Float =
  *   默认 false，其他玻璃面一字不动。
  * @param flareShader 强玻璃 shader 外延补全（意图卡片圆角外延专用）；
  *   默认 null 不补全，其他玻璃面一字不动。
+ * @param uniformGlass true 时跳过强玻璃锐利折射层（AGSL shader +
+ *   patchSharp），整面只剩模糊层 + 叠色，不再有 bandDp 边缘带分界：
+ *   智能卡片专用（Bob 2026-11-26 定：卡内 30dp 分界线是 bug）；
+ *   默认 false，其他玻璃面一字不动。
  */
 @Composable
 fun Modifier.glassSurface(
@@ -240,6 +244,7 @@ fun Modifier.glassSurface(
     dockLight: DockLightParams? = null,
     noRim: Boolean = false,
     flareShader: FlareShaderParams? = null,
+    uniformGlass: Boolean = false,
 ): Modifier {
     val fallbackShape = shape ?: RoundedCornerShape(cornerRadius)
     val state = LocalGlassBackdrop.current
@@ -256,7 +261,7 @@ fun Modifier.glassSurface(
         return this.background(fallbackColor, fallbackShape)
     }
     return this.then(
-        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost, shape, dockLight, noRim, flareShader)
+        glassDraw(state, tier, cornerRadius, tintColor, fallbackColor, tintBoost, shape, dockLight, noRim, flareShader, uniformGlass)
     )
 }
 
@@ -297,6 +302,7 @@ private fun glassDraw(
     dockLight: DockLightParams? = null,
     noRim: Boolean = false,
     flareShader: FlareShaderParams? = null,
+    uniformGlass: Boolean = false,
 ): Modifier {
     val composeDensity = LocalDensity.current.density
     val patchBlur = rememberGraphicsLayer()
@@ -342,7 +348,7 @@ private fun glassDraw(
             null
         }
     }
-    val strong = tier == GlassTier.STRONG && shaderEffect != null
+    val strong = GlassPolicy.useSharpRefraction(tier, shaderEffect != null, uniformGlass)
     val cache = remember { PatchCache() }
     val boost = tintBoost.coerceIn(0f, 1f)
 

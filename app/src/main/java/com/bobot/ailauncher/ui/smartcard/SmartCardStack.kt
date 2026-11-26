@@ -1641,7 +1641,12 @@ private fun SmartCardView(
                 kind = GlassSurfaceKind.STRONG,
                 cornerRadius = 20.dp,
                 tintColor = AILauncherColors.current.Card,
-                fallbackColor = AILauncherColors.current.GlassCard
+                fallbackColor = AILauncherColors.current.GlassCard,
+                // 均匀玻璃（第五十四批，Bob 2026-11-26 定）：跳过强玻璃锐利
+                // 折射层，整卡只剩模糊层 + 叠色，不再有 30dp 边缘带分界
+                // （分界线曾压在表头文字下沿，读成卡内一个更透的方框）；
+                // Dock 等其他玻璃面不传此参数，一字不动。
+                uniformGlass = true
             )
             .background(
                 color = tint,
