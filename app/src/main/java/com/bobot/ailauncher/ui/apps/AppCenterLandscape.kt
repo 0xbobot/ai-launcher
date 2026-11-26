@@ -5,6 +5,7 @@ package com.bobot.ailauncher.ui.apps
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -219,6 +220,22 @@ fun AppCenterLandscape(
     // LaunchedEffect），避免下次顶栏重现时误弹键盘。
     var fabFocusRequest by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    // 浮层搜索（Bob 2026-11-26 晚：点搜索浮在原地，不滚网格）：
+    // 悬浮搜索钮点按后网格一格不动，搜索栏以浮层盖在内容区顶部；
+    // 取消时回点按前保存的位置（firstVisibleItemIndex + offset，
+    // 瞬时 scrollToItem，不用动画）。顶栏发起的搜索不走浮层，取消
+    // 仍按 437 口径（未读首项/首字母组头）——两路在取消落点处用
+    // floatingSavedScroll 是否非空区分（见 searchCancelScrollTarget）。
+    var floatingSearch by remember { mutableStateOf(false) }
+    var floatingSavedScroll by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    // morph 齿轮/X 点按（429 同竖屏）：有字清空、没字且聚焦退焦、
+    // 没字且失焦进设置。in-flow 顶栏与浮层共用同一回调（两处同一
+    // 时刻只一处在屏上）；浮层里的 X 退焦后由失焦收尾关浮层回原位。
+    val onMorphClick: () -> Unit = {
+        if (searchFieldValue.text.isNotEmpty()) onSearchFieldChange(TextFieldValue(""))
+        else if (searchFocused) focusManager.clearFocus()
+        else onOpenSettings()
+    }
 
     Box(
         modifier = modifier
@@ -282,6 +299,17 @@ fun AppCenterLandscape(
             if (searchFocused) {
                 fabFocusRequest = false
                 keyboardController?.show()
+            } else if (floatingSearch && searchFieldValue.text.isEmpty()) {
+                // 浮层发起、没打字就失焦（点外面/点 X/返回）= 取消：
+                // 关浮层、回点按前的位置（瞬时，不用动画）。有字失焦不
+                // 关（结果还在，顶栏同款口径）。文本与焦点不会在同一事
+                // 件里同时变（X 有字只清文本、X 空字只退焦、点外面只退
+                // 焦），此处读到的文本是当前值。
+                floatingSavedScroll?.let { (index, offset) ->
+                    gridState.scrollToItem(index, offset)
+                }
+                floatingSavedScroll = null
+                floatingSearch = false
             }
         }
         LaunchedEffect(isTopBarCollapsed) {
@@ -311,14 +339,23 @@ fun AppCenterLandscape(
 
         // 取消搜索后落到网格顶：未读组在则未读首项、否则首个字母组头（同竖屏
         // 437 口径改后；此前横屏取消搜索后停在进入前位置，与竖屏不一致）。
+        // 浮层发起的取消例外（Bob 2026-11-26 晚）：回点按前保存的位置，
+        // 不走 437——落点由 searchCancelScrollTarget（纯函数，可单测）定。
         var hadSearched by remember { mutableStateOf(false) }
         LaunchedEffect(searchResults) {
             if (searchResults != null) {
                 hadSearched = true
             } else if (hadSearched) {
-                val target = anchors.unread
+                hadSearched = false
+                val homeTarget = anchors.unread
                     ?: ('A'..'Z').firstNotNullOfOrNull { anchors.letters[it] }
-                if (target != null) gridState.scrollToItem(target)
+                searchCancelScrollTarget(floatingSavedScroll, floatingSearch, homeTarget)?.let { (index, offset) ->
+                    gridState.scrollToItem(index, offset)
+                }
+                if (floatingSearch) {
+                    floatingSavedScroll = null
+                    floatingSearch = false
+                }
             }
         }
 
@@ -329,8 +366,21 @@ fun AppCenterLandscape(
                 // 紧凑顶栏（搜索滚动收起：网格往下滚出初始落点行后收起，滚回即回来）
                 // v0.68.82（横屏专项第 1 项）：顶栏下滑 → D2（阈值沿用竖屏 80dp）
                 val headThreshPx = with(density) { 80.dp.toPx() }
-                if (!isTopBarCollapsed) {
-                Row(
+                // 浮层搜索打开时 in-flow 顶栏保持隐藏（与浮层互斥，不能两个搜索栏并存）。
+                if (!isTopBarCollapsed && !floatingSearch) {
+                LandscapeSearchRow(
+                    searchFieldValue = searchFieldValue,
+                    onSearchFieldChange = onSearchFieldChange,
+                    onSearchSubmit = onSearchSubmit,
+                    onSearchFocusChanged = onSearchFocusChanged,
+                    searchFocused = searchFocused,
+                    requestFocusOnMount = fabFocusRequest,
+                    onSearchPositioned = onSearchPositioned,
+                    onMorphButtonPositioned = onMorphButtonPositioned,
+                    onMorphClick = onMorphClick,
+                    onHeaderSwipeRight = onHeaderSwipeRight,
+                    headerGestures = true,
+                    totalCount = totalCount,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp)
@@ -350,134 +400,16 @@ fun AppCenterLandscape(
                                     }
                                 }
                             )
-                        },
-                    verticalAlignment = Alignment.CenterVertically
+                        }
+                )
+                }
+                // 网格区（浮层搜索的宿主）：结果网格与普通网格同处一个 Box，
+                // 浮层搜索栏叠在两者上方（后画＝在上），网格本身不动。
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
                 ) {
-                    // v0.68.82（横屏专项第 1 项）：顶栏左半右滑 → D2（记住档，阈值沿用竖屏 48dp）
-                    // 只包款数：避开中间搜索框与右侧齿轮
-                    // Bob 2026-11-03：编辑态不再隐藏款数（胶囊与齿轮保留）；
-                    // 款数 Hint 色细体（同竖屏刊头口径）
-                    Row(
-                        modifier = Modifier.pointerInput(Unit) {
-                            var accumX = 0f
-                            var fired = false
-                            val hPx = with(density) { 48.dp.toPx() }
-                            detectHorizontalDragGestures(
-                                onDragStart = { accumX = 0f; fired = false },
-                                onDragCancel = { fired = true },
-                                onHorizontalDrag = { change, dragAmount ->
-                                    change.consume()
-                                    if (fired) return@detectHorizontalDragGestures
-                                    accumX += dragAmount
-                                    if (accumX > hPx) {
-                                        fired = true
-                                        onHeaderSwipeRightState.value()
-                                    }
-                                }
-                            )
-                        },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Stageshow 应用中心优化 3.5：计数只在搜索态出现——
-                        // 默认态顶栏不显示「N 款」，打字后回来（与竖屏同口径）。
-                        if (shouldShowAppCenterCount(searchFieldValue.text)) {
-                            Text(
-                                text = appCenterCountTextLandscape(totalCount),
-                                fontSize = AILauncherType.Caption.fontSize,
-                                color = AILauncherColors.current.Hint
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    // F2：与竖屏同一 IntentCapsuleField（占位/✕ 清空/焦点
-                    // 礼仪全部同组件同口径；胶囊无提交钮，Bob 2026-11-03 与竖屏同批删）
-                    // 应用中心升级：宽度 440dp 写死 → weight + 上限 440dp——
-                    // 窄高横屏下不再挤压款数 / 齿轮
-                    IntentCapsuleField(
-                        value = searchFieldValue,
-                        onValueChange = onSearchFieldChange,
-                        onSubmit = onSearchSubmit,
-                        // 425（Bob 2026-11-04，参考视频）：里侧清空去掉，挪到外面齿轮位（同竖屏）
-                        showClearButton = false,
-                        showSubmitButton = false,
-                        // 428 滚动关键字（同竖屏）：文案审计第 2 批——应用中心
-                        // 不轮换关键字（showKeywords = false，空闲时只显示静态占位）。
-                        keywordSubmitCallsOnSubmit = false,
-                        showKeywords = false,
-                        fusedBackground = true,
-                        onFocusChanged = onSearchFocusChanged,
-                        // 悬浮搜索直达输入态（Bob 2026-11-24）：requestFocusOnMount
-                        // 是组件自带的口子（按 prop 本身 key 的 LaunchedEffect，
-                        // 翻 true 就发聚焦请求，键盘随聚焦弹起）；这里只接悬浮
-                        // 搜索钮的一次性请求位，平时 false，点搜索栏本身的行为不动。
-                        requestFocusOnMount = fabFocusRequest,
-                        modifier = Modifier
-                            .weight(1f)
-                            .widthIn(max = 440.dp)
-                            .onGloballyPositioned { onSearchPositioned(it.boundsInRoot()) }
-                    )
-                    // Bob 2026-11-22：搜的时候 X 离胶囊太远——右边空档收到 8dp，
-                    // X 贴到胶囊右边；不搜时空档恢复 weight，齿轮还在最右不动。
-                    // 425 的“位置不动”是旧口径，本次改位置是 Bob 亲口定的。
-                    // 426 行为不动：X 点按仍是有字清空／没字退焦，按钮仍不可聚焦，
-                    // bounds 回传保留（onGloballyPositioned 随移动重报）。
-                    if (searchFocused || searchFieldValue.text.isNotEmpty()) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                    } else {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                    // 425（Bob 2026-11-04，参考视频）：齿轮位 morph（同竖屏）——失焦设置齿轮原样，
-                    // 聚焦（输入态）变清空；只换图标＋动作＋文案，圆盘／尺寸／testTag 一律不动。
-                    // 位置：搜时 X 贴胶囊右边（Bob 2026-11-22，见上），不搜时齿轮回最右。
-                    // 点 X：有字清空（留输入态，X 还在）、没字退焦（键盘收起，自动变回齿轮）。
-                    // 429：触发改成“聚焦 或 有字”（同竖屏）。
-                    // 设置齿轮（Bob：横屏时竖屏的齿轮拿掉，放这里）
-                    // F2：与竖屏同一 IconButton + testTag 锚点——此前是裸 Icon
-                    // 无锚点，冒烟 §21 到达校验与布局几何断言在横屏测不到本节点、
-                    // 触控面也只有约 28dp（竖屏为 48dp IconButton）
-                    // 426（Bob 2026-11-04 点 X 回设置页）：按钮不可聚焦＋记 bounds 回传
-                    // （同竖屏：点 X 不抢输入框焦点、按钮位不算点外面；圆盘／位置／
-                    // 尺寸／testTag 一律不动，只加这两项）
-                    IconButton(
-                        onClick = {
-                            // 429（同竖屏）：有字点 ✕ 只清空文本；没字且聚焦时点 ✕ 退焦；
-                            // 没字且失焦时点齿轮进设置（不变）。
-                            if (searchFieldValue.text.isNotEmpty()) onSearchFieldChange(TextFieldValue(""))
-                            else if (searchFocused) focusManager.clearFocus()
-                            else onOpenSettings()
-                        },
-                        modifier = Modifier.testTag("appcenter_settings")
-                            .focusProperties { canFocus = false }
-                            .onGloballyPositioned { onMorphButtonPositioned(it.boundsInRoot()) }
-                    ) {
-                        // Bob 2026-11-03 原型样式：齿轮坐浅色圆盘（原型同款）；
-                        // 触控框仍是 IconButton 48dp，圆盘 40dp 只改视觉
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(AILauncherColors.current.Title.copy(alpha = 0.08f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (searchFocused || searchFieldValue.text.isNotEmpty()) {
-                                Icon(
-                                    imageVector = Icons.Filled.Close,
-                                    contentDescription = "清空",
-                                    tint = AILauncherColors.current.Title,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Filled.Settings,
-                                    contentDescription = "设置",
-                                    tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-                }
                 val results = searchResults
                 if (results != null) {
                     // 横屏图标网格（Bob 2026-11-22 定稿）：搜索态用同一网格
@@ -485,8 +417,7 @@ fun AppCenterLandscape(
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(LandscapeGridColumns),
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
+                            .fillMaxSize()
                             .padding(horizontal = 16.dp)
                             // 应用中心升级：composing 期间结果区降透明度至 0.6
                             // （Bob 定稿③；守卫与 120ms 防抖本身不动）
@@ -563,8 +494,7 @@ fun AppCenterLandscape(
                 // 悬浮按钮叠在网格右上角（搜索滚动收起后才出现），故网格包进 Box。
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
+                        .fillMaxSize()
                 ) {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(LandscapeGridColumns),
@@ -703,10 +633,11 @@ fun AppCenterLandscape(
                     }
                 }
                 // 悬浮按钮（搜索滚动收起后）：搜索在最右（贴 rail）、齿轮在其左。
-                // 点搜索 → 滚回顶部、搜索栏重新展开并直接进入输入态（聚焦＋弹
-                // 键盘，不用再点搜索栏）；点齿轮 → 设置；滚回顶部 → 顶部栏回来、
-                // 悬浮按钮消失。
-                if (isTopBarCollapsed) {
+                // 浮层搜索打开时悬浮钮那一行隐藏（浮层里已有齿轮）。
+                // 点搜索 → 浮层搜索栏盖在网格上方并直接进入输入态（聚焦＋弹
+                // 键盘，不用再点搜索栏），网格一格不动；点齿轮 → 设置；
+                // 滚回顶部 → 顶部栏回来、悬浮按钮消失。
+                if (isTopBarCollapsed && !floatingSearch) {
                     Row(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -723,21 +654,56 @@ fun AppCenterLandscape(
                             description = "搜索",
                             testTag = "appcenter_fab_search",
                             onClick = {
-                                scope.launch {
-                                    // 先滚回顶部（保留 569 行为），再把聚焦请求位置
-                                    // true——顶栏是滚到顶后才重新出现的，请求位翻
-                                    // true 时搜索框已在树里，组件内的
-                                    // LaunchedEffect(requestFocusOnMount) 随即发聚
-                                    // 焦请求（见 IntentCapsuleField），不用固定延时。
-                                    gridState.animateScrollToItem(0)
-                                    fabFocusRequest = true
-                                }
+                                // 浮层搜索（Bob 2026-11-26 晚）：网格一格不动——
+                                // 只保存当前滚动位置、打开浮层、发聚焦请求；
+                                // 浮层里的搜索框挂载后随请求位聚焦、键盘弹起，
+                                // 不用固定延时。旧的 animateScrollToItem(0)
+                                // 长距离飞滚就是跳的根因，已删掉。
+                                floatingSavedScroll = gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
+                                floatingSearch = true
+                                fabFocusRequest = true
                             }
                         )
                     }
                 }
                 }
                 }  // else 非搜索态结束
+                // 浮层搜索栏（Bob 2026-11-26 晚：点搜索浮在原地，不滚网格）：
+                // 盖在网格上方、与 in-flow 顶栏同款式（搜索胶囊＋X＋齿轮）；
+                // 打开期间网格一格不动，聚焦、键盘滑入是全程唯一的动作。
+                // 打字出结果后结果网格换上来，浮层继续当搜索栏（in-flow
+                // 顶栏被 floatingSearch 门压住，不会两个搜索栏并存）；
+                // 取消后浮层消失、网格回点按前的位置（见取消收尾两处）。
+                if (floatingSearch) {
+                    LandscapeSearchRow(
+                        searchFieldValue = searchFieldValue,
+                        onSearchFieldChange = onSearchFieldChange,
+                        onSearchSubmit = onSearchSubmit,
+                        onSearchFocusChanged = onSearchFocusChanged,
+                        searchFocused = searchFocused,
+                        requestFocusOnMount = fabFocusRequest,
+                        onSearchPositioned = onSearchPositioned,
+                        onMorphButtonPositioned = onMorphButtonPositioned,
+                        onMorphClick = onMorphClick,
+                        onHeaderSwipeRight = onHeaderSwipeRight,
+                        headerGestures = false,
+                        totalCount = totalCount,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .padding(horizontal = 24.dp)
+                            .background(AILauncherColors.current.Background)
+                            // 空点消费：浮层带盖在网格上，带上没被胶囊/按钮
+                            // 吃掉的点按不能漏到下方格子（会误启动应用）；
+                            // 点外面取消由根部观察者管（先于此处判定）。
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() }
+                            ) { }
+                    )
+                }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
             }
             Box(
@@ -874,6 +840,177 @@ fun AppCenterLandscape(
         }
         // 应用中心底部上滑已删除（Bob 2026-11-03：避免操作干扰）。
     }
+}
+
+
+/**
+ * 横屏搜索行（Bob 2026-11-26 晚：浮层搜索与顶栏 in-flow 共用同一行）：
+ * 款数（仅搜索态）＋ 搜索胶囊 ＋ 间隔 ＋ morph 齿轮/X。
+ * 两处同一时刻只一处在屏上（互斥），bounds 回传共用同一状态
+ * （AppCenter.kt 注释：两面同一时刻只一面在屏上）。
+ * 外层 56dp 行的修饰符由调用点给：in-flow 顶栏带下滑→D2 的拖拽，
+ * 浮层带实底色（盖住下方网格）＋空点消费（挡住下方格子）。
+ * headerGestures：顶栏左半右滑→D2 的手势只在 in-flow 时开，浮层里
+ * 只要款数文本本身（搜一半右滑去 D2 是错的）。
+ */
+@Composable
+private fun LandscapeSearchRow(
+    searchFieldValue: TextFieldValue,
+    onSearchFieldChange: (TextFieldValue) -> Unit,
+    onSearchSubmit: () -> Unit,
+    onSearchFocusChanged: (Boolean) -> Unit,
+    searchFocused: Boolean,
+    requestFocusOnMount: Boolean,
+    onSearchPositioned: (Rect) -> Unit,
+    onMorphButtonPositioned: (Rect) -> Unit,
+    onMorphClick: () -> Unit,
+    onHeaderSwipeRight: () -> Unit,
+    headerGestures: Boolean,
+    totalCount: Int,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val onHeaderSwipeRightState = rememberUpdatedState(onHeaderSwipeRight)
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // v0.68.82（横屏专项第 1 项）：顶栏左半右滑 → D2（记住档，阈值沿用竖屏 48dp）
+        // 只包款数：避开中间搜索框与右侧齿轮
+        // Bob 2026-11-03：编辑态不再隐藏款数（胶囊与齿轮保留）；
+        // 款数 Hint 色细体（同竖屏刊头口径）
+        Row(
+            modifier = if (headerGestures) {
+                Modifier.pointerInput(Unit) {
+                    var accumX = 0f
+                    var fired = false
+                    val hPx = with(density) { 48.dp.toPx() }
+                    detectHorizontalDragGestures(
+                        onDragStart = { accumX = 0f; fired = false },
+                        onDragCancel = { fired = true },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            if (fired) return@detectHorizontalDragGestures
+                            accumX += dragAmount
+                            if (accumX > hPx) {
+                                fired = true
+                                onHeaderSwipeRightState.value()
+                            }
+                        }
+                    )
+                }
+            } else Modifier,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Stageshow 应用中心优化 3.5：计数只在搜索态出现——
+            // 默认态顶栏不显示「N 款」，打字后回来（与竖屏同口径）。
+            if (shouldShowAppCenterCount(searchFieldValue.text)) {
+                Text(
+                    text = appCenterCountTextLandscape(totalCount),
+                    fontSize = AILauncherType.Caption.fontSize,
+                    color = AILauncherColors.current.Hint
+                )
+            }
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        // F2：与竖屏同一 IntentCapsuleField（占位/✕ 清空/焦点
+        // 礼仪全部同组件同口径；胶囊无提交钮，Bob 2026-11-03 与竖屏同批删）
+        // 应用中心升级：宽度 440dp 写死 → weight + 上限 440dp——
+        // 窄高横屏下不再挤压款数 / 齿轮
+        IntentCapsuleField(
+            value = searchFieldValue,
+            onValueChange = onSearchFieldChange,
+            onSubmit = onSearchSubmit,
+            // 425（Bob 2026-11-04，参考视频）：里侧清空去掉，挪到外面齿轮位（同竖屏）
+            showClearButton = false,
+            showSubmitButton = false,
+            // 428 滚动关键字（同竖屏）：文案审计第 2 批——应用中心
+            // 不轮换关键字（showKeywords = false，空闲时只显示静态占位）。
+            keywordSubmitCallsOnSubmit = false,
+            showKeywords = false,
+            fusedBackground = true,
+            onFocusChanged = onSearchFocusChanged,
+            // 悬浮搜索直达输入态（Bob 2026-11-24）：requestFocusOnMount
+            // 是组件自带的口子（按 prop 本身 key 的 LaunchedEffect，
+            // 翻 true 就发聚焦请求，键盘随聚焦弹起）；这里只接悬浮
+            // 搜索钮的一次性请求位，平时 false，点搜索栏本身的行为不动。
+            requestFocusOnMount = requestFocusOnMount,
+            modifier = Modifier
+                .weight(1f)
+                .widthIn(max = 440.dp)
+                .onGloballyPositioned { onSearchPositioned(it.boundsInRoot()) }
+        )
+        // Bob 2026-11-22：搜的时候 X 离胶囊太远——右边空档收到 8dp，
+        // X 贴到胶囊右边；不搜时空档恢复 weight，齿轮还在最右不动。
+        // 425 的“位置不动”是旧口径，本次改位置是 Bob 亲口定的。
+        // 426 行为不动：X 点按仍是有字清空／没字退焦，按钮仍不可聚焦，
+        // bounds 回传保留（onGloballyPositioned 随移动重报）。
+        if (searchFocused || searchFieldValue.text.isNotEmpty()) {
+            Spacer(modifier = Modifier.width(8.dp))
+        } else {
+            Spacer(modifier = Modifier.weight(1f))
+        }
+        // 425（Bob 2026-11-04，参考视频）：齿轮位 morph（同竖屏）——失焦设置齿轮原样，
+        // 聚焦（输入态）变清空；只换图标＋动作＋文案，圆盘／尺寸／testTag 一律不动。
+        // 位置：搜时 X 贴胶囊右边（Bob 2026-11-22，见上），不搜时齿轮回最右。
+        // 点 X：有字清空（留输入态，X 还在）、没字退焦（键盘收起，自动变回齿轮）。
+        // 429：触发改成“聚焦 或 有字”（同竖屏）。
+        // 设置齿轮（Bob：横屏时竖屏的齿轮拿掉，放这里）
+        // F2：与竖屏同一 IconButton + testTag 锚点——此前是裸 Icon
+        // 无锚点，冒烟 §21 到达校验与布局几何断言在横屏测不到本节点、
+        // 触控面也只有约 28dp（竖屏为 48dp IconButton）
+        // 426（Bob 2026-11-04 点 X 回设置页）：按钮不可聚焦＋记 bounds 回传
+        // （同竖屏：点 X 不抢输入框焦点、按钮位不算点外面；圆盘／位置／
+        // 尺寸／testTag 一律不动，只加这两项）
+        IconButton(
+            onClick = onMorphClick,
+            modifier = Modifier.testTag("appcenter_settings")
+                .focusProperties { canFocus = false }
+                .onGloballyPositioned { onMorphButtonPositioned(it.boundsInRoot()) }
+        ) {
+            // Bob 2026-11-03 原型样式：齿轮坐浅色圆盘（原型同款）；
+            // 触控框仍是 IconButton 48dp，圆盘 40dp 只改视觉
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(AILauncherColors.current.Title.copy(alpha = 0.08f)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (searchFocused || searchFieldValue.text.isNotEmpty()) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "清空",
+                        tint = AILauncherColors.current.Title,
+                        modifier = Modifier.size(20.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "设置",
+                        tint = AILauncherColors.current.Hint.copy(alpha = 0.6f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 取消搜索的落点（纯函数，可单测）。
+ * 浮层发起的取消：回点按前保存的位置（index + offset，瞬时恢复）；
+ * 没保存到位置时不滚（网格本来就没动过）。
+ * 顶栏发起的取消：437 口径——未读首项/首字母组头（offset 0）；
+ * 没目标时不滚。
+ */
+internal fun searchCancelScrollTarget(
+    floatingSavedScroll: Pair<Int, Int>?,
+    floatingActive: Boolean,
+    homeTarget: Int?
+): Pair<Int, Int>? {
+    if (floatingActive) return floatingSavedScroll
+    return homeTarget?.let { it to 0 }
 }
 
 

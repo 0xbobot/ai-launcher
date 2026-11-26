@@ -260,6 +260,29 @@ class AppCenterLandscapeGridTest {
     }
 
     @Test
+    fun `floating search cancel restores saved scroll position`() {
+        // 浮层发起的取消：回点按前保存的位置（index + offset，瞬时恢复）。
+        assertEquals(5 to 120, searchCancelScrollTarget(5 to 120, floatingActive = true, homeTarget = 9))
+    }
+
+    @Test
+    fun `floating search cancel with no saved position scrolls nowhere`() {
+        // 没保存到位置时不滚——网格本来就没动过。
+        assertNull(searchCancelScrollTarget(null, floatingActive = true, homeTarget = 9))
+    }
+
+    @Test
+    fun `top bar search cancel lands on home target at offset zero`() {
+        // 顶栏发起的取消：437 口径——未读首项/首字母组头（offset 0）。
+        assertEquals(9 to 0, searchCancelScrollTarget(null, floatingActive = false, homeTarget = 9))
+    }
+
+    @Test
+    fun `top bar search cancel with no home target scrolls nowhere`() {
+        assertNull(searchCancelScrollTarget(null, floatingActive = false, homeTarget = null))
+    }
+
+    @Test
     fun `anchors are null for absent sections`() {
         val a = app("com.example.a", "A 应用")
         val items = buildLandscapeGridItems(
