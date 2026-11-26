@@ -632,7 +632,8 @@ fun AppCenterLandscape(
                         }
                     }
                 }
-                // 悬浮按钮（搜索滚动收起后）：搜索在最右（贴 rail）、齿轮在其左。
+                // 悬浮按钮（搜索滚动收起后）：搜索在左、齿轮在右（贴 rail）。
+                // Bob 2026-11-26：与 569 的顺序对调，只换左右，按钮本身不动。
                 // 浮层搜索打开时悬浮钮那一行隐藏（浮层里已有齿轮）。
                 // 点搜索 → 浮层搜索栏盖在网格上方并直接进入输入态（聚焦＋弹
                 // 键盘，不用再点搜索栏），网格一格不动；点齿轮 → 设置；
@@ -643,27 +644,31 @@ fun AppCenterLandscape(
                             .align(Alignment.TopEnd)
                             .padding(top = 8.dp, end = 16.dp)
                     ) {
-                        LandscapeFabButton(
-                            icon = Icons.Filled.Settings,
-                            description = "设置",
-                            testTag = "appcenter_fab_settings",
-                            onClick = { onOpenSettings() }
-                        )
-                        LandscapeFabButton(
-                            icon = Icons.Filled.Search,
-                            description = "搜索",
-                            testTag = "appcenter_fab_search",
-                            onClick = {
-                                // 浮层搜索（Bob 2026-11-26 晚）：网格一格不动——
-                                // 只保存当前滚动位置、打开浮层、发聚焦请求；
-                                // 浮层里的搜索框挂载后随请求位聚焦、键盘弹起，
-                                // 不用固定延时。旧的 animateScrollToItem(0)
-                                // 长距离飞滚就是跳的根因，已删掉。
-                                floatingSavedScroll = gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
-                                floatingSearch = true
-                                fabFocusRequest = true
+                        for (kind in landscapeFabOrder) {
+                            when (kind) {
+                                LandscapeFabKind.Search -> LandscapeFabButton(
+                                    icon = Icons.Filled.Search,
+                                    description = "搜索",
+                                    testTag = "appcenter_fab_search",
+                                    onClick = {
+                                        // 浮层搜索（Bob 2026-11-26 晚）：网格一格不动——
+                                        // 只保存当前滚动位置、打开浮层、发聚焦请求；
+                                        // 浮层里的搜索框挂载后随请求位聚焦、键盘弹起，
+                                        // 不用固定延时。旧的 animateScrollToItem(0)
+                                        // 长距离飞滚就是跳的根因，已删掉。
+                                        floatingSavedScroll = gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
+                                        floatingSearch = true
+                                        fabFocusRequest = true
+                                    }
+                                )
+                                LandscapeFabKind.Settings -> LandscapeFabButton(
+                                    icon = Icons.Filled.Settings,
+                                    description = "设置",
+                                    testTag = "appcenter_fab_settings",
+                                    onClick = { onOpenSettings() }
+                                )
                             }
-                        )
+                        }
                     }
                 }
                 }
@@ -693,7 +698,9 @@ fun AppCenterLandscape(
                             .fillMaxWidth()
                             .height(56.dp)
                             .padding(horizontal = 24.dp)
-                            .background(AILauncherColors.current.Background)
+                            // Bob 2026-11-26：浮层不要实底——背后不留白条，
+                            // 网格直接露在胶囊与 X 周围；胶囊白底与
+                            // X/齿轮圆盘底各是自己的，不动。
                             // 空点消费：浮层带盖在网格上，带上没被胶囊/按钮
                             // 吃掉的点按不能漏到下方格子（会误启动应用）；
                             // 点外面取消由根部观察者管（先于此处判定）。
@@ -1162,9 +1169,18 @@ internal fun landscapeGridAnchors(items: List<LandscapeGridItem>): LandscapeGrid
     return LandscapeGridAnchors(fav, unread, unreadHeader, letters, fold, hidden)
 }
 
+/** 收起态右上角悬浮钮的种类（顺序见 landscapeFabOrder）。 */
+internal enum class LandscapeFabKind { Search, Settings }
+
+/**
+ * 收起态悬浮钮从左到右的顺序（Bob 2026-11-26：搜索在左、齿轮在右贴 rail，
+ * 与 569 的顺序对调；只换左右，按钮本身的图标/文案/testTag/动作不动）。
+ */
+internal val landscapeFabOrder = listOf(LandscapeFabKind.Search, LandscapeFabKind.Settings)
+
 /**
  * 横屏悬浮圆钮（搜索滚动收起后）：40dp 白色圆盘＋20dp 图标，48dp 触控面
- * （IconButton）；阴影 4dp。搜索在最右（贴 rail）、齿轮在其左。
+ * （IconButton）；阴影 4dp。搜索在左、齿轮在右（贴 rail）。
  */
 @Composable
 private fun LandscapeFabButton(

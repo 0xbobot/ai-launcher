@@ -283,6 +283,15 @@ class AppCenterLandscapeGridTest {
     }
 
     @Test
+    fun `collapsed fab row order is search then settings`() {
+        // Bob 2026-11-26：收起态悬浮钮对调——搜索在左、齿轮在右（贴 rail）。
+        assertEquals(
+            listOf(LandscapeFabKind.Search, LandscapeFabKind.Settings),
+            landscapeFabOrder
+        )
+    }
+
+    @Test
     fun `anchors are null for absent sections`() {
         val a = app("com.example.a", "A 应用")
         val items = buildLandscapeGridItems(
