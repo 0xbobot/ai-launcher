@@ -75,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -425,7 +426,7 @@ fun AppCenterLandscape(
                                 alpha = if (searchFieldValue.composition != null) 0.6f else 1f
                             },
                         // 底部留出手势条高度，避免末行被手势条盖住（同竖屏）
-                        contentPadding = PaddingValues(bottom = 96.dp),
+                        contentPadding = PaddingValues(top = searchResultsTopPadding(floatingSearch), bottom = 96.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -1177,6 +1178,14 @@ internal enum class LandscapeFabKind { Search, Settings }
  * 与 569 的顺序对调；只换左右，按钮本身的图标/文案/testTag/动作不动）。
  */
 internal val landscapeFabOrder = listOf(LandscapeFabKind.Search, LandscapeFabKind.Settings)
+
+/**
+ * 搜索结果网格的顶部内边距（Bob 2026-11-27：「2 款」计数压在第一个结果
+ * 应用上）：浮层搜索打开时结果顶行顶到浮层下方——浮层高 56dp + 8dp
+ * 间隙（与行间距一致）；in-flow 顶栏时顶栏已在网格上方、不加。
+ */
+internal fun searchResultsTopPadding(floatingSearch: Boolean): Dp =
+    if (floatingSearch) 64.dp else 0.dp
 
 /**
  * 横屏悬浮圆钮（搜索滚动收起后）：40dp 白色圆盘＋20dp 图标，48dp 触控面

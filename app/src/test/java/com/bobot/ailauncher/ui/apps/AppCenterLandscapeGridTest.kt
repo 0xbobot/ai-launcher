@@ -292,6 +292,15 @@ class AppCenterLandscapeGridTest {
     }
 
     @Test
+    fun `search results top padding clears the floating search row`() {
+        // Bob 2026-11-27：浮层搜索打开时结果顶行顶到浮层下方（56dp 浮层
+        // + 8dp 间隙），「2 款」计数不再压第一个结果应用；in-flow 顶栏
+        // 时顶栏已在网格上方、不加。
+        assertEquals(64.dp, searchResultsTopPadding(floatingSearch = true))
+        assertEquals(0.dp, searchResultsTopPadding(floatingSearch = false))
+    }
+
+    @Test
     fun `anchors are null for absent sections`() {
         val a = app("com.example.a", "A 应用")
         val items = buildLandscapeGridItems(
