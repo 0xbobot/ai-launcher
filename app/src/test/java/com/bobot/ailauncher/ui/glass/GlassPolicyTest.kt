@@ -1,6 +1,7 @@
 package com.bobot.ailauncher.ui.glass
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -92,6 +93,50 @@ class GlassPolicyTest {
         assertTrue(m.blurRadiusDp in 24f..28f)
         assertNull(GlassPolicy.paramsFor(GlassTier.SIMULATED, BackdropKind.TEXTURED))
         assertNull(GlassPolicy.paramsFor(GlassTier.SIMULATED, BackdropKind.FLAT))
+    }
+
+    @Test
+    fun `uniform glass skips sharp refraction layer - smart card has no 30dp boundary`() {
+        // 根因（Bob 2026-11-26 实拍）：STRONG/TEXTURED 的 bandDp = 30f，
+        // shader 只在边缘 30dp 带内画锐利层，中心只露模糊层，分界线压在
+        // 表头文字下沿，读成卡内一个更透的方框。均匀玻璃（uniformGlass）
+        // 跳过锐利层，整面只剩模糊层 + 叠色，分界线消失。
+        val p = GlassPolicy.paramsFor(GlassTier.STRONG, BackdropKind.TEXTURED)!!
+        assertEquals(30f, p.bandDp)
+        // 默认（Dock 等）：强玻璃 + shader 可用 → 画锐利层，边缘带保留。
+        assertTrue(
+            GlassPolicy.useSharpRefraction(GlassTier.STRONG, true, false)
+        )
+        // 均匀玻璃（智能卡片）：同样强玻璃 + shader 可用 → 不画锐利层。
+        assertFalse(
+            GlassPolicy.useSharpRefraction(GlassTier.STRONG, true, true)
+        )
+        // 无 shader 可用时本来就不画锐利层（与 uniformGlass 无关）。
+        assertFalse(
+            GlassPolicy.useSharpRefraction(GlassTier.STRONG, false, false)
+        )
+        assertFalse(
+            GlassPolicy.useSharpRefraction(GlassTier.STRONG, false, true)
+        )
+    }
+
+    @Test
+    fun `non-strong tiers never draw sharp refraction regardless of uniform flag`() {
+        // 中玻璃本来就没有锐利层（refractionDp = 0、bandDp = 0），
+        // uniformGlass 开关不改变它的行为；模拟档无参数也不画。
+        assertFalse(
+            GlassPolicy.useSharpRefraction(GlassTier.MEDIUM, true, false)
+        )
+        assertFalse(
+            GlassPolicy.useSharpRefraction(GlassTier.MEDIUM, true, true)
+        )
+        assertFalse(
+            GlassPolicy.useSharpRefraction(GlassTier.SIMULATED, true, false)
+        )
+        assertFalse(
+            GlassPolicy.useSharpRefraction(GlassTier.SIMULATED, true, true)
+        )
+        assertEquals(0f, GlassPolicy.paramsFor(GlassTier.MEDIUM, BackdropKind.TEXTURED)!!.bandDp)
     }
 
     @Test

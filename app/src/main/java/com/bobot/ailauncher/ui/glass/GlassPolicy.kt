@@ -123,6 +123,16 @@ object GlassPolicy {
     }
 
     /**
+     * 强玻璃是否画锐利折射层（AGSL shader + patchSharp）。
+     * uniformGlass = true（均匀玻璃）时不画：整面只剩模糊层 + 叠色，
+     * 卡内不再有 bandDp 边缘带分界。智能卡片用均匀玻璃（Bob 2026-11-26
+     * 定：卡内 30dp 分界线是 bug，表头压在线上）；默认 false，
+     * Dock 等其他玻璃面一字不动。
+     */
+    fun useSharpRefraction(tier: GlassTier, shaderAvailable: Boolean, uniformGlass: Boolean): Boolean =
+        tier == GlassTier.STRONG && shaderAvailable && !uniformGlass
+
+    /**
      * 饱和颜色矩阵（4×5 行主序，Compose ColorMatrix 布局）。
      * 亮度权重取 0.213/0.715/0.072（与 Android ColorMatrix.setSaturation 同口径）。
      * s=1 恒等；s=0 全灰；s=1.35 即文档的「增色 135%」。
