@@ -49,7 +49,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -747,12 +746,6 @@ val SmartCardStackSideMargin = 24.dp
  * 24dp 不动。8dp 网格。
  */
 val SmartCardStackTopGap = 8.dp
-
-/**
- * 卡片抬起阴影（Stageshow 桌面优化 3.2，Bob 2026-11-21 定）：呼吸边拿掉后，
- * 卡片靠面与阴影立住——柔和抬起阴影 8.dp（设计没给数字，Bob 可再调）。
- */
-val SmartCardLiftShadow = 8.dp
 
 /**
  * 卡片固定高度（重设计 §2.6）：192dp，不随正文长短变；所有卡一样高，
@@ -1635,7 +1628,10 @@ private fun SmartCardView(
     val factScrollState = rememberScrollState()
     Column(
         modifier = modifier
-            .shadow(elevation = SmartCardLiftShadow, shape = shape)
+            // 第五十六批（Bob 2026-11-27 定）：抬起阴影整条拿掉——阴影不跟圆角，
+            // 尖角从 20dp 圆角后露出来，卡片底部两角各一个三角尖；卡片改和 Dock
+            // 同口径：全程没有 .shadow()，只靠玻璃本身（模糊＋0.95 衬底＋描边＋
+            // 顶部亮边）立住。圆角 20dp 不动。
             .clip(shape)
             .graphicsLayer {
                 scaleX = pop.value
